@@ -1,0 +1,11 @@
+name: coding_master
+description: 编写代码的完整工作流。
+
+steps:
+  - name: 生成代码
+    action: generate_code
+    description: "根据用户需求生成代码"
+
+  - name: 展示结果
+    action: display
+    description: "代码已生成"

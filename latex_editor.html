@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LaTeX 在线编辑器</title>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .toolbar {
+            background: #181825;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #313244;
+            flex-wrap: wrap;
+        }
+
+        .toolbar h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #cba6f7;
+            margin-right: 20px;
+        }
+
+        .toolbar button {
+            background: #313244;
+            color: #cdd6f4;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .toolbar button:hover {
+            background: #45475a;
+        }
+
+        .toolbar button.primary {
+            background: #cba6f7;
+            color: #1e1e2e;
+            font-weight: 600;
+        }
+
+        .toolbar button.primary:hover {
+            background: #b4befe;
+        }
+
+        .toolbar button.danger {
+            background: #f38ba8;
+            color: #1e1e2e;
+        }
+
+        .toolbar button.danger:hover {
+            background: #eba0ac;
+        }
+
+        .toolbar select {
+            background: #313244;
+            color: #cdd6f4;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .toolbar .spacer {
+            flex: 1;
+        }
+
+        .toolbar .shortcut-hint {
+            font-size: 12px;
+            color: #6c7086;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .editor-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #313244;
+        }
+
+        .editor-panel .panel-header {
+            background: #181825;
+            padding: 8px 16px;
+            font-size: 12px;
+            color: #6c7086;
+            border-bottom: 1px solid #313244;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .editor-panel .panel-header .line-count {
+            color: #585b70;
+        }
+
+        #latex-input {
+            flex: 1;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border: none;
+            outline: none;
+            padding: 20px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: none;
+            tab-size: 4;
+        }
+
+        #latex-input::placeholder {
+            color: #585b70;
+        }
+
+        .preview-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .preview-panel .panel-header {
+            background: #181825;
+            padding: 8px 16px;
+            font-size: 12px;
+            color: #6c7086;
+            border-bottom: 1px solid #313244;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .preview-panel .panel-header .status {
+            color: #a6e3a1;
+        }
+
+        .preview-panel .panel-header .status.error {
+            color: #f38ba8;
+        }
+
+        #preview {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #1e1e2e;
+            line-height: 1.8;
+        }
+
+        #preview h1, #preview h2, #preview h3 {
+            color: #cba6f7;
+            margin: 16px 0 8px;
+        }
+
+        #preview p {
+            margin: 8px 0;
+        }
+
+        #preview code {
+            background: #313244;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        #preview pre {
+            background: #181825;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        #preview ul, #preview ol {
+            padding-left: 24px;
+            margin: 8px 0;
+        }
+
+        #preview blockquote {
+            border-left: 4px solid #cba6f7;
+            padding-left: 16px;
+            color: #a6adc8;
+            margin: 12px 0;
+        }
+
+        .error-panel {
+            background: #181825;
+            border-top: 1px solid #313244;
+            padding: 12px 20px;
+            font-size: 13px;
+            color: #f38ba8;
+            display: none;
+            max-height: 80px;
+            overflow-y: auto;
+        }
+
+        .error-panel.show {
+            display: block;
+        }
+
+        .snippets-panel {
+            background: #181825;
+            border-top: 1px solid #313244;
+            padding: 8px 16px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .snippets-panel span {
+            font-size: 12px;
+            color: #6c7086;
+            margin-right: 4px;
+        }
+
+        .snippets-panel button {
+            background: #313244;
+            color: #cdd6f4;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .snippets-panel button:hover {
+            background: #45475a;
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+            .editor-panel {
+                border-right: none;
+                border-bottom: 1px solid #313244;
+                height: 50vh;
+            }
+            .preview-panel {
+                height: 50vh;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <h1>LaTeX Editor</h1>
+        <button class="primary" onclick="renderLatex()">▶ 编译</button>
+        <button onclick="clearEditor()">清空</button>
+        <button onclick="downloadTex()">下载 .tex</button>
+        <button onclick="downloadPdf()">导出 PDF</button>
+        <select id="theme-select" onchange="changeTheme(this.value)">
+            <option value="dark">暗色主题</option>
+            <option value="light">亮色主题</option>
+        </select>
+        <div class="spacer"></div>
+        <span class="shortcut-hint">Ctrl+Enter 编译</span>
+    </div>
+
+    <!-- Main -->
+    <div class="main-container">
+        <!-- Editor -->
+        <div class="editor-panel">
+            <div class="panel-header">
+                <span>源代码</span>
+                <span class="line-count" id="line-count">行 0</span>
+            </div>
+            <textarea id="latex-input" placeholder="在此输入 LaTeX 代码...&#10;&#10;例如:&#10;\documentclass{article}&#10;\begin{document}&#10;Hello \LaTeX!&#10;\end{document}" spellcheck="false"></textarea>
+        </div>
+
+        <!-- Preview -->
+        <div class="preview-panel">
+            <div class="panel-header">
+                <span>预览</span>
+                <span class="status" id="status">就绪</span>
+            </div>
+            <div id="preview">
+                <p style="color: #585b70;">输入 LaTeX 代码后点击「编译」或按 Ctrl+Enter</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error -->
+    <div class="error-panel" id="error-panel"></div>
+
+    <!-- Snippets -->
+    <div class="snippets-panel">
+        <span>模板:</span>
+        <button onclick="insertSnippet('article')">Article</button>
+        <button onclick="insertSnippet('math')">数学公式</button>
+        <button onclick="insertSnippet('table')">表格</button>
+        <button onclick="insertSnippet('list')">列表</button>
+        <button onclick="insertSnippet('figure')">图片</button>
+        <button onclick="insertSnippet('code')">代码块</button>
+        <button onclick="insertSnippet('theorem')">定理</button>
+        <button onclick="insertSnippet('bib')">参考文献</button>
+    </div>
+
+    <script>
+        const snippets = {
+            article: `\\documentclass{article}
+\\usepackage[UTF8]{ctex}
+\\usepackage{amsmath, amssymb}
+\\usepackage{graphicx}
+\\usepackage{geometry}
+\\geometry{a4paper, margin=1in}
+
+\\title{标题}
+\\author{作者}
+\\date{\\today}
+
+\\begin{document}
+\\maketitle
+
+\\section{引言}
+这是引言内容。
+
+\\section{正文}
+这里是正文。
+
+\\end{document}`,
+
+            math: `\\[
+    E = mc^2
+\\]
+
+\\[
+    \\int_{0}^{\\infty} e^{-x^2} \\, dx = \\frac{\\sqrt{\\pi}}{2}
+\\]
+
+\\[
+    \\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}
+\\]
+
+\\begin{equation}
+    \\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}
+\\end{equation}`,
+
+            table: `\\begin{table}[h]
+\\centering
+\\begin{tabular}{|c|c|c|}
+\\hline
+\\textbf{列1} & \\textbf{列2} & \\textbf{列3} \\\\ \\hline
+数据1 & 数据2 & 数据3 \\\\ \\hline
+数据4 & 数据5 & 数据6 \\\\ \\hline
+\\end{tabular}
+\\caption{示例表格}
+\\label{tab:example}
+\\end{table}`,
+
+            list: `\\begin{itemize}
+    \\item 第一项
+    \\item 第二项
+    \\item 第三项
+\\end{itemize}
+
+\\begin{enumerate}
+    \\item 第一步
+    \\item 第二步
+    \\item 第三步
+\\end{enumerate}`,
+
+            figure: `\\begin{figure}[h]
+\\centering
+\\includegraphics[width=0.8\\textwidth]{image.png}
+\\caption{图片标题}
+\\label{fig:example}
+\\end{figure}`,
+
+            code: `\\begin{verbatim}
+def hello():
+    print("Hello, LaTeX!")
+\\end{verbatim}
+
+\\begin{lstlisting}[language=Python]
+import numpy as np
+arr = np.array([1, 2, 3])
+print(arr.mean())
+\\end{lstlisting}`,
+
+            theorem: `\\newtheorem{theorem}{定理}
+\\begin{theorem}
+勾股定理：直角三角形斜边的平方等于两直角边的平方和。
+\\end{theorem}
+
+\\begin{proof}
+由毕达哥拉斯定理可得...
+\\end{proof}`,
+
+            bib: `\\begin{thebibliography}{9}
+\\bibitem{latex} Leslie Lamport, \\textit{LaTeX: A Document Preparation System}, Addison-Wesley, 1994.
+\\bibitem{knuth} Donald E. Knuth, \\textit{The TeXbook}, Addison-Wesley, 1984.
+\\end{thebibliography}`
+        };
+
+        const editor = document.getElementById('latex-input');
+        const preview = document.getElementById('preview');
+        const errorPanel = document.getElementById('error-panel');
+        const status = document.getElementById('status');
+        const lineCount = document.getElementById('line-count');
+
+        // Update line count
+        editor.addEventListener('input', () => {
+            const lines = editor.value.split('\\n').length;
+            lineCount.textContent = `行 ${lines}`;
+        });
+
+        // Ctrl+Enter to compile
+        editor.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                renderLatex();
+            }
+        });
+
+        // Tab support
+        editor.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = editor.selectionStart;
+                const end = editor.selectionEnd;
+                editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+                editor.selectionStart = editor.selectionEnd = start + 4;
+            }
+        });
+
+        function renderLatex() {
+            const input = editor.value.trim();
+            if (!input) {
+                preview.innerHTML = '<p style="color: #585b70;">输入 LaTeX 代码后点击「编译」或按 Ctrl+Enter</p>';
+                status.textContent = '就绪';
+                status.className = 'status';
+                errorPanel.classList.remove('show');
+                return;
+            }
+
+            status.textContent = '编译中...';
+            status.className = 'status';
+
+            // Escape HTML for display
+            const escaped = input
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // Build preview HTML
+            let html = '';
+
+            // Check for document class
+            if (input.includes('\\documentclass')) {
+                // Full document mode
+                html = `<div class="latex-document">
+                    <div style="background: #181825; padding: 8px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 12px; color: #6c7086;">
+                        📄 完整文档模式 — 共 ${editor.value.split('\\n').length} 行
+                    </div>
+                    <div id="math-content">
+                        ${escaped}
+                    </div>
+                </div>`;
+            } else {
+                // Fragment mode
+                html = `<div id="math-content">${escaped}</div>`;
+            }
+
+            preview.innerHTML = html;
+
+            // Try to render with MathJax
+            try {
+                if (window.MathJax && typeof MathJax.typesetPromise === 'function') {
+                    MathJax.typesetPromise()
+                        .then(() => {
+                            status.textContent = '✓ 编译成功';
+                            status.className = 'status';
+                            errorPanel.classList.remove('show');
+                        })
+                        .catch((err) => {
+                            status.textContent = '⚠ 部分渲染错误';
+                            status.className = 'status error';
+                            errorPanel.textContent = 'MathJax 渲染警告: ' + err.message;
+                            errorPanel.classList.add('show');
+                        });
+                } else {
+                    status.textContent = '✓ 已渲染 (MathJax 加载中...)';
+                    status.className = 'status';
+                    errorPanel.classList.remove('show');
+                }
+            } catch (e) {
+                status.textContent = '✗ 渲染错误';
+                status.className = 'status error';
+                errorPanel.textContent = '错误: ' + e.message;
+                errorPanel.classList.add('show');
+            }
+        }
+
+        function clearEditor() {
+            if (editor.value.trim() && !confirm('确定清空编辑器内容？')) return;
+            editor.value = '';
+            preview.innerHTML = '<p style="color: #585b70;">输入 LaTeX 代码后点击「编译」或按 Ctrl+Enter</p>';
+            status.textContent = '就绪';
+            status.className = 'status';
+            errorPanel.classList.remove('show');
+            lineCount.textContent = '行 0';
+        }
+
+        function insertSnippet(name) {
+            const snippet = snippets[name];
+            if (!snippet) return;
+
+            const start = editor.selectionStart;
+            const end = editor.selectionEnd;
+            const before = editor.value.substring(0, start);
+            const after = editor.value.substring(end);
+
+            editor.value = before + snippet + after;
+            editor.selectionStart = editor.selectionEnd = start + snippet.length;
+            editor.focus();
+
+            const lines = editor.value.split('\\n').length;
+            lineCount.textContent = `行 ${lines}`;
+
+            renderLatex();
+        }
+
+        function downloadTex() {
+            const content = editor.value.trim();
+            if (!content) {
+                alert('编辑器为空，无法下载');
+                return;
+            }
+
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'document.tex';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadPdf() {
+            alert('PDF 导出需要后端 LaTeX 引擎支持。\n\n请先下载 .tex 文件，然后在本地使用 xelatex 编译:\n\n  xelatex document.tex');
+        }
+
+        function changeTheme(theme) {
+            if (theme === 'light') {
+                document.body.style.background = '#eff1f5';
+                document.body.style.color = '#4c4f69';
+                document.querySelector('.toolbar').style.background = '#e6e9ef';
+                document.querySelector('.toolbar').style.borderColor = '#ccd0da';
+                document.querySelector('.editor-panel .panel-header').style.background = '#e6e9ef';
+                document.querySelector('.preview-panel .panel-header').style.background = '#e6e9ef';
+                document.querySelector('.snippets-panel').style.background = '#e6e9ef';
+                document.querySelector('.error-panel').style.background = '#e6e9ef';
+                editor.style.background = '#eff1f5';
+                editor.style.color = '#4c4f69';
+                preview.style.background = '#eff1f5';
+                document.querySelectorAll('.toolbar button').forEach(b => {
+                    if (!b.classList.contains('primary') && !b.classList.contains('danger')) {
+                        b.style.background = '#ccd0da';
+                        b.style.color = '#4c4f69';
+                    }
+                });
+                document.querySelectorAll('.snippets-panel button').forEach(b => {
+                    b.style.background = '#ccd0da';
+                    b.style.color = '#4c4f69';
+                });
+            } else {
+                document.body.style.background = '#1e1e2e';
+                document.body.style.color = '#cdd6f4';
+                document.querySelector('.toolbar').style.background = '#181825';
+                document.querySelector('.toolbar').style.borderColor = '#313244';
+                document.querySelector('.editor-panel .panel-header').style.background = '#181825';
+                document.querySelector('.preview-panel .panel-header').style.background = '#181825';
+                document.querySelector('.snippets-panel').style.background = '#181825';
+                document.querySelector('.error-panel').style.background = '#181825';
+                editor.style.background = '#1e1e2e';
+                editor.style.color = '#cdd6f4';
+                preview.style.background = '#1e1e2e';
+                document.querySelectorAll('.toolbar button').forEach(b => {
+                    if (!b.classList.contains('primary') && !b.classList.contains('danger')) {
+                        b.style.background = '#313244';
+                        b.style.color = '#cdd6f4';
+                    }
+                });
+                document.querySelectorAll('.snippets-panel button').forEach(b => {
+                    b.style.background = '#313244';
+                    b.style.color = '#cdd6f4';
+                });
+            }
+        }
+
+        // Load default content
+        editor.value = `\\documentclass{article}
+\\usepackage[UTF8]{ctex}
+\\usepackage{amsmath, amssymb}
+\\usepackage{geometry}
+\\geometry{a4paper, margin=1in}
+
+\\title{Hello, \\LaTeX!}
+\\author{Bobo}
+\\date{\\today}
+
+\\begin{document}
+\\maketitle
+
+\\section{简介}
+这是一个在线 \\LaTeX 编辑器。
+
+\\section{数学公式}
+爱因斯坦的质能方程：
+\\[
+    E = mc^2
+\\]
+
+麦克斯韦方程组：
+\\begin{align}
+    \\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\varepsilon_0} \\\\
+    \\nabla \\cdot \\mathbf{B} &= 0 \\\\
+    \\nabla \\times \\mathbf{E} &= -\\frac{\\partial \\mathbf{B}}{\\partial t} \\\\
+    \\nabla \\times \\mathbf{B} &= \\mu_0 \\mathbf{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}
+\\end{align}
+
+\\section{列表}
+\\begin{itemize}
+    \\item 支持中文编译
+    \\item 实时预览
+    \\item 一键导出
+\\end{itemize}
+
+\\end{document}`;
+
+        const lines = editor.value.split('\\n').length;
+        lineCount.textContent = `行 ${lines}`;
+
+        // Auto render on load
+        setTimeout(renderLatex, 500);
+    </script>
+
+</body>
+</html>

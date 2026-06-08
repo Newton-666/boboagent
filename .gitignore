@@ -1,0 +1,32 @@
+# ── 安全 ──
+.env
+*.env
+!*.env.example
+
+# ── 个人数据 ──
+knowledge_base*.json
+session_*.json
+*.session.json
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# ── 备份文件 ──
+*.bak
+*.backup
+*.broken
+*_副本*
+backups/
+
+# ── IDE ──
+.vscode/
+.idea/
+.DS_Store
+
+# 测试生成的代码项目
+projects/
