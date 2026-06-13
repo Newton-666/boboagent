@@ -135,6 +135,8 @@ def _build_session_info(sid: str) -> dict:
     from config import API_MODEL_NAME, ACTIVE_PROVIDER
     from tools import TOOLS_SCHEMA
     from core.context import ContextMixin
+    from core.skill_manager import get_skill_manager
+    _skill_mgr = get_skill_manager()
 
     # 使用引擎本身的工具分类，而不是把所有工具塞进 "general"
     tool_categories: dict[str, list[str]] = {}
@@ -163,7 +165,7 @@ def _build_session_info(sid: str) -> dict:
         "model": API_MODEL_NAME,
         "provider": ACTIVE_PROVIDER,
         "tools": tool_categories,
-        "skills": {},
+        "skills": {"skills": _skill_mgr.list_skills()},
         "version": "2.0",
         "cwd": os.getcwd(),
         "message_count": len(messages),
