@@ -47,17 +47,26 @@ echo "DEEPSEEK_API_KEY=sk-your-key-here" > ~/.bobo/.env
 ### 4. Run
 
 ```bash
-./bobo
-```
-
-Or if you used venv:
-
-```bash
-source .venv/bin/activate
 bobo
 ```
 
-> **No API key?** Bobo will start the TUI with a setup screen guiding you to create one.
+On first run, Bobo detects no API key and shows a setup screen automatically:
+
+```
+┌─────────────────────────────────────────────┐
+│           ⚙ Setup Required                  │
+│                                             │
+│   Provider: [DeepSeek        ▾]             │
+│   API Key:  [___________________________]   │
+│                                             │
+│   [Submit]                                  │
+└─────────────────────────────────────────────┘
+```
+
+Select your provider, paste your API key, and click Submit. Bobo saves it to `~/.bobo/.env` and you're ready to chat.
+
+> Get a DeepSeek API key at https://platform.deepseek.com/api-keys
+> Or set `BOBO_PROVIDER=openai` in `~/.bobo/.env` to use OpenAI instead.
 
 ### Optional: Configure services
 
