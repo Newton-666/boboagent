@@ -134,13 +134,27 @@ def _save_session_to_disk(sid: str):
 def _build_session_info(sid: str) -> dict:
     from config import API_MODEL_NAME, ACTIVE_PROVIDER
     from tools import TOOLS_SCHEMA
+    from core.context import ContextMixin
 
-    tool_categories: dict[str, list[str]] = {"general": []}
+    # 使用引擎本身的工具分类，而不是把所有工具塞进 "general"
+    tool_categories: dict[str, list[str]] = {}
+    for cat, names in ContextMixin.TOOL_CATEGORIES.items():
+        tool_categories[cat] = [n for n in names if any(
+            t.get("function", t).get("name") == n for t in TOOLS_SCHEMA
+        )]
+    # 处理不在任何分类中的工具
+    all_categorized = set()
+    for names in tool_categories.values():
+        all_categorized.update(names)
+    uncategorized = []
     for t in TOOLS_SCHEMA:
-        fn = t.get("function", t)
-        name = fn.get("name", "")
-        if name:
-            tool_categories["general"].append(name)
+        name = t.get("function", t).get("name", "")
+        if name and name not in all_categorized:
+            uncategorized.append(name)
+    if uncategorized:
+        tool_categories["other"] = uncategorized
+    # 去掉空类别
+    tool_categories = {k: v for k, v in tool_categories.items() if v}
 
     session = _sessions.get(sid, {})
     messages = session.get("messages", [])
