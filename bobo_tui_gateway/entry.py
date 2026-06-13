@@ -55,6 +55,40 @@ def resolve_skin() -> dict:
 
 
 def main():
+    # 找到 TUI 前端文件
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # 尝试多个路径找到 dist/entry.js
+    candidates = [
+        Path(__file__).parent.parent / "ui-tui" / "dist" / "entry.js",
+        Path(__file__).parent.parent.parent / "ui-tui" / "dist" / "entry.js",
+        Path.cwd() / "ui-tui" / "dist" / "entry.js",
+    ]
+    tui_path = None
+    for p in candidates:
+        if p.exists():
+            tui_path = p
+            break
+
+    if tui_path:
+        # 启动 TUI 前端，它内部会 spawn 本脚本作为后端
+        os.execvp("node", ["node", str(tui_path)])
+    else:
+        # 找不到 TUI，输出安装指南
+        print("=" * 60)
+        print("  Bobo Agent")
+        print("=" * 60)
+        print()
+        print("  TUI 前端未找到，请确保 ui-tui/dist/entry.js 存在。")
+        print()
+        print("  安装依赖并构建 TUI:")
+        print("    cd ui-tui && npm install && npm run build")
+        print()
+        print("  或者直接运行 Python 后端（无 TUI 界面）:")
+        print("    python -m bobo_tui_gateway.entry")
+        print("=" * 60)
     # 发送 ready 事件（包含皮肤配置）
     if not write_json({
         "jsonrpc": "2.0",
