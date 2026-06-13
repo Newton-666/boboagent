@@ -1,9 +1,9 @@
 {
   "skills": [
-    {"name": "Python调研", "trigger": ["python调研", "调研python", "python研究", "研究python"], "description": "搜索 Python 信息并保存笔记"},
-    {"name": "企业调研", "trigger": ["企业调研", "调研公司", "查公司", "公司调研"], "description": "调研公司信息并生成报告"},
-    {"name": "生成日报", "trigger": ["生成日报", "日报", "今日总结", "每日报告", "工作总结"], "description": "生成每日工作报告"},
-    {"name": "快速搜索", "trigger": ["快速搜索", "快速查找", "搜索一下"], "description": "快速搜索并返回结果"},
-    {"name": "coding_master", "trigger": ["coding_master", "写代码", "编写代码", "写程序", "编程", "开发", "写一个", "创建代码"], "description": "编写代码的完整工作流"}
+    {"name": "Python调研", "description": "搜索 Python 信息并保存笔记"},
+    {"name": "企业调研", "description": "调研公司信息并生成报告"},
+    {"name": "生成日报", "description": "生成每日工作报告"},
+    {"name": "快速搜索", "description": "快速搜索并返回结果"},
+    {"name": "coding_master", "description": "编写代码的完整工作流"}
   ]
 }

@@ -131,21 +131,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.recorded_messages.append(msg)
 
     def _check_skill_match(self, user_input: str) -> Optional[str]:
-        """使用 skill_manager 的智能匹配来查找匹配的技能。"""
-        user_lower = user_input.lower()
-
-        # 问题类关键词不匹配 skill
-        ask_keywords = ['right', '是吗', '对吗', '真的吗', '?', '？', '是不是', '能否', '可以吗',
-                        'how', 'what', 'why', 'when', 'where', '什么是', '哪个是', '有没有']
-        for kw in ask_keywords:
-            if kw in user_lower:
-                return None
-
-        # 使用 skill_manager 的 match_skill 进行匹配
-        matched = self.skill_manager.match_skill(user_input)
-        if matched:
-            return matched.get("name", "")
-
+        """Skills are now tools (run_skill:xxx). No keyword matching needed."""
         return None
 
     def _handle_pre_input(self, user_input: str) -> Optional[str]:

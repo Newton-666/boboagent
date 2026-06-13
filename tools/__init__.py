@@ -77,3 +77,16 @@ if gated_count > 0:
     print(f" 已过滤 {gated_count} 个不可用工具，可用 {len(gated_schemas)} 个", file=sys.stderr)
 else:
     print(f" 已加载 {len(TOOLS_SCHEMA)} 个有效工具（去重后）", file=sys.stderr)
+
+# ── 技能作为动态工具注册 ──
+from core.skill_manager import get_skill_manager
+_skill_mgr = get_skill_manager()
+for skill_tool in _skill_mgr.get_skill_tools():
+    name = skill_tool["function"]["name"]  # "run_skill:xxx"
+    if name not in seen_names:
+        seen_names.add(name)
+        TOOL_FUNCTIONS[name] = lambda _skill_name=name.split(":", 1)[1]: _skill_mgr.execute_skill(_skill_mgr.get_skill(_skill_name))
+        gated_schemas.append(skill_tool)
+
+TOOLS_SCHEMA[:] = gated_schemas
+print(f" 含技能工具: 共 {len(TOOLS_SCHEMA)} 个工具", file=sys.stderr)
