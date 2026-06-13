@@ -359,6 +359,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.current_depth = 0
         self.current_tool_round = 0
         self._tool_failures = {}
+        self._file_checkpoints.clear()
         self._pending_content = None
         self._pending_tool_calls = None
         self._step_count = 0

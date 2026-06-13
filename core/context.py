@@ -34,6 +34,9 @@ class ContextMixin:
         "code": [
             "code_execution", "file_writer", "execute_terminal",
             "search_code", "refactor", "git_status",
+            "github_create_repo", "github_create_pr",
+            "github_pr_diff", "github_pr_comment",
+            "restore_checkpoint",
         ],
         "file": [
             "read_local_file", "list_directory", "file_operation",

@@ -1,4 +1,4 @@
-"""工具执行 — 并行调度、错误分析、密钥脱敏、自动 diff、自动运行"""
+"""工具执行 — 并行调度、错误分析、密钥脱敏、自动 diff、自动运行、文件回滚"""
 
 import json
 import os
@@ -12,6 +12,7 @@ class ToolRunnerMixin:
     """为 Engine 提供工具执行、结果加工能力。"""
 
     MAX_TOOL_RESULT_LENGTH = 4000
+    _file_checkpoints: dict[str, str] = {}  # path -> content before write
 
     SECRET_PATTERNS = [
         re.compile(r'(sk-|sk-ant-)[a-zA-Z0-9_\-]{20,}'),
@@ -46,6 +47,7 @@ class ToolRunnerMixin:
     def _execute_tool_loop(self, tool_calls: list) -> list:
         from core.tool_executor import execute_tool as _execute_tool
 
+        # 拦截 restore_checkpoint 工具，由 engine 自身处理
         self._notify("thinking", {"phase": "executing_tools", "message": f"准备执行 {len(tool_calls)} 个工具"})
         tool_results = []
 
@@ -53,6 +55,18 @@ class ToolRunnerMixin:
         prepared = []
         for tc in tool_calls:
             tool_name = tc.get("function", {}).get("name", "")
+            if tool_name == "restore_checkpoint":
+                # 直接在 engine 中处理
+                args_str = tc.get("function", {}).get("arguments", "{}")
+                try:
+                    tool_args = json.loads(args_str)
+                except Exception:
+                    tool_args = {}
+                result = self._restore_checkpoint(tool_args.get("path", ""))
+                self._notify("tool_result", {"name": tool_name, "args": tool_args, "result": result[:200], "duration": 0, "success": True})
+                tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
+                self._record_message("tool_result", result=result[:200])
+                continue
             args_str = tc.get("function", {}).get("arguments", "{}")
             try:
                 tool_args = json.loads(args_str)
@@ -77,6 +91,7 @@ class ToolRunnerMixin:
         executor = ThreadPoolExecutor(max_workers=len(prepared))
         future_map = {}
         for tc, tool_name, tool_args in prepared:
+            # 生成人类可读的工具上下文
             context = tool_name
             if isinstance(tool_args, dict):
                 if "query" in tool_args:
@@ -96,6 +111,15 @@ class ToolRunnerMixin:
                 elif "content" in tool_args:
                     content_preview = tool_args["content"][:40].replace("\n", " ")
                     context = f"写入: {content_preview}"
+            # 文件写入前创建检查点（允许回滚）
+            if tool_name == "file_writer" and isinstance(tool_args, dict):
+                path = tool_args.get("path", "")
+                if path and os.path.exists(path):
+                    try:
+                        with open(path, "r", encoding="utf-8") as _f:
+                            self._file_checkpoints[path] = _f.read()
+                    except Exception:
+                        pass
             self._notify("tool_call", {"name": tool_name, "args": tool_args, "context": context, "status": "start"})
             future = executor.submit(_execute_tool, tool_name, tool_args)
             future_map[future] = (tc, tool_name, tool_args)
@@ -184,3 +208,23 @@ class ToolRunnerMixin:
             self._record_message("tool_result", result=result[:200])
 
         return tool_results
+
+    def _restore_checkpoint(self, path: str = "") -> str:
+        """从检查点恢复文件内容。path 为空时列出所有检查点。"""
+        if not path:
+            if not self._file_checkpoints:
+                return "ℹ️ 当前没有可回滚的文件检查点"
+            lines = ["📋 可回滚的文件:"]
+            for p in self._file_checkpoints:
+                size = len(self._file_checkpoints[p])
+                lines.append(f"  {p} ({size} 字符)")
+            return "\n".join(lines)
+        if path not in self._file_checkpoints:
+            return f"❌ 没有找到 '{path}' 的检查点"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._file_checkpoints[path])
+            del self._file_checkpoints[path]
+            return f"✅ 已回滚: {path}"
+        except Exception as e:
+            return f"❌ 回滚失败: {str(e)}"
