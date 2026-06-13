@@ -402,7 +402,25 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
             last_usage = [{}]
 
             def on_event(event_type, data):
-                if event_type == "tool_call":
+                if event_type == "thinking":
+                    # 将引擎思考阶段显示给用户
+                    phase = data.get("phase", "")
+                    msg = data.get("message", "")
+                    if msg:
+                        _emit("status.update", sid, {
+                            "kind": phase,
+                            "text": msg,
+                            "session_id": sid,
+                        })
+                    # 将 thinking 阶段的内容作为 message.delta 显示
+                    if phase == "tool_filter":
+                        _emit("message.delta", sid, {"text": f"\n[{msg}]\n", "session_id": sid})
+                    elif phase == "compressing":
+                        _emit("message.delta", sid, {"text": f"\n[{msg}]\n", "session_id": sid})
+                elif event_type == "user_input":
+                    # 将用户输入 echo 到 TUI（让用户看到自己的消息）
+                    _emit("message.delta", sid, {"text": data.get("content", ""), "session_id": sid})
+                elif event_type == "tool_call":
                     _emit("tool.start", sid, {
                         "tool_id": data.get("name", ""),
                         "name": data.get("name", ""),
