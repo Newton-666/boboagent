@@ -99,6 +99,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 当用户说"记住"、"以后都这样"、"按此执行"等时，使用 save_memory 保存。
 - 记忆会在每次对话时自动注入，让指令贯穿整个会话。
 
+## 用户资料
+
+- 当用户提供个人信息（名字、偏好、语言、风格）时，使用 bobo_profile 保存。
+- 用户资料会在每次对话时自动注入，立即可用。
+
 ## 工具使用
 
 - 搜索信息 → web_search / search_obsidian / cross_search
@@ -231,7 +236,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
         user_query = self.current_user_input or ""
         if user_query and not self._compressing:
             try:
-                from tools.v5_memory import search_knowledge_base
+                from tools.v5_memory import search_knowledge_base, format_user_profile
+                # User profile (injected every call)
+                user_profile = format_user_profile()
+                if user_profile:
+                    messages.insert(1, {
+                        "role": "system",
+                        "content": user_profile
+                    })
+                # Memory search
                 mem_result = search_knowledge_base(user_query)
                 if mem_result and "未找到" not in mem_result:
                     messages.insert(1, {

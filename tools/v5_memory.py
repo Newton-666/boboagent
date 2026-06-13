@@ -241,6 +241,33 @@ def save_to_knowledge_base(content, entry_type="general"):
     return "保存失败"
 
 
+def save_user_profile(key: str, value: str) -> str:
+    """Save or update a user profile entry."""
+    data = _load()
+    if "profile" not in data:
+        data["profile"] = {}
+    data["profile"][key] = {"value": value, "updated": datetime.now().isoformat()}
+    _save(data)
+    return f"用户资料已更新: {key} = {value}"
+
+
+def get_user_profile() -> dict:
+    """Return all user profile entries."""
+    data = _load()
+    return data.get("profile", {})
+
+
+def format_user_profile() -> str:
+    """Format user profile for system prompt injection."""
+    profile = get_user_profile()
+    if not profile:
+        return ""
+    lines = []
+    for key, entry in sorted(profile.items()):
+        lines.append(f"  {key}: {entry['value']}")
+    return "用户资料:\n" + "\n".join(lines)
+
+
 def register(reg):
     reg("save_memory", save_to_knowledge_base, {
         "type": "function",

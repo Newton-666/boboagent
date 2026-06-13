@@ -17,7 +17,7 @@ class ContextMixin:
             "save_skill", "render", "project_info",
             "notion_setup", "cross_search",
             "copy_to_obsidian", "copy_to_notion",
-            "api_register", "api_call", "bobo_config", "bobo_schedule", "wiki_rebuild",
+            "api_register", "api_call", "bobo_config", "bobo_schedule", "wiki_rebuild", "bobo_profile",
         ],
         "web": [
             "web_search", "web_fetch", "web_extract", "open_url",
