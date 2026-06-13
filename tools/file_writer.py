@@ -10,38 +10,11 @@ from datetime import datetime
 from typing import Optional
 
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
+from .obsidian_tools import _normalize_path
 
 # ============================================================
 # 辅助函数
 # ============================================================
-
-def _normalize_path(filename: str) -> str:
-    """规范化文件路径，返回绝对路径"""
-    if not filename:
-        return ""
-    
-    # 去掉开头的斜杠
-    if filename.startswith("/"):
-        filename = filename[1:]
-    if filename.startswith("./"):
-        filename = filename[2:]
-    
-    # 确保有 .md 扩展名
-    if not filename.endswith(".md"):
-        filename += ".md"
-    
-    # 如果包含路径分隔符，视为相对 vault 根目录的路径
-    if "/" in filename:
-        return os.path.abspath(os.path.join(OBSIDIAN_VAULT, filename))
-    
-    # 不包含路径分隔符：检查 vault 根目录是否存在同名文件
-    root_path = os.path.join(OBSIDIAN_VAULT, filename)
-    if os.path.exists(root_path):
-        return os.path.abspath(root_path)
-    
-    # 不存在则写入 vault 根目录（创建新文件）
-    return os.path.abspath(root_path)
-
 
 def _ensure_dir(filepath: str) -> bool:
     """确保目录存在"""

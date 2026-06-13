@@ -43,6 +43,21 @@ def _normalize_path(filename: str, is_destination: bool = False) -> str:
     if os.path.exists(bobo_path):
         return bobo_path
     
+    # 递归搜索整个 vault 中是否存在同名文件
+    matches = []
+    for root, dirs, files in os.walk(OBSIDIAN_VAULT):
+        # 跳过隐藏文件夹和 .obsidian
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for f in files:
+            if f == filename:
+                matches.append(os.path.join(root, f))
+    if len(matches) == 1:
+        return matches[0]
+    elif len(matches) > 1:
+        # 多个同名文件，返回第一个并提示
+        paths = [os.path.relpath(m, OBSIDIAN_VAULT) for m in matches[:5]]
+        return matches[0]
+    
     # 都不存在，默认返回 Bobo数据库目录（让调用方处理"文件不存在"）
     return bobo_path
 
