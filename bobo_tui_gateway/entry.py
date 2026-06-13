@@ -98,4 +98,27 @@ def main():
 
 
 if __name__ == "__main__":
+    # 如果是从 cron 调用的定时任务，直接执行
+    if "--run-schedule" in sys.argv:
+        idx = sys.argv.index("--run-schedule")
+        if idx + 1 < len(sys.argv):
+            name = sys.argv[idx + 1]
+            from tools.bobo_schedule import _load_schedules
+            schedules = _load_schedules()
+            for s in schedules:
+                if s["name"] == name:
+                    print(f"执行定时任务: {s['name']}")
+                    # Load engine and run the task description
+                    from config import API_KEY, API_BASE_URL, API_MODEL_NAME
+                    from core.llm_caller import create_llm_caller
+                    from core.tool_executor import execute_tool
+                    from core.engine import Engine
+                    from tools import TOOLS_SCHEMA
+                    caller = create_llm_caller(API_KEY, API_BASE_URL, API_MODEL_NAME, TOOLS_SCHEMA)
+                    engine = Engine(caller, execute_tool)
+                    engine.run(s["task"])
+                    print(engine.history[-1]["content"] if engine.history else "完成")
+                    break
+        sys.exit(0)
+
     main()
