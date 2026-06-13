@@ -1,9 +1,5 @@
 {
   "skills": [
-    {"name": "Python调研", "description": "搜索 Python 信息并保存笔记"},
-    {"name": "企业调研", "description": "调研公司信息并生成报告"},
-    {"name": "生成日报", "description": "生成每日工作报告"},
-    {"name": "快速搜索", "description": "快速搜索并返回结果"},
-    {"name": "coding_master", "description": "编写代码的完整工作流"}
+    {"name": "KarpathyWiki", "description": "Auto-link related notes in Obsidian vault — scan, find connections, update Knowledge Hub page"}
   ]
 }

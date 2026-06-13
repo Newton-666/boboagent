@@ -1,9 +1,0 @@
-name: coding_master
-description: 编写代码的完整工作流
-
-steps:
-  - type: display
-    description: "使用 code_execution、file_writer、execute_terminal 等工具完成编码任务"
-
-  - type: user_input
-    content: "请根据需求编写代码"

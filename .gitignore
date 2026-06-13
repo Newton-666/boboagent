@@ -28,7 +28,10 @@ backups/
 .vscode/
 .idea/
 
-# ── 项目运行时 ──
+# ── 个人技能（用户本地添加，不提交到 GitHub）
+skills/*.yaml
+skills/*.md
+!skills/index.json
 projects/
 *.log
 *.tmp
