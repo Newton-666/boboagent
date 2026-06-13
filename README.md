@@ -17,19 +17,74 @@
 
 ## Quick Start
 
+### 1. Clone
+
 ```bash
-# Install
-pip install bobo-agent
+git clone https://github.com/Newton-666/BOBO_Project_Backup.git
+cd BOBO_Project_Backup
+```
 
-# Configure your API key
+### 2. Install Python dependencies
+
+```bash
+# Using venv (recommended)
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
+
+pip install -e .
+```
+
+### 3. Configure your API key
+
+Create `~/.bobo/.env`:
+
+```bash
 mkdir -p ~/.bobo
-echo "DEEPSEEK_API_KEY=sk-you...-key" > ~/.bobo/.env
+echo "DEEPSEEK_API_KEY=sk-your-key-here" > ~/.bobo/.env
+```
 
-# Run
+### 4. Run
+
+```bash
+./bobo
+```
+
+Or if you used venv:
+
+```bash
+source .venv/bin/activate
 bobo
 ```
 
-The TUI opens with a setup screen (if no API key is found) or directly to chat.
+> **No API key?** Bobo will start the TUI with a setup screen guiding you to create one.
+
+### Optional: Configure services
+
+```bash
+# Obsidian vault
+echo "OBSIDIAN_VAULT=/path/to/your/vault" >> ~/.bobo/.env
+
+# Notion — just say "connect Notion" in chat
+# GitHub — just say "connect GitHub" in chat
+
+# Email
+cat > ~/.bobo/mail.json << 'EOF'
+{
+  "server": "imap.gmail.com",
+  "port": 993,
+  "username": "you@gmail.com",
+  "password": "your-app-password"
+}
+EOF
+```
+
+### Uninstall
+
+```bash
+pip uninstall bobo-agent
+rm -rf ~/.bobo ~/.bobo_v2
+```
 
 ---
 
