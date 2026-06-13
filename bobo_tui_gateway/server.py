@@ -30,8 +30,19 @@ _pending_confirm: dict[str, threading.Event] = {}
 _pending_confirm_result: dict[str, bool] = {}
 _confirm_lock = threading.Lock()
 
-# 上下文窗口大小（可从环境变量覆盖，默认 128K 适用于 DeepSeek 等主流模型）
-_CONTEXT_LENGTH = int(os.environ.get("CONTEXT_LENGTH", "128000"))
+# 上下文窗口大小（从环境变量覆盖，否则从 provider 配置获取）
+_CONTEXT_LENGTH = int(os.environ.get("CONTEXT_LENGTH", "0"))
+
+def _get_context_length() -> int:
+    """返回当前 provider 的上下文长度。优先使用环境变量覆盖。"""
+    if _CONTEXT_LENGTH:
+        return _CONTEXT_LENGTH
+    try:
+        from core.provider import resolve_provider
+        cfg = resolve_provider()
+        return cfg.get("context_length", 128000)
+    except Exception:
+        return 128000
 
 # 累计 token 用量（跨轮次累加）
 _session_usage: dict[str, dict] = {}
@@ -169,7 +180,7 @@ def _build_session_info(sid: str) -> dict:
         "version": "2.0",
         "cwd": os.getcwd(),
         "message_count": len(messages),
-        "context_max": _CONTEXT_LENGTH,
+        "context_max": _get_context_length(),
     }
 
 
@@ -473,9 +484,9 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
                             "input": acc["input"],
                             "output": acc["output"],
                             "total": total,
-                            "context_max": _CONTEXT_LENGTH,
+                            "context_max": _get_context_length(),
                             "context_used": context_used,
-                            "context_percent": round(context_used / _CONTEXT_LENGTH * 100, 1),
+                            "context_percent": round(context_used / _get_context_length() * 100, 1),
                         }
                 elif event_type == "error":
                     # 将错误发送到 TUI 作为可见错误提示
