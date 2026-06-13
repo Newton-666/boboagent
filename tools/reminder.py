@@ -10,6 +10,11 @@ TOOL_NAME = "reminder"
 _active_reminders = []
 
 
+def _escape_applescript(text: str) -> str:
+    """转义 AppleScript 字符串中的特殊字符，防止注入"""
+    return text.replace('\\', '\\\\').replace('"', '\\"')
+
+
 def parse_time(text: str) -> tuple:
     text_lower = text.lower()
     now = datetime.now()
@@ -56,7 +61,12 @@ def execute(message: str) -> str:
         print(f"\n🔔 提醒: {message}")
         try:
             import subprocess
-            subprocess.run(['osascript', '-e', f'display notification "{message}" with title "Bobo提醒"'])
+            safe_msg = _escape_applescript(message)
+            subprocess.run(
+                ['osascript', '-e', f'display notification "{safe_msg}" with title "Bobo\u63d0\u9192"'],
+                capture_output=True,
+                timeout=5
+            )
         except:
             pass
     
@@ -75,6 +85,8 @@ def list_reminders() -> str:
         result += f"  {i}. {r['message']}\n"
     return result
 
+
+_check = lambda: __import__('sys').platform == 'darwin'
 
 def register(reg):
     reg("set_reminder", execute, {
@@ -98,9 +110,9 @@ def register(reg):
 【注意】此工具保存的是**临时提醒**，会过期，不是永久记忆。""",
             "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}
         }
-    })
+    }, check_fn=_check)
     
     reg("list_reminders", list_reminders, {
         "type": "function",
         "function": {"name": "list_reminders", "description": "列出所有活跃的提醒", "parameters": {"type": "object", "properties": {}, "required": []}}
-    })
+    }, check_fn=_check)

@@ -1,12 +1,18 @@
 # v5_memory.py — 知识库记忆系统（增强版：容量限制 + 原子写入）
+# 数据存储在 ~/.bobo_v2/ 下，不在项目目录中
 
 import json
 import os
 import tempfile
 import shutil
 from datetime import datetime
+from pathlib import Path
 
-MEMORY_DB = "knowledge_base.json"
+# 数据存储目录：用户目录下的 .bobo_v2，不在项目目录中
+_MEMORY_DIR = Path.home() / ".bobo_v2"
+_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+MEMORY_DB = str(_MEMORY_DIR / "knowledge_base.json")
+
 MAX_TOTAL_CHARS = 100000  # 总记忆字符限制（约 36k tokens）
 MAX_SINGLE_ENTRY_CHARS = 5000  # 单条记忆字符限制
 
@@ -192,69 +198,87 @@ def update_entry(entry_id, new_text):
             e['text'] = new_text
             e['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M")
             
-            # 重新计算总容量
+            # 重新计算总字符数
             entries = data['entries']
-            total_chars = _get_total_chars(entries)
-            if total_chars > MAX_TOTAL_CHARS:
-                # 回滚
+            total = _get_total_chars(entries)
+            if total > MAX_TOTAL_CHARS:
                 e['text'] = old_text
-                return {"error": f"更新后记忆超限 ({total_chars}/{MAX_TOTAL_CHARS})，请先删除一些旧记忆"}
+                return {"error": f"更新后记忆总容量 ({total}) 超过限制 ({MAX_TOTAL_CHARS})"}
             
             _save(data)
             return {"success": True, "entry": e}
+    
     return {"error": f"未找到 ID: {entry_id}"}
 
 
 def search_knowledge_base(query):
-    entries = get_entries()
+    """搜索知识库"""
+    data = _load()
+    entries = data.get('entries', [])
+    query_lower = query.lower()
+    
     results = []
     for e in entries:
-        if query.lower() in e.get('text', '').lower():
-            preview = e['text'][:80] + "..." if len(e['text']) > 80 else e['text']
-            results.append(f"- [{e.get('folder', '根目录')}] {preview}")
+        text = e.get("text", "")
+        if query_lower in text.lower():
+            results.append(e)
     
     if not results:
-        return f"📝 知识库中没找到与 '{query}' 相关的内容。"
+        return "未找到相关记忆"
     
-    stats = get_memory_stats()
-    return f"📝 找到 {len(results)} 条记忆 (共 {stats['total_entries']} 条, {stats['usage_percent']}% 容量):\n" + "\n".join(results[:10])
+    output = f"找到 {len(results)} 条相关记忆:\n"
+    for e in results:
+        text = e['text'][:100]
+        output += f"  [{e['id']}] {text}\n"
+    return output
 
 
 def save_to_knowledge_base(content, entry_type="general"):
-    if not content or not content.strip():
-        return "❌ 内容不能为空"
-    entry = add_entry(content.strip(), entry_type)
-    if entry is None:
-        stats = get_memory_stats()
-        return f"❌ 记忆已满 ({stats['total_chars']}/{stats['max_chars']} 字符)，请删除一些旧记忆"
-    return "✅ 已保存到知识库"
-
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("测试 v5_memory.py（容量限制版）")
-    print("=" * 60)
-    
-    stats = get_memory_stats()
-    print(f"\n📊 记忆统计:")
-    print(f"   条目数: {stats['total_entries']}")
-    print(f"   字符数: {stats['total_chars']}/{stats['max_chars']} ({stats['usage_percent']}%)")
-    print(f"   单条限制: {stats['max_entry_chars']} 字符")
-    
-    # 测试添加
-    print("\n--- 测试添加记忆 ---")
-    entry = add_entry("测试记忆：这是一个容量限制测试", entry_type="test")
+    """保存内容到知识库（供工具调用）"""
+    entry = add_entry(content, entry_type)
     if entry:
-        print(f"   ✅ 添加成功，ID: {entry['id']}")
-    else:
-        print(f"   ⚠️ 添加失败（可能已满）")
-    
-    # 显示最新统计
-    stats = get_memory_stats()
-    print(f"\n📊 最新统计: {stats['total_entries']} 条, {stats['total_chars']} 字符")
-    
-    print("\n✅ v5_memory.py 测试完成")
+        return f"已保存到知识库 (ID: {entry['id']})"
+    return "保存失败"
 
 
 def register(reg):
-    pass
+    reg("save_memory", save_to_knowledge_base, {
+        "type": "function",
+        "function": {
+            "name": "save_memory",
+            "description": """【用途】保存永久性知识到长期记忆库。
+
+适用场景：
+- 记住事实、知识点、偏好（如"我喜欢Python"）
+- 不会过期的信息
+
+不适用场景：
+- 有时间限制的事情（如"明天开会"）→ 请用 set_reminder
+
+示例：
+- "记住我的邮箱是 xxx@example.com" → 保存到记忆
+- "记住我喜欢喝咖啡" → 保存到记忆""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "memory_type": {"type": "string"}
+                },
+                "required": ["content"]
+            }
+        }
+    })
+    
+    reg("search_memory", search_knowledge_base, {
+        "type": "function",
+        "function": {
+            "name": "search_memory",
+            "description": """【用途】在长期记忆库中搜索之前保存的信息。
+【适用场景】用户问"还记得XX吗"、"我之前让你记住的XX是什么"。""",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }
+        }
+    })

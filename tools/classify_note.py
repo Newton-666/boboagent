@@ -88,6 +88,8 @@ def confirm_move(filename: str, folder: str = None) -> str:
     return f"❌ 移动失败: {result}"
 
 
+_check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))
+
 def register(reg):
     reg("classify_analyze", analyze, {
         "type": "function",
@@ -99,7 +101,7 @@ def register(reg):
                 "content": {"type": "string"}
             }, "required": ["filename"]}
         }
-    })
+    }, check_fn=_check)
     
     reg("classify_confirm", confirm_move, {
         "type": "function",
@@ -111,4 +113,4 @@ def register(reg):
                 "folder": {"type": "string"}
             }, "required": ["filename"]}
         }
-    })
+    }, check_fn=_check)

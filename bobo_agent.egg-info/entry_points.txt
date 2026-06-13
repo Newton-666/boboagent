@@ -1,0 +1,2 @@
+[console_scripts]
+bobo = bobo_tui_gateway.entry:main

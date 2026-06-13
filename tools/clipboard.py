@@ -21,6 +21,8 @@ def write(content: str) -> str:
     except:
         return "❌ 写入剪贴板失败"
 
+_check = lambda: __import__('sys').platform == 'darwin'
+
 def register(reg):
     reg("read_clipboard", read, {
         "type": "function",
@@ -29,7 +31,7 @@ def register(reg):
             "description": "读取系统剪贴板内容。适用场景：用户说'看看我复制了什么'、'读取剪贴板'。",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
-    })
+    }, check_fn=_check)
     reg("write_clipboard", write, {
         "type": "function",
         "function": {
@@ -37,4 +39,4 @@ def register(reg):
             "description": "写入内容到系统剪贴板。适用场景：用户要求'复制这段内容'、'把这个放到剪贴板'。",
             "parameters": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}
         }
-    })
+    }, check_fn=_check)

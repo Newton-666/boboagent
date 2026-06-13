@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bobo-agent"
+version = "0.1.0"
+description = "Bobo — a personal AI agent for your terminal, Obsidian, and email"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "niuqingwei"},
+]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/niuqingwei/bobo-agent"
+
+[project.scripts]
+bobo = "bobo_tui_gateway.entry:main"
+
+[tool.setuptools.packages.find]
+include = ["bobo_tui_gateway*", "core*", "tools*"]

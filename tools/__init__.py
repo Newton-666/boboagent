@@ -6,10 +6,13 @@ from pathlib import Path
 
 TOOL_FUNCTIONS = {}
 TOOLS_SCHEMA = []
+TOOL_CHECKS = {}  # tool_name -> callable returning bool
 
-def register_tool(name, func, schema):
+def register_tool(name, func, schema, check_fn=None):
     TOOL_FUNCTIONS[name] = func
     TOOLS_SCHEMA.append(schema)
+    if check_fn is not None:
+        TOOL_CHECKS[name] = check_fn
 
 def discover_tools():
     current_dir = Path(__file__).parent
@@ -32,14 +35,45 @@ def discover_tools():
 
 discover_tools()
 
-# 过滤掉空的或有问题的工具
-valid_schemas = []
+# 过滤 + 按名称去重（DeepSeek API 要求工具名称唯一）
+seen_names = set()
+unique_schemas = []
 for tool in TOOLS_SCHEMA:
     if tool and isinstance(tool, dict):
         if 'function' in tool and tool['function']:
-            valid_schemas.append(tool)
+            schema = tool
         elif 'name' in tool:
-            valid_schemas.append({"type": "function", "function": tool})
-TOOLS_SCHEMA[:] = valid_schemas
+            schema = {"type": "function", "function": tool}
+        else:
+            continue
+        
+        name = schema.get("function", {}).get("name", "")
+        if not name:
+            continue  # 跳过空 schema
+        if name and name in seen_names:
+            continue  # 跳过重复的工具名
+        if name:
+            seen_names.add(name)
+        unique_schemas.append(schema)
 
-print(f"✅ 已加载 {len(TOOLS_SCHEMA)} 个有效工具", file=sys.stderr)
+# 根据 check_fn 过滤不可用的工具
+before_gate = len(unique_schemas)
+gated_schemas = []
+for tool in unique_schemas:
+    name = tool.get("function", {}).get("name", "")
+    check = TOOL_CHECKS.get(name)
+    if check is not None:
+        try:
+            if not check():
+                continue  # 跳过不可用的工具
+        except Exception:
+            continue  # check 异常时保守跳过
+    gated_schemas.append(tool)
+
+TOOLS_SCHEMA[:] = gated_schemas
+
+gated_count = before_gate - len(gated_schemas)
+if gated_count > 0:
+    print(f" 已过滤 {gated_count} 个不可用工具，可用 {len(gated_schemas)} 个", file=sys.stderr)
+else:
+    print(f" 已加载 {len(TOOLS_SCHEMA)} 个有效工具（去重后）", file=sys.stderr)

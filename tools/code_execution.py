@@ -8,8 +8,9 @@ from pathlib import Path
 
 TOOL_NAME = "code_execution"
 
-# 项目文件保存目录
-PROJECTS_DIR = Path(__file__).parent.parent / "projects"
+# 项目文件保存目录（从 config 读取，可通过环境变量 BOBO_PROJECTS_DIR 覆盖）
+from config import PROJECTS_DIR as _CONFIG_PROJECTS_DIR
+PROJECTS_DIR = Path(_CONFIG_PROJECTS_DIR)
 
 # 自修复最大尝试次数
 MAX_FIX_ATTEMPTS = 3
@@ -94,6 +95,52 @@ def _build_test_prompt(code: str, language: str) -> list:
     return [{"role": "user", "content": prompt}]
 
 
+def _check_syntax(code: str, language: str) -> str:
+    """
+    本地语法检查。语法正确返回 None，错误返回错误描述。
+    用于自修复循环中预检 LLM 返回的代码，避免无效执行。
+    """
+    if language == "python":
+        try:
+            import ast
+            ast.parse(code)
+            return None
+        except SyntaxError as e:
+            return f"语法错误: {e}"
+    
+    if language == "javascript":
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                f.write(code)
+                temp_file = f.name
+            result = subprocess.run(['node', '--check', temp_file],
+                                    capture_output=True, text=True, timeout=10)
+            os.unlink(temp_file)
+            if result.returncode != 0:
+                return f"语法错误: {result.stderr.strip()[:100]}"
+            return None
+        except FileNotFoundError:
+            return None
+        except:
+            return None
+    
+    if language == "bash":
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+                f.write(code)
+                temp_file = f.name
+            result = subprocess.run(['bash', '-n', temp_file],
+                                    capture_output=True, text=True, timeout=10)
+            os.unlink(temp_file)
+            if result.returncode != 0:
+                return f"语法错误: {result.stderr.strip()[:100]}"
+            return None
+        except:
+            return None
+    
+    return None
+
+
 def _call_llm_for_fix(llm_caller, code: str, error_output: str, language: str) -> str:
     """调用 LLM 修复代码，返回修复后的代码"""
     messages = _build_fix_prompt(code, error_output, language)
@@ -140,6 +187,42 @@ def _call_llm_for_test(llm_caller, code: str, language: str) -> str:
         return None
 
 
+def _run_test_file(test_path: str, language: str) -> str:
+    """运行测试文件，返回测试结果"""
+    try:
+        if language == "python":
+            result = subprocess.run(
+                ['python3', '-m', 'pytest', test_path, '-q'],
+                capture_output=True, text=True, timeout=30
+            )
+        elif language == "javascript":
+            result = subprocess.run(
+                ['node', '--test', test_path],
+                capture_output=True, text=True, timeout=30
+            )
+        else:
+            return "(不支持此语言的测试运行)"
+
+        output = ""
+        if result.stdout:
+            output += result.stdout.strip()
+        if result.stderr:
+            if output:
+                output += "\n"
+            output += result.stderr.strip()
+        
+        if result.returncode == 0:
+            return f"测试通过: {output[:100]}" if output else "测试通过"
+        else:
+            return f"测试失败: {output[:200]}"
+    except subprocess.TimeoutExpired:
+        return "测试执行超时（30秒）"
+    except FileNotFoundError:
+        return "测试运行环境未安装"
+    except Exception as e:
+        return f"测试执行失败: {e}"
+
+
 def execute(code: str, language: str = "python", type: str = "run",
             llm_caller: callable = None) -> str:
     """执行代码
@@ -172,6 +255,12 @@ def execute(code: str, language: str = "python", type: str = "run",
             if fixed_code is None:
                 break
 
+            syntax_error = _check_syntax(fixed_code, language)
+            if syntax_error:
+                result = syntax_error
+                _save_run_log(task_name, result, version=version)
+                continue
+
             fix_path, _ = _save_code(fixed_code, language, task_name, version=version)
             result = _run_code(fixed_code, language)
             _save_run_log(task_name, result, version=version)
@@ -186,7 +275,10 @@ def execute(code: str, language: str = "python", type: str = "run",
         test_code = _call_llm_for_test(llm_caller, code, language)
         if test_code:
             test_path, _ = _save_code(test_code, language, task_name, version="test")
-            return f"{result}\n(代码已保存: {filepath})\n(测试已生成: {test_path})"
+            # 自动运行测试并获取结果
+            test_result = _run_test_file(test_path, language)
+            _save_run_log(task_name, f"测试结果: {test_result}", version="test")
+            return f"{result}\n(代码已保存: {filepath})\n(测试已生成: {test_path})\n(测试结果: {test_result})"
 
     return f"{result}\n(代码已保存: {filepath})"
 
@@ -277,15 +369,20 @@ def _run_javascript(code):
 
 
 def _run_bash(code):
+    """执行 Bash 代码（写入临时文件，不使用 shell=True）"""
     try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+            f.write(code)
+            temp_file = f.name
+
         result = subprocess.run(
-            code,
-            shell=True,
+            ['bash', temp_file],
             capture_output=True,
             text=True,
-            timeout=30,
-            executable='/bin/bash'
+            timeout=30
         )
+        os.unlink(temp_file)
+
         output = ""
         if result.stdout:
             output += result.stdout

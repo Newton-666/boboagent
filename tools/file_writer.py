@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from config import OBSIDIAN_VAULT, BOBO_FOLDER
+from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
 
 # ============================================================
 # 辅助函数
@@ -30,9 +30,17 @@ def _normalize_path(filename: str) -> str:
     if not filename.endswith(".md"):
         filename += ".md"
     
-    # 构建完整路径
-    full_path = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, filename)
-    return os.path.abspath(full_path)
+    # 如果包含路径分隔符，视为相对 vault 根目录的路径
+    if "/" in filename:
+        return os.path.abspath(os.path.join(OBSIDIAN_VAULT, filename))
+    
+    # 不包含路径分隔符：检查 vault 根目录是否存在同名文件
+    root_path = os.path.join(OBSIDIAN_VAULT, filename)
+    if os.path.exists(root_path):
+        return os.path.abspath(root_path)
+    
+    # 不存在则写入 vault 根目录（创建新文件）
+    return os.path.abspath(root_path)
 
 
 def _ensure_dir(filepath: str) -> bool:
@@ -87,6 +95,13 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
     
     try:
         filepath = _normalize_path(filename)
+        
+        # 检查是否在屏蔽文件夹中
+        for blocked in BLOCKED_FOLDERS:
+            blocked = blocked.strip()
+            if blocked and blocked in filepath.split(os.sep):
+                return f"❌ 无权写入该文件（隐私保护）"
+        
         _ensure_dir(filepath)
         
         # 自动备份
@@ -104,40 +119,25 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
 
 
 def append_obsidian(filename: str, content: str, auto_backup: bool = True) -> str:
-    """
-    追加内容到文件（不覆盖）
-    
-    Args:
-        filename: 文件名
-        content: 要追加的内容
-        auto_backup: 是否自动备份
-    
-    Returns:
-        操作结果消息
-    """
+    """追加内容到文件（不覆盖）"""
     if not filename or not filename.strip():
         return "❌ 文件名不能为空"
-    
     if not content:
         return "❌ 内容不能为空"
-    
     try:
         filepath = _normalize_path(filename)
+        for blocked in BLOCKED_FOLDERS:
+            blocked = blocked.strip()
+            if blocked and blocked in filepath.split(os.sep):
+                return "❌ 无权写入该文件（隐私保护）"
         _ensure_dir(filepath)
-        
-        # 自动备份
         if auto_backup and os.path.exists(filepath):
             _create_backup(filepath)
-        
-        # 追加写入
         with open(filepath, 'a', encoding='utf-8') as f:
-            # 如果文件非空且不以换行结尾，先加换行
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                 f.write('\n')
             f.write(content)
-        
         return f"✅ 已追加到: {filename}"
-        
     except Exception as e:
         return f"❌ 追加失败: {str(e)}"
 

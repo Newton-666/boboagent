@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Mario - HTML Edition</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Courier New', monospace;
+        }
+        .game-wrapper { position: relative; }
+        canvas {
+            display: block;
+            border: 3px solid #333;
+            background: #5c94fc;
+            image-rendering: pixelated;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .controls button {
+            padding: 12px 24px;
+            font-size: 18px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #e52521;
+            color: white;
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .controls button:active { transform: scale(0.95); }
+        .controls button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .info {
+            color: #aaa;
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .info span { color: #fff; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div class="game-wrapper">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div class="controls">
+        <button id="leftBtn">&#9664; Left</button>
+        <button id="jumpBtn">Jump</button>
+        <button id="rightBtn">Right &#9654;</button>
+        <button id="restartBtn">Restart</button>
+    </div>
+    <div class="info">
+        Arrow keys to move &nbsp;|&nbsp; <span>Space</span> to jump &nbsp;|&nbsp; Collect coins! Avoid Goombas!
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = 800, H = 400;
+
+    const GRAVITY = 0.5;
+    const FRICTION = 0.8;
+    const GROUND_Y = 340;
+
+    let gameOver = false;
+    let score = 0;
+    let keys = { left: false, right: false, jump: false };
+
+    const mario = {
+        x: 80, y: GROUND_Y - 32, w: 28, h: 32,
+        vx: 0, vy: 0,
+        onGround: false,
+        facing: 1,
+        frame: 0,
+        frameTimer: 0
+    };
+
+    const platforms = [
+        { x: 0, y: GROUND_Y, w: 800, h: 60 },
+        { x: 200, y: 260, w: 96, h: 16 },
+        { x: 400, y: 200, w: 96, h: 16 },
+        { x: 600, y: 260, w: 96, h: 16 },
+        { x: 700, y: GROUND_Y - 32, w: 32, h: 16 },
+        { x: 732, y: GROUND_Y - 64, w: 32, h: 16 },
+        { x: 764, y: GROUND_Y - 96, w: 32, h: 16 },
+    ];
+
+    let coins = [
+        { x: 216, y: 228, w: 16, h: 16, collected: false },
+        { x: 240, y: 228, w: 16, h: 16, collected: false },
+        { x: 264, y: 228, w: 16, h: 16, collected: false },
+        { x: 416, y: 168, w: 16, h: 16, collected: false },
+        { x: 440, y: 168, w: 16, h: 16, collected: false },
+        { x: 616, y: 228, w: 16, h: 16, collected: false },
+        { x: 640, y: 228, w: 16, h: 16, collected: false },
+        { x: 664, y: 228, w: 16, h: 16, collected: false },
+    ];
+
+    let goombas = [
+        { x: 350, y: GROUND_Y - 28, w: 28, h: 28, vx: -1.5, alive: true },
+        { x: 550, y: GROUND_Y - 28, w: 28, h: 28, vx: 1.2, alive: true },
+    ];
+
+    const pipes = [
+        { x: 480, y: GROUND_Y - 48, w: 48, h: 48 },
+    ];
+
+    function rectCollide(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x &&
+               a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function resetGame() {
+        mario.x = 80;
+        mario.y = GROUND_Y - 32;
+        mario.vx = 0;
+        mario.vy = 0;
+        mario.onGround = false;
+        gameOver = false;
+        score = 0;
+        coins.forEach(c => c.collected = false);
+        goombas.forEach(g => { g.alive = true; g.x = g.x > 400 ? 550 : 350; });
+    }
+
+    function update() {
+        if (gameOver) return;
+
+        if (keys.left) { mario.vx = -4; mario.facing = -1; }
+        else if (keys.right) { mario.vx = 4; mario.facing = 1; }
+        else { mario.vx *= FRICTION; if (Math.abs(mario.vx) < 0.1) mario.vx = 0; }
+
+        if (keys.jump && mario.onGround) { mario.vy = -10; mario.onGround = false; }
+
+        mario.vy += GRAVITY;
+        if (mario.vy > 12) mario.vy = 12;
+
+        mario.x += mario.vx;
+        if (mario.x < 0) mario.x = 0;
+        if (mario.x > W - mario.w) mario.x = W - mario.w;
+
+        mario.y += mario.vy;
+
+        mario.onGround = false;
+        for (const p of platforms) {
+            if (rectCollide(mario, p)) {
+                if (mario.vy > 0 && mario.y + mario.h - mario.vy <= p.y + 4) {
+                    mario.y = p.y - mario.h;
+                    mario.vy = 0;
+                    mario.onGround = true;
+                } else if (mario.vy < 0 && mario.y - mario.vy >= p.y + p.h - 4) {
+                    mario.y = p.y + p.h;
+                    mario.vy = 0;
+                }
+            }
+        }
+
+        for (const p of pipes) {
+            if (rectCollide(mario, p)) {
+                if (mario.vx > 0 && mario.x + mario.w - mario.vx <= p.x + 4) mario.x = p.x - mario.w;
+                else if (mario.vx < 0 && mario.x - mario.vx >= p.x + p.w - 4) mario.x = p.x + p.w;
+                if (mario.vy > 0 && mario.y + mario.h - mario.vy <= p.y + 4) {
+                    mario.y = p.y - mario.h;
+                    mario.vy = 0;
+                    mario.onGround = true;
+                }
+            }
+        }
+
+        if (mario.y > H + 50) { gameOver = true; return; }
+
+        if (Math.abs(mario.vx) > 0.5) {
+            mario.frameTimer++;
+            if (mario.frameTimer > 6) { mario.frame = (mario.frame + 1) % 3; mario.frameTimer = 0; }
+        } else { mario.frame = 0; mario.frameTimer = 0; }
+
+        for (const c of coins) {
+            if (!c.collected && rectCollide(mario, c)) { c.collected = true; score += 10; }
+        }
+
+        for (const g of goombas) {
+            if (!g.alive) continue;
+            g.x += g.vx;
+            if (g.x < 0 || g.x > W - g.w) g.vx *= -1;
+            if (rectCollide(mario, g)) {
+                if (mario.vy > 0 && mario.y + mario.h - mario.vy <= g.y + 8) {
+                    g.alive = false;
+                    mario.vy = -7;
+                    score += 50;
+                } else { gameOver = true; }
+            }
+        }
+    }
+
+    function drawMario() {
+        const { x, y, w, h, facing, frame } = mario;
+        ctx.save();
+
+        ctx.fillStyle = '#e52521';
+        ctx.fillRect(x + 4, y + 8, 20, 14);
+
+        ctx.fillStyle = '#f5cba7';
+        ctx.fillRect(x + 6, y, 16, 10);
+
+        ctx.fillStyle = '#e52521';
+        ctx.fillRect(x + 4, y - 2, 20, 6);
+
+        ctx.fillStyle = '#000';
+        if (facing > 0) ctx.fillRect(x + 16, y + 3, 4, 4);
+        else ctx.fillRect(x + 8, y + 3, 4, 4);
+
+        ctx.fillStyle = '#6d3a1f';
+        ctx.fillRect(x + 10, y + 7, 10, 3);
+
+        ctx.fillStyle = '#1a4a8a';
+        ctx.fillRect(x + 4, y + 20, 20, 8);
+
+        ctx.fillStyle = '#6d3a1f';
+        if (frame === 0 || Math.abs(mario.vx) < 0.5) {
+            ctx.fillRect(x + 6, y + 28, 6, 4);
+            ctx.fillRect(x + 16, y + 28, 6, 4);
+        } else if (frame === 1) {
+            ctx.fillRect(x + 4, y + 28, 6, 4);
+            ctx.fillRect(x + 18, y + 28, 6, 4);
+        } else {
+            ctx.fillRect(x + 8, y + 28, 6, 4);
+            ctx.fillRect(x + 14, y + 28, 6, 4);
+        }
+
+        ctx.fillStyle = '#6d3a1f';
+        ctx.fillRect(x + 4, y + 30, 8, 3);
+        ctx.fillRect(x + 16, y + 30, 8, 3);
+
+        ctx.restore();
+    }
+
+    function draw() {
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#5c94fc');
+        grad.addColorStop(1, '#a0c4ff');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.beginPath();
+        ctx.arc(120, 50, 20, 0, Math.PI * 2);
+        ctx.arc(140, 40, 25, 0, Math.PI * 2);
+        ctx.arc(160, 50, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(350, 30, 25, 0, Math.PI * 2);
+        ctx.arc(375, 18, 30, 0, Math.PI * 2);
+        ctx.arc(400, 30, 25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(600, 60, 18, 0, Math.PI * 2);
+        ctx.arc(618, 50, 22, 0, Math.PI * 2);
+        ctx.arc(636, 60, 18, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#4a8c3f';
+        ctx.beginPath();
+        ctx.arc(110, GROUND_Y, 60, Math.PI, 0);
+        ctx.lineTo(170, GROUND_Y);
+        ctx.lineTo(50, GROUND_Y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(430, GROUND_Y, 80, Math.PI, 0);
+        ctx.lineTo(510, GROUND_Y);
+        ctx.lineTo(350, GROUND_Y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(700, GROUND_Y, 50, Math.PI, 0);
+        ctx.lineTo(750, GROUND_Y);
+        ctx.lineTo(650, GROUND_Y);
+        ctx.closePath();
+        ctx.fill();
+
+        for (const p of platforms) {
+            if (p.h > 30) {
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.fillStyle = '#4a8c3f';
+                ctx.fillRect(p.x, p.y, p.w, 6);
+                ctx.strokeStyle = '#6d3a1f';
+                ctx.lineWidth = 1;
+                for (let bx = p.x; bx < p.x + p.w; bx += 32) {
+                    ctx.strokeRect(bx, p.y + 6, 32, 16);
+                    ctx.strokeRect(bx, p.y + 22, 32, 16);
+                }
+            } else {
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.strokeStyle = '#6d3a1f';
+                ctx.lineWidth = 1;
+                for (let bx = p.x; bx < p.x + p.w; bx += 16) {
+                    ctx.strokeRect(bx, p.y, 16, p.h);
+                }
+            }
+        }
+
+        for (const p of pipes) {
+            ctx.fillStyle = '#2e7d32';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+            ctx.fillStyle = '#1b5e20';
+            ctx.fillRect(p.x + 4, p.y, p.w - 8, 6);
+            ctx.fillStyle = '#388e3c';
+            ctx.fillRect(p.x + 2, p.y + 6, p.w - 4, 4);
+            ctx.fillStyle = '#66bb6a';
+            ctx.fillRect(p.x + 4, p.y + 10, 6, p.h - 10);
+        }
+
+        for (const c of coins) {
+            if (c.collected) continue;
+            const pulse = Math.sin(Date.now() / 200) * 2;
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.ellipse(c.x + 8, c.y + 8 + pulse, 8, 7, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffec8b';
+            ctx.beginPath();
+            ctx.ellipse(c.x + 7, c.y + 7 + pulse, 4, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        for (const g of goombas) {
+            if (!g.alive) continue;
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.arc(g.x + g.w/2, g.y + g.h/2, g.w/2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#5d2e0c';
+            ctx.fillRect(g.x + 2, g.y + g.h - 6, 10, 6);
+            ctx.fillRect(g.x + g.w - 12, g.y + g.h - 6, 10, 6);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(g.x + 6, g.y + 8, 6, 6);
+            ctx.fillRect(g.x + g.w - 12, g.y + 8, 6, 6);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(g.x + 8, g.y + 10, 3, 4);
+            ctx.fillRect(g.x + g.w - 10, g.y + 10, 3, 4);
+            ctx.fillStyle = '#3e1f0a';
+            ctx.fillRect(g.x + 5, g.y + 6, 8, 2);
+            ctx.fillRect(g.x + g.w - 13, g.y + 6, 8, 2);
+        }
+
+        if (!gameOver) drawMario();
+        else {
+            drawMario();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(mario.x + 8, mario.y + 3, 4, 2);
+            ctx.fillRect(mario.x + 16, mario.y + 3, 4, 2);
+        }
+
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, 0, 200, 36);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 18px "Courier New", monospace';
+        ctx.fillText('SCORE: ' + score, 16, 26);
+
+        const remaining = coins.filter(c => !c.collected).length;
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('COINS: ' + remaining + '/' + coins.length, 16, 52);
+
+        if (gameOver) {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#e52521';
+            ctx.font = 'bold 48px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', W/2, H/2 - 20);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Courier New", monospace';
+            ctx.fillText('Score: ' + score + '  |  Press Restart', W/2, H/2 + 30);
+            ctx.textAlign = 'left';
+        } else if (coins.every(c => c.collected)) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#ffd700';
+            ctx.font = 'bold 40px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('YOU WIN!', W/2, H/2 - 10);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Courier New", monospace';
+            ctx.fillText('Final Score: ' + score, W/2, H/2 + 30);
+            ctx.textAlign = 'left';
+        }
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+        if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+        if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); keys.jump = true; }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+        if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+        if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); keys.jump = false; }
+    });
+
+    document.getElementById('leftBtn').addEventListener('mousedown', () => keys.left = true);
+    document.getElementById('leftBtn').addEventListener('mouseup', () => keys.left = false);
+    document.getElementById('leftBtn').addEventListener('mouseleave', () => keys.left = false);
+    document.getElementById('rightBtn').addEventListener('mousedown', () => keys.right = true);
+    document.getElementById('rightBtn').addEventListener('mouseup', () => keys.right = false);
+    document.getElementById('rightBtn').addEventListener('mouseleave', () => keys.right = false);
+    document.getElementById('jumpBtn').addEventListener('mousedown', () => keys.jump = true);
+    document.getElementById('jumpBtn').addEventListener('mouseup', () => keys.jump = false);
+    document.getElementById('jumpBtn').addEventListener('mouseleave', () => keys.jump = false);
+    document.getElementById('restartBtn').addEventListener('click', resetGame);
+
+    for (const id of ['leftBtn', 'rightBtn', 'jumpBtn']) {
+        const btn = document.getElementById(id);
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (id === 'leftBtn') keys.left = true;
+            if (id === 'rightBtn') keys.right = true;
+            if (id === 'jumpBtn') keys.jump = true;
+        });
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (id === 'leftBtn') keys.left = false;
+            if (id === 'rightBtn') keys.right = false;
+            if (id === 'jumpBtn') keys.jump = false;
+        });
+    }
+
+    gameLoop();
+</script>
+</body>
+</html>

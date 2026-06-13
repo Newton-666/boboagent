@@ -24,6 +24,8 @@ def send(title: str, message: str) -> str:
     except:
         return "发送通知失败"
 
+_check = lambda: __import__('sys').platform == 'darwin'
+
 def register(reg):
     reg("send_notification", send, {
         "type": "function",
@@ -32,4 +34,4 @@ def register(reg):
             "description": "发送 macOS 系统通知。适用场景：用户要求'提醒我'、'通知我'。",
             "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "message": {"type": "string"}}, "required": ["title", "message"]}
         }
-    })
+    }, check_fn=_check)

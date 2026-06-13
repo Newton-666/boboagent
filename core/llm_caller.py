@@ -78,17 +78,22 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None):
         payload = {
             "model": model_name,
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": 8192,
         }
-        # 只有在需要且 tools 存在时才添加
-        if use_tools and tools_schema:
-            payload["tools"] = tools_schema
+        # 如果调用方传了 tools_override，用它替换默认的 tools_schema
+        active_tools = tools_override if tools_override is not None else tools_schema
+        if use_tools and active_tools:
+            payload["tools"] = active_tools
             payload["tool_choice"] = "auto"
+        
+        # 当提供了 stream_callback 时启用流式传输
+        if stream_callback is not None:
+            payload["stream"] = True
         
         headers = {
             "Content-Type": "application/json",
@@ -103,7 +108,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     api_url,
                     json=payload,
                     headers=headers,
-                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT)
+                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+                    stream=bool(stream_callback),
                 )
 
                 # ── HTTP 状态码检查 ──
@@ -113,6 +119,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     )
                     if retryable and attempt < MAX_RETRIES:
                         delay = RETRY_DELAY_BASE * (2 ** attempt)
+                        if retry_callback:
+                            retry_callback(message, delay)
                         time.sleep(delay)
                         last_error = {"error": message, "error_type": error_type, "retryable": True}
                         continue
@@ -124,13 +132,68 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             "detail": response.text
                         }
 
-                # ── 成功 ──
+                # ── 流式模式 ──
+                if stream_callback:
+                    full_content = ""
+                    tool_calls_buffer = []
+                    usage = {}
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        line = line.decode("utf-8")
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        # 捕获 usage（部分 API 在流结束前返回）
+                        if "usage" in chunk:
+                            usage = chunk["usage"]
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_content += content
+                            stream_callback(content)
+                        tc = delta.get("tool_calls")
+                        if tc:
+                            tool_calls_buffer.extend(tc)
+
+                    # 从流中重建完整响应
+                    choice = {"message": {"role": "assistant", "content": full_content}}
+                    if tool_calls_buffer:
+                        # 合并流式 tool_calls（OpenAI 流式格式是增量式的）
+                        merged = {}
+                        for tc in tool_calls_buffer:
+                            idx = tc.get("index", 0)
+                            if idx not in merged:
+                                merged[idx] = {"id": tc.get("id", ""), "type": "function", "function": {"name": "", "arguments": ""}}
+                            fn = tc.get("function", {})
+                            if "name" in fn:
+                                merged[idx]["function"]["name"] = fn["name"]
+                            if "arguments" in fn:
+                                merged[idx]["function"]["arguments"] += fn["arguments"]
+                        choice["message"]["tool_calls"] = list(merged.values())
+                    result = {"choices": [choice]}
+                    if usage:
+                        result["usage"] = usage
+                    return result
+
+                # ── 非流式模式 ──
                 return response.json()
 
             except Exception as e:
                 error_type, retryable, message = _classify_error(exception=e)
                 if retryable and attempt < MAX_RETRIES:
                     delay = RETRY_DELAY_BASE * (2 ** attempt)
+                    if retry_callback:
+                        retry_callback(message, delay)
                     time.sleep(delay)
                     last_error = {"error": message, "error_type": error_type, "retryable": True}
                     continue

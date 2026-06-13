@@ -17,4 +17,6 @@ TOOL_SCHEMA = {
         "parameters": {"type": "object", "properties": {"index": {"type": "integer"}}, "required": []}
     }
 }
-def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)
+_check = lambda: __import__('os').path.exists(__import__('os').path.expanduser('~/.bobo/mail.json'))
+
+def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA, check_fn=_check)

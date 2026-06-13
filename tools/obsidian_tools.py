@@ -4,6 +4,7 @@ obsidian_tools.py - Obsidian 笔记操作工具（修复版）
 
 import os
 import re
+import subprocess
 from pathlib import Path
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
 
@@ -29,10 +30,21 @@ def _normalize_path(filename: str, is_destination: bool = False) -> str:
     if is_destination:
         return os.path.join(OBSIDIAN_VAULT, filename)
     
+    # 如果包含路径分隔符，直接拼接
     if "/" in filename:
         return os.path.join(OBSIDIAN_VAULT, filename)
-    else:
-        return os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, filename)
+    
+    # 不包含路径分隔符：先检查根目录，再检查 Bobo数据库目录
+    root_path = os.path.join(OBSIDIAN_VAULT, filename)
+    if os.path.exists(root_path):
+        return root_path
+    
+    bobo_path = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, filename)
+    if os.path.exists(bobo_path):
+        return bobo_path
+    
+    # 都不存在，默认返回 Bobo数据库目录（让调用方处理"文件不存在"）
+    return bobo_path
 
 
 def _is_blocked_path(path: str) -> bool:
@@ -51,27 +63,60 @@ def search_obsidian_notes(query: str) -> str:
         return f"❌ Obsidian 仓库不存在: {OBSIDIAN_VAULT}"
     
     results = []
-    for root, dirs, files in os.walk(target_dir):
-        if _is_blocked_path(root):
-            continue
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        
-        for file in files:
-            if file.endswith('.md'):
-                filepath = os.path.join(root, file)
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        if query.lower() in content.lower():
-                            rel_path = os.path.relpath(filepath, OBSIDIAN_VAULT)
-                            results.append(f"- {rel_path}")
-                except:
-                    pass
+    
+    # 优先使用 grep（C 语言实现，比 Python os.walk 快 50-100 倍）
+    grep_found = []
+    try:
+        exclude_args = []
+        for folder in BLOCKED_FOLDERS:
+            folder = folder.strip()
+            if folder:
+                exclude_args.extend(["--exclude-dir", folder])
+        cmd = ["grep", "-ril"] + exclude_args + [query, target_dir]
+        grep_result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=15
+        )
+        if grep_result.returncode == 0 and grep_result.stdout.strip():
+            grep_found = [
+                os.path.relpath(f, OBSIDIAN_VAULT)
+                for f in grep_result.stdout.strip().split('\n')
+                if f and not _is_blocked_path(f)
+            ]
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass  # grep 不可用或超时时回退到 Python 方法
+    
+    if grep_found:
+        results = grep_found
+    else:
+        # 回退：Python os.walk 方法
+        for root, dirs, files in os.walk(target_dir):
+            if _is_blocked_path(root):
+                continue
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for file in files:
+                if file.endswith('.md'):
+                    filepath = os.path.join(root, file)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            if query.lower() in content.lower():
+                                rel_path = os.path.relpath(filepath, OBSIDIAN_VAULT)
+                                results.append(rel_path)
+                    except:
+                        pass
+                if len(results) >= 100:  # 防止搜索过大
+                    break
+            if len(results) >= 100:
+                break
     
     if not results:
         return f"📝 没有找到包含 '{query}' 的笔记"
     
-    return f"📝 找到 {len(results)} 条笔记:\n" + "\n".join(results[:20])
+    display = results[:20]
+    summary = f"📝 找到 {len(results)} 条笔记"
+    if len(results) > 20:
+        summary += f"（显示前 20 条）"
+    return summary + ":\n" + "\n".join(f"- {r}" for r in display)
 
 
 def read_obsidian_note(filename: str) -> str:
@@ -252,12 +297,12 @@ TOOL_MAP = {
 }
 
 
-# 添加标准导出格式
 TOOL_NAME = "obsidian_tools"
-TOOL_FUNC = None  # obsidian_tools 是多个工具的组合，不单独注册
+TOOL_FUNC = None
+
+_check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))
 
 def register(reg):
-    """注册所有 obsidian 子工具"""
     from .list_folder import TOOL_FUNC as list_folder_func, TOOL_NAME as list_folder_name
     from .search_obsidian import TOOL_FUNC as search_obsidian_func, TOOL_NAME as search_obsidian_name
     from .read_obsidian import TOOL_FUNC as read_obsidian_func, TOOL_NAME as read_obsidian_name
@@ -265,9 +310,9 @@ def register(reg):
     from .move_note import TOOL_FUNC as move_note_func, TOOL_NAME as move_note_name
     from .delete_note import TOOL_FUNC as delete_note_func, TOOL_NAME as delete_note_name
     
-    reg(list_folder_name, list_folder_func, {})
-    reg(search_obsidian_name, search_obsidian_func, {})
-    reg(read_obsidian_name, read_obsidian_func, {})
-    reg(write_obsidian_name, write_obsidian_func, {})
-    reg(move_note_name, move_note_func, {})
-    reg(delete_note_name, delete_note_func, {})
+    reg(list_folder_name, list_folder_func, {}, check_fn=_check)
+    reg(search_obsidian_name, search_obsidian_func, {}, check_fn=_check)
+    reg(read_obsidian_name, read_obsidian_func, {}, check_fn=_check)
+    reg(write_obsidian_name, write_obsidian_func, {}, check_fn=_check)
+    reg(move_note_name, move_note_func, {}, check_fn=_check)
+    reg(delete_note_name, delete_note_func, {}, check_fn=_check)

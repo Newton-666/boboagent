@@ -17,4 +17,6 @@ TOOL_SCHEMA = {
         "parameters": {"type": "object", "properties": {"source": {"type": "string"}, "folder": {"type": "string"}}, "required": ["source", "folder"]}
     }
 }
-def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)
+_check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))
+
+def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA, check_fn=_check)
