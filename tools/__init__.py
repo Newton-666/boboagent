@@ -2,6 +2,7 @@
 
 import sys
 import importlib.util
+import re
 from pathlib import Path
 
 TOOL_FUNCTIONS = {}
@@ -85,7 +86,18 @@ for skill_tool in _skill_mgr.get_skill_tools():
     name = skill_tool["function"]["name"]  # "run_skill:xxx"
     if name not in seen_names:
         seen_names.add(name)
-        TOOL_FUNCTIONS[name] = lambda _skill_name=name.split(":", 1)[1]: _skill_mgr.execute_skill(_skill_mgr.get_skill(_skill_name))
+        # Sanitize to only [a-zA-Z0-9_-] (DeepSeek requirement), ensure unique
+        raw = name.split(":", 1)[1] if ":" in name else name
+        safe_base = re.sub(r'[^a-zA-Z0-9_-]', '_', raw)
+        # Truncate long names, add dedup suffix if needed
+        safe_name = "skill_" + safe_base[:40]
+        suffix = 1
+        while safe_name in seen_names:
+            safe_name = "skill_" + safe_base[:35] + "_" + str(suffix)
+            suffix += 1
+        seen_names.add(safe_name)
+        skill_tool["function"]["name"] = safe_name
+        TOOL_FUNCTIONS[safe_name] = lambda _raw=raw: _skill_mgr.execute_skill(_skill_mgr.get_skill(_raw))
         gated_schemas.append(skill_tool)
 
 TOOLS_SCHEMA[:] = gated_schemas
