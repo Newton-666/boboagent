@@ -222,6 +222,23 @@ class Engine(ContextMixin, ToolRunnerMixin):
             except Exception:
                 pass
 
+        # 注入 AGENTS.md（来自 Obsidian vault 的项目规则）
+        try:
+            import os as _os
+            vault = _os.environ.get("OBSIDIAN_VAULT", "")
+            if vault:
+                agents_path = _os.path.join(vault, "AGENTS.md")
+                if _os.path.isfile(agents_path):
+                    with open(agents_path, encoding="utf-8") as _f:
+                        agents_content = _f.read(4000)
+                    if agents_content.strip():
+                        messages.insert(1, {
+                            "role": "system",
+                            "content": f"[项目规则 (AGENTS.md)]:\n{agents_content}"
+                        })
+        except Exception:
+            pass
+
         self._notify("thinking", {"phase": "calling_llm", "message": "正在思考..."})
 
         def _on_token(token: str):
