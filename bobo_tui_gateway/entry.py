@@ -55,11 +55,17 @@ def resolve_skin() -> dict:
 
 
 def main():
-    # 当用户直接运行 `bobo` 命令时，告知正确的启动方式
+    # 当用户直接运行 `bobo` 命令时，启动 TUI 前端
+    import subprocess
     import sys
     from pathlib import Path
 
-    # 查找 TUI 文件路径
+    # 如果已经是 TUI 的后端进程，直接进入后端逻辑
+    if os.environ.get("BOBO_BACKEND"):
+        _run_backend()
+        return
+
+    # 查找 TUI 文件
     candidates = [
         Path(__file__).parent.parent / "ui-tui" / "dist" / "entry.js",
         Path.cwd() / "ui-tui" / "dist" / "entry.js",
@@ -70,13 +76,32 @@ def main():
             tui_path = p
             break
 
-    if tui_path and not os.environ.get("BOBO_BACKEND"):
-        # 用户直接运行了 `bobo`，启动 TUI
-        os.environ["BOBO_BACKEND"] = "1"
-        os.execvp("node", ["node", str(tui_path)])
-        return  # never reached
+    if tui_path:
+        # 启动 TUI 作为子进程，设置环境变量防止子进程再 spawn TUI
+        env = os.environ.copy()
+        env["BOBO_BACKEND"] = "1"
+        proc = subprocess.Popen(["node", str(tui_path)], env=env)
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.kill()
+        return
 
-    # === 以下代码仅在作为 TUI 后端进程时执行 ===
+    # 找不到 TUI
+    print("=" * 60)
+    print("  Bobo Agent")
+    print("=" * 60)
+    print()
+    print("  TUI not found. Build it first:")
+    print("    cd ui-tui && npm install && npm run build")
+    print()
+    print("  Or run the Python backend directly:")
+    print("    BOBO_BACKEND=1 python -m bobo_tui_gateway.entry")
+    print("=" * 60)
+
+
+def _run_backend():
+    """Run as TUI backend process (stdin/stdout JSON-RPC)."""
     # 发送 ready 事件（包含皮肤配置）
     if not write_json({
         "jsonrpc": "2.0",
