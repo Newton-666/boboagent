@@ -205,8 +205,22 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if apis:
                 messages.insert(1, {
                     "role": "system",
-                    "content": f"[已注册的自定义 API]:\n" + "\n".join(apis)
+                    "content": "[已注册的自定义 API]:\n" + "\n".join(apis)
                 })
+
+        # 注入相关记忆（本地 JSON 搜索，~5ms）
+        user_query = self.current_user_input or ""
+        if user_query and not self._compressing:
+            try:
+                from tools.v5_memory import search_knowledge_base
+                mem_result = search_knowledge_base(user_query)
+                if mem_result and "未找到" not in mem_result:
+                    messages.insert(1, {
+                        "role": "system",
+                        "content": f"[相关记忆]:\n{mem_result[:1000]}"
+                    })
+            except Exception:
+                pass
 
         self._notify("thinking", {"phase": "calling_llm", "message": "正在思考..."})
 
