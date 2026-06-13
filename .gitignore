@@ -32,6 +32,8 @@ backups/
 skills/*.yaml
 skills/*.md
 !skills/index.json
+*.egg-info/
+.DS_Store
 projects/
 *.log
 *.tmp
