@@ -56,6 +56,7 @@ def resolve_skin() -> dict:
 
 def main():
     # 当用户直接运行 `bobo` 命令时，启动 TUI 前端
+    import signal
     import subprocess
     import sys
     from pathlib import Path
@@ -77,14 +78,12 @@ def main():
             break
 
     if tui_path:
-        # 启动 TUI 作为子进程，设置环境变量防止子进程再 spawn TUI
+        # 忽略 Ctrl+C — 让 TUI 前端处理中断
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         env = os.environ.copy()
         env["BOBO_BACKEND"] = "1"
         proc = subprocess.Popen(["node", str(tui_path)], env=env)
-        try:
-            proc.wait()
-        except KeyboardInterrupt:
-            proc.kill()
+        proc.wait()
         return
 
     # 找不到 TUI
@@ -102,6 +101,9 @@ def main():
 
 def _run_backend():
     """Run as TUI backend process (stdin/stdout JSON-RPC)."""
+    # Ctrl+C by the TUI via session.interrupt RPC
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     # 发送 ready 事件（包含皮肤配置）
     if not write_json({
         "jsonrpc": "2.0",
