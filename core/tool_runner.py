@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 class ToolRunnerMixin:
     """为 Engine 提供工具执行、结果加工能力。"""
 
-    MAX_TOOL_RESULT_LENGTH = 20000
+    MAX_TOOL_RESULT_LENGTH = 40000
     _file_checkpoints: dict[str, str] = {}  # path -> content before write
 
     SECRET_PATTERNS = [
