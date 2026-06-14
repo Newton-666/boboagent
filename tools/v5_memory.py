@@ -268,6 +268,34 @@ def format_user_profile() -> str:
     return "用户资料:\n" + "\n".join(lines)
 
 
+def format_all_memory(max_chars: int = 5000) -> str:
+    """Format all memory entries for system prompt injection (up to max_chars)."""
+    data = _load()
+    entries = data.get("entries", [])
+    if not entries:
+        return ""
+    # Sort by recency (newest first)
+    sorted_entries = sorted(entries, key=lambda e: e.get("created_at", 0), reverse=True)
+    lines = []
+    total = 0
+    for e in sorted_entries:
+        text = e.get("text", "").strip()
+        if not text:
+            continue
+        text_truncated = text[:200] + ("..." if len(text) > 200 else "")
+        entry = f"  - {text_truncated}"
+        if total + len(entry) + 1 > max_chars:
+            break
+        lines.append(entry)
+        total += len(entry) + 1
+    if not lines:
+        return ""
+    total_all = len(entries)
+    shown = len(lines)
+    header = f"记忆 ({shown}/{total_all} 条, {total:,}/{max_chars:,} 字符)"
+    return header + "\n" + "\n".join(lines)
+
+
 def register(reg):
     reg("save_memory", save_to_knowledge_base, {
         "type": "function",

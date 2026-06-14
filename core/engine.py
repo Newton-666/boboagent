@@ -286,27 +286,25 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     "content": "[已注册的自定义 API]:\n" + "\n".join(apis)
                 })
  
-        # 注入相关记忆（本地 JSON 搜索，~5ms）
-        user_query = self.current_user_input or ""
-        if user_query and not self._compressing:
-            try:
-                from tools.v5_memory import search_knowledge_base, format_user_profile
-                # User profile (injected every call)
-                user_profile = format_user_profile()
-                if user_profile:
+        # 注入用户资料（始终注入）
+        try:
+            from tools.v5_memory import format_user_profile, format_all_memory
+            user_profile = format_user_profile()
+            if user_profile:
+                messages.insert(1, {
+                    "role": "system",
+                    "content": user_profile
+                })
+            # 注入全部记忆（最新 5000 字符，类似 Hermes 的快照方式）
+            if not self._compressing:
+                all_mem = format_all_memory(max_chars=5000)
+                if all_mem and "记忆 (0/0" not in all_mem:
                     messages.insert(1, {
                         "role": "system",
-                        "content": user_profile
+                        "content": all_mem
                     })
-                # Memory search
-                mem_result = search_knowledge_base(user_query)
-                if mem_result and "未找到" not in mem_result:
-                    messages.insert(1, {
-                        "role": "system",
-                        "content": f"[相关记忆]:\n{mem_result[:1000]}"
-                    })
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         # 注入 AGENTS.md（来自 Obsidian vault 的项目规则）
         try:
