@@ -12,6 +12,21 @@ def execute() -> str:
     if not vault or not os.path.isdir(vault):
         return "OBSIDIAN_VAULT 未配置，请在 .env 中设置"
 
+    # Step 0: Detect vault rules file
+    RULES_CANDIDATES = ["AGENTS.md", "CLAUDE.md", "README.md", "rules.md", ".cursorrules",
+                        "index.md", "向导.md", "规则.md", "使用说明.md"]
+    rules_source = ""
+    for fname in RULES_CANDIDATES:
+        path = os.path.join(vault, fname)
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    rules_source = f.read(2000).strip()
+                rules_source = f"（规则来源: {fname}）\n{rules_source}"
+            except Exception:
+                pass
+            break
+
     # Step 1: Discover all .md files in the vault
     md_files = []
     for root, dirs, files in os.walk(vault):
@@ -115,6 +130,7 @@ def execute() -> str:
         f"  扫描了 {note_count} 篇笔记\n"
         f"  发现 {section_count} 个关联主题\n"
         f"  创建 {link_count} 个交叉链接\n"
+        f"  {'规则来源: ' + rules_source.split(chr(10))[0] if rules_source else '未检测到 vault 规则文件'}\n"
         f"  Notion: {'已关联' if os.environ.get('NOTION_API_KEY') else '未配置'}\n"
         f"  邮箱: {'已关联' if os.path.exists(os.path.expanduser('~/.bobo/mail.json')) else '未配置'}\n\n"
         f"Hub 页面: Bobo/Knowledge Hub.md"
