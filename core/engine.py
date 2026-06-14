@@ -141,6 +141,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 搜索信息 → web_search / search_obsidian / cross_search
 - 写代码 → file_writer + auto-run（写完自动运行）
 - 文件操作 → read_local_file / 对应工具
+- 短内容写入（约 40000 字符以内）→ 用 write_obsidian（安全、有自动备份）
+- 长内容写入（超过 40000 字符）→ 用 execute_terminal 的 cat / echo 命令（无大小限制）
+- 时间/日期 → get_current_time
+- 文件列表 → list_directory
 - 普通聊天 → 直接回答
 
 ## 输出格式
