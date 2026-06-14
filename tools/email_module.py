@@ -25,7 +25,7 @@ class EmailModule:
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception:
             return None
     
     def _connect_imap(self):
@@ -344,7 +344,7 @@ def process_emails_with_privacy(emails):
                 indices = [int(x.strip())-1 for x in choice.split(',')]
                 selected = [need_confirm[i] for i in indices if 0 <= i < len(need_confirm)]
                 return auto + selected
-            except:
+            except Exception:
                 return auto
     
     return auto

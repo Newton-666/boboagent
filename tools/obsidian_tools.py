@@ -119,7 +119,7 @@ def search_obsidian_notes(query: str) -> str:
                             if query.lower() in content.lower():
                                 rel_path = os.path.relpath(filepath, OBSIDIAN_VAULT)
                                 results.append(rel_path)
-                    except:
+                    except Exception:
                         pass
                 if len(results) >= 100:  # 防止搜索过大
                     break

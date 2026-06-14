@@ -121,7 +121,7 @@ def _check_syntax(code: str, language: str) -> str:
             return None
         except FileNotFoundError:
             return None
-        except:
+        except Exception:
             return None
     
     if language == "bash":
@@ -135,7 +135,7 @@ def _check_syntax(code: str, language: str) -> str:
             if result.returncode != 0:
                 return f"语法错误: {result.stderr.strip()[:100]}"
             return None
-        except:
+        except Exception:
             return None
     
     return None
@@ -160,7 +160,7 @@ def _call_llm_for_fix(llm_caller, code: str, error_output: str, language: str) -
         if code_match:
             return code_match.group(1).strip()
         return content.strip()
-    except:
+    except Exception:
         return None
 
 
@@ -183,7 +183,7 @@ def _call_llm_for_test(llm_caller, code: str, language: str) -> str:
         if code_match:
             return code_match.group(1).strip()
         return content.strip()
-    except:
+    except Exception:
         return None
 
 

@@ -9,7 +9,7 @@ def execute(url: str) -> str:
     try:
         subprocess.run(['open', url], capture_output=True)
         return f"✅ 已在浏览器中打开: {url}"
-    except:
+    except Exception:
         return f"❌ 无法打开: {url}"
 
 def register(reg):

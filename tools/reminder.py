@@ -67,7 +67,7 @@ def execute(message: str) -> str:
                 capture_output=True,
                 timeout=5
             )
-        except:
+        except Exception:
             pass
     
     thread = threading.Thread(target=remind, daemon=True)

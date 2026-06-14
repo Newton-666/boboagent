@@ -14,7 +14,7 @@ def _get_file_hash(filepath: str) -> str:
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             return hashlib.md5(f.read().encode()).hexdigest()
-    except:
+    except Exception:
         return None
 
 def _write_single_file(path: str, content: str) -> str:

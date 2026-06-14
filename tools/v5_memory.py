@@ -31,7 +31,7 @@ def _atomic_save(data):
     except Exception:
         try:
             os.unlink(tmp_path)
-        except:
+        except Exception:
             pass
         raise
 
@@ -44,7 +44,7 @@ def _load():
                 if 'entries' not in data:
                     data = {'entries': [], 'folders': []}
                 return data
-        except:
+        except Exception:
             pass
     return {'entries': [], 'folders': []}
 

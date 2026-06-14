@@ -9,7 +9,7 @@ def read() -> str:
     try:
         result = subprocess.run(['pbpaste'], capture_output=True, text=True)
         return result.stdout if result.stdout else "剪贴板为空"
-    except:
+    except Exception:
         return "❌ 读取剪贴板失败"
 
 def write(content: str) -> str:
@@ -18,7 +18,7 @@ def write(content: str) -> str:
         process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
         process.communicate(content.encode())
         return f"✅ 已写入剪贴板: {content[:50]}..."
-    except:
+    except Exception:
         return "❌ 写入剪贴板失败"
 
 _check = lambda: __import__('sys').platform == 'darwin'

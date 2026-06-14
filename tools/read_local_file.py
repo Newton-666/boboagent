@@ -122,7 +122,7 @@ def _read_directory(dirpath: str) -> str:
                         result.append(f"    {line[:100]}")
                 if len(lines) > DIR_PREVIEW_LINES:
                     result.append(f"    ... (共 {len(lines)} 行)")
-        except:
+        except Exception:
             pass
         result.append("")
 

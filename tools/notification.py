@@ -21,7 +21,7 @@ def send(title: str, message: str) -> str:
         return f"已发送通知: {title}"
     except subprocess.TimeoutExpired:
         return "发送通知超时"
-    except:
+    except Exception:
         return "发送通知失败"
 
 _check = lambda: __import__('sys').platform == 'darwin'

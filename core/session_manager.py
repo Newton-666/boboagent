@@ -57,7 +57,7 @@ class SessionManager:
                         "created_at": created,
                         "message_count": len(data.get("messages", []))
                     })
-            except:
+            except Exception:
                 continue
         return sorted(sessions, key=lambda x: x["created_at"], reverse=True)[:limit]
 

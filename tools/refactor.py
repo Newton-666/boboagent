@@ -52,7 +52,7 @@ def _search_files(keyword: str, directory: str, file_pattern: str, max_results: 
                                 break
                     if len(results) >= max_results:
                         break
-            except:
+            except Exception:
                 continue
         if len(results) >= max_results:
             break
@@ -64,7 +64,7 @@ def _read_file_content(filepath: str) -> str:
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             return f.read()
-    except:
+    except Exception:
         return ""
 
 

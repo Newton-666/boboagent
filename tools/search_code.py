@@ -72,7 +72,7 @@ def execute(keyword: str, directory: str = None, file_pattern: str = "*.py", max
                                 break
                     if len(results) >= max_results:
                         break
-            except:
+            except Exception:
                 continue
         if len(results) >= max_results:
             break

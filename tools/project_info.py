@@ -74,7 +74,7 @@ def _get_project_summary(path):
             try:
                 size = os.path.getsize(os.path.join(root, f))
                 total_size += size
-            except:
+            except Exception:
                 pass
             ext = os.path.splitext(f)[1] or "no_ext"
             file_types[ext] = file_types.get(ext, 0) + 1
