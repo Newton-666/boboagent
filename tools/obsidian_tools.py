@@ -25,7 +25,8 @@ def _normalize_path(filename: str, is_destination: bool = False) -> str:
     if filename.startswith("./"):
         filename = filename[2:]
     
-    if not is_destination and not filename.endswith(".md"):
+    # 只在文件名完全没有扩展名时才追加 .md
+    if not is_destination and not filename.endswith(".md") and "." not in os.path.basename(filename):
         filename += ".md"
     
     if is_destination:
