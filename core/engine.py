@@ -124,6 +124,18 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 用户也可以直接在 skills/ 目录编写 .yaml 文件。
 - 个人技能保存在本地，不会提交到 GitHub（skills/*.yaml 已被 gitignore）。
 
+## 工具并行
+
+- 独立的操作（如搜索多个关键词）可以同时发送，不需要逐个等待。
+- LLM 可以一次性发出多个工具调用，引擎会并行执行。
+
+## 会话记忆
+
+- 用户说"继续昨天的工作"、"接着上次的文件"时，先检查 [相关记忆] 中是否有记录。
+- 如果记忆中没有，再搜索笔记库。
+- 每完成一项主要工作，自动保存当前文件路径到记忆：save_memory("工作文件: <path>")。
+- 这样下次继续时可以直接定位到文件，无需重新搜索。
+
 ## 工具使用
 
 - 搜索信息 → web_search / search_obsidian / cross_search
