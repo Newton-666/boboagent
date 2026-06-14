@@ -27,51 +27,25 @@ node --version   # should show v18+
 # Install: https://nodejs.org or brew install node
 ```
 
-### 1. Clone
+### 1. Install
 
 ```bash
-git clone https://github.com/Newton-666/BOBO_Project_Backup.git
-cd BOBO_Project_Backup
+pip install bobo-agent
 ```
 
-### 2. Install Python backend
+### 2. Run
 
-```bash
-python3 -m venv .venv          # optional but recommended
-source .venv/bin/activate
-python3 -m pip install -e .    # -m pip ensures correct Python
-```
-
-### 3. Run
-
-**Option A — from the project folder (most reliable):**
-```bash
-./bobo
-```
-
-**Option B — from anywhere (after pip install):**
 ```bash
 bobo
 ```
 
-> If `bobo` gives `ModuleNotFoundError: No module named 'bobo_tui_gateway'`, reinstall:
+On first run, Bobo shows a setup screen. Paste your API key and you're ready.
+
+> **Make sure Node.js is installed** — the TUI needs it:
 > ```bash
-> cd /path/to/BOBO_Project_Backup
-> python3 -m pip install -e . --force-reinstall
+> node --version   # should show v18+
 > ```
-
-### 4. Configure API key
-
-On first run, the TUI shows a setup screen. Select your provider and paste your API key.
-
-Or configure manually:
-```bash
-mkdir -p ~/.bobo
-echo "DEEPSEEK_API_KEY=sk-your-key-here" > ~/.bobo/.env
-```
-
 > Get a DeepSeek key: https://platform.deepseek.com/api-keys
-> Set `BOBO_PROVIDER=openai` to use OpenAI instead
 
 ### Optional: Connect services
 
