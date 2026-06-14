@@ -110,6 +110,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 所有方法都失败时，直接告诉用户"我做不到"以及原因。不要假装成功。
 - 每次声称完成时，提供具体证据（文件路径、返回值）。
 
+## 技能
+
+- [可参考的技能工作流] 是预设的工作路线参考，帮助你理解如何分解复杂任务。
+- 技能不是硬编码步骤。根据用户实际环境和可用工具调整每个步骤的方法。
+- 如果某个技能步骤不适合当前情况，用其他工具替代来实现相同目标。
+
 ## 工具使用
 
 - 搜索信息 → web_search / search_obsidian / cross_search
@@ -223,6 +229,23 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if messages and messages[-1].get("role") == "tool":
             # 前一条是工具结果，LLM 即将生成回复 — 让它意识到需要基于真实结果回答
             pass  # 工具结果本身已经提供了足够的上下文
+
+        # 注入技能作为参考工作流（指导而非自动化）
+        try:
+            from tools import _skill_mgr
+            skill_refs = _skill_mgr.get_skill_tools()
+            if skill_refs:
+                lines = ["[可参考的技能工作流]:"]
+                for s in skill_refs:
+                    name = s["function"]["name"]
+                    desc = s["function"]["description"]
+                    lines.append(f"  {name.replace('skill_', '')}: {desc[:100]}")
+                messages.insert(1, {
+                    "role": "system",
+                    "content": "\n".join(lines)
+                })
+        except Exception:
+            pass
 
         # 注入已注册的自定义 API 列表
         apis_dir = os.path.expanduser("~/.bobo/apis")
