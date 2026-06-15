@@ -9,7 +9,7 @@ TOOL_NAME = "read_local_file"
 DIR_PREVIEW_LINES = 30
 
 
-def _read_single_file(filepath: str, max_chars: int = 5000) -> str:
+def _read_single_file(filepath: str, max_chars: int = 40000) -> str:
     """读取单个文件内容"""
     path = Path(filepath).expanduser()
 
@@ -129,7 +129,7 @@ def _read_directory(dirpath: str) -> str:
     return '\n'.join(result)
 
 
-def execute(filepath: str, max_chars: int = 5000) -> str:
+def execute(filepath: str, max_chars: int = 40000) -> str:
     """读取本地文件或目录内容"""
     path = Path(filepath).expanduser()
 
@@ -147,7 +147,7 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "读取本地文件或目录内容。支持 .md, .txt, .py, .json, .yaml 等格式。传入目录时返回目录结构和文件预览。适用场景：用户要求'读取某个文件'、'看看这个目录'。",
+        "description": "读取本地文件或目录内容（默认上限 40000 字符）。支持 .md, .txt, .py, .json, .yaml 等格式。传入目录时返回目录结构和文件预览。适用场景：用户要求'读取某个文件'、'看看这个目录'。大文件用 max_chars 参数控制读取量。",
         "parameters": {"type": "object", "properties": {"filepath": {"type": "string"}, "max_chars": {"type": "integer"}}, "required": ["filepath"]}
     }
 }
