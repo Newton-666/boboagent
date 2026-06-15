@@ -60,6 +60,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._tool_failures: dict[str, int] = {}
         self._last_usage: dict = {}
         self._pending_diff: str = ""
+        self._verification_attempted = False  # 防止验证死循环
         self._interrupt_event: threading.Event | None = None
 
     def _notify(self, event_type: str, data: dict):
@@ -451,14 +452,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
             return f"解析失败: {str(e)}", []
 
     def _step(self):
+        # _check_guards 移到最外层，每个 step 都检查，防止无限循环
+        if self._check_guards():
+            self.state = self.STATE_ERROR
+            return
+
         if self.state == self.STATE_IDLE:
             result = self._handle_pre_input(self.current_user_input)
             if result is not None:
                 self._notify("complete", {"content": result})
                 self.state = self.STATE_DONE
-                return
-            if self._check_guards():
-                self.state = self.STATE_ERROR
                 return
             if self.current_user_input:
                 self._append_to_history("user", self.current_user_input)
@@ -471,7 +474,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self.state = self.STATE_EXECUTING
             else:
                 # 检查是否需要验证：LLM 声称完成但没有使用任何工具
-                if content and self._needs_verification(content):
+                # _verification_attempted 防止验证提示触发后再次匹配，导致死循环
+                if content and self._needs_verification(content) and not self._verification_attempted:
+                    self._verification_attempted = True
                     self._append_to_history("assistant", content)
                     self._append_verification_note()
                     self._pending_content = None
@@ -545,4 +550,5 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._pending_tool_calls = None
         self._step_count = 0
         self._all_confirmed = False
+        self._verification_attempted = False
         self._notify("reset", {})
