@@ -541,8 +541,12 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
 
             engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
             engine.history = session.get("messages", [])
+            engine._checkpoints = session.get("checkpoints", [])
             engine._interrupt_event = interrupt_event
             engine.run(text)
+
+            # 持久化回退快照
+            session["checkpoints"] = engine._checkpoints
 
             # 清理中断事件
             with _current_engines_lock:
@@ -618,10 +622,53 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return _ok(rid, {"output": "可用命令: /help, /clear, /tools, /settings, /exit, /sessions"})
+        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions"})
     elif command == "clear":
         _emit("session.cleared", sid, {"session_id": sid})
         return _ok(rid, {"output": ""})
+    elif command.startswith("undo"):
+        # /undo [N|关键词] — 回退对话
+        target = command[4:].strip()
+        sid = params.get("session_id", "")
+        session = _sessions.get(sid)
+        if not session:
+            return _ok(rid, {"output": "没有活跃的会话"})
+        checkpoints = session.get("checkpoints", [])
+        if not checkpoints:
+            return _ok(rid, {"output": "没有可回退的操作。"})
+
+        # 查找目标快照
+        idx = len(checkpoints) - 2  # 默认回退一步
+        if target:
+            try:
+                steps = int(target)
+                idx = max(0, len(checkpoints) - 1 - steps)
+            except ValueError:
+                import os
+                for i in range(len(checkpoints) - 1, -1, -1):
+                    if target.lower() in checkpoints[i]["label"].lower():
+                        idx = i
+                        break
+
+        cp = checkpoints[idx]
+        session["messages"] = cp["history"]
+        session["checkpoints"] = checkpoints[:idx + 1]
+
+        # 恢复文件
+        import os
+        restored = []
+        for path, content in cp.get("files", {}).items():
+            try:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                restored.append(os.path.basename(path))
+            except Exception:
+                pass
+
+        label = cp["label"]
+        file_info = f"\n文件已恢复: {', '.join(restored)}" if restored else ""
+        return _ok(rid, {"output": f"已回退到: {label}{file_info}"})
     elif command == "tools":
         from tools import TOOLS_SCHEMA
         names = [t.get("function", t).get("name", "") for t in TOOLS_SCHEMA]

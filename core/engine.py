@@ -61,6 +61,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._last_usage: dict = {}
         self._pending_diff: str = ""
         self._verification_attempted = False  # 防止验证死循环
+        self._checkpoints: list[dict] = []   # 对话回退快照
         self._interrupt_event: threading.Event | None = None
 
     def _notify(self, event_type: str, data: dict):
@@ -213,6 +214,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         teaching_result = self._handle_teaching_mode(user_input)
         if teaching_result is not None:
             return teaching_result
+        # 对话回退：支持自然语言和 /undo 命令
+        undo_keywords = ["回退", "撤销", "撤销刚才", "回到上一步", "回到之前", "恢复上一步",
+                         "undo", "revert", "go back"]
+        if any(kw in user_input.lower() for kw in undo_keywords) and self._checkpoints:
+            return self._do_undo()
         if self.teaching_mode:
             return None
         skill_name = self._check_skill_match(user_input)
@@ -233,6 +239,89 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._notify("error", {"content": "已达最大循环深度"})
             return True
         return False
+
+    # ── 对话回退 ──────────────────────────────────────────────────────
+
+    MAX_CHECKPOINTS = 20
+
+    def _save_checkpoint(self, label: str = ""):
+        """保存当前对话状态快照，用于回退。"""
+        import copy, os as _os
+        files = {}
+        for path, content in self._file_checkpoints.items():
+            if _os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as _f:
+                        files[path] = _f.read()
+                except Exception:
+                    files[path] = content
+        self._checkpoints.append({
+            "label": label or f"step_{self.current_depth}",
+            "history": copy.deepcopy(self.history),
+            "files": files,
+            "depth": self.current_depth,
+            "tool_round": self.current_tool_round,
+        })
+        # 只保留最近 N 个快照
+        if len(self._checkpoints) > self.MAX_CHECKPOINTS:
+            self._checkpoints = self._checkpoints[-self.MAX_CHECKPOINTS:]
+
+    def _find_checkpoint(self, target: str = "") -> int | None:
+        """查找快照索引。支持数字（回退 N 步）、关键词匹配 label、默认回退 1 步。"""
+        if not self._checkpoints:
+            return None
+        if not target:
+            return len(self._checkpoints) - 2  # 回退到倒数第二个（恢复一步）
+        # 数字
+        try:
+            steps = int(target)
+            idx = len(self._checkpoints) - 1 - steps
+            return max(0, idx)
+        except ValueError:
+            pass
+        # 关键词
+        for i in range(len(self._checkpoints) - 1, -1, -1):
+            if target.lower() in self._checkpoints[i]["label"].lower():
+                return i
+        return None
+
+    def _do_undo(self, target: str = "") -> str:
+        """执行回退，返回给用户的消息。"""
+        if not self._checkpoints:
+            return "没有可回退的操作。"
+        idx = self._find_checkpoint(target)
+        if idx is None:
+            return f"未找到匹配的快照: {target}"
+
+        cp = self._checkpoints[idx]
+        # 恢复 history
+        self.history = cp["history"]
+        # 恢复文件
+        restored = []
+        import os as _os
+        for path, content in cp.get("files", {}).items():
+            try:
+                _os.makedirs(_os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "w", encoding="utf-8") as _f:
+                    _f.write(content)
+                restored.append(_os.path.basename(path))
+            except Exception:
+                pass
+        # 恢复状态
+        self.current_depth = cp["depth"]
+        self.current_tool_round = cp["tool_round"]
+        self._pending_content = None
+        self._pending_tool_calls = None
+        # 截断后续快照
+        self._checkpoints = self._checkpoints[:idx + 1]
+
+        label = cp["label"]
+        file_info = f"\n文件已恢复: {', '.join(restored)}" if restored else ""
+        self._notify("status.update", {
+            "kind": "undo",
+            "text": f"已回退到: {label}{file_info}",
+        })
+        return f"已回退到: {label}{file_info}\n\n要继续对话吗？"
 
     def _call_llm(self) -> Tuple[str, list]:
         # 硬限制：超过上限的消息数，丢弃最早的消息
@@ -472,6 +561,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._pending_content = content
             self._pending_tool_calls = tool_calls
             if tool_calls:
+                # 工具执行前保存快照，用于回退
+                tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls]
+                self._save_checkpoint(f"调用: {', '.join(tool_names[:3])}")
                 self.state = self.STATE_EXECUTING
             else:
                 # 检查是否需要验证：LLM 声称完成但没有使用任何工具
@@ -552,4 +644,5 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._step_count = 0
         self._all_confirmed = False
         self._verification_attempted = False
+        self._checkpoints.clear()
         self._notify("reset", {})
