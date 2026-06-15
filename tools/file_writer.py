@@ -97,29 +97,62 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
 
 
 def append_obsidian(filename: str, content: str, auto_backup: bool = True) -> str:
-    """追加内容到文件（不覆盖）"""
+    """追加内容到已有文件末尾。文件必须存在。"""
     if not filename or not filename.strip():
         return "❌ 文件名不能为空"
     if not content:
         return "❌ 内容不能为空"
     try:
-        filepath = _normalize_path(filename)
+        filepath = _normalize_path(filename, for_append=True)
+
         # 多个同名文件时，让用户选择
         if isinstance(filepath, str) and filepath.startswith("__MULTIPLE_MATCHES__"):
             paths = filepath.split(":", 1)[1].split("|")
             return f"找到多个同名文件，请指定具体路径:\n" + "\n".join(f"  {p}" for p in paths)
+
+        # 检查文件是否存在
+        if not os.path.exists(filepath):
+            # 尝试去掉/加上 .md 再找一次
+            alt_filename = filename
+            if filename.endswith(".md"):
+                alt_filename = filename[:-3]
+            else:
+                alt_filename = filename + ".md"
+            alt_path = _normalize_path(alt_filename, for_append=True)
+            if isinstance(alt_path, str) and not alt_path.startswith("__") and os.path.exists(alt_path):
+                filepath = alt_path
+            else:
+                return (
+                    f"❌ 文件不存在: {filename}\n"
+                    f"  尝试过: {filepath}\n"
+                    f"  请确认文件名是否正确，或先用 search_obsidian 搜索文件名。"
+                    f"  如果要创建新文件，请用 write_obsidian。"
+                )
+
         for blocked in BLOCKED_FOLDERS:
             blocked = blocked.strip()
             if blocked and blocked in filepath.split(os.sep):
                 return "❌ 无权写入该文件（隐私保护）"
+
         _ensure_dir(filepath)
-        if auto_backup and os.path.exists(filepath):
+
+        if auto_backup:
             _create_backup(filepath)
+
+        # 检查文件末尾是否有换行，没有则补一个
+        needs_newline = False
+        if os.path.getsize(filepath) > 0:
+            with open(filepath, 'rb') as check:
+                check.seek(-1, os.SEEK_END)
+                needs_newline = (check.read(1) != b'\n')
+
         with open(filepath, 'a', encoding='utf-8') as f:
-            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+            if needs_newline:
                 f.write('\n')
             f.write(content)
-        return f"✅ 已追加到: {filename}"
+
+        return f"✅ 已追加到: {os.path.relpath(filepath, OBSIDIAN_VAULT)}"
+
     except Exception as e:
         return f"❌ 追加失败: {str(e)}"
 

@@ -10,57 +10,84 @@ from pathlib import Path
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
 
 
-def _normalize_path(filename: str, is_destination: bool = False) -> str:
+def _normalize_path(filename: str, is_destination: bool = False, for_append: bool = False) -> str:
     """规范化文件路径
-    
+
     Args:
         filename: 文件名或路径
         is_destination: 是否为目标路径（用于 move 操作）
+        for_append: 是否用于追加操作（会携带调用方信息）
     """
     if not filename:
         return ""
-    
+
     if filename.startswith("/"):
         filename = filename[1:]
     if filename.startswith("./"):
         filename = filename[2:]
-    
+
     # 只在文件名完全没有扩展名时才追加 .md
-    if not is_destination and not filename.endswith(".md") and "." not in os.path.basename(filename):
-        filename += ".md"
-    
+    # 修复：检查扩展名是否看起来像已知的文件扩展名，而非误判
+    basename = os.path.basename(filename)
+    _, ext = os.path.splitext(basename)
+    known_exts = {".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".log", ".py", ".js", ".ts", ".html", ".css"}
+    if not is_destination and ext.lower() not in known_exts:
+        # 如果扩展名不是已知类型，可能是用户给的文件名没有扩展名，加上 .md
+        if not ext or len(ext) > 5:  # 无扩展名或扩展名过长（不太可能是真实扩展名）
+            filename += ".md"
+
     if is_destination:
         return os.path.join(OBSIDIAN_VAULT, filename)
-    
+
     # 如果包含路径分隔符，直接拼接
     if "/" in filename:
-        return os.path.join(OBSIDIAN_VAULT, filename)
-    
+        result = os.path.join(OBSIDIAN_VAULT, filename)
+        if for_append and not os.path.exists(result):
+            # 追加模式下，尝试在 Bobo数据库 下查找
+            alt = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, os.path.basename(filename))
+            if os.path.exists(alt):
+                return alt
+        return result
+
     # 不包含路径分隔符：先检查根目录，再检查 Bobo数据库目录
     root_path = os.path.join(OBSIDIAN_VAULT, filename)
     if os.path.exists(root_path):
         return root_path
-    
+
     bobo_path = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, filename)
     if os.path.exists(bobo_path):
         return bobo_path
-    
+
     # 递归搜索整个 vault 中是否存在同名文件
-    matches = []
-    for root, dirs, files in os.walk(OBSIDIAN_VAULT):
-        # 跳过隐藏文件夹和 .obsidian
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for f in files:
-            if f == filename:
-                matches.append(os.path.join(root, f))
-    if len(matches) == 1:
-        return matches[0]
-    elif len(matches) > 1:
-        # 多个同名文件，返回提示信息让 LLM 询问用户
-        paths = [os.path.relpath(m, OBSIDIAN_VAULT) for m in matches[:10]]
+    # 同时做模糊匹配：去掉空格、大小写不敏感
+    filename_normalized = filename.replace(" ", "").lower()
+    exact_matches = []
+    fuzzy_matches = []
+    try:
+        for root, dirs, files in os.walk(OBSIDIAN_VAULT):
+            # 跳过隐藏文件夹和 .obsidian
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for f in files:
+                if f == filename:
+                    exact_matches.append(os.path.join(root, f))
+                elif f.replace(" ", "").lower() == filename_normalized:
+                    fuzzy_matches.append(os.path.join(root, f))
+    except Exception:
+        pass
+
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    elif len(exact_matches) > 1:
+        paths = [os.path.relpath(m, OBSIDIAN_VAULT) for m in exact_matches[:10]]
         return f"__MULTIPLE_MATCHES__:" + "|".join(paths)
-    
-    # 都不存在，默认返回 Bobo数据库目录（让调用方处理"文件不存在"）
+
+    if len(fuzzy_matches) == 1:
+        return fuzzy_matches[0]
+    elif len(fuzzy_matches) > 1:
+        paths = [os.path.relpath(m, OBSIDIAN_VAULT) for m in fuzzy_matches[:10]]
+        return f"__MULTIPLE_MATCHES__:" + "|".join(paths)
+
+    # 都不存在，默认返回 Bobo数据库目录
     return bobo_path
 
 
