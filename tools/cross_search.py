@@ -9,9 +9,9 @@ TOOL_SCHEMA = {
     "function": {
         "name": TOOL_NAME,
         "description": (
-            "在一个查询中搜索所有已配置的知识平台（Obsidian、Notion、邮件）。"
-            "自动搜索已连接的每个平台，并返回带标签的合并结果。"
-            "适用场景：你想知道某个主题的所有相关信息，不局限于单个平台。"
+            "跨平台统一搜索——在 Obsidian、Notion、Email 中同时搜索，"
+            "返回按时间排列的统一时间线，自动去重。"
+            "能看到一条主题在不同平台上的完整轨迹。"
         ),
         "parameters": {
             "type": "object",

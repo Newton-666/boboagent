@@ -54,7 +54,9 @@ def execute(query: str, limit: int = 10) -> str:
                     break
             url = page.get("url", "")
             page_type = page.get("object", "page")
-            lines.append(f"  {title} ({page_type})")
+            edited = page.get("last_edited_time", "")[:10]  # YYYY-MM-DD
+            date_info = f" ({edited})" if edited else ""
+            lines.append(f"  {title}{date_info} ({page_type})")
             if url:
                 lines.append(f"    {url}")
 

@@ -378,7 +378,7 @@ class ToolRunnerMixin:
         self._record_message("tool_result", result=result[:200])
 
     def _handle_cross_search(self, tc: dict, tool_results: list):
-        """Search Obsidian + Notion + email for the same query."""
+        """Search Obsidian + Notion + email, return unified time-sorted timeline."""
         args_str = tc.get("function", {}).get("arguments", "{}")
         try:
             tool_args = json.loads(args_str)
@@ -392,42 +392,165 @@ class ToolRunnerMixin:
             return
 
         self._notify("thinking", {"phase": "cross_search", "message": f"搜索 '{query}' 跨平台..."})
-        parts = []
+        import os as _os
 
-        # Obsidian
+        items = []  # [{platform, title, date, detail}]
+
+        # ── Obsidian ──
         try:
-            from tools.obsidian_tools import search_obsidian_notes
-            obsidian_result = search_obsidian_notes(query)
-            if "没有找到" not in obsidian_result:
-                parts.append(f"[Obsidian]\n{obsidian_result}")
+            from tools.obsidian_tools import OBSIDIAN_VAULT, BLOCKED_FOLDERS
+            vault = OBSIDIAN_VAULT
+            if vault and _os.path.exists(vault):
+                from tools.obsidian_tools import search_obsidian_notes
+                obsidian_result = search_obsidian_notes(query)
+                if "没有找到" not in obsidian_result and "📝" in obsidian_result:
+                    # 解析文件路径，获取修改时间
+                    for line in obsidian_result.split("\n"):
+                        line = line.strip()
+                        if line.startswith("- "):
+                            rel_path = line[2:]
+                            abs_path = _os.path.join(vault, rel_path)
+                            try:
+                                mtime = _os.path.getmtime(abs_path)
+                                date_str = time.strftime("%m-%d %H:%M", time.localtime(mtime))
+                                items.append({
+                                    "platform": "Obsidian",
+                                    "title": rel_path.replace(".md", ""),
+                                    "date": mtime,
+                                    "date_str": date_str,
+                                    "detail": rel_path,
+                                })
+                            except Exception:
+                                pass
         except Exception:
             pass
 
-        # Notion (only if configured)
-        import os
-        if os.environ.get("NOTION_API_KEY", ""):
+        # ── Notion ──
+        if _os.environ.get("NOTION_API_KEY", ""):
             try:
-                from tools.notion_search import execute as notion_search
-                notion_result = notion_search(query)
-                if "没有找到" not in notion_result and "Notion 未配置" not in notion_result:
-                    parts.append(f"[Notion]\n{notion_result}")
+                import requests as _req
+                api_key = _os.environ.get("NOTION_API_KEY", "")
+                resp = _req.post(
+                    "https://api.notion.com/v1/search",
+                    json={"query": query, "page_size": 10},
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "Notion-Version": "2022-06-28",
+                    },
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    for page in resp.json().get("results", []):
+                        title = "未命名"
+                        for prop in page.get("properties", {}).values():
+                            if prop.get("type") == "title":
+                                parts = prop.get("title", [])
+                                if parts:
+                                    title = "".join(t.get("plain_text", "") for t in parts)
+                                break
+                        edited = page.get("last_edited_time", "")
+                        try:
+                            from datetime import datetime as _dt
+                            dt = _dt.fromisoformat(edited.replace("Z", "+00:00"))
+                            ts = dt.timestamp()
+                            date_str = dt.strftime("%m-%d %H:%M")
+                        except Exception:
+                            ts = 0
+                            date_str = ""
+                        items.append({
+                            "platform": "Notion",
+                            "title": title,
+                            "date": ts,
+                            "date_str": date_str,
+                            "detail": page.get("url", ""),
+                        })
             except Exception:
                 pass
 
-        # Email (only if configured)
-        if os.path.exists(os.path.expanduser("~/.bobo/mail.json")):
+        # ── Email ──
+        if _os.path.exists(_os.path.expanduser("~/.bobo/mail.json")):
             try:
-                from tools.search_emails import execute as email_search
-                email_result = email_search(query)
-                if email_result and "没有找到" not in email_result:
-                    parts.append(f"[邮件]\n{email_result}")
+                from tools.email_module import EmailModule
+                mail = EmailModule()
+                if mail.enabled:
+                    email_results = mail.search_emails(query)
+                    if isinstance(email_results, list):
+                        for em in email_results:
+                            subject = em.get("subject", "无主题")
+                            date_str = em.get("date", "")
+                            ts = 0
+                            try:
+                                from email.utils import parsedate_to_datetime
+                                ts = parsedate_to_datetime(date_str).timestamp()
+                            except Exception:
+                                pass
+                            items.append({
+                                "platform": "Email",
+                                "title": subject,
+                                "date": ts,
+                                "date_str": date_str[:10] if date_str else "",
+                                "detail": em.get("from", ""),
+                            })
+                    elif isinstance(email_results, str) and "未找到" not in email_results:
+                        # 解析文本格式的邮件结果
+                        for line in email_results.split("\n"):
+                            line = line.strip()
+                            if line and not line.startswith("📭") and not line.startswith("📧"):
+                                items.append({
+                                    "platform": "Email",
+                                    "title": line[:80],
+                                    "date": 0,
+                                    "date_str": "",
+                                    "detail": "",
+                                })
             except Exception:
                 pass
 
-        if not parts:
+        # ── 合并、去重、排序 ──
+        if not items:
             result = f"在已配置的平台中都没有找到包含 '{query}' 的内容"
         else:
-            result = f"跨平台搜索 '{query}':\n\n" + "\n\n".join(parts)
+            # 去重：标题相似度 > 80% 视为重复，保留日期最新的
+            unique = []
+            seen_titles = []
+            items.sort(key=lambda x: x.get("date", 0), reverse=True)
+            for item in items:
+                title_lower = item["title"].lower()
+                is_dup = False
+                for seen in seen_titles:
+                    if title_lower in seen or seen in title_lower:
+                        is_dup = True
+                        break
+                    # 简单相似度：共用词比例
+                    words = set(title_lower.split())
+                    seen_words = set(seen.split())
+                    if words and seen_words:
+                        overlap = len(words & seen_words) / min(len(words), len(seen_words))
+                        if overlap > 0.7:
+                            is_dup = True
+                            break
+                if not is_dup:
+                    seen_titles.append(title_lower)
+                    unique.append(item)
+
+            # 排序：有日期的在前，无日期的在后
+            dated = [i for i in unique if i["date"] > 0]
+            undated = [i for i in unique if i["date"] == 0]
+            dated.sort(key=lambda x: x["date"], reverse=True)
+
+            lines = [f"跨平台搜索 '{query}' — 找到 {len(unique)} 条结果，按时间排列:\n"]
+            for item in dated + undated:
+                platform_icon = {"Obsidian": "📝", "Notion": "📋", "Email": "📧"}.get(item["platform"], "📄")
+                date_part = f" {item['date_str']}" if item["date_str"] else ""
+                detail_part = f" — {item['detail'][:50]}" if item["detail"] else ""
+                lines.append(f"  {platform_icon}{date_part}  {item['title']}{detail_part}")
+
+            # 平台覆盖摘要
+            platforms_found = list(set(i["platform"] for i in unique))
+            lines.append(f"\n来源: {', '.join(platforms_found)} （共 {len(unique)} 条）")
+
+            result = "\n".join(lines)
 
         self._notify("tool_result", {"name": "cross_search", "args": tool_args, "result": result[:200], "duration": 0, "success": True})
         tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
