@@ -6,7 +6,8 @@ import re
 
 TOOL_NAME = "execute_terminal"
 
-# 真正危险的命令模式
+# 真正危险的命令模式（与 engine.py DANGEROUS_PATTERNS 保持一致，
+# 作为最后一道防线——engine 已通过 _classify_command + 用户确认做了一级防护）
 DANGEROUS_PATTERNS = [
     r'rm\s+(-rf?|--recursive)\s+',      # rm -rf /path
     r'sudo\s+',                          # sudo 命令
@@ -17,13 +18,16 @@ DANGEROUS_PATTERNS = [
     r':\s*\(\s*\)\s*:\s*',               # fork bomb
     r'\|\s*sh\s*',                       # pipe to sh
     r'\|\s*bash\s*',                     # pipe to bash
+    r'\$\(',                             # 命令替换 $(...)
+    r'curl.*\$\(',                       # curl + 命令替换
+    r'wget.*\$\(',                       # wget + 命令替换
 ]
 
 # 命令长度限制（防止超长命令注入）
 MAX_COMMAND_LENGTH = 10000
 
-# 禁止的 shell 特殊字符（不允许单独出现）
-BLOCKED_CHARS = set('`$')
+# 高危字符（反引号命令替换）
+BLOCKED_CHARS = set('`')
 
 
 def is_dangerous(command: str) -> bool:

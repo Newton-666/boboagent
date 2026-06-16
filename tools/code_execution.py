@@ -224,7 +224,8 @@ def _run_test_file(test_path: str, language: str) -> str:
 
 
 def execute(code: str, language: str = "python", type: str = "run",
-            llm_caller: callable = None) -> str:
+            llm_caller: callable = None,
+            _llm_caller: callable = None) -> str:
     """执行代码
 
     Args:
@@ -232,7 +233,11 @@ def execute(code: str, language: str = "python", type: str = "run",
         language: python, javascript, bash
         type: run(执行), lint(检查语法), test(运行测试)
         llm_caller: LLM 调用函数（可选），传入后启用自修复和测试生成
+        _llm_caller: 由 engine 自动注入（优先于 llm_caller）
     """
+    # _llm_caller 由 tool_runner 注入，优先于显式参数
+    if _llm_caller is not None:
+        llm_caller = _llm_caller
     # 先保存代码
     filepath, task_name = _save_code(code, language)
 
@@ -246,8 +251,8 @@ def execute(code: str, language: str = "python", type: str = "run",
     # 保存执行日志
     _save_run_log(task_name, result)
 
-    # ── 自修复：执行失败且有 llm_caller 时 ──
-    if type == "run" and llm_caller is not None and _is_error_result(result):
+    # ── 自修复：执行失败且有可用的 llm_caller 时 ──
+    if type == "run" and callable(llm_caller) and _is_error_result(result):
         fixed_code = code
         for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
             version = f"fix_v{attempt}"
@@ -270,8 +275,8 @@ def execute(code: str, language: str = "python", type: str = "run",
 
         return f"{result}\n(已尝试修复{MAX_FIX_ATTEMPTS}次，均失败，最终代码: {fix_path})"
 
-    # ── 测试生成：执行成功且有 llm_caller 时 ──
-    if type == "run" and llm_caller is not None and not _is_error_result(result):
+    # ── 测试生成：执行成功且有可用的 llm_caller 时 ──
+    if type == "run" and callable(llm_caller) and not _is_error_result(result):
         test_code = _call_llm_for_test(llm_caller, code, language)
         if test_code:
             test_path, _ = _save_code(test_code, language, task_name, version="test")

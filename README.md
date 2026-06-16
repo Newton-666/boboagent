@@ -242,7 +242,7 @@ Settings can also be changed naturally: "use gpt-4o," "switch to OpenAI."
 |----------|-------|
 | **General** | `cross_search`, `bobo_config`, `bobo_schedule`, `wiki_rebuild`, `api_register`, `api_call`, `get_current_time`, `save_memory`, `search_memory`, `save_skill`, `project_info`, `render`, `notion_setup` |
 | **Knowledge** | `search_obsidian`, `read_obsidian`, `write_obsidian`, `append_obsidian`, `notion_search`, `notion_read_page`, `notion_create_page`, `notion_append`, `search_emails`, `read_email_content`, `analyze_emails` |
-| **Code** | `code_execution`, `file_writer`, `execute_terminal`, `search_code`, `refactor`, `git_status`, `github_create_repo`, `github_create_pr`, `github_pr_diff`, `github_pr_comment`, `github_check_auth`, `github_setup` |
+| **Code** | `code_execution`, `file_operation`, `write_obsidian`, `append_obsidian`, `execute_terminal`, `search_code`, `grep_code`, `edit_file`, `refactor`, `git_status`, `run_tests`, `github_create_repo`, `github_create_pr`, `github_pr_diff`, `github_pr_comment`, `github_check_auth`, `github_setup` |
 | **Files** | `read_local_file`, `list_directory`, `file_operation`, `restore_checkpoint` |
 | **Web** | `web_search`, `web_fetch`, `web_extract`, `browser_open`, `browser_get_title`, `open_url` |
 | **macOS** | `send_notification`, `read_clipboard`, `write_clipboard`, `set_reminder`, `list_reminders`, `create_calendar_event`, `list_calendar_events` |

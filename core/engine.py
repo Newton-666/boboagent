@@ -516,37 +516,60 @@ class Engine(ContextMixin, ToolRunnerMixin):
         (r'wget.*\|\s*(ba)?sh', "管道执行远程脚本"),
         (r'git\s+push\s+.*--force', "强制推送"),
         (r'(scp|rsync|nc|netcat)\s+.*:', "远程文件传输/网络连接"),
+        (r'\$\(', "命令替换注入 ($(...))"),
+        (r'`[^`]+`', "反引号命令替换"),
+        (r'curl.*\$\(', "curl + 命令替换"),
+        (r'wget.*\$\(', "wget + 命令替换"),
     ]
 
     def _classify_command(self, command: str) -> tuple[str, str]:
-        """分类命令：safe / dangerous / gray。返回 (等级, 原因)。"""
+        """分类命令：safe / dangerous / gray。返回 (等级, 原因)。
+
+        检查优先级：
+          1. 黑名单正则（全字符串匹配，拦截已知危险模式）
+          2. 管道分段检查（每段独立判定，防止白名单命令夹带危险管道）
+          3. 白名单（单命令，base_cmd 命中即安全）
+          4. 灰名单（兜底，需用户确认）
+        """
         if not command or not command.strip():
             return ("safe", "")
 
         cmd_clean = command.strip()
         base_cmd = cmd_clean.split()[0] if cmd_clean.split() else ""
 
-        # 检查黑名单
         import re as _re
+
+        # ── 第 1 步：全字符串黑名单 ──
         for pattern, reason in self.DANGEROUS_PATTERNS:
             if _re.search(pattern, cmd_clean):
                 return ("dangerous", reason)
 
-        # 检查白名单
+        # ── 第 2 步：管道分段检查 ──
+        # 必须在白名单检查之前执行，否则 "ls | unknown_cmd"
+        # 会以 "ls" 命中白名单而跳过后续管道的安全检查。
+        if "|" in cmd_clean:
+            for segment in cmd_clean.split("|"):
+                seg = segment.strip()
+                seg_cmd = seg.split()[0] if seg.split() else ""
+                if not seg_cmd:
+                    continue
+                # 每段先过黑名单
+                for pattern, reason in self.DANGEROUS_PATTERNS:
+                    if _re.search(pattern, seg):
+                        return ("dangerous", f"管道中的危险操作 — {reason}: {seg[:60]}")
+                # 再检查白名单
+                if seg_cmd in self.SAFE_COMMANDS:
+                    continue
+                # 不在白名单也不在黑名单 → 灰名单
+                return ("gray", f"管道中包含未知命令: {seg_cmd}")
+            # 所有段都通过 → 安全
+            return ("safe", "")
+
+        # ── 第 3 步：单命令白名单 ──
         if base_cmd in self.SAFE_COMMANDS:
             return ("safe", "")
 
-        # 管道中的每个命令都要检查
-        if "|" in cmd_clean:
-            all_safe = True
-            for segment in cmd_clean.split("|"):
-                seg_cmd = segment.strip().split()[0] if segment.strip().split() else ""
-                if seg_cmd and seg_cmd not in self.SAFE_COMMANDS:
-                    all_safe = False
-                    break
-            if all_safe:
-                return ("safe", "")
-
+        # ── 第 4 步：灰名单兜底 ──
         return ("gray", f"未知安全等级的命令: {base_cmd}")
 
     def _is_high_risk_tool(self, tool_name: str, tool_args: dict) -> Tuple[bool, str]:
