@@ -598,8 +598,8 @@ def handle_config_full(params: dict, rid: str) -> dict:
             "display": {
                 "streaming": True,
                 "show_reasoning": True,
-                "tui_compact": True,
-                "details_mode": "collapsed",
+                "tui_compact": False,
+                "details_mode": "expanded",
             }
         }
     })

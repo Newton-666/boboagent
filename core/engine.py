@@ -247,8 +247,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return None
 
     def _check_guards(self) -> bool:
-        if self.current_tool_round > 5:
-            self._notify("error", {"content": "工具调用次数过多，请简化问题"})
+        if self.current_tool_round > 12:
+            self._notify("error", {"content": "工具调用轮次超过上限（12 轮），请简化任务"})
             return True
         if self.current_depth > 30:
             self._notify("error", {"content": "已达最大循环深度"})
