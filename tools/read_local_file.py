@@ -9,8 +9,16 @@ TOOL_NAME = "read_local_file"
 DIR_PREVIEW_LINES = 30
 
 
-def _read_single_file(filepath: str, max_chars: int = 40000) -> str:
-    """读取单个文件内容"""
+def _read_single_file(filepath: str, max_chars: int = 40000,
+                      offset: int = 0, limit: int | None = None) -> str:
+    """读取单个文件内容
+
+    Args:
+        filepath: 文件路径
+        max_chars: 最大返回字符数（默认 40000）
+        offset: 从第几行开始读（0 表示开头）
+        limit: 最多读几行（None 表示全部）
+    """
     path = Path(filepath).expanduser()
 
     if not path.exists():
@@ -74,6 +82,18 @@ def _read_single_file(filepath: str, max_chars: int = 40000) -> str:
         else:
             content = path.read_text(encoding='utf-8', errors='ignore')
 
+        # ── 分页：offset + limit ──
+        if offset > 0 or limit is not None:
+            lines = content.split('\n')
+            total_lines = len(lines)
+            start = offset
+            end = (start + limit) if limit is not None else total_lines
+            selected = lines[start:end]
+            content = '\n'.join(selected)
+            if offset > 0 or limit is not None:
+                header = f"[行 {start+1}-{min(end, total_lines)} / 共 {total_lines} 行]\n"
+                content = header + content
+
         if len(content) > max_chars:
             content = content[:max_chars] + f"\n... (内容已截断，共 {len(content)} 字符)"
 
@@ -129,8 +149,16 @@ def _read_directory(dirpath: str) -> str:
     return '\n'.join(result)
 
 
-def execute(filepath: str, max_chars: int = 40000) -> str:
-    """读取本地文件或目录内容"""
+def execute(filepath: str, max_chars: int = 40000,
+            offset: int = 0, limit: int = None) -> str:
+    """读取本地文件或目录内容
+
+    Args:
+        filepath: 文件或目录路径
+        max_chars: 最大返回字符数（默认 40000）
+        offset: 从第几行开始读（默认 0 = 开头）。用于大文件分页读取
+        limit: 最多读取的行数（默认 None = 全部）。配合 offset 实现分页
+    """
     path = Path(filepath).expanduser()
 
     if not path.exists():
@@ -139,7 +167,7 @@ def execute(filepath: str, max_chars: int = 40000) -> str:
     if path.is_dir():
         return _read_directory(filepath)
     else:
-        return _read_single_file(filepath, max_chars)
+        return _read_single_file(filepath, max_chars, offset, limit)
 
 
 TOOL_FUNC = execute
@@ -147,8 +175,13 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "读取本地文件或目录内容（默认上限 40000 字符）。支持 .md, .txt, .py, .json, .yaml 等格式。传入目录时返回目录结构和文件预览。适用场景：用户要求'读取某个文件'、'看看这个目录'。大文件用 max_chars 参数控制读取量。",
-        "parameters": {"type": "object", "properties": {"filepath": {"type": "string"}, "max_chars": {"type": "integer"}}, "required": ["filepath"]}
+        "description": "读取本地文件或目录内容（默认上限 40000 字符）。支持 .md, .txt, .py, .pdf, .docx 等。大文件可用 offset+limit 分页读取，防止撑爆上下文。目录返回结构预览。",
+        "parameters": {"type": "object", "properties": {
+            "filepath": {"type": "string"},
+            "max_chars": {"type": "integer"},
+            "offset": {"type": "integer", "description": "从第几行开始读（0=开头），大文件分页用"},
+            "limit": {"type": "integer", "description": "最多读取行数，配合 offset 分页"}
+        }, "required": ["filepath"]}
     }
 }
 def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)

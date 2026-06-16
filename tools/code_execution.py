@@ -311,7 +311,10 @@ def _run_code(code, language):
         return f"不支持的语言: {language}"
 
 
+MAX_OUTPUT_CHARS = 50_000  # 与 Hermes MAX_STDOUT_BYTES 对齐
+
 def _run_python(code):
+    temp_file = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(code)
@@ -323,7 +326,6 @@ def _run_python(code):
             text=True,
             timeout=30
         )
-        os.unlink(temp_file)
 
         output = ""
         if result.stdout:
@@ -334,14 +336,21 @@ def _run_python(code):
             output += result.stderr
         if not output:
             output = "(执行成功，无输出)"
-        return output[:2000]
+        return output[:MAX_OUTPUT_CHARS]
     except subprocess.TimeoutExpired:
         return "执行超时（30秒）"
     except Exception as e:
         return f"执行失败: {e}"
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
 
 
 def _run_javascript(code):
+    temp_file = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
             f.write(code)
@@ -353,7 +362,6 @@ def _run_javascript(code):
             text=True,
             timeout=30
         )
-        os.unlink(temp_file)
 
         output = ""
         if result.stdout:
@@ -364,17 +372,24 @@ def _run_javascript(code):
             output += result.stderr
         if not output:
             output = "(执行成功，无输出)"
-        return output[:2000]
+        return output[:MAX_OUTPUT_CHARS]
     except FileNotFoundError:
         return "Node.js 未安装，无法执行 JavaScript"
     except subprocess.TimeoutExpired:
         return "执行超时（30秒）"
     except Exception as e:
         return f"执行失败: {e}"
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
 
 
 def _run_bash(code):
-    """执行 Bash 代码（写入临时文件，不使用 shell=True）"""
+    """执行 Bash 代码（写入临时文件，不使用 shell=True，finally 确保清理）"""
+    temp_file = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
             f.write(code)
@@ -386,7 +401,6 @@ def _run_bash(code):
             text=True,
             timeout=30
         )
-        os.unlink(temp_file)
 
         output = ""
         if result.stdout:
@@ -397,11 +411,17 @@ def _run_bash(code):
             output += result.stderr
         if not output:
             output = "(执行成功，无输出)"
-        return output[:2000]
+        return output[:MAX_OUTPUT_CHARS]
     except subprocess.TimeoutExpired:
         return "执行超时（30秒）"
     except Exception as e:
         return f"执行失败: {e}"
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
 
 
 def _lint_code(code, language):

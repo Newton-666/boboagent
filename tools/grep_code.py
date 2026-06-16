@@ -75,10 +75,7 @@ def _search_ripgrep(search_dir: Path, pattern: str, file_types: list[str],
             cmd.extend(["--context", str(context)])
         if file_types:
             for ft in file_types:
-                cmd.extend(["--type-add", f"custom:*{ft}"])
-            globs = [f"*{ft}" for ft in file_types]
-            for g in globs:
-                cmd.extend(["--glob", g])
+                cmd.extend(["--glob", f"*{ft}"])
         cmd.append(pattern)
         cmd.append(str(search_dir))
 

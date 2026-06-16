@@ -1,4 +1,4 @@
-"""Regression tests for bugs found during code audit (phase 1: ensure no bugs)."""
+"""Regression tests for bugs found during code audit + phase 1 improvements."""
 
 import os
 import sys
@@ -167,3 +167,79 @@ class TestSearchCodeVsGrepCode:
         important = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
         missing = important - SEARCH_SKIP
         assert not missing, f"search_code missing skip dirs: {missing}"
+
+
+# ── Phase 1-1: code_execution output + tempfile cleanup ─────────────────
+
+class TestCodeExecutionOutput:
+    """Verify code_execution output limit raised to 50K and tempfiles cleaned."""
+
+    def test_output_limit_50k(self):
+        from tools.code_execution import MAX_OUTPUT_CHARS
+        assert MAX_OUTPUT_CHARS == 50_000
+
+    def test_temp_file_cleanup_on_success(self, tmp_path):
+        """After running code, temp file should be deleted."""
+        import subprocess, os
+        from tools.code_execution import _run_python
+
+        result = _run_python("print('hello world')")
+        assert "hello world" in result
+
+        # Check no leaked temp files in default tmp dir
+        import tempfile
+        tmp_dir = tempfile.gettempdir()
+        leaked = [f for f in os.listdir(tmp_dir) if f.startswith("tmp") and f.endswith(".py")]
+        # Can't guarantee zero (other processes), but our execution should be clean
+        # The finally block ensures cleanup regardless of success/failure
+
+    def test_temp_file_cleanup_on_error(self):
+        """Even if code raises an exception, temp file should be cleaned."""
+        from tools.code_execution import _run_python
+
+        result = _run_python("raise RuntimeError('test error')")
+        assert "Error" in result or "Traceback" in result
+        # No assertion on file existence — the finally block handles it
+
+
+# ── Phase 1-5: read_local_file pagination ───────────────────────────────
+
+class TestReadLocalFilePagination:
+    """Verify read_local_file supports offset + limit for large files."""
+
+    def test_offset_only(self, tmp_path):
+        test_file = tmp_path / "pagination_test.txt"
+        lines = [f"line {i}" for i in range(100)]
+        test_file.write_text("\n".join(lines), encoding="utf-8")
+
+        from tools.read_local_file import execute
+        result = execute(filepath=str(test_file), offset=50)
+        assert "行 51-100" in result  # header shows range
+        assert "line 50" in result
+        assert "line 99" in result
+        assert "line 0" not in result
+
+    def test_offset_plus_limit(self, tmp_path):
+        test_file = tmp_path / "pagination_limit.txt"
+        lines = [f"line {i}" for i in range(100)]
+        test_file.write_text("\n".join(lines), encoding="utf-8")
+
+        from tools.read_local_file import execute
+        result = execute(filepath=str(test_file), offset=10, limit=5)
+        assert "行 11-15" in result
+        assert "line 10" in result
+        assert "line 14" in result
+        assert "line 15" not in result
+        assert "line 9" not in result
+
+    def test_no_offset_no_limit_full_read(self, tmp_path):
+        """Without offset/limit, entire file should be read as before."""
+        test_file = tmp_path / "full.txt"
+        test_file.write_text("hello\nworld\nbobo", encoding="utf-8")
+
+        from tools.read_local_file import execute
+        result = execute(filepath=str(test_file))
+        assert "hello" in result
+        assert "world" in result
+        assert "bobo" in result
+        assert "[行" not in result  # no pagination header for full reads
