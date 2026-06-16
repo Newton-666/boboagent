@@ -282,6 +282,56 @@ Settings can also be changed naturally: "use gpt-4o," "switch to OpenAI."
 
 ---
 
+## Common Installation Issues
+
+### `ModuleNotFoundError: No module named 'bobo_tui_gateway'`
+
+You have multiple Python versions installed and `pip3` installed to the wrong one.
+
+```bash
+# 1. Find which Python has bobo
+python3 -c "import bobo_tui_gateway; print('OK')" 2>&1
+
+# 2. If it fails, reinstall for THIS Python
+python3 -m pip install --upgrade bobo-agent
+
+# 3. If still failing, install from GitHub directly
+pip3 install --upgrade git+https://github.com/Newton-666/boboagent.git
+
+# 4. If Homebrew Python blocks pip (externally-managed-environment), use:
+pip3 install --user --upgrade bobo-agent
+# or install from GitHub with the Python that works:
+/usr/local/bin/python3 -m pip install --upgrade git+https://github.com/Newton-666/boboagent.git
+```
+
+### `gateway exited` loop / TUI crashes on startup
+
+This was a packaging bug in versions before v0.2.3. Upgrade:
+
+```bash
+pip3 install --upgrade bobo-agent   # must be >= 0.2.3
+```
+
+If you're on v0.2.3+ and still see this, run diagnostic and share the output:
+
+```bash
+which python3 && python3 --version && which bobo && python3 -c "from config import OBSIDIAN_VAULT; print('config OK')"
+```
+
+### "no TTY" or blank screen
+
+Bobo needs an interactive terminal. Make sure you're running in a real terminal app
+(Terminal.app, iTerm2, Warp, etc.), not a script or IDE output pane.
+
+### Node.js not found
+
+Bobo's TUI requires Node.js v18+. Install it:
+
+```bash
+brew install node          # macOS
+# or: https://nodejs.org
+```
+
 ## Troubleshooting
 
 | Problem | Solution |
@@ -292,7 +342,7 @@ Settings can also be changed naturally: "use gpt-4o," "switch to OpenAI."
 | Notion tools missing | Run `notion_setup` with your API key. |
 | GitHub push fails | Run `gh auth login` or `github_setup`. |
 | Chinese input crashes TUI | Compact mode enabled. Use single-line input. |
-| Session can't be deleted | Fixed in latest version. Ensure `session.delete` handler exists. |
+| Session can't be deleted | Fixed in v0.2.3+. Upgrade with `pip3 install --upgrade bobo-agent`. |
 
 ---
 
