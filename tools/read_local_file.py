@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from core.file_safety import safe_read_check
 
 TOOL_NAME = "read_local_file"
 
@@ -163,6 +164,12 @@ def execute(filepath: str, max_chars: int = 40000,
 
     if not path.exists():
         return f"错误: 路径不存在: {filepath}"
+
+    # 安全: 二进制文件检测
+    if path.is_file():
+        warning = safe_read_check(str(path))
+        if warning:
+            return warning
 
     if path.is_dir():
         return _read_directory(filepath)

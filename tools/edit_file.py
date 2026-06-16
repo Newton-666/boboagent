@@ -14,6 +14,7 @@
 import os
 import time
 from pathlib import Path
+from core.file_safety import is_write_denied
 
 
 TRASH_DIR = Path.home() / ".bobo" / "trash"
@@ -81,6 +82,11 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
     """精确替换文件中第一次（且唯一一次）出现的 old_string。"""
 
     path = Path(file_path).expanduser().resolve()
+
+    # ── 安全检查 ──
+    denied, reason = is_write_denied(str(path))
+    if denied:
+        return f"错误: {reason}"
 
     # ── 存在性检查 ──
     if not path.exists():

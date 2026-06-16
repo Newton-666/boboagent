@@ -3,6 +3,8 @@
 import subprocess
 import shlex
 import re
+import os
+from core.file_safety import sanitize_env
 
 TOOL_NAME = "execute_terminal"
 
@@ -64,16 +66,17 @@ def execute(command: str, timeout: int = 30) -> str:
         if is_dangerous(command):
             return f"⚠️ 危险命令: {command}\n此命令需要用户明确确认。"
         
-        # 使用 shell 执行（支持管道、重定向）
-        # shell=True 是必要的，因为终端工具的本质就是执行 shell 命令
+        # 使用 shell 执行（支持管道、重定向），环境变量已脱敏
         # 安全防护由上游 Engine 的 _is_high_risk_tool + 用户确认机制保障
+        clean_env = sanitize_env()
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
             text=True,
             timeout=timeout,
-            executable='/bin/bash'
+            executable='/bin/bash',
+            env=clean_env
         )
         
         output = ""

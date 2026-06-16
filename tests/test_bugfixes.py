@@ -384,3 +384,97 @@ class TestRefactorInterface:
         assert "path" in item_props
         assert "old_string" in item_props
         assert "new_string" in item_props
+
+
+# ── Phase 2: file_safety (write-denied + binary + env isolation) ──────
+
+class TestWriteDenied:
+    """Verify write-denied path blocking."""
+
+    def test_blocks_etc_passwd(self):
+        from core.file_safety import is_write_denied
+        denied, reason = is_write_denied("/etc/passwd")
+        assert denied is True
+
+    def test_blocks_ssh_key(self):
+        from core.file_safety import is_write_denied
+        from pathlib import Path
+        denied, _ = is_write_denied(f"{Path.home()}/.ssh/id_rsa")
+        assert denied is True
+
+    def test_blocks_aws_credentials(self):
+        from core.file_safety import is_write_denied
+        from pathlib import Path
+        denied, _ = is_write_denied(f"{Path.home()}/.aws/credentials")
+        assert denied is True
+
+    def test_allows_normal_file(self, tmp_path):
+        from core.file_safety import is_write_denied
+        test_file = tmp_path / "safe_file.txt"
+        denied, _ = is_write_denied(str(test_file))
+        assert denied is False
+
+    def test_file_operation_blocks_write(self, tmp_path):
+        """file_operation.write should reject denied paths."""
+        from tools.file_operation import execute
+        result = execute(action="write", path="/etc/passwd", content="hack")
+        assert "禁止" in result
+
+    def test_edit_file_blocks_write(self, tmp_path):
+        """edit_file should reject denied paths."""
+        from tools.edit_file import execute
+        result = execute("/etc/passwd", "old", "new")
+        assert "禁止" in result
+
+
+class TestBinaryDetection:
+    """Verify binary file detection."""
+
+    def test_png_detected(self, tmp_path):
+        from core.file_safety import is_binary_file
+        png = tmp_path / "test.png"
+        # PNG magic bytes
+        png.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR")
+        is_bin, _ = is_binary_file(str(png))
+        assert is_bin is True
+
+    def test_py_not_detected(self, tmp_path):
+        from core.file_safety import is_binary_file
+        py_file = tmp_path / "test.py"
+        py_file.write_text("print('hello')")
+        is_bin, _ = is_binary_file(str(py_file))
+        assert is_bin is False
+
+    def test_extension_fast_path(self):
+        from core.file_safety import is_binary_file
+        # .pyc should be detected by extension alone
+        is_bin, msg = is_binary_file("/tmp/nonexistent.pyc")
+        assert is_bin is True
+        assert "pyc" in msg
+
+
+class TestEnvIsolation:
+    """Verify env sanitization for subprocess."""
+
+    def test_strips_api_keys(self):
+        from core.file_safety import sanitize_env
+        env = {"PATH": "/usr/bin", "HOME": "/home", "DEEPSEEK_API_KEY": "sk-secret"}
+        clean = sanitize_env(env)
+        assert "PATH" in clean
+        assert "HOME" in clean
+        assert "DEEPSEEK_API_KEY" not in clean
+
+    def test_keeps_safe_vars(self):
+        from core.file_safety import sanitize_env
+        env = {"PATH": "/usr/bin", "HOME": "/home", "USER": "test", "LANG": "en_US.UTF-8"}
+        clean = sanitize_env(env)
+        for key in env:
+            assert key in clean
+
+    def test_strips_token_vars(self):
+        from core.file_safety import sanitize_env
+        env = {"GITHUB_TOKEN": "ghp_secret", "NOTION_API_KEY": "secret_xxx", "PATH": "/bin"}
+        clean = sanitize_env(env)
+        assert "PATH" in clean
+        assert "GITHUB_TOKEN" not in clean
+        assert "NOTION_API_KEY" not in clean

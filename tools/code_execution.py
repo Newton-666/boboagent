@@ -5,6 +5,7 @@ import tempfile
 import os
 import time
 from pathlib import Path
+from core.file_safety import sanitize_env
 
 TOOL_NAME = "code_execution"
 
@@ -114,7 +115,8 @@ def _check_syntax(code: str, language: str) -> str:
                 f.write(code)
                 temp_file = f.name
             result = subprocess.run(['node', '--check', temp_file],
-                                    capture_output=True, text=True, timeout=10)
+                                    capture_output=True, text=True, timeout=10,
+                                    env=sanitize_env())
             os.unlink(temp_file)
             if result.returncode != 0:
                 return f"语法错误: {result.stderr.strip()[:100]}"
@@ -130,7 +132,8 @@ def _check_syntax(code: str, language: str) -> str:
                 f.write(code)
                 temp_file = f.name
             result = subprocess.run(['bash', '-n', temp_file],
-                                    capture_output=True, text=True, timeout=10)
+                                    capture_output=True, text=True, timeout=10,
+                                    env=sanitize_env())
             os.unlink(temp_file)
             if result.returncode != 0:
                 return f"语法错误: {result.stderr.strip()[:100]}"
@@ -193,12 +196,14 @@ def _run_test_file(test_path: str, language: str) -> str:
         if language == "python":
             result = subprocess.run(
                 ['python3', '-m', 'pytest', test_path, '-q'],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, timeout=30,
+                env=sanitize_env()
             )
         elif language == "javascript":
             result = subprocess.run(
                 ['node', '--test', test_path],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, timeout=30,
+                env=sanitize_env()
             )
         else:
             return "(不支持此语言的测试运行)"
@@ -324,7 +329,8 @@ def _run_python(code):
             ['python3', temp_file],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=sanitize_env()
         )
 
         output = ""
@@ -360,7 +366,8 @@ def _run_javascript(code):
             ['node', temp_file],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=sanitize_env()
         )
 
         output = ""
@@ -399,7 +406,8 @@ def _run_bash(code):
             ['bash', temp_file],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=sanitize_env()
         )
 
         output = ""

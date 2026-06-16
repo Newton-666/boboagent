@@ -1,10 +1,11 @@
-"""文件操作工具 - 带读取缓存 + 自动备份，支持批量写入"""
+"""文件操作工具 - 带读取缓存 + 自动备份 + 安全防护，支持批量写入"""
 
 import os
 import hashlib
 import shutil
 import time
 from pathlib import Path
+from core.file_safety import is_write_denied, safe_read_check
 
 TOOL_NAME = "file_operation"
 
@@ -92,9 +93,15 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
             return f"读取失败: {e}"
     
     elif action == "write":
+        denied, reason = is_write_denied(full_path)
+        if denied:
+            return f"❌ {reason}"
         return _write_single_file(path, content)
     
     elif action == "delete":
+        denied, reason = is_write_denied(full_path)
+        if denied:
+            return f"❌ {reason}"
         try:
             # 删除前备份
             if os.path.exists(full_path):
