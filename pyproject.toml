@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bobo-agent"
-version = "0.3.1"
+version = "0.4.0"
 description = "Bobo — a personal AI agent for your terminal, Obsidian, and email"
 readme = "README.md"
 license = {text = "MIT"}
