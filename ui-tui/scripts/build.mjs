@@ -2,7 +2,7 @@
 // Bundles src/entry.tsx into a single self-contained dist/entry.js.
 // No runtime node_modules needed.
 import { build } from 'esbuild'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -58,4 +58,14 @@ if (body.startsWith('#!')) {
   writeFileSync(out, body.slice(body.indexOf('\n') + 1))
 }
 
-console.log(`built ${out}`)
+// Copy to pip package static dir so `bobo_tui_gateway/static/entry.js` is
+// always in sync with the latest TUI build (fix: gateway exited on fresh pip install).
+import { copyFileSync, mkdirSync } from 'node:fs'
+const staticDir = resolve(root, '..', 'bobo_tui_gateway', 'static')
+mkdirSync(staticDir, { recursive: true })
+copyFileSync(out, resolve(staticDir, 'entry.js'))
+const pkgJson = resolve(staticDir, 'package.json')
+if (!existsSync(pkgJson)) {
+  writeFileSync(pkgJson, '{"type":"module"}\n')
+}
+console.log(`built ${out}  →  ${resolve(staticDir, 'entry.js')}`)

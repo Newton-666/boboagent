@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bobo-agent"
-version = "0.2.2"
+version = "0.2.3"
 description = "Bobo — a personal AI agent for your terminal, Obsidian, and email"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,6 +36,9 @@ include = ["bobo_tui_gateway*", "core*", "tools*"]
 
 [tool.setuptools.package-data]
 bobo_tui_gateway = ["static/entry.js", "static/package.json"]
+
+[tool.setuptools]
+py-modules = ["config"]  # install config.py as a top-level module
 
 [tool.pytest.ini_options]
 minversion = "7.0"
