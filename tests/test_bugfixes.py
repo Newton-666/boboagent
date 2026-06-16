@@ -243,3 +243,59 @@ class TestReadLocalFilePagination:
         assert "world" in result
         assert "bobo" in result
         assert "[行" not in result  # no pagination header for full reads
+
+
+# ── Phase 1-4: edit_file context-aware matching ──────────────────────────
+
+class TestEditFileContextAware:
+    """Verify edit_file returns similar-line hints when match fails."""
+
+    def test_find_similar_lines_substring_match(self):
+        """First line of old_string should be used to find similar lines."""
+        from tools.edit_file import _find_similar_lines
+
+        content = "def foo():\n    pass\n\ndef bar():\n    return 42\n"
+        old = "def bar():\n    return 43"
+        hints = _find_similar_lines(content, old)
+        assert len(hints) > 0
+        assert hints[0][1] == "def bar():"
+
+    def test_find_similar_lines_keyword_match(self):
+        """Keywords from old_string should find related lines via fuzzy scoring."""
+        from tools.edit_file import _find_similar_lines
+
+        content = "import os\nimport sys\nfrom pathlib import Path\n\nx = 1\n"
+        old = "import oss\n"
+        hints = _find_similar_lines(content, old)
+        # 'import' matches lines 1,2; 'oss' is a substring of nothing directly
+        # but the scoring approach returns lines containing at least one keyword
+        assert len(hints) > 0
+        # The top match should be one of the import lines
+        assert "import" in hints[0][1]
+
+    def test_find_similar_lines_no_match(self):
+        """Completely unrelated search should return empty list."""
+        from tools.edit_file import _find_similar_lines
+
+        content = "hello world\nfoo bar\n"
+        old = "xyzzy plugh"
+        hints = _find_similar_lines(content, old)
+        assert hints == []
+
+    def test_edit_file_error_includes_hints(self, tmp_path):
+        """When edit_file fails to match, error message should include hints."""
+        test_file = tmp_path / "test_edit.py"
+        test_file.write_text(
+            "def hello():\n    print('hello')\n\ndef world():\n    print('world')\n",
+            encoding="utf-8"
+        )
+
+        from tools.edit_file import execute
+        result = execute(
+            file_path=str(test_file),
+            old_string="def hello():\n    print('hi')",  # wrong: 'hi' not 'hello'
+            new_string="def hello():\n    print('hi')"
+        )
+        assert "错误" in result
+        assert "文件中相似的行" in result  # hint section
+        assert "hello" in result  # the similar line is shown

@@ -34,6 +34,49 @@ def _backup(file_path: Path) -> str | None:
         return None
 
 
+def _find_similar_lines(content: str, old_string: str, max_hints: int = 5) -> list[tuple[int, str]]:
+    """在文件内容中搜索与 old_string 最相似的行，返回 [(行号, 行内容), ...]。
+
+    策略（按优先级）：
+      1. 用 old_string 的第一行做精确子串搜索
+      2. 提取 old_string 中的关键词（3 个字符以上的标识符），
+         搜索包含所有关键词的行
+      3. 都没找到则返回空列表
+    """
+    lines = content.split("\n")
+    if not old_string.strip():
+        return []
+
+    # 策略 1：提取 old_string 第一行，去掉首尾空白做子串搜索
+    first_line = old_string.strip().split("\n")[0].strip()
+    if len(first_line) >= 6:
+        candidates = []
+        for i, line in enumerate(lines):
+            if first_line in line:
+                candidates.append((i + 1, line))
+                if len(candidates) >= max_hints:
+                    return candidates
+        if candidates:
+            return candidates
+
+    # 策略 2：提取 old_string 中的关键词，每个关键词独立搜索，
+    # 匹配行数最多的优先返回
+    import re
+    keywords = re.findall(r"[a-zA-Z_]\w{2,}|\S{3,}", old_string)
+    keywords = list(dict.fromkeys(keywords))[:5]  # 去重，最多 5 个
+    if not keywords:
+        return []
+
+    # 按匹配关键词数量降序排列候选行
+    scored = []
+    for i, line in enumerate(lines):
+        score = sum(1 for kw in keywords if kw in line)
+        if score > 0:
+            scored.append((score, i + 1, line))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [(ln, txt) for _, ln, txt in scored[:max_hints]]
+
+
 def execute(file_path: str, old_string: str, new_string: str) -> str:
     """精确替换文件中第一次（且唯一一次）出现的 old_string。"""
 
@@ -64,13 +107,20 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
     # ── 匹配检查 ──
     count = content.count(old_string)
     if count == 0:
-        # 尝试给出调试信息：展示 old_string 前几行，帮助 LLM 比对
+        # 自动搜索文件中与 old_string 相似的行，帮助 LLM 一次纠正
         preview = old_string[:80].replace("\n", "\\n")
+        hints = _find_similar_lines(content, old_string)
+        hint_block = ""
+        if hints:
+            hint_block = "\n  文件中相似的行:\n" + "\n".join(
+                f"    L{ln}: {txt[:120]}" for ln, txt in hints
+            )
         return (
             f"错误: 未找到要替换的文本。\n"
             f"  文件: {path} ({len(content)} 字符, {content.count(chr(10)) + 1} 行)\n"
             f"  查找内容: {preview}...\n"
             f"  请检查 old_string 是否与文件内容完全一致（包括缩进和空白字符）。"
+            f"{hint_block}"
         )
 
     if count > 1:
