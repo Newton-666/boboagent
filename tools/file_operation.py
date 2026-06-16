@@ -1,13 +1,32 @@
-"""文件操作工具 - 带读取缓存，支持批量写入"""
+"""文件操作工具 - 带读取缓存 + 自动备份，支持批量写入"""
 
 import os
 import hashlib
+import shutil
+import time
 from pathlib import Path
 
 TOOL_NAME = "file_operation"
 
 # 全局读取缓存（会话级别）
 _read_cache = {}
+
+# 备份目录（与 edit_file 保持一致）
+TRASH_DIR = Path.home() / ".bobo" / "trash"
+
+
+def _backup(filepath: str) -> str | None:
+    """写入前自动备份到回收站。返回备份名。"""
+    if not os.path.exists(filepath):
+        return None
+    try:
+        TRASH_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{os.path.basename(filepath)}_{timestamp}"
+        shutil.copy2(filepath, TRASH_DIR / backup_name)
+        return backup_name
+    except Exception:
+        return None
 
 def _get_file_hash(filepath: str) -> str:
     """获取文件内容的哈希值"""
@@ -18,9 +37,12 @@ def _get_file_hash(filepath: str) -> str:
         return None
 
 def _write_single_file(path: str, content: str) -> str:
-    """写入单个文件"""
+    """写入单个文件（带自动备份）"""
     full_path = os.path.expanduser(path)
     try:
+        # 写入前自动备份已有文件
+        if os.path.exists(full_path):
+            _backup(full_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -55,9 +77,9 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
     if action == "read":
         cache_key = full_path
         if cache_key in _read_cache:
-            cached_time, cached_content = _read_cache[cache_key]
+            cached_hash, cached_content = _read_cache[cache_key]
             current_hash = _get_file_hash(full_path)
-            if current_hash == cached_time:
+            if current_hash == cached_hash:
                 return f"文件内容（缓存）:\n{cached_content}"
         
         try:
@@ -74,6 +96,9 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
     
     elif action == "delete":
         try:
+            # 删除前备份
+            if os.path.exists(full_path):
+                backup_name = _backup(full_path)
             os.remove(full_path)
             _read_cache.pop(full_path, None)
             return f"已删除: {path}"

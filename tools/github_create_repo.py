@@ -9,8 +9,12 @@ def execute(name: str, description: str = "", public: bool = True) -> str:
     """Create a GitHub repo and push the current branch."""
     visibility = "--public" if public else "--private"
     try:
+        cmd = ["gh", "repo", "create", name, visibility, "--source=.", "--push"]
+        if description:
+            cmd.insert(3, "--description")
+            cmd.insert(4, description)
         result = subprocess.run(
-            ["gh", "repo", "create", name, visibility, "--source=.", "--push"],
+            cmd,
             capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0:

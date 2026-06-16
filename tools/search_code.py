@@ -9,7 +9,8 @@ TOOL_NAME = "search_code"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 跳过不需要搜索的目录
-SKIP_DIRS = {"__pycache__", ".git", ".vscode", "node_modules", "projects", "__pycache__"}
+SKIP_DIRS = {"__pycache__", ".git", ".vscode", "node_modules", "projects",
+             ".venv", "venv", "dist", "build", ".next", "coverage", ".tox"}
 SKIP_EXTS = {".pyc", ".pyo", ".bak", ".backup"}
 
 
