@@ -61,14 +61,14 @@ class ToolRunnerMixin:
             "file_operation": "文件操作失败 → 用 execute_terminal 的 cp/mv/rm 命令替代",
             "search_code": "代码搜索失败 → 用 grep_code(pattern) 正则搜索，或用 execute_terminal('grep -r pattern path')",
             "execute_terminal": "终端命令失败 → 检查命令语法，用 code_execution 执行脚本，或拆分为多个简单命令",
-            "file_writer": "文件写入失败 → 用 execute_terminal('cat > file') 写入，或检查目录权限",
+            "file_operation": "文件写入失败 → 用 execute_terminal('cat > file') 写入，或检查目录权限",
             "edit_file": "编辑失败 → old_string 与文件内容不完全一致（含缩进/空格），用 read_local_file 重新读取确认",
             "grep_code": "搜索无结果 → 放宽正则表达式，或改用 file_types 不过滤先看全部文件，或用 list_directory 确定文件位置",
             "run_tests": "测试失败 → 查看失败详情，用 grep_code 定位问题代码，用 edit_file 修复后重新 run_tests",
             # Obsidian 类
             "search_obsidian": "搜索无结果 → 用 grep_code 搜索本地文件，或用 list_directory 浏览 vault",
             "read_obsidian": "读取失败 → 用 read_local_file(path) 直接读取文件",
-            "write_obsidian": "写入失败 → 用 file_writer(path) 或 execute_terminal('cat > file') 写入",
+            "write_obsidian": "写入失败 → 用 file_operation(action='write', path=...) 或 execute_terminal('cat > file') 写入",
             "append_obsidian": "追加失败 → 用 read_obsidian 读取原内容，合并后用 write_obsidian 回写",
             "classify_note": "分类失败 → 手动用 batch_move_notes 移动到目标文件夹",
             # Notion 类
@@ -190,7 +190,7 @@ class ToolRunnerMixin:
                     content_preview = tool_args["content"][:40].replace("\n", " ")
                     context = f"写入: {content_preview}"
             # 文件写入前创建检查点（允许回滚）
-            if tool_name == "file_writer" and isinstance(tool_args, dict):
+            if tool_name in ("file_writer", "file_operation") and isinstance(tool_args, dict):
                 path = tool_args.get("path", "")
                 if path and os.path.exists(path):
                     try:
@@ -278,7 +278,7 @@ class ToolRunnerMixin:
                     pass
 
             # 自动运行
-            if tool_name == "file_writer" and not result.startswith("错误"):
+            if tool_name in ("file_writer", "file_operation") and not result.startswith("错误"):
                 filepath = tool_args.get("path", "") if isinstance(tool_args, dict) else ""
                 if filepath.endswith(".py"):
                     try:
