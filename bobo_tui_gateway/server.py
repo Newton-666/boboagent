@@ -460,10 +460,13 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
                         "session_id": sid,
                     })
                 elif event_type == "tool_result":
+                    result_text = data.get("result", "")
                     _emit("tool.complete", sid, {
                         "tool_id": data.get("name", ""),
                         "name": data.get("name", ""),
                         "duration": data.get("duration", 0),
+                        "result_text": result_text,
+                        "error": "" if data.get("success", True) else (result_text[:200] if result_text else "工具执行失败"),
                         "session_id": sid,
                     })
                 elif event_type == "complete":

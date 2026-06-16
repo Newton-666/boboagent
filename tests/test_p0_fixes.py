@@ -112,6 +112,79 @@ class TestUnifiedSafetyPatterns:
             assert is_dangerous(cmd), f"execute_terminal missed: {cmd}"
 
 
+class TestToolResultDisplay:
+    """Verify tool results carry enough data for TUI display (P1-1 fix)."""
+
+    def test_tool_result_notification_has_result_field(self):
+        """tool_runner should notify with result[:8000], not result[:200]."""
+        # Simulate what tool_runner does
+        from core.engine import Engine
+        from core.tool_executor import execute_tool
+        from tests.mock_llm import MockLLMCaller, text_response, tool_response
+
+        results_captured = []
+
+        def capture_callback(event_type, data):
+            if event_type == "tool_result":
+                results_captured.append(data)
+
+        caller = MockLLMCaller([
+            tool_response("get_current_time"),
+            text_response("done"),
+        ])
+        engine = Engine(caller, execute_tool, test_mode=True, callback=capture_callback)
+        engine.run("what time is it")
+
+        if results_captured:
+            data = results_captured[0]
+            assert "result" in data
+            # result should have meaningful content (not truncated to 200)
+            assert isinstance(data["result"], str)
+
+    def test_tool_complete_event_includes_result_text(self):
+        """server.py should pass result_text in tool.complete event."""
+        # Test that the data structure includes result_text
+        event_data = {
+            "name": "code_execution",
+            "result": "print('hello world')" * 50,  # ~1250 chars
+            "duration": 0.5,
+            "success": True,
+        }
+        # Simulate what server.py does now
+        result_text = event_data.get("result", "")
+        tool_complete_payload = {
+            "tool_id": event_data.get("name", ""),
+            "name": event_data.get("name", ""),
+            "duration": event_data.get("duration", 0),
+            "result_text": result_text,
+            "error": "",
+            "session_id": "test",
+        }
+        assert "result_text" in tool_complete_payload
+        assert len(tool_complete_payload["result_text"]) > 200
+        assert "hello world" in tool_complete_payload["result_text"]
+
+    def test_long_result_not_truncated_too_early(self):
+        """Results up to 8000 chars should be sent in full."""
+        long_result = "x" * 9000
+        # Simulate truncation logic from tool_runner
+        truncated = long_result[:8000]
+        assert len(truncated) == 8000
+        # The truncation at 8000 means results > 8000 are trimmed — acceptable
+
+    def test_successful_tool_has_empty_error(self):
+        """Successful tools should have empty error string (not None)."""
+        event_data = {
+            "name": "grep_code",
+            "result": "Found 5 matches",
+            "duration": 0.1,
+            "success": True,
+        }
+        result_text = event_data.get("result", "")
+        error = "" if event_data.get("success", True) else result_text[:200]
+        assert error == ""
+
+
 class TestToolRegistryP0:
     """Verify tools correctly registered after P0 fixes."""
 

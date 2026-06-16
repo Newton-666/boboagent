@@ -301,7 +301,9 @@ class ToolRunnerMixin:
                         pass
 
             self._notify("tool_result", {
-                "name": tool_name, "args": tool_args, "result": result[:200],
+                "name": tool_name, "args": tool_args,
+                "result": result[:8000],
+                "result_truncated": len(result) > 8000,
                 "duration": duration, "success": not result.startswith("错误")
             })
             tool_results.append({
