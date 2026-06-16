@@ -63,6 +63,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._verification_attempted = False  # 防止验证死循环
         self._checkpoints: list[dict] = []   # 对话回退快照
         self._interrupt_event: threading.Event | None = None
+        self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -89,6 +90,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 用户让你做某事时，直接执行，不要只给计划或描述。完成后再报告结果。
 - 如果工具调用失败，尝试替代方案，不要编造结果。诚实报告阻塞比伪造输出好。
 - 在完成任务之前，继续调用工具。不要提前停止。
+
+## 防循环规则（重要）
+
+- **不要重复调用同一个工具读取同一个文件**。read_local_file 读一次就够了，内容不会变。
+- 如果文件被截断了（输出末尾有"... (内容已截断，共 XXX 字符)"），用 offset+limit 分页继续读下一段。读完就停。
+- grep_code 搜索一次就够了。如果无结果，换关键词或换搜索路径，不要原样重试。
+- **最多连续调用同一个工具 3 次**。3 次后必须换方法或报告给用户。
 
 ## 对话规则
 
@@ -751,6 +759,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.current_depth = 0
         self.current_tool_round = 0
         self._tool_failures = {}
+        self._recent_tool_calls = []
         self._file_checkpoints.clear()
         self._pending_content = None
         self._pending_tool_calls = None

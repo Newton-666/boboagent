@@ -312,6 +312,27 @@ class ToolRunnerMixin:
             })
             self._record_message("tool_result", result=result[:200])
 
+        # ── Loop detection: warn LLM if same tool+args called 3+ times ──
+        for tc, tool_name, tool_args in prepared:
+            args_key = str(sorted(tool_args.items())) if tool_args else "{}"
+            self._recent_tool_calls.append((tool_name, args_key))
+        if len(self._recent_tool_calls) > 20:
+            self._recent_tool_calls = self._recent_tool_calls[-20:]
+
+        from collections import Counter
+        recent = self._recent_tool_calls[-10:]
+        for (name, args), count in Counter(recent).items():
+            if count >= 3:
+                warning = (
+                    f"[防循环] '{name}' 已重复调用 {count} 次（相同参数）。\n"
+                    f"请停止。若文件截断，用 offset+limit 分页继续。否则基于已有信息继续或报告用户。"
+                )
+                tool_results.append({
+                    "tool_call_id": "system-loop-detector", "role": "tool",
+                    "content": warning
+                })
+                break
+
         return tool_results
 
     def _restore_checkpoint(self, path: str = "") -> str:
