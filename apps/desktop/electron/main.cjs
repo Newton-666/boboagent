@@ -30,7 +30,15 @@ function resolvePython() {
 
 function startBackend() {
   const python = resolvePython()
-  const projectRoot = path.resolve(__dirname, '..', '..', '..')
+  const isPackaged = app.isPackaged
+  let projectRoot
+  if (isPackaged) {
+    // Packaged .dmg: Python backend is bundled in Resources
+    projectRoot = path.join(process.resourcesPath, 'bobo-backend')
+  } else {
+    // Dev: 3 levels up from electron/ to project root
+    projectRoot = path.resolve(__dirname, '..', '..', '..')
+  }
 
   const env = {
     ...process.env,

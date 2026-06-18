@@ -230,9 +230,9 @@ function App() {
     setDebugInfo('Switching session...')
     setSessionId(sid)
     setMessages([])
-    // Load history via session.activate
-    const result = await gw.call('session.activate', { session_id: sid })
-    if (result && typeof result === 'object' && !('error' in result) && 'messages' in result) {
+    // Load history via session.resume
+    const result = await gw.call('session.resume', { session_id: sid })
+    if (result && typeof result === 'object' && !('error' in result)) {
       const r = result as { messages?: Array<{ role: string; text: string }> }
       if (r.messages && r.messages.length > 0) {
         setMessages(r.messages.map((m, i) => ({

@@ -35,6 +35,31 @@
     "files": [
       "dist/**/*",
       "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../bobo_tui_gateway",
+        "to": "bobo-backend/bobo_tui_gateway",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../core",
+        "to": "bobo-backend/core",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../tools",
+        "to": "bobo-backend/tools",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../config.py",
+        "to": "bobo-backend/config.py"
+      },
+      {
+        "from": "../../pyproject.toml",
+        "to": "bobo-backend/pyproject.toml"
+      }
     ]
   }
 }
