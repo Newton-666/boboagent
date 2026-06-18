@@ -42,7 +42,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tool-expand { cursor:pointer; color:#5b9bd5; margin-left:4px; }
 .status { font-size:12px; color:var(--text2); text-align:center; padding:4px; }
 /* Code blocks */
-.msg .txt pre { background:#f4f4f0; border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin:8px 0; overflow-x:auto; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; line-height:1.5; color:#333; }
+.code-block-wrapper { margin:8px 0; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.code-header { display:flex; align-items:center; justify-content:space-between; background:var(--bg2); padding:6px 12px; border-bottom:1px solid var(--border); }
+.code-lang { font-size:11px; color:var(--text2); text-transform:uppercase; }
+.copy-btn { background:none; border:1px solid var(--border); border-radius:4px; color:var(--text2); cursor:pointer; font-size:11px; padding:2px 8px; }
+.copy-btn:hover { background:var(--bg3); }
+.copy-btn.copied { color:#50a14f; border-color:#50a14f; }
+.msg .txt pre { background:#f4f4f0; border:none; padding:12px 16px; margin:0; overflow-x:auto; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; line-height:1.5; color:#333; }
 .msg .txt code { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; background:rgba(0,0,0,0.05); padding:1px 4px; border-radius:3px; }
 .msg .txt pre code { background:none; padding:0; font-size:13px; }
 /* Diff */
@@ -143,6 +149,13 @@ function setConnected(c) {
   statusText.textContent = c ? 'Connected' : 'Offline';
 }
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function copyCode(btn, code) {
+  navigator.clipboard.writeText(code).then(function() {
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = '📋 Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
 function highlight(code, lang) {
   var kw = '\\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|in|not|and|or|True|False|None|pass|break|continue|yield|async|await|function|const|let|var|export|default|new|this|throw|catch|go|func|defer|struct|interface|map|chan|fn|let|mut|pub|impl|trait|enum|mod|use)\\b';
   var escaped = esc(code);
@@ -163,7 +176,17 @@ function highlight(code, lang) {
 function md(s) {
   var codeBlocks = [];
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-    codeBlocks.push('<pre><code>' + highlight(code.trim(), lang) + '</code></pre>');
+    var rawCode = code.trim();
+    var langLabel = lang || '';
+    codeBlocks.push(
+      '<div class="code-block-wrapper">' +
+      '<div class="code-header">' +
+      '<span class="code-lang">' + esc(langLabel) + '</span>' +
+      '<button class="copy-btn" onclick="copyCode(this,' + JSON.stringify(rawCode) + ')">📋 Copy</button>' +
+      '</div>' +
+      '<pre><code>' + highlight(rawCode, lang) + '</code></pre>' +
+      '</div>'
+    );
     return '%%CODEBLOCK' + (codeBlocks.length-1) + '%%';
   });
   var tables = [];
@@ -406,43 +429,34 @@ inputEl.addEventListener('keydown', function(e) {
 });
 
 // ── Settings ────────────────────────────────────────────────────────────
-var settingsModal = document.getElementById('settings-modal');
-var settingsOpen = false;
+(function() {
+  var modal = document.getElementById('settings-modal');
+  var gear = document.getElementById('settings-icon');
+  var close = document.getElementById('settings-close');
+  var save = document.getElementById('settings-save');
 
-async function openSettings() {
-  if (settingsOpen) return;
-  settingsOpen = true;
-  var setupResult = await call('setup.status', {});
-  var fullResult = await call('config.full', {});
-  var display = (fullResult.config && fullResult.config.display) || {};
+  gear.onclick = async function() {
+    var r1 = await call('setup.status', {});
+    var r2 = await call('config.full', {});
+    document.getElementById('cfg-provider').value = (r1.provider) || 'deepseek';
+    document.getElementById('cfg-apikey').placeholder = r1.provider_configured ? '已配置，输入新key覆盖' : '输入API Key';
+    document.getElementById('cfg-apikey').value = '';
+    modal.classList.add('open');
+  };
 
-  document.getElementById('cfg-provider').value = setupResult.provider || 'deepseek';
-  document.getElementById('cfg-model').value = display.model || '';
-  document.getElementById('cfg-apikey').value = setupResult.provider_configured ? '(已配置)' : '';
-  document.getElementById('cfg-apikey').placeholder = setupResult.provider_configured ? '已配置，输入新key覆盖' : '输入API Key';
-  document.getElementById('cfg-obsidian').value = '';
-  settingsModal.classList.add('open');
-}
+  close.onclick = function() { modal.classList.remove('open'); };
+  modal.onclick = function(e) { if (e.target === modal) modal.classList.remove('open'); };
 
-function closeSettings() {
-  settingsModal.classList.remove('open');
-  settingsOpen = false;
-}
-
-settingsModal.addEventListener('click', function(e) {
-  if (e.target === settingsModal) closeSettings();
-});
-
-document.getElementById('settings-save').addEventListener('click', async function() {
-  var provider = document.getElementById('cfg-provider').value;
-  var apiKey = document.getElementById('cfg-apikey').value.trim();
-
-  if (apiKey && apiKey !== '(已配置)') {
-    await call('setup.submit', { provider: provider, api_key: apiKey });
-    addStatus('API Key 已保存');
-  }
-  closeSettings();
-});
+  save.onclick = async function() {
+    var provider = document.getElementById('cfg-provider').value;
+    var apiKey = document.getElementById('cfg-apikey').value.trim();
+    if (apiKey && apiKey !== '(已配置)') {
+      await call('setup.submit', { provider: provider, api_key: apiKey });
+      addStatus('API Key 已保存');
+    }
+    modal.classList.remove('open');
+  };
+})();
 </script>
 <div id="settings-modal">
   <div id="settings-panel">
@@ -464,7 +478,7 @@ document.getElementById('settings-save').addEventListener('click', async functio
     <input id="cfg-obsidian" type="text" placeholder="/path/to/vault (需手动在 ~/.bobo/.env 设置)" />
     <div style="margin-top:16px;">
       <button class="btn-save" id="settings-save">保存</button>
-      <button class="btn-close" id="settings-close" onclick="closeSettings()">取消</button>
+      <button class="btn-close" id="settings-close">取消</button>
     </div>
   </div>
 </div>
