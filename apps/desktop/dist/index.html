@@ -44,6 +44,11 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg .txt .diff-add { color:#7ec87b; }
 .msg .txt .diff-del { color:#f48771; }
 .msg .txt .diff-file { color:#5b9bd5; font-weight:600; }
+/* Tables */
+.msg .txt table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
+.msg .txt th, .msg .txt td { border:1px solid var(--border); padding:6px 12px; text-align:left; }
+.msg .txt th { background:var(--bg3); color:#5b9bd5; font-weight:600; }
+.msg .txt tr:nth-child(even) { background:rgba(255,255,255,0.03); }
 #input-box { padding:12px 16px 24px; position:relative; }
 #input { width:100%; padding:14px 48px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
 #input:focus { border-color:#555; }
@@ -125,18 +130,39 @@ function setConnected(c) {
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function md(s) {
   s = esc(s);
-  // Code blocks: ```lang\n...\n```
+  // Code blocks
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     return '<pre><code>' + code.trim() + '</code></pre>';
   });
-  // Inline code: `...`
+  // Tables: detect |---|---| pattern, convert surrounding lines
+  s = s.replace(/((?:^\|.+$\n?)+)/gm, function(block) {
+    var lines = block.trim().split('\n');
+    if (lines.length < 2) return block;
+    // Check if second line is a separator like |---|---|
+    if (!/^\|[\s\-:]+\|$/.test(lines[1])) return block;
+    var html = '<table>';
+    // Header
+    html += '<thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+c.trim()+'</th>';}).join('') + '</tr></thead>';
+    // Body
+    html += '<tbody>';
+    for (var i = 2; i < lines.length; i++) {
+      html += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+c.trim()+'</td>';}).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  });
+  // Inline code
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   // Bold
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Diff lines (must come after code blocks to avoid matching inside <pre>)
-  s = s.replace(/^(\+.*)$/gm, '<span class="diff-add">$1</span>');
-  s = s.replace(/^(-.*)$/gm, '<span class="diff-del">$1</span>');
-  s = s.replace(/^(@@ .* @@)$/gm, '<span class="diff-file">$1</span>');
+  // Diff lines
+  var lines = s.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    if (/^\+/.test(lines[i]) && !lines[i].match(/^\+[\-\s]/)) lines[i] = '<span class="diff-add">' + lines[i] + '</span>';
+    else if (/^\-/.test(lines[i]) && !lines[i].match(/^\-[\-\s]/)) lines[i] = '<span class="diff-del">' + lines[i] + '</span>';
+    else if (/^@@/.test(lines[i])) lines[i] = '<span class="diff-file">' + lines[i] + '</span>';
+  }
+  s = lines.join('\n');
   return s;
 }
 
