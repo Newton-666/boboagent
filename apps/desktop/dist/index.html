@@ -1,20 +1,33 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" />
-<title>Bobo</title>
+<meta charset="UTF-8" /><title>Bobo</title>
 <style>
 :root { --bg: #212121; --bg2: #171717; --bg3: #2f2f2f; --text: #ececec; --text2: #b4b4b4; --border: #333; --hover: #2a2a2a; --green: #4caf50; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size:15px; line-height:1.6; overflow:hidden; height:100vh; }
-#app { display:flex; flex-direction:column; height:100vh; max-width:800px; margin:0 auto; }
+#app { display:flex; height:100vh; }
+/* Sidebar */
+#sidebar { width:240px; min-width:240px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+#sidebar-header { padding:12px; }
+#new-chat { width:100%; padding:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:14px; }
+#new-chat:hover { background:var(--hover); }
+#session-list { flex:1; overflow-y:auto; padding:4px 8px; }
+.session-item { padding:10px 12px; border-radius:8px; cursor:pointer; color:var(--text2); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.session-item:hover { background:var(--hover); }
+.session-item.active { background:var(--bg3); color:var(--text); }
+#sidebar-footer { padding:12px; font-size:12px; color:var(--text2); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+#sidebar-footer .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+#sidebar-footer .dot.green { background:var(--green); }
+#sidebar-footer .dot.red { background:#f44336; }
+/* Main */
+#main { flex:1; display:flex; flex-direction:column; max-width:800px; margin:0 auto; width:100%; }
 #welcome { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; }
 #welcome h1 { font-size:32px; font-weight:600; }
 #welcome p { color:var(--text2); }
 #chat { flex:1; overflow-y:auto; padding:24px 16px; }
 .msg { padding:10px 18px; border-radius:12px; margin-bottom:20px; max-width:85%; }
 .msg.user { background:var(--bg3); border:1px solid var(--border); margin-left:auto; }
-.msg.bobo {  }
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .tool { font-size:12px; color:var(--text2); padding:4px 0; }
@@ -31,119 +44,159 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 </head>
 <body>
 <div id="app">
-  <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p><div id="debug">Starting...</div></div>
-  <div id="chat"></div>
-  <div id="input-box">
-    <textarea id="input" rows="1" placeholder="Connecting..." disabled></textarea>
-    <button id="send" disabled>↑</button>
+  <div id="sidebar">
+    <div id="sidebar-header"><button id="new-chat">+ 新对话</button></div>
+    <div id="session-list"></div>
+    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span></div>
+  </div>
+  <div id="main">
+    <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p><div id="debug">Starting...</div></div>
+    <div id="chat"></div>
+    <div id="input-box">
+      <textarea id="input" rows="1" placeholder="Connecting..." disabled></textarea>
+      <button id="send" disabled>↑</button>
+    </div>
   </div>
 </div>
 <script>
-// ── Gateway (same JSON-RPC protocol as TUI) ──────────────────────────
-const handlers = new Map();
-let reqId = 0;
-const pending = new Map();
-let currentSessionId = null;
-let connected = false;
-
+// ── Gateway ────────────────────────────────────────────────────────────
+const handlers = new Map(); let reqId = 0; const pending = new Map();
+let currentSessionId = null; let connected = false;
 function connect() {
-  if (!window.boboAPI) {
-    debug('Browser mode — no backend');
-    return;
-  }
+  if (!window.boboAPI) { debug('Browser mode'); return; }
   debug('Connecting...');
   window.boboAPI.onMessage(function(msg) {
     if (!msg || typeof msg !== 'object') return;
-    // Events
     if (msg.method === 'event' && msg.params && msg.params.type) {
       var h = handlers.get(msg.params.type);
       if (h) h(msg.params.payload || msg.params);
       return;
     }
-    // Responses
-    if (msg.id) {
-      var resolve = pending.get(msg.id);
-      if (resolve) { pending.delete(msg.id); resolve(msg.result || msg.error || {}); }
-    }
+    if (msg.id) { var r = pending.get(msg.id); if (r) { pending.delete(msg.id); r(msg.result || msg.error || {}); } }
   });
 }
-
-function on(event, handler) { handlers.set(event, handler); }
-
-function call(method, params) {
+function on(e, h) { handlers.set(e, h); }
+function call(m, p) {
   if (!window.boboAPI) return Promise.resolve({});
   return new Promise(function(resolve) {
-    var id = 'req-' + (++reqId);
-    pending.set(id, resolve);
-    window.boboAPI.send({ jsonrpc: '2.0', id: id, method: method, params: params || {} });
+    var id = 'req-' + (++reqId); pending.set(id, resolve);
+    window.boboAPI.send({ jsonrpc:'2.0', id:id, method:m, params:p||{} });
     setTimeout(function() { pending.delete(id); resolve({}); }, 15000);
   });
 }
-
 function sendPrompt(text) {
   if (!currentSessionId || !window.boboAPI) return;
-  window.boboAPI.send({ jsonrpc: '2.0', id: 'prompt-' + (++reqId), method: 'prompt.submit', params: { session_id: currentSessionId, text: text } });
+  window.boboAPI.send({ jsonrpc:'2.0', id:'prompt-'+(++reqId), method:'prompt.submit', params:{ session_id:currentSessionId, text:text } });
 }
 
-// ── UI ────────────────────────────────────────────────────────────────
+// ── UI refs ────────────────────────────────────────────────────────────
 var chatEl = document.getElementById('chat');
 var welcomeEl = document.getElementById('welcome');
 var inputEl = document.getElementById('input');
 var sendEl = document.getElementById('send');
 var debugEl = document.getElementById('debug');
+var sessionListEl = document.getElementById('session-list');
+var statusDot = document.getElementById('status-dot');
+var statusText = document.getElementById('status-text');
 var messaging = false;
+var sessions = [];
 
 function debug(msg) { debugEl.textContent = '[' + msg + ']'; }
+function setConnected(c) {
+  connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
+  inputEl.placeholder = c ? '给 Bobo 发送消息...' : 'Connecting...';
+  statusDot.className = 'dot ' + (c ? 'green' : 'red');
+  statusText.textContent = c ? 'Connected' : 'Offline';
+}
+function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Messages ───────────────────────────────────────────────────────────
+function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
 
 function addMsg(role, text, id, append) {
-  if (welcomeEl.style.display !== 'none') welcomeEl.style.display = 'none';
+  welcomeEl.style.display = 'none';
   var existing = document.getElementById(id);
   if (existing) { existing.querySelector('.txt').textContent = append ? existing.querySelector('.txt').textContent + text : text; return; }
-
-  var div = document.createElement('div');
-  div.id = id;
-  div.className = 'msg ' + role;
-  div.innerHTML = '<div class="who">' + (role === 'user' ? 'You' : 'Bobo') + '</div><div class="txt">' + esc(text) + '</div>';
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  var div = document.createElement('div'); div.id = id; div.className = 'msg ' + role;
+  div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + esc(text) + '</div>';
+  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
-
 function addTool(name) {
-  if (welcomeEl.style.display !== 'none') welcomeEl.style.display = 'none';
-  var div = document.createElement('div');
-  div.className = 'tool';
-  div.textContent = '🔧 ' + name;
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  welcomeEl.style.display = 'none';
+  var div = document.createElement('div'); div.className = 'tool'; div.textContent = '🔧 ' + name;
+  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
-
 function addStatus(text) {
-  var div = document.createElement('div');
-  div.className = 'status';
-  div.textContent = text;
-  chatEl.appendChild(div);
+  var div = document.createElement('div'); div.className = 'status'; div.textContent = text;
+  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────
+async function loadSessions() {
+  var result = await call('session.list');
+  if (result && result.sessions) {
+    sessions = result.sessions;
+    renderSessions();
+  }
+}
+function renderSessions() {
+  sessionListEl.innerHTML = '';
+  sessions.forEach(function(s) {
+    var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':'');
+    div.textContent = s.title || s.id;
+    div.onclick = function() { loadSession(s.id); };
+    sessionListEl.appendChild(div);
+  });
+}
+function updateSessionTitle(sid, text) {
+  var s = sessions.find(function(x) { return x.id === sid; });
+  if (s) { s.title = text || s.title; s.title = s.title.substring(0, 35); renderSessions(); }
+}
+
+async function loadSession(sid) {
+  var result = await call('session.resume', { session_id: sid });
+  if (!result || result.error) return;
+  currentSessionId = sid;
+  clearChat();
+  // Render existing messages
+  var msgs = result.messages || [];
+  msgs.forEach(function(m) {
+    if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
+    else if (m.role === 'assistant') addMsg('bobo', m.text, 'hist-' + Math.random());
+    else if (m.role === 'tool') addTool(m.text ? m.text.substring(0, 40) : 'Tool');
+    else if (m.role === 'system' && m.text && m.text.length < 200) addStatus(m.text);
+  });
   chatEl.scrollTop = chatEl.scrollHeight;
+  call('session.activate', { session_id: sid });
+  renderSessions();
+  // Update title with first user message
+  var firstUserMsg = msgs.find(function(m) { return m.role === 'user'; });
+  if (firstUserMsg) updateSessionTitle(sid, firstUserMsg.text.substring(0, 30));
 }
 
-function esc(s) { return s.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
-function setConnected(c) {
-  connected = c;
-  inputEl.disabled = !c;
-  sendEl.disabled = !c;
-  inputEl.placeholder = c ? '给 Bobo 发送消息...' : 'Connecting...';
-}
-
-// ── Connect ───────────────────────────────────────────────────────────
-connect();
-
-on('gateway.ready', async function() {
-  debug('Connected ✓');
-  setConnected(true);
+async function newChat() {
   var result = await call('session.create', { title: 'New Chat' });
   if (result && result.session_id) {
     currentSessionId = result.session_id;
-    call('session.activate', { session_id: currentSessionId });
+    clearChat();
+    sessions.unshift({ id: result.session_id, title: 'New Chat' });
+    renderSessions();
+    call('session.activate', { session_id: result.session_id });
+  }
+}
+
+// ── Connect & events ───────────────────────────────────────────────────
+connect();
+
+on('gateway.ready', async function() {
+  debug('Connected ✓'); setConnected(true);
+  await loadSessions();
+  // If no sessions exist, create one
+  if (sessions.length === 0) {
+    await newChat();
+  } else {
+    // Resume most recent session
+    await loadSession(sessions[0].id);
   }
 });
 
@@ -155,34 +208,27 @@ on('message.delta', function(data) {
   addMsg('bobo', t, streamingId, true);
 });
 on('message.complete', function(data) {
-  messaging = false;
-  debug('Connected ✓');
-  // Remove streaming div, replace with final
-  if (streamingId) {
-    var old = document.getElementById(streamingId);
-    if (old) old.remove();
-    streamingId = null;
-  }
+  messaging = false; debug('Connected ✓');
+  if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
   var t = data ? data.final_text || '' : '';
   if (t) addMsg('bobo', t, 'msg-' + Date.now());
+  // Refresh session list (title may have been updated by backend)
+  loadSessions();
 });
 on('tool.start', function(data) { addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool'); });
-on('tool.complete', function() {});
 on('status.update', function(data) {
-  if (data && data.text && data.text !== '工具执行完成' && data.text !== '正在思考...')
-    addStatus(data.text);
+  if (data && data.text && data.text !== '工具执行完成' && data.text !== '正在思考...') addStatus(data.text);
 });
 on('backend.exited', function() { setConnected(false); debug('Backend disconnected'); });
 
-// ── Input ─────────────────────────────────────────────────────────────
+// ── Input ──────────────────────────────────────────────────────────────
+document.getElementById('new-chat').addEventListener('click', newChat);
 sendEl.addEventListener('click', function() {
-  var text = inputEl.value.trim();
-  if (!text || !connected) return;
+  var text = inputEl.value.trim(); if (!text || !connected) return;
   inputEl.value = '';
   addMsg('user', text, 'user-' + Date.now());
   sendPrompt(text);
 });
-
 inputEl.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendEl.click(); }
 });
