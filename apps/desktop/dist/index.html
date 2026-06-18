@@ -33,14 +33,19 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .msg .txt strong, .msg .txt b { color:#5b9bd5; }
-.tool { font-size:12px; color:var(--text2); padding:4px 12px; margin:4px 0; cursor:pointer; border-radius:6px; }
-.tool:hover { background:rgba(0,0,0,0.02); }
-.tool .dot { color:#5b9bd5; margin-right:6px; }
-.tool .tool-status { font-size:10px; color:var(--text-muted); margin-left:8px; }
-.tool .tool-toggle { color:var(--text-muted); margin-left:6px; font-size:10px; }
-.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:2px 8px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:120px; overflow-y:auto; display:none; }
+.tool { font-size:13px; color:var(--text2); padding:6px 12px; margin:4px 0; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; border:1px solid transparent; }
+.tool:hover { background:rgba(0,0,0,0.02); border-color:var(--border); }
+.tool .dot { color:var(--text-muted); font-size:10px; flex-shrink:0; animation:dotPulse 3s infinite; }
+.tool .dot.done { animation:none; color:#50a14f; }
+.tool .dot.fail { animation:none; color:#f48771; }
+.tool .tool-name { flex-shrink:0; }
+.tool .tool-context { color:var(--text-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tool .tool-status { font-size:10px; color:var(--text-muted); margin-left:auto; flex-shrink:0; }
+.tool .tool-toggle { color:var(--text-muted); font-size:10px; flex-shrink:0; }
+.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 24px; padding:4px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:120px; overflow-y:auto; display:none; }
 .tool-result.open { display:block; }
 .tool-result.error { color:#f48771; background:rgba(244,135,113,0.06); display:block; }
+@keyframes dotPulse { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
 /* Thinking */
 .think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:rgba(91,155,213,0.04); border:1px solid rgba(91,155,213,0.12); }
 .think-box.show { display:block; }
@@ -261,24 +266,42 @@ var toolResults = {};
 
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
-  // Freeze thinking box
   if (thinkBoxEl) {
     thinkBoxEl.querySelector('.think-label').innerHTML = 'Thought';
     thinkBoxEl.style.opacity = '0.6';
   }
 
-  var label = name;
-  if (context && context !== name) label += ' (' + context + ')';
+  // Friendly names
+  var friendly = name;
+  var friendlyMap = {
+    'file_operation': '写入文件', 'write_obsidian': '写入笔记', 'append_obsidian': '追加笔记',
+    'read_local_file': '读取文件', 'read_obsidian': '读取笔记',
+    'grep_code': '搜索代码', 'search_code': '搜索代码', 'search_obsidian': '搜索笔记',
+    'code_execution': '执行代码', 'execute_terminal': '终端命令',
+    'edit_file': '编辑文件', 'run_tests': '运行测试',
+    'web_search': '网络搜索', 'web_fetch': '抓取网页', 'web_extract': '提取内容',
+    'git_status': 'Git 状态', 'github_create_pr': '创建 PR', 'github_pr_diff': 'PR 差异',
+    'index_project': '项目索引', 'review_diff': '审查代码',
+    'cross_search': '跨平台搜索', 'cross_project_search': '跨项目搜索',
+    'code_to_obsidian': '保存知识', 'review_to_obsidian': '保存审查',
+    'save_memory': '保存记忆', 'search_memory': '搜索记忆',
+    'get_current_time': '获取时间', 'list_directory': '列出目录',
+    'notion_search': '搜索 Notion', 'notion_create_page': '创建 Notion 页面',
+    'search_emails': '搜索邮件', 'send_notification': '发送通知',
+  };
+  if (friendlyMap[name]) friendly = friendlyMap[name];
 
   var div = document.createElement('div'); div.className = 'tool';
   div.id = 'tool-' + toolId;
-  div.innerHTML = '<span class="dot">●</span><span>' + esc(label) +
-    '</span><span class="tool-status">running...</span>' +
+  div.innerHTML = '<span class="dot">●</span>' +
+    '<span class="tool-name">' + esc(friendly) + '</span>' +
+    (context && context !== name ? '<span class="tool-context">' + esc(context) + '</span>' : '') +
+    '<span class="tool-status">running</span>' +
     '<span class="tool-toggle" style="display:none">▸</span>' +
     '<div class="tool-result"></div>';
   div.onclick = function() {
     var r = div.querySelector('.tool-result');
-    if (r) { r.classList.toggle('open'); div.querySelector('.tool-toggle').textContent = r.classList.contains('open') ? '▾' : '▸'; }
+    if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; }
   };
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
@@ -286,23 +309,25 @@ function addTool(name, context, toolId) {
 function updateToolResult(toolId, resultText, error) {
   var div = document.getElementById('tool-' + toolId);
   if (!div) return;
+  var dot = div.querySelector('.dot');
   var statusEl = div.querySelector('.tool-status');
   var toggleEl = div.querySelector('.tool-toggle');
   var resultEl = div.querySelector('.tool-result');
 
   if (error) {
+    dot.className = 'dot fail';
     statusEl.textContent = 'failed';
     statusEl.style.color = '#f48771';
     resultEl.className = 'tool-result error open';
-    resultEl.textContent = '❌ ' + error.substring(0, 200);
+    resultEl.textContent = error.substring(0, 200);
   } else {
+    dot.className = 'dot done';
     statusEl.textContent = 'done';
     statusEl.style.color = '#50a14f';
     if (resultText) {
       var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
       if (preview.length > 120) preview = preview.substring(0, 120) + '...';
       resultEl.textContent = preview;
-      // Store full text as attribute for detail view
       div.setAttribute('data-result', resultText);
     }
     toggleEl.style.display = 'inline';
