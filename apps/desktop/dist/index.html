@@ -143,10 +143,27 @@ function setConnected(c) {
   statusText.textContent = c ? 'Connected' : 'Offline';
 }
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function highlight(code, lang) {
+  var kw = '\\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|in|not|and|or|True|False|None|pass|break|continue|yield|async|await|function|const|let|var|export|default|new|this|throw|catch|go|func|defer|struct|interface|map|chan|fn|let|mut|pub|impl|trait|enum|mod|use)\\b';
+  var escaped = esc(code);
+  // Strings
+  escaped = escaped.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|".*?"|'.*?')/g, '<span style="color:#50a14f">$1</span>');
+  escaped = escaped.replace(/(''[^']*''|"""[^"]*""")/g, '<span style="color:#50a14f">$1</span>');
+  // Comments
+  escaped = escaped.replace(/(#.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">$1</span>');
+  escaped = escaped.replace(/(\/\/.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">$1</span>');
+  // Numbers
+  escaped = escaped.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#c18401">$1</span>');
+  // Keywords
+  escaped = escaped.replace(new RegExp(kw, 'g'), '<span style="color:#a626a4;font-weight:600">$1</span>');
+  // Decorators
+  escaped = escaped.replace(/(@\w+)/g, '<span style="color:#c18401">$1</span>');
+  return escaped;
+}
 function md(s) {
   var codeBlocks = [];
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-    codeBlocks.push('<pre><code>' + esc(code.trim()) + '</code></pre>');
+    codeBlocks.push('<pre><code>' + highlight(code.trim(), lang) + '</code></pre>');
     return '%%CODEBLOCK' + (codeBlocks.length-1) + '%%';
   });
   var tables = [];
