@@ -10,6 +10,9 @@ interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   text: string
   toolName?: string
+  toolResult?: string
+  toolDuration?: number
+  toolError?: string
 }
 
 interface ChatSession {
@@ -28,8 +31,29 @@ function App() {
   const [debugInfo, setDebugInfo] = useState('Starting...')
   const chatEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Track streaming text buffer to avoid React re-render thrashing
+  const streamingBufRef = useRef('')
+  const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // Flush streaming buffer to messages state (throttled)
+  const flushStreaming = useCallback(() => {
+    if (streamingTimerRef.current) {
+      clearTimeout(streamingTimerRef.current)
+      streamingTimerRef.current = null
+    }
+    const buf = streamingBufRef.current
+    if (!buf) return
+    streamingBufRef.current = ''
+    setMessages((prev) => {
+      const last = prev[prev.length - 1]
+      if (last && last.role === 'assistant' && last.id === 'streaming') {
+        return [...prev.slice(0, -1), { ...last, text: last.text + buf }]
+      }
+      return [...prev, { id: 'streaming', role: 'assistant', text: buf }]
+    })
+  }, [])
 
   useEffect(() => {
     setDebugInfo('Connecting...')
@@ -40,30 +64,47 @@ function App() {
       setDebugInfo('Connected ✓')
       setConnected(true)
       const result = await gw.call('session.create', { title: 'New Chat' })
-      if (result && typeof result === 'object' && 'session_id' in result) {
-        const sid = (result as Record<string, unknown>).session_id as string
+      if (result && typeof result === 'object' && !('error' in result) && 'session_id' in result) {
+        const r = result as Record<string, unknown>
+        const sid = r.session_id as string
         setSessionId(sid)
         setSessions(prev => [...prev, { id: sid, title: 'New Chat' }])
         gw.subscribe(sid)
+      } else if (result && typeof result === 'object' && 'error' in result) {
+        const err = result as { error: { message?: string } }
+        setDebugInfo(`Error: ${err.error?.message || 'session.create failed'}`)
+      }
+    })
+
+    gw.on('thinking.delta', (data) => {
+      const text = (data as Record<string, string>).text || ''
+      if (text) {
+        setDebugInfo(`Thinking: ${text.slice(0, 60)}...`)
       }
     })
 
     gw.on('message.delta', (data) => {
       const text = (data as Record<string, string>).text || ''
-      setMessages((prev) => {
-        const last = prev[prev.length - 1]
-        if (last && last.role === 'assistant' && last.id === 'streaming') {
-          return [...prev.slice(0, -1), { ...last, text: last.text + text }]
-        }
-        return [...prev, { id: 'streaming', role: 'assistant', text }]
-      })
+      if (!text) return
+      streamingBufRef.current += text
+      // Throttle React updates to ~50ms intervals
+      if (!streamingTimerRef.current) {
+        streamingTimerRef.current = setTimeout(flushStreaming, 50)
+      }
     })
 
-    gw.on('message.start', () => { setStreaming(true); setDebugInfo('Receiving...') })
+    gw.on('message.start', () => {
+      setStreaming(true)
+      setDebugInfo('Receiving...')
+      streamingBufRef.current = ''
+    })
 
     gw.on('message.complete', (data) => {
       setStreaming(false)
-      const finalText = (data as Record<string, string>).final_text || ''
+      // Flush any remaining buffered text
+      flushStreaming()
+      const d = data as Record<string, string>
+      const finalText = d.final_text || ''
       if (finalText) {
         setMessages((prev) => {
           if (prev[prev.length - 1]?.id === 'streaming') {
@@ -72,11 +113,47 @@ function App() {
           return prev
         })
       }
+      setDebugInfo('Ready')
     })
 
     gw.on('tool.start', (data) => {
       const d = data as Record<string, unknown>
-      setMessages((prev) => [...prev, { id: `tool-${Date.now()}`, role: 'tool', text: '', toolName: (d.name || d.tool_id) as string }])
+      const name = (d.name || d.tool_id) as string
+      const args = d.arguments as Record<string, unknown> | undefined
+      const argsText = args ? JSON.stringify(args).slice(0, 200) : ''
+      setMessages((prev) => [...prev, {
+        id: `tool-${Date.now()}`,
+        role: 'tool',
+        text: argsText,
+        toolName: name,
+      }])
+      setDebugInfo(`Tool: ${name}`)
+    })
+
+    gw.on('tool.complete', (data) => {
+      const d = data as Record<string, unknown>
+      const name = d.name as string
+      const resultText = (d.result_text as string) || ''
+      const error = d.error as string
+      const duration = d.duration as number
+      // Update the last tool message with result
+      setMessages((prev) => {
+        // Find the last tool message with matching name
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'tool' && prev[i].toolName === name) {
+            const updated = [...prev]
+            updated[i] = {
+              ...updated[i],
+              toolResult: resultText.slice(0, 300),
+              toolDuration: duration,
+              toolError: error,
+            }
+            return updated
+          }
+        }
+        return prev
+      })
+      setDebugInfo(`Tool ${name} ${error ? 'failed' : 'done'}`)
     })
 
     gw.on('status.update', (data) => {
@@ -88,11 +165,16 @@ function App() {
 
     gw.on('backend.exited', () => {
       setConnected(false)
+      setStreaming(false)
       setMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: 'system', text: 'Backend disconnected.' }])
+      setDebugInfo('Disconnected')
     })
 
-    return () => { try { gw.disconnect() } catch {} }
-  }, [])
+    return () => {
+      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current)
+      try { gw.disconnect() } catch {}
+    }
+  }, [flushStreaming])
 
   const handleSend = useCallback(() => {
     if (!input.trim() || !sessionId || !connected) return
@@ -106,14 +188,37 @@ function App() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }, [handleSend])
 
+  const switchSession = useCallback(async (sid: string) => {
+    if (sid === sessionId) return
+    setDebugInfo('Switching session...')
+    setSessionId(sid)
+    setMessages([])
+    // Load history via session.activate
+    const result = await gw.call('session.activate', { session_id: sid })
+    if (result && typeof result === 'object' && !('error' in result) && 'messages' in result) {
+      const r = result as { messages?: Array<{ role: string; text: string }> }
+      if (r.messages && r.messages.length > 0) {
+        setMessages(r.messages.map((m, i) => ({
+          id: `hist-${i}`,
+          role: m.role as Message['role'],
+          text: m.text,
+        })))
+      }
+    }
+    gw.subscribe(sid)
+    setDebugInfo('Ready')
+  }, [sessionId])
+
   const newChat = async () => {
     const result = await gw.call('session.create', { title: 'New Chat' })
-    if (result && typeof result === 'object' && 'session_id' in result) {
-      const sid = (result as Record<string, unknown>).session_id as string
+    if (result && typeof result === 'object' && !('error' in result) && 'session_id' in result) {
+      const r = result as Record<string, unknown>
+      const sid = r.session_id as string
       setSessionId(sid)
       setMessages([])
       setSessions(prev => [...prev, { id: sid, title: 'New Chat' }])
       gw.subscribe(sid)
+      setDebugInfo('Ready')
     }
   }
 
@@ -127,7 +232,7 @@ function App() {
         <div className="sidebar-list">
           {sessions.map(s => (
             <div key={s.id} className={`sidebar-item ${s.id === sessionId ? 'active' : ''}`}
-              onClick={() => { setSessionId(s.id); setMessages([]); gw.subscribe(s.id) }}>
+              onClick={() => switchSession(s.id)}>
               {s.title}
             </div>
           ))}
@@ -157,7 +262,12 @@ function App() {
             {messages.map((msg) => (
               <div key={msg.id} className={`msg-row ${msg.role === 'user' ? 'user-row' : ''}`}>
                 {msg.role === 'tool' && (
-                  <div className="tool-badge">🔧 {msg.toolName || 'Tool'}</div>
+                  <div className="tool-badge">
+                    🔧 {msg.toolName || 'Tool'}
+                    {msg.toolDuration !== undefined && ` (${msg.toolDuration.toFixed(1)}s)`}
+                    {msg.toolError && <span className="tool-error"> ⚠ {msg.toolError}</span>}
+                    {msg.toolResult && <div className="tool-result">{msg.toolResult}</div>}
+                  </div>
                 )}
                 {msg.role === 'system' && (
                   <div className="system-msg">{msg.text}</div>

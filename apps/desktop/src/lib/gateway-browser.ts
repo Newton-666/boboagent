@@ -57,12 +57,15 @@ class BrowserGateway {
   }
 
   async call(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return {}
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return { error: { code: -32000, message: 'WebSocket not connected' } }
     const id = `req-${++this.reqId}`
     return new Promise((resolve) => {
       this.pending.set(id, resolve)
       this.ws!.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-      setTimeout(() => { this.pending.delete(id); resolve({}) }, 15000)
+      setTimeout(() => {
+        this.pending.delete(id)
+        resolve({ error: { code: -32000, message: 'Request timeout' } })
+      }, 120000) // 120s timeout to match TUI
     })
   }
 

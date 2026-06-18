@@ -19,6 +19,7 @@ class GatewayClient {
   private handlers = new Map<string, EventHandler>()
   private unsubMessage: (() => void) | null = null
   private unsubStatus: (() => void) | null = null
+  private pendingResponses = new Map<string, (value: Record<string, unknown>) => void>()
 
   private browserMode = false
 
@@ -32,11 +33,32 @@ class GatewayClient {
     }
     this.unsubMessage = window.boboAPI.onMessage((msg) => {
       if (!msg || typeof msg !== 'object') return
-      // Events: {method: "event", params: {type: "gateway.ready", payload: ...}}
-      if (msg.method === 'event' && msg.params?.type) {
-        const handler = this.handlers.get(msg.params.type as string)
-        if (handler) handler(msg.params.payload || msg.params)
+
+      // 1) Events: {method: "event", params: {type: "...", payload: ...}}
+      //    Must be checked FIRST — events may also carry an id field in some protocols
+      const params = msg.params as { type?: string; payload?: Record<string, unknown> } | undefined
+      if (msg.method === 'event' && params?.type) {
+        const handler = this.handlers.get(params.type)
+        if (handler) handler(params.payload || params)
+        return
       }
+
+      // 2) Response with id → resolve pending call()
+      if ('id' in msg && msg.id) {
+        const resolve = this.pendingResponses.get(msg.id as string)
+        if (resolve) {
+          this.pendingResponses.delete(msg.id as string)
+          const resp = msg as { result?: Record<string, unknown>; error?: { message: string } }
+          resolve(resp.result || { error: resp.error?.message || 'unknown error' })
+          return
+        }
+        // Unknown id — could be a prompt.submit response we didn't await
+        // Silently ignore (sendPrompt doesn't store a pending promise)
+        return
+      }
+
+      // 3) Unrecognized message — log for debugging
+      console.warn('[gateway] Unhandled message:', JSON.stringify(msg).slice(0, 200))
     })
 
     this.unsubStatus = window.boboAPI.onStatus((data) => {
@@ -50,6 +72,11 @@ class GatewayClient {
   disconnect() {
     this.unsubMessage?.()
     this.unsubStatus?.()
+    // Reject all pending
+    for (const resolve of this.pendingResponses.values()) {
+      resolve({ error: { code: -32000, message: 'Gateway disconnected' } })
+    }
+    this.pendingResponses.clear()
   }
 
   on(event: string, handler: EventHandler) {
@@ -64,18 +91,13 @@ class GatewayClient {
 
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
+        this.pendingResponses.delete(id)
         resolve({ error: { code: -32000, message: 'Request timeout' } })
-      }, 30000)
+      }, 120000) // 120s timeout to match TUI
 
-      const unsub = window.boboAPI.onMessage((response) => {
-        if (response && typeof response === 'object' && 'id' in response) {
-          const resp = response as { id: string; result?: Record<string, unknown>; error?: { message: string } }
-          if (resp.id === id || resp.id === null) {
-            clearTimeout(timeout)
-            unsub()
-            resolve(resp.result || { error: resp.error?.message })
-          }
-        }
+      this.pendingResponses.set(id, (result) => {
+        clearTimeout(timeout)
+        resolve(result)
       })
 
       window.boboAPI.send(msg)
