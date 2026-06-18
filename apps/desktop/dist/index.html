@@ -79,7 +79,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   <div id="sidebar">
     <div id="sidebar-header"><button id="new-chat">+ 新对话</button></div>
     <div id="session-list"></div>
-    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="settings-icon" style="margin-left:auto;cursor:pointer;font-size:14px;" title="Settings">⚙</span></div>
+    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="settings-icon" style="margin-left:auto;cursor:pointer;font-size:14px;" title="Settings" onclick="openSettings()">⚙</span></div>
   </div>
   <div id="main">
     <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p></div>
@@ -390,8 +390,11 @@ inputEl.addEventListener('keydown', function(e) {
 
 // ── Settings ────────────────────────────────────────────────────────────
 var settingsModal = document.getElementById('settings-modal');
-document.getElementById('settings-icon').addEventListener('click', async function() {
-  // Fetch current config
+var settingsOpen = false;
+
+async function openSettings() {
+  if (settingsOpen) return;
+  settingsOpen = true;
   var setupResult = await call('setup.status', {});
   var fullResult = await call('config.full', {});
   var display = (fullResult.config && fullResult.config.display) || {};
@@ -402,28 +405,26 @@ document.getElementById('settings-icon').addEventListener('click', async functio
   document.getElementById('cfg-apikey').placeholder = setupResult.provider_configured ? '已配置，输入新key覆盖' : '输入API Key';
   document.getElementById('cfg-obsidian').value = '';
   settingsModal.classList.add('open');
-});
+}
 
-document.getElementById('settings-close').addEventListener('click', function() {
+function closeSettings() {
   settingsModal.classList.remove('open');
-});
+  settingsOpen = false;
+}
+
 settingsModal.addEventListener('click', function(e) {
-  if (e.target === settingsModal) settingsModal.classList.remove('open');
+  if (e.target === settingsModal) closeSettings();
 });
 
 document.getElementById('settings-save').addEventListener('click', async function() {
   var provider = document.getElementById('cfg-provider').value;
   var apiKey = document.getElementById('cfg-apikey').value.trim();
-  var obsidian = document.getElementById('cfg-obsidian').value.trim();
 
   if (apiKey && apiKey !== '(已配置)') {
     await call('setup.submit', { provider: provider, api_key: apiKey });
     addStatus('API Key 已保存');
   }
-  if (obsidian) {
-    addStatus('Obsidian vault 路径需要在 ~/.bobo/.env 中手动设置: OBSIDIAN_VAULT=' + obsidian);
-  }
-  settingsModal.classList.remove('open');
+  closeSettings();
 });
 </script>
 <div id="settings-modal">
@@ -446,7 +447,7 @@ document.getElementById('settings-save').addEventListener('click', async functio
     <input id="cfg-obsidian" type="text" placeholder="/path/to/vault (需手动在 ~/.bobo/.env 设置)" />
     <div style="margin-top:16px;">
       <button class="btn-save" id="settings-save">保存</button>
-      <button class="btn-close" id="settings-close">取消</button>
+      <button class="btn-close" id="settings-close" onclick="closeSettings()">取消</button>
     </div>
   </div>
 </div>
