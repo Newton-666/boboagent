@@ -100,7 +100,6 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   <div id="main">
     <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p></div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
-    <div id="think-box" class="think-box"><div class="think-label"><span>Thinking</span><span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span></div><div class="think-text"></div></div>
     <div id="chat"></div>
     <div id="input-box">
       <textarea id="input" rows="1" placeholder="Connecting..." disabled></textarea>
@@ -262,11 +261,10 @@ var toolResults = {};
 
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
-  // Minimize thinking box — keep text visible, remove animation
-  var tb = document.getElementById('think-box');
-  if (tb) {
-    tb.querySelector('.think-label').innerHTML = 'Thought';
-    tb.style.opacity = '0.6';
+  // Freeze thinking box
+  if (thinkBoxEl) {
+    thinkBoxEl.querySelector('.think-label').innerHTML = 'Thought';
+    thinkBoxEl.style.opacity = '0.6';
   }
 
   var label = name;
@@ -399,39 +397,43 @@ on('gateway.ready', async function() {
 var streamingId = null;
 var thinkText = '';
 var toolsCalledThisRound = false;
+var thinkBoxEl = null;
+
+function createThinkBox() {
+  var tb = document.createElement('div');
+  tb.className = 'think-box show';
+  tb.innerHTML = '<div class="think-label">Thinking <span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span></div><div class="think-text"></div>';
+  chatEl.appendChild(tb);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return tb;
+}
 
 on('message.start', function() {
   messaging = true; debug('Receiving...');
   thinkText = '';
   toolsCalledThisRound = false;
   streamingId = null;
-  var tb = document.getElementById('think-box');
-  tb.classList.add('show');
-  tb.style.opacity = '1';
-  tb.querySelector('.think-label').innerHTML = 'Thinking <span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span>';
-  document.querySelector('.think-text').textContent = '';
   welcomeEl.style.display = 'none';
+  thinkBoxEl = createThinkBox();
 });
 
 on('message.delta', function(data) {
   var t = data ? data.text || '' : '';
   if (!toolsCalledThisRound) {
-    // Show in think box
     thinkText += t;
-    document.querySelector('.think-text').textContent = thinkText;
+    var txt = thinkBoxEl ? thinkBoxEl.querySelector('.think-text') : null;
+    if (txt) { txt.textContent = thinkText; chatEl.scrollTop = chatEl.scrollHeight; }
   } else {
-    // Show as normal streaming message
     if (!streamingId) streamingId = 'stream-' + Date.now();
     addMsg('bobo', t, streamingId, true);
   }
 });
 on('message.complete', function(data) {
   messaging = false; debug('Connected ✓');
-  document.getElementById('think-box').classList.remove('show');
+  if (thinkBoxEl) { thinkBoxEl.remove(); thinkBoxEl = null; }
   thinkText = '';
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
   var t = data ? data.final_text || '' : '';
-  // Only show as message if there's actual final text (not tool-only rounds)
   if (t && t.trim()) addMsg('bobo', t, 'msg-' + Date.now());
   loadSessions();
 });
