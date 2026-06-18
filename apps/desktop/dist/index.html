@@ -191,12 +191,12 @@ connect();
 on('gateway.ready', async function() {
   debug('Connected ✓'); setConnected(true);
   await loadSessions();
-  // If no sessions exist, create one
-  if (sessions.length === 0) {
-    await newChat();
-  } else {
-    // Resume most recent session
-    await loadSession(sessions[0].id);
+  // Don't auto-create — user picks a session from sidebar or clicks +New
+  if (sessions.length > 0) {
+    // Auto-resume most recent so input is ready, but don't create new
+    currentSessionId = sessions[0].id;
+    call('session.activate', { session_id: sessions[0].id });
+    renderSessions();
   }
 });
 
