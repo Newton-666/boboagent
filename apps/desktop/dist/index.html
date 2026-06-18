@@ -511,6 +511,19 @@ on('status.update', function(data) {
   addStatus(t);
 });
 on('backend.exited', function() { setConnected(false); debug('Backend disconnected'); });
+on('approval.request', function(data) {
+  var cmd = data.command || data.description || 'unknown';
+  if (confirm('Bobo 想要执行:\n\n' + cmd + '\n\n是否允许？')) {
+    call('approval.respond', { session_id: currentSessionId, choice: 'once' });
+  } else {
+    call('approval.respond', { session_id: currentSessionId, choice: 'deny' });
+    addStatus('已拒绝: ' + cmd.substring(0, 80));
+  }
+});
+on('gateway.error', function(data) {
+  addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
+  debug('Error: ' + (data.message || '').substring(0, 60));
+});
 
 // ── Input ──────────────────────────────────────────────────────────────
 document.getElementById('new-chat').addEventListener('click', newChat);

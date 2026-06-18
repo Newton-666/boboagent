@@ -518,8 +518,18 @@ class Engine(ContextMixin, ToolRunnerMixin):
         "go", "cargo", "rustc", "make", "cmake", "docker", "ps", "top",
         "tree", "xargs", "awk", "sed", "tr",
         "open",   # macOS: open apps/files/URLs
-        "kill",   # kill processes
-        "killall",
+        "kill", "killall", "pgrep", "pkill",
+        "osascript",    # macOS AppleScript automation
+        "say",          # macOS text-to-speech
+        "pbcopy", "pbpaste",  # macOS clipboard
+        "screencapture", "sips",  # macOS screenshot / image
+        "mdfind", "mdls", "mdutil",  # macOS Spotlight
+        "launchctl", "defaults",  # macOS launch services / prefs
+        "sw_vers", "system_profiler", "sysctl", "nettop",  # macOS system info
+        "plutil", "pmset", "tmutil",  # macOS plist / power / time machine
+        "diskutil", "hdiutil",  # macOS disk (read-only safe)
+        "security", "codesign",  # macOS keychain / signing
+        "ditto", "rsync",  # macOS file copy
     }
 
     # 黑名单：永远阻止的高危模式
