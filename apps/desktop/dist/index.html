@@ -155,6 +155,7 @@ function renderSessions() {
 }
 
 async function deleteSession(sid) {
+  if (!confirm('删除此会话？TUI 中也会同步删除。')) return;
   await call('session.delete', { session_id: sid });
   sessions = sessions.filter(function(s) { return s.id !== sid; });
   if (currentSessionId === sid) { currentSessionId = null; clearChat(); welcomeEl.style.display = 'flex'; }
