@@ -517,6 +517,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         "less", "more", "clear", "history", "type", "uname", "hostname",
         "go", "cargo", "rustc", "make", "cmake", "docker", "ps", "top",
         "tree", "xargs", "awk", "sed", "tr",
+        "open",   # macOS: open apps/files/URLs
+        "kill",   # kill processes
+        "killall",
     }
 
     # 黑名单：永远阻止的高危模式
