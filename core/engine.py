@@ -249,10 +249,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return None
 
     def _check_guards(self) -> bool:
-        if self.current_tool_round > 12:
-            self._notify("error", {"content": "工具调用轮次超过上限（12 轮），请简化任务"})
-            return True
-        if self.current_depth > 30:
+        if self.current_tool_round > 90:
+            # 达上限时请求总结，而不是直接报错
+            summary = (
+                "你已达到最大工具调用轮次上限。请提供最终回复，"
+                "总结你已完成的内容，不需要再调用工具。"
+            )
+            self._append_to_history("user", summary)
+            self.current_depth += 1
+            return False  # let LLM respond with summary
+        if self.current_depth > 200:
             self._notify("error", {"content": "已达最大循环深度"})
             return True
         return False
