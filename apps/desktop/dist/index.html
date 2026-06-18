@@ -33,13 +33,21 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .msg .txt strong, .msg .txt b { color:#5b9bd5; }
-.tool { font-size:12px; color:var(--text2); padding:4px 12px; border-left:2px solid var(--border); margin:8px 0; }
+.tool { font-size:12px; color:var(--text2); padding:4px 12px; margin:4px 0; cursor:pointer; border-radius:6px; }
+.tool:hover { background:rgba(0,0,0,0.02); }
 .tool .dot { color:#5b9bd5; margin-right:6px; }
-.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:2px 8px; background:rgba(255,255,255,0.03); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; }
-.tool-result.error { color:#f48771; background:rgba(244,135,113,0.06); }
-.tool-result.dim { color:var(--text-muted); opacity:0.6; }
-.tool-result-full { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:4px 8px; background:rgba(255,255,255,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; }
-.tool-expand { cursor:pointer; color:#5b9bd5; margin-left:4px; }
+.tool .tool-status { font-size:10px; color:var(--text-muted); margin-left:8px; }
+.tool .tool-toggle { color:var(--text-muted); margin-left:6px; font-size:10px; }
+.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:2px 8px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:120px; overflow-y:auto; display:none; }
+.tool-result.open { display:block; }
+.tool-result.error { color:#f48771; background:rgba(244,135,113,0.06); display:block; }
+/* Thinking */
+.think-box { padding:8px 12px; margin:8px 0; border-radius:8px; font-size:12px; color:var(--text2); display:none; align-items:center; gap:8px; }
+.think-box.show { display:flex; }
+.think-dot { width:6px; height:6px; border-radius:50%; background:#5b9bd5; animation:thinkPulse 1.4s infinite; }
+.think-dot:nth-child(2) { animation-delay:0.2s; }
+.think-dot:nth-child(3) { animation-delay:0.4s; }
+@keyframes thinkPulse { 0%,60%,100% { opacity:0.2; transform:scale(1); } 30% { opacity:1; transform:scale(1.3); } }
 .status { font-size:12px; color:var(--text2); text-align:center; padding:4px; }
 /* Code blocks */
 .code-block-wrapper { margin:8px 0; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
@@ -90,6 +98,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   <div id="main">
     <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p></div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
+    <div id="think-box" class="think-box"><span>Thinking</span><span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span></div>
     <div id="chat"></div>
     <div id="input-box">
       <textarea id="input" rows="1" placeholder="Connecting..." disabled></textarea>
@@ -247,36 +256,53 @@ function addMsg(role, text, id, append) {
   div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + md(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
-var toolResults = {}; // tool_id → {name, result, error}
+var toolResults = {};
 
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
+  // Hide thinking box
+  var tb = document.getElementById('think-box');
+  if (tb) tb.classList.remove('show');
+
   var label = name;
   if (context && context !== name) label += ' (' + context + ')';
 
   var div = document.createElement('div'); div.className = 'tool';
   div.id = 'tool-' + toolId;
-  div.innerHTML = '<span class="dot">●</span><span>' + esc(label) + '</span>';
+  div.innerHTML = '<span class="dot">●</span><span>' + esc(label) +
+    '</span><span class="tool-status">running...</span>' +
+    '<span class="tool-toggle" style="display:none">▸</span>' +
+    '<div class="tool-result"></div>';
+  div.onclick = function() {
+    var r = div.querySelector('.tool-result');
+    if (r) { r.classList.toggle('open'); div.querySelector('.tool-toggle').textContent = r.classList.contains('open') ? '▾' : '▸'; }
+  };
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 function updateToolResult(toolId, resultText, error) {
   var div = document.getElementById('tool-' + toolId);
   if (!div) return;
+  var statusEl = div.querySelector('.tool-status');
+  var toggleEl = div.querySelector('.tool-toggle');
+  var resultEl = div.querySelector('.tool-result');
 
   if (error) {
-    div.innerHTML += '<div class="tool-result error">❌ ' + esc(error.substring(0, 200)) + '</div>';
-  } else if (resultText) {
-    // Show first line of result, truncated
-    var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
-    if (preview.length > 150) preview = preview.substring(0, 150) + '...';
-    var detail = resultText.length > 200 ? ' <span class="tool-expand" onclick="this.parentElement.nextElementSibling.style.display=this.parentElement.nextElementSibling.style.display==\'block\'?\'none\':\'block\'">▶</span>' : '';
-    div.innerHTML += '<div class="tool-result">' + esc(preview) + detail + '</div>';
-    if (resultText.length > 200) {
-      div.innerHTML += '<div class="tool-result-full" style="display:none">' + esc(resultText) + '</div>';
-    }
+    statusEl.textContent = 'failed';
+    statusEl.style.color = '#f48771';
+    resultEl.className = 'tool-result error open';
+    resultEl.textContent = '❌ ' + error.substring(0, 200);
   } else {
-    div.innerHTML += '<div class="tool-result dim">Done</div>';
+    statusEl.textContent = 'done';
+    statusEl.style.color = '#50a14f';
+    if (resultText) {
+      var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
+      if (preview.length > 120) preview = preview.substring(0, 120) + '...';
+      resultEl.textContent = preview;
+      // Store full text as attribute for detail view
+      div.setAttribute('data-result', resultText);
+    }
+    toggleEl.style.display = 'inline';
   }
 }
 function addStatus(text) {
@@ -366,7 +392,10 @@ on('gateway.ready', async function() {
 });
 
 var streamingId = null;
-on('message.start', function() { messaging = true; debug('Receiving...'); });
+on('message.start', function() {
+  messaging = true; debug('Receiving...');
+  document.getElementById('think-box').classList.add('show');
+});
 on('message.delta', function(data) {
   var t = data ? data.text || '' : '';
   if (!streamingId) streamingId = 'stream-' + Date.now();
@@ -374,10 +403,10 @@ on('message.delta', function(data) {
 });
 on('message.complete', function(data) {
   messaging = false; debug('Connected ✓');
+  document.getElementById('think-box').classList.remove('show');
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
   var t = data ? data.final_text || '' : '';
   if (t) addMsg('bobo', t, 'msg-' + Date.now());
-  // Refresh session list (title may have been updated by backend)
   loadSessions();
 });
 on('tool.start', function(data) {
