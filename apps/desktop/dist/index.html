@@ -33,8 +33,17 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .msg .txt strong, .msg .txt b { color:#5b9bd5; }
-.tool { font-size:12px; color:var(--text2); padding:4px 0; }
+.tool { font-size:12px; color:var(--text2); padding:4px 12px; display:flex; align-items:flex-start; gap:6px; border-left:2px solid var(--border); margin:8px 0; }
+.tool .dot { color:#5b9bd5; flex-shrink:0; }
 .status { font-size:12px; color:var(--text2); text-align:center; padding:4px; }
+/* Code blocks */
+.msg .txt pre { background:#1a1a1a; border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin:8px 0; overflow-x:auto; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; line-height:1.5; }
+.msg .txt code { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; background:rgba(255,255,255,0.06); padding:1px 4px; border-radius:3px; }
+.msg .txt pre code { background:none; padding:0; font-size:13px; }
+/* Diff */
+.msg .txt .diff-add { color:#7ec87b; }
+.msg .txt .diff-del { color:#f48771; }
+.msg .txt .diff-file { color:#5b9bd5; font-weight:600; }
 #input-box { padding:12px 16px 24px; position:relative; }
 #input { width:100%; padding:14px 48px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
 #input:focus { border-color:#555; }
@@ -112,7 +121,22 @@ function setConnected(c) {
   statusText.textContent = c ? 'Connected' : 'Offline';
 }
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function md(s) { return esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'); }
+function md(s) {
+  s = esc(s);
+  // Code blocks: ```lang\n...\n```
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    return '<pre><code>' + code.trim() + '</code></pre>';
+  });
+  // Inline code: `...`
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Diff lines (must come after code blocks to avoid matching inside <pre>)
+  s = s.replace(/^(\+.*)$/gm, '<span class="diff-add">$1</span>');
+  s = s.replace(/^(-.*)$/gm, '<span class="diff-del">$1</span>');
+  s = s.replace(/^(@@ .* @@)$/gm, '<span class="diff-file">$1</span>');
+  return s;
+}
 
 // ── Messages ───────────────────────────────────────────────────────────
 function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
@@ -125,9 +149,12 @@ function addMsg(role, text, id, append) {
   div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + md(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
-function addTool(name) {
+function addTool(name, context) {
   welcomeEl.style.display = 'none';
-  var div = document.createElement('div'); div.className = 'tool'; div.textContent = '🔧 ' + name;
+  var div = document.createElement('div'); div.className = 'tool';
+  var label = name;
+  if (context && context !== name) label += '(' + context + ')';
+  div.innerHTML = '<span class="dot">●</span><span>' + esc(label) + '</span>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
 function addStatus(text) {
@@ -231,7 +258,13 @@ on('message.complete', function(data) {
   // Refresh session list (title may have been updated by backend)
   loadSessions();
 });
-on('tool.start', function(data) { addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool'); });
+on('tool.start', function(data) {
+  addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool', data ? data.context || '' : '');
+});
+on('tool.complete', function(data) {
+  var err = data ? data.error || '' : '';
+  if (err) addStatus('⚠ ' + esc(err.substring(0, 100)));
+});
 on('status.update', function(data) {
   if (data && data.text && data.text !== '工具执行完成' && data.text !== '正在思考...') addStatus(data.text);
 });
