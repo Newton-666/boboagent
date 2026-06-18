@@ -1,0 +1,28 @@
+// Bobo Desktop — Preload script (context bridge)
+const { contextBridge, ipcRenderer } = require('electron')
+
+contextBridge.exposeInMainWorld('boboAPI', {
+  // Send a JSON-RPC message to the Python backend
+  send: (msg) => ipcRenderer.send('backend-send', msg),
+
+  // Listen for messages from the Python backend
+  onMessage: (callback) => {
+    const handler = (_event, msg) => callback(msg)
+    ipcRenderer.on('backend-message', handler)
+    return () => ipcRenderer.removeListener('backend-message', handler)
+  },
+
+  // Listen for backend status changes (exited, error)
+  onStatus: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('backend-status', handler)
+    return () => ipcRenderer.removeListener('backend-status', handler)
+  },
+
+  // Listen for backend log output
+  onLog: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('backend-log', handler)
+    return () => ipcRenderer.removeListener('backend-log', handler)
+  },
+})
