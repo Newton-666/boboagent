@@ -398,18 +398,32 @@ on('gateway.ready', async function() {
 
 var streamingId = null;
 var thinkText = '';
+var toolsCalledThisRound = false;
+
 on('message.start', function() {
   messaging = true; debug('Receiving...');
   thinkText = '';
-  document.getElementById('think-box').classList.add('show');
+  toolsCalledThisRound = false;
+  streamingId = null;
+  var tb = document.getElementById('think-box');
+  tb.classList.add('show');
+  tb.style.opacity = '1';
+  tb.querySelector('.think-label').innerHTML = 'Thinking <span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span>';
   document.querySelector('.think-text').textContent = '';
+  welcomeEl.style.display = 'none';
 });
+
 on('message.delta', function(data) {
   var t = data ? data.text || '' : '';
-  // Show thinking text in the think box while no tool has been called yet
-  var thinkEl = document.querySelector('.think-text');
-  thinkText += t;
-  thinkEl.textContent = thinkText;
+  if (!toolsCalledThisRound) {
+    // Show in think box
+    thinkText += t;
+    document.querySelector('.think-text').textContent = thinkText;
+  } else {
+    // Show as normal streaming message
+    if (!streamingId) streamingId = 'stream-' + Date.now();
+    addMsg('bobo', t, streamingId, true);
+  }
 });
 on('message.complete', function(data) {
   messaging = false; debug('Connected ✓');
@@ -422,6 +436,7 @@ on('message.complete', function(data) {
   loadSessions();
 });
 on('tool.start', function(data) {
+  toolsCalledThisRound = true;
   addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
           data ? data.context || '' : '',
           data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
