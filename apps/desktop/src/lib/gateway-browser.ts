@@ -42,7 +42,7 @@ class BrowserGateway {
         }
       }
       this.ws.onerror = () => {
-        console.warn('[browser-gateway] WebSocket connection failed. Start backend with: python3 -m bobo_tui_gateway.ws_server')
+        console.warn('[browser-gateway] WebSocket connection failed. For dev mode, run: python3 -m bobo_tui_gateway.entry')
       }
       this.ws.onclose = () => {
         console.log('[browser-gateway] Disconnected')
@@ -76,7 +76,7 @@ class BrowserGateway {
   }
 
   subscribe(sessionId: string) {
-    this.call('session.activate', { session_id: sessionId })
+    this.call('session.resume', { session_id: sessionId })
   }
 
   sendPrompt(sessionId: string, text: string) {
