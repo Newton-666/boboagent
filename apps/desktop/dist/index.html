@@ -33,8 +33,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .msg .txt strong, .msg .txt b { color:#5b9bd5; }
-.tool { font-size:12px; color:var(--text2); padding:4px 12px; display:flex; align-items:flex-start; gap:6px; border-left:2px solid var(--border); margin:8px 0; }
-.tool .dot { color:#5b9bd5; flex-shrink:0; }
+.tool { font-size:12px; color:var(--text2); padding:4px 12px; border-left:2px solid var(--border); margin:8px 0; }
+.tool .dot { color:#5b9bd5; margin-right:6px; }
+.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:2px 8px; background:rgba(255,255,255,0.03); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; }
+.tool-result.error { color:#f48771; background:rgba(244,135,113,0.06); }
+.tool-result.dim { color:var(--text-muted); opacity:0.6; }
+.tool-result-full { font-size:11px; color:var(--text2); margin:2px 0 0 12px; padding:4px 8px; background:rgba(255,255,255,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; }
+.tool-expand { cursor:pointer; color:#5b9bd5; margin-left:4px; }
 .status { font-size:12px; color:var(--text2); text-align:center; padding:4px; }
 /* Code blocks */
 .msg .txt pre { background:#1a1a1a; border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin:8px 0; overflow-x:auto; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; line-height:1.5; }
@@ -129,18 +134,15 @@ function setConnected(c) {
 }
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function md(s) {
-  // Code blocks (before escaping — keep raw code content)
   var codeBlocks = [];
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     codeBlocks.push('<pre><code>' + esc(code.trim()) + '</code></pre>');
     return '%%CODEBLOCK' + (codeBlocks.length-1) + '%%';
   });
-  // Tables (before escaping) — handle both \n and \r\n
   var tables = [];
   s = s.replace(/((?:\|.+(?:\r?\n|$))+)/gm, function(block) {
     var lines = block.trim().split(/\r?\n/);
     if (lines.length < 2) return block;
-    // Separator line: |---|:---:| etc
     var sepLine = lines[1].replace(/\s/g, '');
     if (!/^\|[-:]+\|$/.test(sepLine)) return block;
     var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
@@ -151,11 +153,20 @@ function md(s) {
     tables.push(h);
     return '%%TABLE' + (tables.length-1) + '%%';
   });
-  // Now escape remaining text
   s = esc(s);
-  // Inline code
+  // Headings
+  s = s.replace(/^### (.+)$/gm, '<h3 style="font-size:16px;margin:12px 0 4px;">$1</h3>');
+  s = s.replace(/^## (.+)$/gm, '<h2 style="font-size:18px;margin:16px 0 4px;">$1</h2>');
+  s = s.replace(/^# (.+)$/gm, '<h1 style="font-size:20px;margin:20px 0 4px;">$1</h1>');
+  // Lists
+  s = s.replace(/^\- (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
+  s = s.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
+  // Quotes
+  s = s.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:2px solid #5b9bd5;padding-left:12px;color:var(--text2);margin:4px 0;">$1</blockquote>');
+  // Links [text](url)
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#5b9bd5;">$1</a>');
+  // Inline code, bold
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   // Diff lines
   var lines = s.split('\n');
@@ -165,7 +176,6 @@ function md(s) {
     else if (/^@@/.test(lines[i])) lines[i] = '<span class="diff-file">' + lines[i] + '</span>';
   }
   s = lines.join('\n');
-  // Restore code blocks and tables
   s = s.replace(/%%CODEBLOCK(\d+)%%/g, function(_, i) { return codeBlocks[+i]; });
   s = s.replace(/%%TABLE(\d+)%%/g, function(_, i) { return tables[+i]; });
   return s;
@@ -182,13 +192,37 @@ function addMsg(role, text, id, append) {
   div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + md(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
-function addTool(name, context) {
+var toolResults = {}; // tool_id → {name, result, error}
+
+function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
-  var div = document.createElement('div'); div.className = 'tool';
   var label = name;
-  if (context && context !== name) label += '(' + context + ')';
+  if (context && context !== name) label += ' (' + context + ')';
+
+  var div = document.createElement('div'); div.className = 'tool';
+  div.id = 'tool-' + toolId;
   div.innerHTML = '<span class="dot">●</span><span>' + esc(label) + '</span>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function updateToolResult(toolId, resultText, error) {
+  var div = document.getElementById('tool-' + toolId);
+  if (!div) return;
+
+  if (error) {
+    div.innerHTML += '<div class="tool-result error">❌ ' + esc(error.substring(0, 200)) + '</div>';
+  } else if (resultText) {
+    // Show first line of result, truncated
+    var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
+    if (preview.length > 150) preview = preview.substring(0, 150) + '...';
+    var detail = resultText.length > 200 ? ' <span class="tool-expand" onclick="this.parentElement.nextElementSibling.style.display=this.parentElement.nextElementSibling.style.display==\'block\'?\'none\':\'block\'">▶</span>' : '';
+    div.innerHTML += '<div class="tool-result">' + esc(preview) + detail + '</div>';
+    if (resultText.length > 200) {
+      div.innerHTML += '<div class="tool-result-full" style="display:none">' + esc(resultText) + '</div>';
+    }
+  } else {
+    div.innerHTML += '<div class="tool-result dim">Done</div>';
+  }
 }
 function addStatus(text) {
   var div = document.createElement('div'); div.className = 'status'; div.textContent = text;
@@ -292,11 +326,13 @@ on('message.complete', function(data) {
   loadSessions();
 });
 on('tool.start', function(data) {
-  addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool', data ? data.context || '' : '');
+  addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
+          data ? data.context || '' : '',
+          data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
 });
 on('tool.complete', function(data) {
-  var err = data ? data.error || '' : '';
-  if (err) addStatus('⚠ ' + esc(err.substring(0, 100)));
+  var tid = data ? data.tool_id || '' : '';
+  if (tid) updateToolResult(tid, data ? data.result_text || '' : '', data ? data.error || '' : '');
 });
 on('status.update', function(data) {
   var t = data ? data.text || '' : ''; if (!t) return;
@@ -308,9 +344,33 @@ on('backend.exited', function() { setConnected(false); debug('Backend disconnect
 
 // ── Input ──────────────────────────────────────────────────────────────
 document.getElementById('new-chat').addEventListener('click', newChat);
+function handleSlash(cmd) {
+  if (cmd === 'help') { addMsg('bobo', '**可用命令:**\n- /help — 显示帮助\n- /clear — 清除当前对话\n- /undo — 回退上一步\n- /tools — 列出工具\n- /settings — 查看配置\n\n或说 "切换到 OpenAI" 来换模型', 'help-'+Date.now()); return true; }
+  if (cmd === 'clear') { clearChat(); welcomeEl.style.display = 'flex'; addStatus('对话已清除'); return true; }
+  if (cmd === 'tools') {
+    call('tools.list', {}).then(function(r) {
+      var tools = r.tools || [];
+      var names = tools.map(function(t){return t.name;}).join(', ');
+      addMsg('bobo', '**可用工具 (' + tools.length + '):**\n' + names, 'tools-'+Date.now());
+    });
+    return true;
+  }
+  if (cmd === 'settings') {
+    call('config.full', {}).then(function(r) {
+      addMsg('bobo', '**当前配置:**\n```json\n' + JSON.stringify(r.config, null, 2) + '\n```', 'cfg-'+Date.now());
+    });
+    return true;
+  }
+  if (cmd === 'undo') { addStatus('请使用 Ctrl+Z 或在 TUI 中用 /undo'); return true; }
+  return false;
+}
+
 sendEl.addEventListener('click', function() {
   var text = inputEl.value.trim(); if (!text || !connected) return;
   inputEl.value = '';
+  if (text.startsWith('/')) {
+    if (handleSlash(text.slice(1))) return;
+  }
   addMsg('user', text, 'user-' + Date.now());
   sendPrompt(text);
 });
