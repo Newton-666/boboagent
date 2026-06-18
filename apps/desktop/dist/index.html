@@ -138,7 +138,7 @@ function call(m, p) {
   return new Promise(function(resolve) {
     var id = 'req-' + (++reqId); pending.set(id, resolve);
     window.boboAPI.send({ jsonrpc:'2.0', id:id, method:m, params:p||{} });
-    setTimeout(function() { pending.delete(id); resolve({}); }, 120000);
+    setTimeout(function() { pending.delete(id); resolve({}); }, 15000);
   });
 }
 function sendPrompt(text) {
@@ -302,17 +302,7 @@ function addTool(name, context, toolId) {
     '<div class="tool-result"></div>';
   div.onclick = function() {
     var r = div.querySelector('.tool-result');
-    if (!r) return;
-    var opening = !r.classList.contains('open');
-    r.classList.toggle('open');
-    var t = div.querySelector('.tool-toggle');
-    t.textContent = r.classList.contains('open') ? '▾' : '▸';
-    t.style.display = 'inline';
-    // Load full result from data attribute when expanding
-    if (opening && div.getAttribute('data-result')) {
-      r.textContent = div.getAttribute('data-result');
-      r.style.maxHeight = '300px';
-    }
+    if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; }
   };
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
@@ -441,16 +431,10 @@ connect();
 
 on('gateway.ready', async function() {
   debug('Connected ✓'); setConnected(true);
-  // Check if API key is configured — show setup hint for new users
-  var statusResult = await call('setup.status', {});
-  if (statusResult && !statusResult.provider_configured) {
-    setConnected(false);
-    addMsg('bobo', '**欢迎使用 Bobo！**\n\n请先配置 API Key 以开始使用。点击左下角 ⚙ 图标打开设置，选择 Provider 并输入 API Key。\n\n推荐使用 DeepSeek：在 platform.deepseek.com/api-keys 获取免费 Key。', 'setup-msg');
-    document.getElementById('settings-icon').click();
-    return;
-  }
   await loadSessions();
+  // Don't auto-create — user picks a session from sidebar or clicks +New
   if (sessions.length > 0) {
+    // Auto-resume most recent so input is ready, but don't create new
     currentSessionId = sessions[0].id;
     call('session.activate', { session_id: sessions[0].id });
     renderSessions();
@@ -651,13 +635,10 @@ document.getElementById('settings-save').onclick = function() {
     done.push('API Key');
   }
   if (obsidian) {
-    done.push('Obsidian vault 已记录');
-    addStatus('请在终端运行: echo "OBSIDIAN_VAULT=' + obsidian + '" >> ~/.bobo/.env');
+    done.push('Obsidian vault (需手动在~/.bobo/.env 中设置 OBSIDIAN_VAULT=' + obsidian + ')');
   }
   if (model) {
-    done.push('Model: ' + model + ' 已记录');
-    addStatus('请在终端运行: echo "API_MODEL_NAME=' + model + '" >> ~/.bobo/.env');
-  }
+    done.push('Model: ' + model + ' (需手动在~/.bobo/.env 中设置 API_MODEL_NAME=' + model + ')');
   }
   status.textContent = done.length ? '✅ ' + done.join(', ') + ' 已保存' : '未做更改';
   setTimeout(function() { document.getElementById('settings-modal').classList.remove('open'); }, 1200);
