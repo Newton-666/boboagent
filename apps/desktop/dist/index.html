@@ -441,19 +441,18 @@ connect();
 
 on('gateway.ready', async function() {
   debug('Connected ✓'); setConnected(true);
-  // Check if API key is configured — show setup hint for new users
-  var statusResult = await call('setup.status', {});
-  if (statusResult && !statusResult.provider_configured) {
-    setConnected(false);
-    addMsg('bobo', '**欢迎使用 Bobo！**\n\n请先配置 API Key 以开始使用。点击左下角 ⚙ 图标打开设置，选择 Provider 并输入 API Key。\n\n推荐使用 DeepSeek：在 platform.deepseek.com/api-keys 获取免费 Key。', 'setup-msg');
-    document.getElementById('settings-icon').click();
-    return;
-  }
   await loadSessions();
   if (sessions.length > 0) {
     currentSessionId = sessions[0].id;
     call('session.activate', { session_id: sessions[0].id });
     renderSessions();
+  }
+  // Background check: if no API key, show hint (non-blocking)
+  call('setup.status', {}).then(function(r) {
+    if (r && !r.provider_configured) {
+      addStatus('⚠ 未配置 API Key — 点击 ⚙ 设置');
+    }
+  });
   }
 });
 
