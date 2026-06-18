@@ -166,9 +166,6 @@ class ToolRunnerMixin:
         executor = ThreadPoolExecutor(max_workers=len(prepared))
         future_map = {}
         for tc, tool_name, tool_args in prepared:
-            # ── 注入 llm_caller 以启用 code_execution 的自修复和测试生成 ──
-            if tool_name == "code_execution" and hasattr(self, 'llm_caller'):
-                tool_args["_llm_caller"] = self.llm_caller
             # 生成人类可读的工具上下文
             context = tool_name
             if isinstance(tool_args, dict):

@@ -229,22 +229,14 @@ def _run_test_file(test_path: str, language: str) -> str:
         return f"测试执行失败: {e}"
 
 
-def execute(code: str, language: str = "python", type: str = "run",
-            llm_caller: callable = None,
-            _llm_caller: callable = None) -> str:
+def execute(code: str, language: str = "python", type: str = "run") -> str:
     """执行代码
 
     Args:
         code: 代码内容
         language: python, javascript, bash
-        type: run(执行), lint(检查语法), test(运行测试)
-        llm_caller: LLM 调用函数（可选），传入后启用自修复和测试生成
-        _llm_caller: 由 engine 自动注入（优先于 llm_caller）
+        type: run(执行), lint(检查语法)
     """
-    # _llm_caller 由 tool_runner 注入，优先于显式参数
-    if _llm_caller is not None:
-        llm_caller = _llm_caller
-    # 先保存代码
     filepath, task_name = _save_code(code, language)
 
     if type == "run":
@@ -254,43 +246,7 @@ def execute(code: str, language: str = "python", type: str = "run",
     else:
         result = f"未知类型: {type}"
 
-    # 保存执行日志
     _save_run_log(task_name, result)
-
-    # ── 自修复：执行失败且有可用的 llm_caller 时 ──
-    if type == "run" and callable(llm_caller) and _is_error_result(result):
-        fixed_code = code
-        for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
-            version = f"fix_v{attempt}"
-            fixed_code = _call_llm_for_fix(llm_caller, fixed_code, result, language)
-            if fixed_code is None:
-                break
-
-            syntax_error = _check_syntax(fixed_code, language)
-            if syntax_error:
-                result = syntax_error
-                _save_run_log(task_name, result, version=version)
-                continue
-
-            fix_path, _ = _save_code(fixed_code, language, task_name, version=version)
-            result = _run_code(fixed_code, language)
-            _save_run_log(task_name, result, version=version)
-
-            if not _is_error_result(result):
-                return f"{result}\n(已自动修复，第{attempt}次成功，代码: {fix_path})"
-
-        return f"{result}\n(已尝试修复{MAX_FIX_ATTEMPTS}次，均失败，最终代码: {fix_path})"
-
-    # ── 测试生成：执行成功且有可用的 llm_caller 时 ──
-    if type == "run" and callable(llm_caller) and not _is_error_result(result):
-        test_code = _call_llm_for_test(llm_caller, code, language)
-        if test_code:
-            test_path, _ = _save_code(test_code, language, task_name, version="test")
-            # 自动运行测试并获取结果
-            test_result = _run_test_file(test_path, language)
-            _save_run_log(task_name, f"测试结果: {test_result}", version="test")
-            return f"{result}\n(代码已保存: {filepath})\n(测试已生成: {test_path})\n(测试结果: {test_result})"
-
     return f"{result}\n(代码已保存: {filepath})"
 
 
