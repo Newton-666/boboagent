@@ -93,13 +93,15 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* Settings modal */
 #settings-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center; }
 #settings-modal.open { display:flex; }
-#settings-panel { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px; width:420px; max-height:80vh; overflow-y:auto; }
-#settings-panel h2 { font-size:18px; margin-bottom:16px; }
-#settings-panel label { display:block; font-size:12px; color:var(--text2); margin:12px 0 4px; }
-#settings-panel input, #settings-panel select { width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font:inherit; margin-bottom:8px; }
-#settings-panel button { padding:8px 16px; border-radius:6px; border:none; cursor:pointer; font:inherit; margin-right:8px; }
-#settings-panel .btn-save { background:#5b9bd5; color:#fff; }
-#settings-panel .btn-close { background:var(--bg3); color:var(--text); }
+#settings-panel { background:var(--bg2); border:1px solid var(--border); border-radius:12px; display:flex; width:580px; max-height:80vh; overflow:hidden; }
+#settings-nav { width:130px; min-width:130px; border-right:1px solid var(--border); padding:16px 0; }
+.settings-tab { padding:10px 16px; cursor:pointer; font-size:13px; color:var(--text2); border-left:3px solid transparent; }
+.settings-tab:hover { background:var(--hover); }
+.settings-tab.active { color:var(--text); background:var(--bg3); border-left-color:#e8913a; font-weight:600; }
+#settings-content { flex:1; padding:20px 24px; overflow-y:auto; }
+#settings-content h2 { font-size:18px; margin-bottom:16px; }
+.settings-page label { display:block; font-size:12px; color:var(--text2); margin-top:12px; margin-bottom:4px; }
+.settings-page input, .settings-page select { width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font:inherit; margin-bottom:4px; box-sizing:border-box; }
 </style>
 </head>
 <body>
@@ -674,14 +676,28 @@ inputEl.addEventListener('input', function() {
 });
 
 // ── Settings ────────────────────────────────────────────────────────────
+// Tab switching
+document.querySelectorAll('.settings-tab').forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.settings-tab').forEach(function(t) { t.classList.remove('active'); });
+    this.classList.add('active');
+    document.querySelectorAll('.settings-page').forEach(function(p) { p.style.display = 'none'; });
+    var page = document.getElementById('page-' + this.getAttribute('data-tab'));
+    if (page) page.style.display = 'block';
+  });
+});
+
+// Open settings
 document.getElementById('settings-icon').onclick = function() {
   call('setup.status', {}).then(function(r1) {
     document.getElementById('cfg-provider').value = (r1 && r1.provider) || 'deepseek';
     document.getElementById('cfg-apikey').placeholder = (r1 && r1.provider_configured) ? '已配置' : '输入API Key';
+    // Trigger provider change to populate models
+    document.getElementById('cfg-provider').dispatchEvent(new Event('change'));
   });
   document.getElementById('settings-modal').classList.add('open');
 };
-// Update model options when provider changes
+// Provider → model linkage
 document.getElementById('cfg-provider').addEventListener('change', function() {
   var models = {
     'deepseek': ['deepseek-chat', 'deepseek-reasoner'],
@@ -700,15 +716,6 @@ document.getElementById('cfg-provider').addEventListener('change', function() {
     sel.appendChild(opt);
   });
 });
-// Check Obsidian vault path validity
-function checkObsidianPath() {
-  var el = document.getElementById('cfg-obsidian');
-  var status = document.getElementById('obsidian-status');
-  call('setup.status', {}).then(function(r) {
-    // No direct API for vault path, show hint
-    status.textContent = '(在 ~/.bobo/.env 设置 OBSIDIAN_VAULT)';
-  });
-}
 document.getElementById('settings-close').onclick = function() {
   document.getElementById('settings-modal').classList.remove('open');
 };
@@ -729,7 +736,6 @@ document.getElementById('settings-save').onclick = function() {
   }
   document.getElementById('settings-modal').classList.remove('open');
 };
-// Clear all sessions button
 document.getElementById('settings-clear').onclick = function() {
   if (!confirm('确定要删除所有会话吗？此操作不可撤销。')) return;
   sessions.forEach(function(s) {
@@ -771,31 +777,53 @@ checkSidebar();
 </script>
 <div id="settings-modal">
   <div id="settings-panel">
-    <h2>⚙ Settings</h2>
-    <label>Provider</label>
-    <select id="cfg-provider">
-      <option value="deepseek">DeepSeek</option>
-      <option value="openai">OpenAI</option>
-      <option value="anthropic">Anthropic</option>
-      <option value="openrouter">OpenRouter</option>
-      <option value="google">Google</option>
-      <option value="ollama">Ollama (local)</option>
-    </select>
-    <label>Model</label>
-    <select id="cfg-model">
-      <option value="deepseek-chat">deepseek-chat</option>
-      <option value="gpt-4o">gpt-4o</option>
-      <option value="claude-sonnet-4-20250514">claude-sonnet-4</option>
-      <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-    </select>
-    <label>API Key</label>
-    <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
-    <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
-    <input id="cfg-obsidian" type="text" placeholder="/path/to/vault (需手动在 ~/.bobo/.env 设置)" />
-    <div style="margin-top:16px;display:flex;gap:8px;">
-      <button class="btn-save" id="settings-save">保存</button>
-      <button class="btn-close" id="settings-close">取消</button>
-      <button id="settings-clear" style="margin-left:auto;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">清理数据</button>
+    <div id="settings-nav">
+      <div class="settings-tab active" data-tab="basic">基础设置</div>
+      <div class="settings-tab" data-tab="api">API</div>
+      <div class="settings-tab" data-tab="advanced">高级设置</div>
+    </div>
+    <div id="settings-content">
+      <h2>⚙ 设置</h2>
+      <!-- 基础设置 -->
+      <div class="settings-page" id="page-basic">
+        <label>Provider</label>
+        <select id="cfg-provider">
+          <option value="deepseek">DeepSeek</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="google">Google</option>
+          <option value="ollama">Ollama (local)</option>
+        </select>
+        <label>Model</label>
+        <select id="cfg-model">
+          <option value="deepseek-chat">deepseek-chat</option>
+        </select>
+      </div>
+      <!-- API 设置 -->
+      <div class="settings-page" id="page-api" style="display:none">
+        <label>API Key</label>
+        <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
+        <label>Base URL <span style="font-weight:400;font-size:11px;">(选填)</span></label>
+        <input id="cfg-baseurl" type="text" placeholder="留空使用 Provider 默认地址" />
+        <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
+        <input id="cfg-obsidian" type="text" placeholder="留空自动检测" />
+      </div>
+      <!-- 高级设置 -->
+      <div class="settings-page" id="page-advanced" style="display:none">
+        <label>Max Tokens</label>
+        <input id="cfg-maxtokens" type="number" value="8192" placeholder="8192" />
+        <label>请求超时 (秒)</label>
+        <input id="cfg-timeout" type="number" value="120" placeholder="120" />
+        <div style="margin-top:20px;">
+          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">删除所有会话</button>
+        </div>
+      </div>
+      <!-- 底部按钮 -->
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#5b9bd5;color:#fff;">保存</button>
+        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">取消</button>
+      </div>
     </div>
   </div>
 </div>
