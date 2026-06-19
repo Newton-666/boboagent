@@ -130,9 +130,14 @@ class SessionManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return
         # 写入 .tmp 成功，原子替换原文件
-        if path.exists():
-            os.replace(path, path.with_suffix(".json.bak"))
-        os.replace(tmp_path, path)
+        try:
+            if path.exists():
+                os.replace(path, path.with_suffix(".json.bak"))
+            os.replace(tmp_path, path)
+        except Exception:
+            # iCloud 同步延迟等导致 tmp 文件不可用时，直接写原文件
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _save(self):
         if self.current_session and self.current_session_id:
