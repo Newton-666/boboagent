@@ -382,6 +382,17 @@ def handle_session_delete(params: dict, rid: str) -> dict:
     return _ok(rid, {"deleted": sid})
 
 
+@method("session.rename")
+def handle_session_rename(params: dict, rid: str) -> dict:
+    sid = params.get("session_id", "")
+    title = params.get("title", "").strip() or "未命名"
+    session = _sessions.get(sid)
+    if session:
+        session["title"] = title[:50]
+        _save_session_to_disk(sid)
+    return _ok(rid, {"ok": True})
+
+
 @method("session.interrupt")
 def handle_session_interrupt(params: dict, rid: str) -> dict:
     sid = params.get("session_id", "")
