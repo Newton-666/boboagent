@@ -11,6 +11,7 @@ let backendProcess = null
 let backendBuffer = ''
 let backendRestartCount = 0
 const MAX_BACKEND_RESTARTS = 3
+let pendingMessages = []  // Buffer for messages received before window's IPC listener is ready
 
 // ── Python backend management ──────────────────────────────────────────
 
@@ -100,6 +101,8 @@ function startBackend() {
         const msg = JSON.parse(line)
         if (mainWindow) {
           mainWindow.webContents.send('backend-message', msg)
+        } else {
+          pendingMessages.push(msg)
         }
       } catch {
         process.stderr.write(`[bobo-desktop] Unparseable backend output: ${line.slice(0, 100)}\n`)
@@ -167,6 +170,16 @@ ipcMain.on('backend-send', (_event, msg) => {
 
 ipcMain.handle('backend-send-sync', async (_event, msg) => {
   return sendToBackend(msg)
+})
+
+// Renderer requests any buffered backend messages that arrived before IPC was ready
+ipcMain.on('backend-get-pending', (event) => {
+  if (pendingMessages.length > 0) {
+    for (const msg of pendingMessages) {
+      event.sender.send('backend-message', msg)
+    }
+    pendingMessages = []
+  }
 })
 
 // ── App lifecycle ──────────────────────────────────────────────────────

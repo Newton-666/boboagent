@@ -40,6 +40,8 @@ function App() {
   // Track streaming text buffer to avoid React re-render thrashing
   const streamingBufRef = useRef('')
   const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Track whether gateway.ready has been received (for fallback timer)
+  const readyRef = useRef(false)
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -67,26 +69,48 @@ function App() {
     else gw.connect()
 
     gw.on('gateway.ready', async () => {
+      readyRef.current = true
       setDebugInfo('Connected ✓')
       setConnected(true)
-      // Check if provider is configured
-      const statusResult = await gw.call('setup.status', {})
-      const needsSetup = statusResult && typeof statusResult === 'object' && (statusResult as Record<string, unknown>).provider_configured === false
+      // Retry setup.status with backoff in case backend is still initializing
+      let statusResult: Record<string, unknown> | null = null
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const result = await gw.call('setup.status', {})
+        if (result && typeof result === 'object' && !('error' in result)) {
+          statusResult = result as Record<string, unknown>
+          break
+        }
+        if (attempt < 4) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      }
+      if (!statusResult) {
+        setDebugInfo('Backend not responding')
+        setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: 'system', text: 'Backend failed to respond. Please restart the app.' }])
+        return
+      }
+      const needsSetup = (statusResult as Record<string, unknown>).provider_configured === false
       if (needsSetup) {
         setShowSetup(true)
         setDebugInfo('Setup required')
         return
       }
-      const result = await gw.call('session.create', { title: 'New Chat' })
-      if (result && typeof result === 'object' && !('error' in result) && 'session_id' in result) {
-        const r = result as Record<string, unknown>
-        const sid = r.session_id as string
-        setSessionId(sid)
-        setSessions(prev => [...prev, { id: sid, title: 'New Chat' }])
-        gw.subscribe(sid)
-      } else if (result && typeof result === 'object' && 'error' in result) {
-        const err = result as { error: { message?: string } }
-        setDebugInfo(`Error: ${err.error?.message || 'session.create failed'}`)
+      // Create session (with retry)
+      let sessionCreated = false
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await gw.call('session.create', { title: 'New Chat' })
+        if (result && typeof result === 'object' && !('error' in result) && 'session_id' in result) {
+          const r = result as Record<string, unknown>
+          const sid = r.session_id as string
+          setSessionId(sid)
+          setSessions(prev => [...prev, { id: sid, title: 'New Chat' }])
+          gw.subscribe(sid)
+          sessionCreated = true
+          break
+        }
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      }
+      setDebugInfo(sessionCreated ? 'Ready' : 'Session creation failed')
+      if (!sessionCreated) {
+        setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: 'system', text: 'Failed to create session.' }])
       }
     })
 
@@ -189,7 +213,42 @@ function App() {
       setDebugInfo('Disconnected')
     })
 
+    // Fallback: if gateway.ready never fires (backend slow / message lost), poll setup.status
+    const fallbackTimer = setTimeout(async () => {
+      if (readyRef.current) return
+      setDebugInfo('Waiting for backend...')
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (readyRef.current) return
+        const result = await gw.call('setup.status', {})
+        if (result && typeof result === 'object' && !('error' in result)) {
+          // Backend is live — proceed directly
+          readyRef.current = true
+          setConnected(true)
+          const needsSetup = (result as Record<string, unknown>).provider_configured === false
+          if (needsSetup) { setShowSetup(true); setDebugInfo('Setup required'); return }
+          for (let sAtt = 0; sAtt < 3; sAtt++) {
+            if (sAtt > 0) await new Promise(r => setTimeout(r, 1000))
+            const cr = await gw.call('session.create', { title: 'New Chat' })
+            if (cr && typeof cr === 'object' && !('error' in cr) && 'session_id' in cr) {
+              const r = cr as Record<string, unknown>
+              const sid = r.session_id as string
+              setSessionId(sid)
+              setSessions(prev => [...prev, { id: sid, title: 'New Chat' }])
+              gw.subscribe(sid)
+              setDebugInfo('Ready')
+              return
+            }
+          }
+          setDebugInfo('Session creation failed')
+          return
+        }
+        await new Promise(r => setTimeout(r, 2000))
+      }
+      if (!readyRef.current) setDebugInfo('Backend unavailable')
+    }, 5000)
+
     return () => {
+      clearTimeout(fallbackTimer)
       if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current)
       try { gw.disconnect() } catch {}
     }

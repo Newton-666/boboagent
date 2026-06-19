@@ -5,6 +5,7 @@ declare global {
   interface Window {
     boboAPI: {
       send: (msg: Record<string, unknown>) => void
+      getPending: () => void
       onMessage: (callback: (msg: Record<string, unknown>) => void) => () => void
       onStatus: (callback: (data: { status: string; message?: string; code?: number }) => void) => () => void
       onLog: (callback: (data: { stream: string; text: string }) => void) => () => void
@@ -67,6 +68,9 @@ class GatewayClient {
         if (handler) handler(data)
       }
     })
+
+    // Request any messages that arrived before our listener was set up
+    window.boboAPI.getPending()
   }
 
   disconnect() {
