@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" /><title>Bobo</title>
 <style>
-:root { --bg: #faf9f2; --bg2: #f2f1e8; --bg3: #eae8dc; --text: #2d2d2d; --text2: #777; --border: #e0ded4; --hover: #e8e6da; --green: #4caf50; }
+:root { --bg: #faf9f2; --bg2: #f2f1e8; --bg3: #eae8dc; --text: #2d2d2d; --text2: #777; --text-muted: #999; --border: #e0ded4; --hover: #e8e6da; --green: #4caf50; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size:15px; line-height:1.6; overflow:hidden; height:100vh; }
 #app { display:flex; height:100vh; }
@@ -104,7 +104,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   <div id="sidebar">
     <div id="sidebar-header"><button id="new-chat">+ 新对话</button></div>
     <div id="session-list"></div>
-    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;color:inherit;" title="Settings" onclick="openSettings()">⚙</button></div>
+    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;color:inherit;" title="Settings">⚙</button></div>
   </div>
   <div id="main">
     <div id="welcome"><h1>Bobo</h1><p>你的个人 AI 助手</p></div>
@@ -409,7 +409,7 @@ async function loadSession(sid) {
   msgs.forEach(function(m) {
     if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
     else if (m.role === 'assistant') addMsg('bobo', m.text, 'hist-' + Math.random());
-    else if (m.role === 'tool') addTool(m.text ? m.text.substring(0, 40) : 'Tool');
+    else if (m.role === 'tool') addTool(m.tool_name || m.text || 'Tool', '', m.tool_id || 'tool');
     else if (m.role === 'system' && m.text && m.text.length < 200) addStatus(m.text);
   });
   chatEl.scrollTop = chatEl.scrollHeight;
