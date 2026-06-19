@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('boboAPI', {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('backend-status', handler)
     return () => ipcRenderer.removeListener('backend-status', handler)
-  },\n})
+  },
+})
