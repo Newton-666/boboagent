@@ -8,7 +8,8 @@
 body { background:var(--bg); color:var(--text); font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size:15px; line-height:1.6; overflow:hidden; height:100vh; }
 #app { display:flex; height:100vh; }
 /* Sidebar */
-#sidebar { width:240px; min-width:240px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+#sidebar { width:240px; min-width:240px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; transition:margin-left 0.2s; }
+#sidebar.closed { margin-left:-240px; }
 #sidebar-header { padding:12px; }
 #new-chat { width:100%; padding:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:14px; }
 #new-chat:hover { background:var(--hover); }
@@ -104,7 +105,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <body>
 <div id="app">
   <div id="sidebar">
-    <div id="sidebar-header"><button id="new-chat">+ 新对话</button></div>
+    <div id="sidebar-header"><button id="new-chat">+ 新对话</button><input id="session-search" type="text" placeholder="搜索..." style="width:100%;margin-top:8px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;" /></div>
     <div id="session-list"></div>
     <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:16px;color:inherit;" title="Settings">⚙</button></div>
   </div>
@@ -354,12 +355,20 @@ function updateToolResult(toolId, resultText, error, duration) {
     statusEl.textContent = duration ? 'done (' + duration.toFixed(1) + 's)' : 'done';
     statusEl.style.color = '#50a14f';
     if (resultText) {
-      var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
+      var preview = resultText.split('\\n').filter(function(l){return l.trim();})[0] || '';
       if (preview.length > 120) preview = preview.substring(0, 120) + '...';
       resultEl.textContent = preview;
       div.setAttribute('data-result', resultText);
     }
     toggleEl.style.display = 'inline';
+    // Notify when a tool > 2s completes
+    if (duration > 2 && Notification.permission !== 'denied') {
+      if (Notification.permission === 'granted') {
+        new Notification('Bobo', { body: friendlyMap[toolId] || toolId + ' 完成 (' + duration.toFixed(1) + 's)' });
+      } else if (Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+    }
   }
 }
 function addStatus(text) {
@@ -375,9 +384,14 @@ async function loadSessions() {
     renderSessions();
   }
 }
-function renderSessions() {
+function renderSessions(filter) {
   sessionListEl.innerHTML = '';
-  sessions.forEach(function(s) {
+  var filtered = sessions;
+  if (filter) {
+    var q = filter.toLowerCase();
+    filtered = sessions.filter(function(s) { return (s.title || '').toLowerCase().indexOf(q) !== -1; });
+  }
+  filtered.forEach(function(s) {
     var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':'');
     var span = document.createElement('span'); span.textContent = s.title || s.id; span.style.overflow='hidden'; span.style.textOverflow='ellipsis';
     span.onclick = function() { loadSession(s.id); };
@@ -640,17 +654,47 @@ document.getElementById('settings-icon').onclick = function() {
   });
   document.getElementById('settings-modal').classList.add('open');
 };
+// Update model options when provider changes
+document.getElementById('cfg-provider').addEventListener('change', function() {
+  var models = {
+    'deepseek': ['deepseek-chat', 'deepseek-reasoner'],
+    'openai': ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+    'anthropic': ['claude-sonnet-4-20250514', 'claude-haiku-3-20240307'],
+    'openrouter': ['openai/gpt-4o', 'anthropic/claude-sonnet-4', 'google/gemini-2.0-flash'],
+    'google': ['gemini-2.0-flash', 'gemini-2.0-pro'],
+    'ollama': ['llama3', 'mistral', 'qwen2.5'],
+  };
+  var sel = document.getElementById('cfg-model');
+  var prev = sel.value;
+  sel.innerHTML = '';
+  (models[this.value] || ['deepseek-chat']).forEach(function(m) {
+    var opt = document.createElement('option'); opt.value = m; opt.textContent = m;
+    if (m === prev) opt.selected = true;
+    sel.appendChild(opt);
+  });
+});
+// Check Obsidian vault path validity
+function checkObsidianPath() {
+  var el = document.getElementById('cfg-obsidian');
+  var status = document.getElementById('obsidian-status');
+  call('setup.status', {}).then(function(r) {
+    // No direct API for vault path, show hint
+    status.textContent = '(在 ~/.bobo/.env 设置 OBSIDIAN_VAULT)';
+  });
+}
 document.getElementById('settings-close').onclick = function() {
   document.getElementById('settings-modal').classList.remove('open');
 };
 document.getElementById('settings-save').onclick = function() {
   var key = document.getElementById('cfg-apikey').value.trim();
+  var model = document.getElementById('cfg-model').value;
   if (key) {
     call('setup.submit', { provider: document.getElementById('cfg-provider').value, api_key: key }).then(function(res) {
       if (res && res.ok === false) {
         addStatus('设置失败: ' + (res.error || '未知错误'));
       } else {
         addStatus('Saved');
+        if (model) call('config.set', { model: model });
       }
     });
   } else {
@@ -658,6 +702,45 @@ document.getElementById('settings-save').onclick = function() {
   }
   document.getElementById('settings-modal').classList.remove('open');
 };
+// Clear all sessions button
+document.getElementById('settings-clear').onclick = function() {
+  if (!confirm('确定要删除所有会话吗？此操作不可撤销。')) return;
+  sessions.forEach(function(s) {
+    call('session.delete', { session_id: s.id });
+  });
+  sessions = [];
+  currentSessionId = null;
+  clearChat();
+  renderSessions();
+  addStatus('所有会话已删除');
+  document.getElementById('settings-modal').classList.remove('open');
+};
+
+// ── Session search ──────────────────────────────────────────────────────
+document.getElementById('session-search').addEventListener('input', function() {
+  renderSessions(this.value);
+});
+
+// ── Keyboard shortcuts ──────────────────────────────────────────────────
+document.addEventListener('keydown', function(e) {
+  var mod = e.metaKey || e.ctrlKey;
+  if (e.key === 'n' && mod) { e.preventDefault(); newChat(); }
+  if (e.key === ',' && mod) { e.preventDefault(); document.getElementById('settings-icon').click(); }
+  if (e.key === 'Escape') { stopThinking(); }
+});
+
+// ── Auto-hide sidebar on narrow window ──────────────────────────────────
+var sidebarEl = document.getElementById('sidebar');
+var sidebarOpen = true;
+function checkSidebar() {
+  if (window.innerWidth < 640 && sidebarOpen) {
+    sidebarEl.classList.add('closed'); sidebarOpen = false;
+  } else if (window.innerWidth >= 640 && !sidebarOpen) {
+    sidebarEl.classList.remove('closed'); sidebarOpen = true;
+  }
+}
+window.addEventListener('resize', checkSidebar);
+checkSidebar();
 </script>
 <div id="settings-modal">
   <div id="settings-panel">
@@ -672,14 +755,20 @@ document.getElementById('settings-save').onclick = function() {
       <option value="ollama">Ollama (local)</option>
     </select>
     <label>Model</label>
-    <input id="cfg-model" type="text" placeholder="e.g. deepseek-chat" readonly />
+    <select id="cfg-model">
+      <option value="deepseek-chat">deepseek-chat</option>
+      <option value="gpt-4o">gpt-4o</option>
+      <option value="claude-sonnet-4-20250514">claude-sonnet-4</option>
+      <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+    </select>
     <label>API Key</label>
     <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
-    <label>Obsidian Vault Path</label>
+    <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
     <input id="cfg-obsidian" type="text" placeholder="/path/to/vault (需手动在 ~/.bobo/.env 设置)" />
-    <div style="margin-top:16px;">
-      <button class="btn-save" id="settings-save" onclick="var k=document.getElementById('cfg-apikey').value.trim();if(k){call('setup.submit',{provider:document.getElementById('cfg-provider').value,api_key:k});addStatus('Saved');}this.closest('#settings-modal').classList.remove('open')">保存</button>
-      <button class="btn-close" id="settings-close" onclick="this.closest('#settings-modal').classList.remove('open')">取消</button>
+    <div style="margin-top:16px;display:flex;gap:8px;">
+      <button class="btn-save" id="settings-save">保存</button>
+      <button class="btn-close" id="settings-close">取消</button>
+      <button id="settings-clear" style="margin-left:auto;padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">清理数据</button>
     </div>
   </div>
 </div>
