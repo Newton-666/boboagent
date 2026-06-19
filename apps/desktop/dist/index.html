@@ -416,13 +416,15 @@ connect();
 on('gateway.ready', async function() {
   debug('Connected ✓'); setConnected(true);
   await loadSessions();
-  // Don't auto-create — user picks a session from sidebar or clicks +New
   if (sessions.length > 0) {
-    // Auto-resume most recent so input is ready, but don't create new
     currentSessionId = sessions[0].id;
     call('session.activate', { session_id: sessions[0].id });
     renderSessions();
+  } else {
+    // First-time user: auto-create a session
+    await newChat();
   }
+  inputEl.focus();
 });
 
 var streamingId = null;
@@ -528,6 +530,33 @@ on('gateway.error', function(data) {
   addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
   debug('Error: ' + (data.message || '').substring(0, 60));
 });
+
+// ── Fallback: if gateway.ready hasn't fired within 5s, poll backend ──
+var readyFallbackTimer = setTimeout(async function() {
+  if (connected) return;
+  debug('Waiting for backend...');
+  for (var attempt = 0; attempt < 5; attempt++) {
+    if (connected) return;
+    var r = await call('setup.status', {});
+    if (r && typeof r === 'object' && !r.error) {
+      // Backend is alive despite missing gateway.ready
+      setConnected(true);
+      await loadSessions();
+      if (sessions.length > 0) {
+        currentSessionId = sessions[0].id;
+        call('session.activate', { session_id: sessions[0].id });
+        renderSessions();
+      } else {
+        await newChat();
+      }
+      debug('Connected ✓');
+      inputEl.focus();
+      return;
+    }
+    await new Promise(function(r2) { setTimeout(r2, 2000); });
+  }
+  if (!connected) debug('Backend unavailable');
+}, 5000);
 
 // ── Input ──────────────────────────────────────────────────────────────
 document.getElementById('new-chat').addEventListener('click', newChat);
