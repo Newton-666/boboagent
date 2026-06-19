@@ -5,25 +5,11 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron:dev": "node scripts/dev.mjs",
-    "electron:build": "electron-builder",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@assistant-ui/react": "^0.7.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "start": "electron ."
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.7.0",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
-    "typescript": "^5.9.3",
-    "vite": "^6.4.3"
+    "electron-builder": "^25.0.0"
   },
   "build": {
     "appId": "com.bobo.agent",
