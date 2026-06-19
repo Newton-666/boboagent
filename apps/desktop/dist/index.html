@@ -194,21 +194,48 @@ function copyCode(id) {
   });
 }
 function highlight(code, lang) {
+  // 1) 转义 HTML 特殊字符
+  var html = esc(code);
+  // 2) 在纯文本上收集所有高亮区间（不含 HTML 标签干扰）
+  var spans = [];  // {start, end, tag}
+  function addSpan(re, tag) {
+    var m;
+    // Reset lastIndex
+    re.lastIndex = 0;
+    while ((m = re.exec(html)) !== null) {
+      spans.push({ start: m.index, end: m.index + m[0].length, tag: tag });
+    }
+  }
+  // 字符串 — 优先于注释/关键字，避免 "hi # comment" 里的 # 被误标
+  addSpan(/''[^']*''|"""[^"]*"""/g, '<span style="color:#50a14f">');
+  addSpan(/&quot;.*?&quot;|&#39;.*?&#39;|".*?"|'.*?'/g, '<span style="color:#50a14f">');
+  // 注释
+  addSpan(/(#.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">');
+  addSpan(/(\/\/.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">');
+  // 数字
+  addSpan(/\b(\d+\.?\d*)\b/g, '<span style="color:#c18401">');
+  // 关键字
   var kw = '\\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|in|not|and|or|True|False|None|pass|break|continue|yield|async|await|function|const|let|var|export|default|new|this|throw|catch|go|func|defer|struct|interface|map|chan|fn|let|mut|pub|impl|trait|enum|mod|use)\\b';
-  var escaped = esc(code);
-  // Strings
-  escaped = escaped.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|".*?"|'.*?')/g, '<span style="color:#50a14f">$1</span>');
-  escaped = escaped.replace(/(''[^']*''|"""[^"]*""")/g, '<span style="color:#50a14f">$1</span>');
-  // Comments
-  escaped = escaped.replace(/(#.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">$1</span>');
-  escaped = escaped.replace(/(\/\/.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">$1</span>');
-  // Numbers
-  escaped = escaped.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#c18401">$1</span>');
-  // Keywords
-  escaped = escaped.replace(new RegExp(kw, 'g'), '<span style="color:#a626a4;font-weight:600">$1</span>');
-  // Decorators
-  escaped = escaped.replace(/(@\w+)/g, '<span style="color:#c18401">$1</span>');
-  return escaped;
+  addSpan(new RegExp(kw, 'g'), '<span style="color:#a626a4;font-weight:600">');
+  // 装饰器
+  addSpan(/(@\w+)/g, '<span style="color:#c18401">');
+  // 3) 按 start 排序，后处理覆盖：短区间被长区间覆盖时丢弃
+  spans.sort(function(a, b) { return a.start - b.start; });
+  var merged = [];
+  for (var i = 0; i < spans.length; i++) {
+    var s = spans[i];
+    // 被上一个覆盖？后面的 start 小于前一个的 end 就丢弃
+    if (merged.length > 0 && s.start < merged[merged.length - 1].end) continue;
+    merged.push(s);
+  }
+  // 4) 从右到左插入，确保位置不偏移
+  var result = html;
+  for (var i = merged.length - 1; i >= 0; i--) {
+    var sp = merged[i];
+    result = result.slice(0, sp.end) + '</span>' + result.slice(sp.end);
+    result = result.slice(0, sp.start) + sp.tag + result.slice(sp.start);
+  }
+  return result;
 }
 function md(s) {
   var codeBlocks = [];
