@@ -1,5 +1,7 @@
 {
   "skills": [
-    {"name": "KarpathyWiki", "description": "Auto-link related notes in Obsidian vault — scan, find connections, update Knowledge Hub page"}
+    {"name": "KarpathyWiki", "description": "Auto-link related notes in Obsidian vault — scan, find connections, update Knowledge Hub page"},
+    {"name": "BenchmarkRun", "description": "Run Bobo benchmark tests — read test scenarios from Obsidian, test Bobo API one by one, generate report and update trend tracking"},
+    {"name": "AnalyzePaper", "description": "按 Keshav 三遍阅读法分析论文 PDF。Pass1 快速扫描输出 5C 评估，Pass2 精读输出论文摘要，Pass3 深度分析输出假设挑战和强弱点评。每个 Pass 结束后询问是否继续。分析结果保存到 Obsidian Inbox。子命令'做文献调研'可触发文献综述模式。"}
   ]
 }

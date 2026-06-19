@@ -626,10 +626,6 @@ def handle_tools_list(params: dict, rid: str) -> dict:
     return _ok(rid, {"tools": tools})
 
 
-@method("skills.list")
-def handle_skills_list(params: dict, rid: str) -> dict:
-    return _ok(rid, {"skills": []})
-
 
 @method("slash.exec")
 def handle_slash_exec(params: dict, rid: str) -> dict:
