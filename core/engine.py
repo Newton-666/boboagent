@@ -249,6 +249,29 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return None
 
     def _check_guards(self) -> bool:
+        # 循环检测：同一搜索类工具调用超过3次，注入停止提示
+        if len(self._recent_tool_calls) >= 3:
+            name_count = {}
+            for name, _ in self._recent_tool_calls[-8:]:
+                name_count[name] = name_count.get(name, 0) + 1
+            search_tools = {'web_search', 'web_fetch', 'web_extract', 'search_code',
+                           'search_obsidian', 'grep_code'}
+            search_count = sum(name_count.get(t, 0) for t in search_tools)
+            if search_count >= 3:
+                self._append_to_history("user",
+                    "提示: 搜索次数过多，请基于已有信息直接整理答案返回，不要再调用搜索工具。")
+                self.current_depth += 1
+                self._recent_tool_calls.clear()
+                return False
+            # 同一工具重复调用（pip install 连续失败等）
+            for name, count in name_count.items():
+                if count >= 3:
+                    self._append_to_history("user",
+                        f"注意: {name} 已连续调用 {count} 次。如果之前的结果不理想，"
+                        f"请换一种策略或直接告知用户无法完成，不要重复尝试相同方法。")
+                    self.current_depth += 1
+                    self._recent_tool_calls.clear()
+                    return False
         if self.current_tool_round > 90:
             # 达上限时请求总结，而不是直接报错
             summary = (
@@ -730,6 +753,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls)
             self._append_to_history("tool", tool_results=tool_results)
+            # 记录工具调用用于循环检测
+            if self._pending_tool_calls:
+                for tc in self._pending_tool_calls:
+                    name = tc.get("function", {}).get("name", "")
+                    args = str(tc.get("function", {}).get("arguments", ""))[:60]
+                    self._recent_tool_calls.append((name, args))
+                self._recent_tool_calls = self._recent_tool_calls[-12:]
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
             self._pending_tool_calls = None

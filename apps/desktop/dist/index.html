@@ -315,18 +315,37 @@ function md(s) {
     return '%%CODEBLOCK' + (codeBlocks.length-1) + '%%';
   });
   var tables = [];
-  s = s.replace(/((?:\|.+(?:\r?\n|$))+)/gm, function(block) {
-    var lines = block.trim().split(/\r?\n/);
+  s = s.replace(/((?:\\|.+(?:\\r?\\n|$))+)/gm, function(block) {
+    var lines = block.trim().split(/\\r?\\n/);
     if (lines.length < 2) return block;
-    var sepLine = lines[1].replace(/\s/g, '');
-    if (!/^\|[-:]+\|$/.test(sepLine)) return block;
-    var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
-    for (var i=2; i<lines.length; i++) {
-      h += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+esc(c.trim())+'</td>';}).join('') + '</tr>';
+    var sepLine = lines[1].replace(/\\s/g, '');
+    var hasDivider = /^\\|?[-:]+\\|?$/.test(sepLine);
+    if (hasDivider) {
+      // Standard markdown table with header/divider/data
+      var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
+      for (var i=2; i<lines.length; i++) {
+        h += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+esc(c.trim())+'</td>';}).join('') + '</tr>';
+      }
+      h += '</tbody></table>';
+      tables.push(h);
+      return '%%TABLE' + (tables.length-1) + '%%';
     }
-    h += '</tbody></table>';
-    tables.push(h);
-    return '%%TABLE' + (tables.length-1) + '%%';
+    // Fallback: no divider row — detect if it looks like a table (all lines have ≥2 | cells)
+    var cellCounts = lines.map(function(l) { return l.split('|').filter(function(c){return c.trim();}).length; });
+    var avg = cellCounts.reduce(function(a,b){return a+b;}, 0) / cellCounts.length;
+    if (avg >= 2 && cellCounts.every(function(c) { return Math.abs(c - avg) <= 1; })) {
+      // First row = header, rest = data
+      var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
+      for (var i=1; i<lines.length; i++) {
+        if (lines[i].trim()) {
+          h += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+esc(c.trim())+'</td>';}).join('') + '</tr>';
+        }
+      }
+      h += '</tbody></table>';
+      tables.push(h);
+      return '%%TABLE' + (tables.length-1) + '%%';
+    }
+    return block;
   });
   s = esc(s);
   // Headings
