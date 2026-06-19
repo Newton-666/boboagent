@@ -83,6 +83,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #input::placeholder { color:var(--text2); }
 #send { position:absolute; right:24px; bottom:32px; width:32px; height:32px; border-radius:8px; background:var(--text); color:var(--bg); border:none; cursor:pointer; font-size:16px; font-weight:600; }
 #send:disabled { opacity:0.3; }
+#send.loading { animation: sendPulse 1.2s ease-in-out infinite; }
+@keyframes sendPulse { 0%,100% { opacity:0.3; } 50% { opacity:0.7; } }
 #debug { text-align:center; font-size:11px; color:#666; margin-top:8px; font-family:monospace; }
 ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-thumb { background:#444; border-radius:2px; }
 /* Settings modal */
@@ -109,7 +111,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
     <div id="chat"></div>
     <div id="input-box">
-      <textarea id="input" rows="1" placeholder="Connecting..." disabled></textarea>
+      <textarea id="input" placeholder="Connecting..." disabled></textarea>
       <button id="send" disabled>↑</button>
     </div>
   </div>
@@ -316,7 +318,9 @@ function addTool(name, context, toolId) {
     '<span class="tool-status">running</span>' +
     '<span class="tool-toggle" style="display:none">▸</span>' +
     '<div class="tool-result"></div>';
-  div.onclick = function() {
+  div.onclick = function(e) {
+    // Don't toggle when clicking result text — allows text selection
+    if (e.target.closest('.tool-result')) return;
     var r = div.querySelector('.tool-result');
     if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; }
   };
@@ -483,7 +487,7 @@ function stopThinking() {
 
 on('message.start', function() {
   if (sendTimeoutId) { clearTimeout(sendTimeoutId); sendTimeoutId = null; }
-  messaging = true; debug('Receiving...');
+  messaging = true; sendEl.classList.add('loading'); debug('Receiving...');
   thinkText = '';
   toolsCalledThisRound = false;
   streamingId = null;
@@ -500,7 +504,7 @@ on('message.delta', function(data) {
   }
 });
 on('message.complete', function(data) {
-  messaging = false; debug('Connected ✓');
+  messaging = false; sendEl.classList.remove('loading'); debug('Connected ✓');
   var toolsWereCalled = toolIdCounter > 0;
   thinkText = '';
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
@@ -605,6 +609,7 @@ function handleSlash(cmd) {
 sendEl.addEventListener('click', function() {
   var text = inputEl.value.trim(); if (!text || !connected || messaging) return;
   inputEl.value = '';
+  inputEl.style.height = 'auto';
   if (text.startsWith('/')) {
     if (handleSlash(text.slice(1))) return;
   }
@@ -613,6 +618,11 @@ sendEl.addEventListener('click', function() {
 });
 inputEl.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendEl.click(); }
+});
+// Auto-height textarea
+inputEl.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 200) + 'px';
 });
 
 // ── Settings ────────────────────────────────────────────────────────────
