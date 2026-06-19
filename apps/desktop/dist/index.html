@@ -121,6 +121,54 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     </div>
   </div>
 </div>
+<div id="settings-modal">
+  <div id="settings-panel">
+    <div id="settings-nav">
+      <div class="settings-tab active" data-tab="basic">基础设置</div>
+      <div class="settings-tab" data-tab="api">API</div>
+      <div class="settings-tab" data-tab="advanced">高级设置</div>
+    </div>
+    <div id="settings-content">
+      <h2>⚙ 设置</h2>
+      <div class="settings-page" id="page-basic">
+        <label>Provider</label>
+        <select id="cfg-provider">
+          <option value="deepseek">DeepSeek</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="google">Google</option>
+          <option value="ollama">Ollama (local)</option>
+        </select>
+        <label>Model</label>
+        <select id="cfg-model">
+          <option value="deepseek-chat">deepseek-chat</option>
+        </select>
+      </div>
+      <div class="settings-page" id="page-api" style="display:none">
+        <label>API Key</label>
+        <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
+        <label>Base URL <span style="font-weight:400;font-size:11px;">(选填)</span></label>
+        <input id="cfg-baseurl" type="text" placeholder="留空使用 Provider 默认地址" />
+        <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
+        <input id="cfg-obsidian" type="text" placeholder="留空自动检测" />
+      </div>
+      <div class="settings-page" id="page-advanced" style="display:none">
+        <label>Max Tokens</label>
+        <input id="cfg-maxtokens" type="number" value="8192" placeholder="8192" />
+        <label>请求超时 (秒)</label>
+        <input id="cfg-timeout" type="number" value="120" placeholder="120" />
+        <div style="margin-top:20px;">
+          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">删除所有会话</button>
+        </div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#5b9bd5;color:#fff;">保存</button>
+        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
@@ -774,58 +822,8 @@ function checkSidebar() {
 }
 window.addEventListener('resize', checkSidebar);
 checkSidebar();
+
+// ── Session search ──────────────────────────────────────────────────────
 </script>
-<div id="settings-modal">
-  <div id="settings-panel">
-    <div id="settings-nav">
-      <div class="settings-tab active" data-tab="basic">基础设置</div>
-      <div class="settings-tab" data-tab="api">API</div>
-      <div class="settings-tab" data-tab="advanced">高级设置</div>
-    </div>
-    <div id="settings-content">
-      <h2>⚙ 设置</h2>
-      <!-- 基础设置 -->
-      <div class="settings-page" id="page-basic">
-        <label>Provider</label>
-        <select id="cfg-provider">
-          <option value="deepseek">DeepSeek</option>
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="openrouter">OpenRouter</option>
-          <option value="google">Google</option>
-          <option value="ollama">Ollama (local)</option>
-        </select>
-        <label>Model</label>
-        <select id="cfg-model">
-          <option value="deepseek-chat">deepseek-chat</option>
-        </select>
-      </div>
-      <!-- API 设置 -->
-      <div class="settings-page" id="page-api" style="display:none">
-        <label>API Key</label>
-        <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
-        <label>Base URL <span style="font-weight:400;font-size:11px;">(选填)</span></label>
-        <input id="cfg-baseurl" type="text" placeholder="留空使用 Provider 默认地址" />
-        <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
-        <input id="cfg-obsidian" type="text" placeholder="留空自动检测" />
-      </div>
-      <!-- 高级设置 -->
-      <div class="settings-page" id="page-advanced" style="display:none">
-        <label>Max Tokens</label>
-        <input id="cfg-maxtokens" type="number" value="8192" placeholder="8192" />
-        <label>请求超时 (秒)</label>
-        <input id="cfg-timeout" type="number" value="120" placeholder="120" />
-        <div style="margin-top:20px;">
-          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">删除所有会话</button>
-        </div>
-      </div>
-      <!-- 底部按钮 -->
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
-        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#5b9bd5;color:#fff;">保存</button>
-        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">取消</button>
-      </div>
-    </div>
-  </div>
-</div>
 </body>
 </html>
