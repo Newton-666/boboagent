@@ -28,9 +28,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #welcome h1 { font-size:32px; font-weight:600; }
 #welcome p { color:var(--text2); }
 #chat { flex:1; overflow-y:auto; padding:24px 16px; }
-.msg { padding:10px 18px; border-radius:12px; margin-bottom:20px; max-width:85%; animation:fadeIn 0.25s ease; }
+.msg { padding:10px 18px; border-radius:12px; margin-bottom:20px; max-width:85%; }
 .msg.user { background:var(--bg2); border:1px solid var(--border); margin-left:auto; }
-@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
 .msg .txt strong, .msg .txt b { color:#e8913a; }
@@ -43,12 +42,12 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tool .tool-context { color:var(--text-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tool .tool-status { font-size:10px; color:var(--text-muted); margin-left:auto; flex-shrink:0; }
 .tool .tool-toggle { color:var(--text-muted); font-size:10px; flex-shrink:0; }
-.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 24px; padding:4px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:0; overflow-y:auto; display:block; opacity:0; transition:max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease; }
-.tool-result.open { max-height:120px; opacity:1; padding:4px 10px; }
+.tool-result { font-size:11px; color:var(--text2); margin:2px 0 0 24px; padding:4px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:monospace; white-space:pre-wrap; word-break:break-all; max-height:120px; overflow-y:auto; display:none; }
+.tool-result.open { display:block; }
 .tool-result.error { color:#f48771; background:rgba(244,135,113,0.06); display:block; }
 @keyframes dotPulse { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
 /* Thinking */
-.think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:rgba(91,155,213,0.04); border:1px solid rgba(91,155,213,0.12); animation:fadeIn 0.3s ease; }
+.think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:rgba(91,155,213,0.04); border:1px solid rgba(91,155,213,0.12); }
 .think-box.show { display:block; }
 .think-box .think-label { font-size:11px; color:#5b9bd5; margin-bottom:4px; font-weight:600; display:flex; align-items:center; gap:8px; }
 .think-stop { margin-left:auto; cursor:pointer; font-size:12px; color:var(--text-muted); padding:2px 6px; border-radius:4px; font-weight:400; }
@@ -131,6 +130,10 @@ function connect() {
     }
     if (msg.id) { var r = pending.get(msg.id); if (r) { pending.delete(msg.id); r(msg.result || msg.error || {}); } }
   });
+  window.boboAPI.onStatus(function(data) {
+    if (data.status === 'exited') { var h = handlers.get('backend.exited'); if (h) h(data); }
+  });
+  if (window.boboAPI.getPending) window.boboAPI.getPending();
 }
 function on(e, h) { handlers.set(e, h); }
 function call(m, p) {
@@ -138,7 +141,7 @@ function call(m, p) {
   return new Promise(function(resolve) {
     var id = 'req-' + (++reqId); pending.set(id, resolve);
     window.boboAPI.send({ jsonrpc:'2.0', id:id, method:m, params:p||{} });
-    setTimeout(function() { pending.delete(id); resolve({}); }, 15000);
+    setTimeout(function() { pending.delete(id); resolve({}); }, 120000);
   });
 }
 function sendPrompt(text) {
@@ -266,11 +269,13 @@ function addMsg(role, text, id, append) {
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
 var toolResults = {};
-var toolArgs = {};  // store tool.start arguments for diff display
 
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
-  freezeThinkBox();
+  if (thinkBoxEl) {
+    thinkBoxEl.querySelector('.think-label').innerHTML = 'Thought';
+    thinkBoxEl.style.opacity = '0.6';
+  }
 
   // Friendly names
   var friendly = name;
@@ -314,8 +319,6 @@ function updateToolResult(toolId, resultText, error) {
   var statusEl = div.querySelector('.tool-status');
   var toggleEl = div.querySelector('.tool-toggle');
   var resultEl = div.querySelector('.tool-result');
-  var args = toolArgs[toolId] || {};
-  var name = div.querySelector('.tool-name') ? div.querySelector('.tool-name').textContent : '';
 
   if (error) {
     dot.className = 'dot fail';
@@ -327,26 +330,7 @@ function updateToolResult(toolId, resultText, error) {
     dot.className = 'dot done';
     statusEl.textContent = 'done';
     statusEl.style.color = '#50a14f';
-    // Diff display for edit_file
-    if (name === '编辑文件' && args.old_string && args.new_string) {
-      var oldLines = args.old_string.split('\n');
-      var newLines = args.new_string.split('\n');
-      var diffHtml = '';
-      for (var i = 0; i < Math.max(oldLines.length, newLines.length); i++) {
-        if (i < oldLines.length && i < newLines.length && oldLines[i] !== newLines[i]) {
-          diffHtml += '<div class="diff-del">- ' + esc(oldLines[i]) + '</div>';
-          diffHtml += '<div class="diff-add">+ ' + esc(newLines[i]) + '</div>';
-        } else if (i < oldLines.length && i >= newLines.length) {
-          diffHtml += '<div class="diff-del">- ' + esc(oldLines[i]) + '</div>';
-        } else if (i >= oldLines.length && i < newLines.length) {
-          diffHtml += '<div class="diff-add">+ ' + esc(newLines[i]) + '</div>';
-        } else {
-          diffHtml += '<div>  ' + esc(oldLines[i]) + '</div>';
-        }
-      }
-      resultEl.innerHTML = diffHtml;
-      resultEl.className = 'tool-result open';
-    } else if (resultText) {
+    if (resultText) {
       var preview = resultText.split('\n').filter(function(l){return l.trim();})[0] || '';
       if (preview.length > 120) preview = preview.substring(0, 120) + '...';
       resultEl.textContent = preview;
@@ -446,25 +430,19 @@ var thinkText = '';
 var toolsCalledThisRound = false;
 var thinkBoxEl = null;
 
-function freezeThinkBox() {
-  if (!thinkBoxEl) return;
-  if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
-  if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
-  thinkBoxEl.querySelector('.think-label').innerHTML = 'Thought';
-  thinkBoxEl.style.opacity = '0.5';
-}
-
 function createThinkBox() {
-  // Remove any old think box first
-  if (thinkBoxEl) { freezeThinkBox(); thinkBoxEl = null; }
   var tb = document.createElement('div');
   tb.className = 'think-box show';
   tb.innerHTML = '<div class="think-label"><span>Thinking</span><span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span><span class="think-stop" title="Stop" onclick="stopThinking()">✕</span></div><div class="think-text"></div>';
   chatEl.appendChild(tb);
   chatEl.scrollTop = chatEl.scrollHeight;
+  // 10s: show warning
   tb._warnTimer = setTimeout(function() {
-    if (tb.parentNode) tb.querySelector('.think-label').innerHTML += ' <span style="color:#f48771;font-weight:400;font-size:10px;">(slow response...)</span>';
+    if (tb.parentNode) {
+      tb.querySelector('.think-label').innerHTML += ' <span style="color:#f48771;font-weight:400;font-size:10px;">(slow response...)</span>';
+    }
   }, 10000);
+  // 30s: auto-timeout — API likely hung
   tb._killTimer = setTimeout(function() {
     if (tb.parentNode) {
       tb.querySelector('.think-text').textContent = 'API 无响应，请稍后重试或点击 ✕ 停止。';
@@ -490,7 +468,7 @@ on('message.start', function() {
   toolsCalledThisRound = false;
   streamingId = null;
   welcomeEl.style.display = 'none';
-  thinkBoxEl = createThinkBox();  // fresh think box every round
+  thinkBoxEl = createThinkBox();
 });
 
 on('message.delta', function(data) {
@@ -506,22 +484,25 @@ on('message.delta', function(data) {
 });
 on('message.complete', function(data) {
   messaging = false; debug('Connected ✓');
-  freezeThinkBox();
+  if (thinkBoxEl) {
+    if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
+    if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
+    thinkBoxEl.style.opacity = '0.5';
+  }
   thinkText = '';
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
   var t = data ? data.final_text || '' : '';
   if (t && t.trim()) {
+    if (thinkBoxEl) { thinkBoxEl.remove(); thinkBoxEl = null; }
     addMsg('bobo', t, 'msg-' + Date.now());
   }
   loadSessions();
 });
 on('tool.start', function(data) {
   toolsCalledThisRound = true;
-  var tid = data ? data.tool_id || 't'+Date.now() : 't'+Date.now();
-  toolArgs[tid] = data ? data.arguments || {} : {};
   addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
           data ? data.context || '' : '',
-          tid);
+          data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
 });
 on('tool.complete', function(data) {
   var tid = data ? data.tool_id || '' : '';
@@ -584,38 +565,11 @@ inputEl.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendEl.click(); }
 });
 
-// ── Keyboard shortcuts ──────────────────────────────────────────────────
-document.addEventListener('keydown', function(e) {
-  if (!e.metaKey && !e.ctrlKey) return;
-  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); newChat(); }
-  if (e.key === ',') { e.preventDefault(); document.getElementById('settings-icon').click(); }
-});
-
 // ── Settings ────────────────────────────────────────────────────────────
-var modelPresets = {
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-  anthropic: ['claude-sonnet-4-20250514', 'claude-haiku-3-20240307'],
-  openrouter: ['openai/gpt-4o', 'anthropic/claude-sonnet-4', 'google/gemini-2.0-flash'],
-  google: ['gemini-2.0-flash', 'gemini-2.0-pro'],
-  ollama: ['llama3', 'mistral', 'qwen2.5']
-};
-function updateModelOptions() {
-  var p = document.getElementById('cfg-provider').value;
-  var list = document.getElementById('cfg-model-list');
-  var input = document.getElementById('cfg-model');
-  list.innerHTML = '';
-  (modelPresets[p] || []).forEach(function(m) {
-    var opt = document.createElement('option'); opt.value = m; list.appendChild(opt);
-  });
-  if (modelPresets[p] && modelPresets[p].length) input.value = modelPresets[p][0];
-}
-
 document.getElementById('settings-icon').onclick = function() {
   call('setup.status', {}).then(function(r1) {
     document.getElementById('cfg-provider').value = (r1 && r1.provider) || 'deepseek';
     document.getElementById('cfg-apikey').placeholder = (r1 && r1.provider_configured) ? '已配置' : '输入API Key';
-    updateModelOptions();
   });
   document.getElementById('settings-modal').classList.add('open');
 };
@@ -623,53 +577,34 @@ document.getElementById('settings-close').onclick = function() {
   document.getElementById('settings-modal').classList.remove('open');
 };
 document.getElementById('settings-save').onclick = function() {
-  var provider = document.getElementById('cfg-provider').value;
-  var model = document.getElementById('cfg-model').value.trim();
   var key = document.getElementById('cfg-apikey').value.trim();
-  var obsidian = document.getElementById('cfg-obsidian').value.trim();
-  var status = document.getElementById('cfg-status');
-  var done = [];
-
   if (key) {
-    call('setup.submit', { provider: provider, api_key: key });
-    done.push('API Key');
+    call('setup.submit', { provider: document.getElementById('cfg-provider').value, api_key: key });
+    addStatus('Saved');
   }
-  if (obsidian) {
-    done.push('Obsidian vault (需手动在~/.bobo/.env 中设置 OBSIDIAN_VAULT=' + obsidian + ')');
-  }
-  if (model) {
-    done.push('Model: ' + model + ' (需手动在~/.bobo/.env 中设置 API_MODEL_NAME=' + model + ')');
-  }
-  status.textContent = done.length ? '✅ ' + done.join(', ') + ' 已保存' : '未做更改';
-  setTimeout(function() { document.getElementById('settings-modal').classList.remove('open'); }, 1200);
+  document.getElementById('settings-modal').classList.remove('open');
 };
 </script>
 <div id="settings-modal">
   <div id="settings-panel">
     <h2>⚙ Settings</h2>
     <label>Provider</label>
-    <select id="cfg-provider" onchange="updateModelOptions()">
+    <select id="cfg-provider">
       <option value="deepseek">DeepSeek</option>
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="openrouter">OpenRouter</option>
-      <option value="google">Google Gemini</option>
-      <option value="ollama">Ollama (本地)</option>
+      <option value="google">Google</option>
+      <option value="ollama">Ollama (local)</option>
     </select>
-    <label>Model <span style="font-weight:400;color:var(--text-muted);font-size:11px;">（可编辑）</span></label>
-    <input id="cfg-model" type="text" list="cfg-model-list" placeholder="e.g. deepseek-chat" />
-    <datalist id="cfg-model-list"></datalist>
+    <label>Model</label>
+    <input id="cfg-model" type="text" placeholder="e.g. deepseek-chat" readonly />
     <label>API Key</label>
     <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
-    <div style="display:flex;gap:12px;">
-      <div style="flex:1;"><label>Max Steps</label><input id="cfg-maxsteps" type="number" value="12" min="3" max="30" /></div>
-      <div style="flex:1;"><label>Timeout (s)</label><input id="cfg-timeout" type="number" value="60" min="30" max="300" /></div>
-    </div>
-    <label>Obsidian Vault</label>
-    <input id="cfg-obsidian" type="text" placeholder="/path/to/vault" />
-    <div id="cfg-status" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+    <label>Obsidian Vault Path</label>
+    <input id="cfg-obsidian" type="text" placeholder="/path/to/vault (需手动在 ~/.bobo/.env 设置)" />
     <div style="margin-top:16px;">
-      <button class="btn-save" id="settings-save">保存</button>
+      <button class="btn-save" id="settings-save" onclick="var k=document.getElementById('cfg-apikey').value.trim();if(k){call('setup.submit',{provider:document.getElementById('cfg-provider').value,api_key:k});addStatus('Saved');}this.closest('#settings-modal').classList.remove('open')">保存</button>
       <button class="btn-close" id="settings-close" onclick="this.closest('#settings-modal').classList.remove('open')">取消</button>
     </div>
   </div>
