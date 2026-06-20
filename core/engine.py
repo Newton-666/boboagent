@@ -161,6 +161,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 ## 工具使用
 
 - 代码搜索 → grep_code（正则搜索代码内容）
+- 项目结构 → index_project（首次接触项目时建立代码索引，后续无需重复搜索结构）
 - 精确改代码 → edit_file（字符串替换，不改整体架构）
 - 创建新文件 → file_operation（action="write"）+ auto-run（写完自动运行）
 - 搜索信息 → web_search / search_obsidian / cross_search
