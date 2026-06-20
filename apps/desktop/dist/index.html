@@ -603,7 +603,7 @@ function openPlugin(id) {
   // Adjust main width
   document.getElementById('main').style.maxWidth = 'calc(100vw - 240px - 340px)';
   // Plugin content
-  if (id === 'notes') renderNotesPanel(content);
+  if (id === 'notes') renderNotesPanel(content, _notesTree);
   else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>即将上线</p>';
 }
 
@@ -612,26 +612,50 @@ function closePanel() {
   document.getElementById('main').style.maxWidth = '';
 }
 
-function renderNotesPanel(el) {
-  el.innerHTML = '' +
-    '<div class="nt-item folder">📁 02_Areas</div>' +
-    '<div class="nt-children">' +
-      '<div class="nt-item folder">📁 人工智能</div>' +
-      '<div class="nt-children">' +
-        '<div class="nt-item file" onclick="showNote(\'Agent架构总结\')">📄 Agent架构总结.md</div>' +
-        '<div class="nt-item file">📄 BOBO 开发日志.md</div>' +
-      '</div>' +
-      '<div class="nt-item folder">📁 Agentic AI</div>' +
-      '<div class="nt-children">' +
-        '<div class="nt-item file">📄 项目笔记.md</div>' +
-      '</div>' +
-    '</div>';
+function renderNotesPanel(el, tree) {
+  if (!tree || tree.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">等待笔记数据...</p>';
+    return;
+  }
+  el.innerHTML = renderTree(tree, '');
 }
 
-function showNote(title) {
+function renderTree(nodes, prefix) {
+  var html = '';
+  nodes.forEach(function(n) {
+    if (n.type === 'folder') {
+      html += '<div class="nt-item folder">📁 ' + n.name + '</div>';
+      html += '<div class="nt-children">' + renderTree(n.children || [], prefix + n.name + '/') + '</div>';
+    } else {
+      html += '<div class="nt-item file" onclick="showNote(\'' + esc(n.path) + '\')">📄 ' + n.name + '</div>';
+    }
+  });
+  return html;
+}
+
+var _notesTree = null;
+
+// Listen for notes.tree event from backend
+on('notes.tree', function(payload) {
+  _notesTree = (payload && payload.tree) || null;
   var content = document.getElementById('right-content');
-  content.innerHTML = '<div class="np"><h2>' + title + '</h2><p>正在从 Obsidian vault 加载内容...</p><p>将在 <code>read_local_file</code> 调用后展示完整笔记。</p></div>';
-  // Future: call('read_local_file', { ... }) via existing call() function
+  if (content && content.innerHTML.indexOf('nt-item') === -1) {
+    renderNotesPanel(content, _notesTree);
+  }
+});
+
+function showNote(filepath) {
+  var content = document.getElementById('right-content');
+  content.innerHTML = '<div class="np"><h2>正在加载...</h2><p>' + esc(filepath) + '</p></div>';
+  call('read_local_file', { filepath: filepath }).then(function(r) {
+    if (r && typeof r === 'string') {
+      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(r.substring(0, 3000)) + '</pre></div>';
+    } else if (r && r.content) {
+      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(r.content.substring(0, 3000)) + '</pre></div>';
+    } else {
+      content.innerHTML = '<div class="np"><p style="color:var(--text-muted);">无法加载文件</p></div>';
+    }
+  });
 }
 
 // ── Sessions ───────────────────────────────────────────────────────────

@@ -102,7 +102,29 @@ def main():
 
 def _run_backend():
     """Run as TUI backend process (stdin/stdout JSON-RPC)."""
-    # Ctrl+C by the TUI via session.interrupt RPC
+
+    from pathlib import Path
+
+    # 扫描 Obsidian vault 目录，返回文件树结构
+    def _scan_vault_tree(root):
+        max_depth = 4
+        tree = []
+        root_path = Path(root)
+        try:
+            for entry in sorted(root_path.iterdir(), key=lambda x: (not x.is_dir(), x.name)):
+                if entry.name.startswith('.'):
+                    continue
+                if len(tree) >= 100:
+                    break
+                if entry.is_dir():
+                    subtree = _scan_vault_tree(entry) if max_depth > 0 else []
+                    tree.append({"name": entry.name, "type": "folder", "children": subtree})
+                elif entry.name.endswith(('.md', '.txt', '.json')):
+                    tree.append({"name": entry.name, "type": "file", "path": str(entry)})
+        except PermissionError:
+            pass
+        return tree
+
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     # 发送 ready 事件（包含皮肤配置）
@@ -121,6 +143,19 @@ def _run_backend():
     if not API_KEY:
         # TUI 会调用 setup.status 检测到未配置，显示 /setup 界面
         logger.warning("DEEPSEEK_API_KEY 未配置，等待用户在 TUI 中设置")
+
+    # 扫描 Obsidian vault，发射笔记文件树
+    try:
+        vault = os.environ.get("OBSIDIAN_VAULT", "")
+        if vault and os.path.isdir(vault):
+            notebook_tree = _scan_vault_tree(vault)
+            write_json({
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {"type": "notes.tree", "payload": {"tree": notebook_tree}}
+            })
+    except Exception:
+        pass
 
     # 读取并处理请求
     for raw in sys.stdin:
