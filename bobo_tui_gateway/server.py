@@ -443,146 +443,23 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
     if not session:
         return _err(rid, -32000, "会话不存在")
 
-    def _run_engine():
-        try:
-            from core.engine import Engine
-            from core.tool_executor import execute_tool
-
-            llm_caller = _get_llm_caller()
-            result_text = [""]
-            last_usage = [{}]
-
-            def on_event(event_type, data):
-                if event_type == "thinking":
-                    # 将引擎思考阶段显示为状态更新（不插入对话）
-                    msg = data.get("message", "")
-                    if msg:
-                        _emit("status.update", sid, {
-                            "kind": data.get("phase", ""),
-                            "text": msg,
-                            "session_id": sid,
-                        })
-                elif event_type == "tool_call":
-                    _emit("tool.start", sid, {
-                        "tool_id": data.get("name", ""),
-                        "name": data.get("name", ""),
-                        "arguments": data.get("args", {}),
-                        "context": data.get("context", ""),
-                        "session_id": sid,
-                    })
-                elif event_type == "tool_result":
-                    tool_output = data.get("result", "")
-                    _emit("tool.complete", sid, {
-                        "tool_id": data.get("name", ""),
-                        "name": data.get("name", ""),
-                        "duration": data.get("duration", 0),
-                        "result_text": tool_output,
-                        "error": "" if data.get("success", True) else (tool_output[:200] if tool_output else "工具执行失败"),
-                        "session_id": sid,
-                    })
-                elif event_type == "complete":
-                    result_text[0] = data.get("content", "")
-                    # 转换 usage 格式以匹配 Hermes TUI 期望的字段
-                    raw = data.get("usage", {})
-                    if raw:
-                        input_tokens = raw.get("prompt_tokens", 0)
-                        output_tokens = raw.get("completion_tokens", 0)
-                        total = raw.get("total_tokens", 0)
-                        # 累计会话 token 用量
-                        with _session_usage_lock:
-                            acc = _session_usage.setdefault(sid, {"input": 0, "output": 0})
-                            acc["input"] += input_tokens
-                            acc["output"] += output_tokens
-                        context_used = acc["input"] + acc["output"]
-                        last_usage[0] = {
-                            "input": acc["input"],
-                            "output": acc["output"],
-                            "total": total,
-                            "context_max": _get_context_length(),
-                            "context_used": context_used,
-                            "context_percent": round(context_used / _get_context_length() * 100, 1),
-                        }
-                elif event_type == "error":
-                    # 将错误发送到 TUI 作为可见错误提示
-                    _emit("gateway.error", sid, {
-                        "message": data.get("content", ""),
-                        "session_id": sid,
-                    })
-                    # 同时记录到会话文本中，方便追溯
-                    result_text[0] = data.get("content", "")
-                elif event_type == "thinking.delta":
-                    # 将流式 token 实时转发到 TUI
-                    _emit("message.delta", sid, {
-                        "text": data.get("text", ""),
-                        "session_id": sid,
-                    })
-                elif event_type == "status.update":
-                    # 将状态更新转发到 TUI
-                    _emit("status.update", sid, {
-                        "kind": data.get("kind", ""),
-                        "text": data.get("text", ""),
-                        "session_id": sid,
-                    })
-
-            def confirm_callback(tool_name: str, tool_args: dict, reason: str) -> bool:
-                """通过 TUI 前端让用户确认高风险操作"""
-                event = threading.Event()
-                with _confirm_lock:
-                    _pending_confirm[sid] = event
-
-                _emit("approval.request", sid, {
-                    "command": tool_name,
-                    "description": reason,
-                    "session_id": sid,
-                })
-
-                # 等待前端响应（最多 120 秒）
-                if not event.wait(timeout=120):
-                    with _confirm_lock:
-                        _pending_confirm.pop(sid, None)
-                    return False
-
-                with _confirm_lock:
-                    result = _pending_confirm_result.pop(sid, False)
-                return result
-
-            _emit("message.start", sid, {"session_id": sid})
-
-            # 创建中断事件
-            interrupt_event = threading.Event()
-            with _current_engines_lock:
-                _current_engines[sid] = interrupt_event
-
-            engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
-            engine.history = session.get("messages", [])
-            engine._checkpoints = session.get("checkpoints", [])
-            engine._interrupt_event = interrupt_event
-            engine.run(text)
-
-            # 持久化回退快照
-            session["checkpoints"] = engine._checkpoints
-
-            # 清理中断事件
-            with _current_engines_lock:
-                _current_engines.pop(sid, None)
-
-            if engine.history:
-                session["messages"] = engine.history
-
-            _save_session_to_disk(sid)
-
-            _emit("message.complete", sid, {
-                "session_id": sid,
-                "final_text": result_text[0],
-                "usage": last_usage[0],
-            })
-
-        except Exception as e:
-            logger.exception("prompt.submit 后台线程执行失败")
-            _emit("error", sid, {"message": str(e), "session_id": sid})
-
     # 在后台线程中运行引擎，主线程继续处理 stdin
-    thread = threading.Thread(target=_run_engine, name=f"engine-{sid}", daemon=True)
+    from core.engine_adapter import run_engine as _run_engine_adapter
+
+    thread = threading.Thread(
+        target=_run_engine_adapter,
+        args=(
+            sid, session, text, _emit,
+            _get_llm_caller, _get_context_length,
+            register_engine_thread,
+            _pending_confirm, _pending_confirm_result, _confirm_lock,
+            _current_engines, _current_engines_lock,
+            _session_usage, _session_usage_lock,
+            _save_session_to_disk,
+        ),
+        name=f"engine-{sid}",
+        daemon=True,
+    )
     register_engine_thread(thread)
     thread.start()
 
