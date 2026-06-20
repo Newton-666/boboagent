@@ -196,10 +196,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       <button id="send" disabled>↑</button>
     </div>
   </div>
-</div>
-<div id="right-panel">
-  <div id="right-tabs"></div>
-  <div id="right-content"></div>
+  <div id="right-panel">
+    <div id="right-tabs"></div>
+    <div id="right-content"></div>
+  </div>
 </div>
 <!-- Preview panel -->
 <div id="preview-overlay"></div>
@@ -599,7 +599,7 @@ function openPlugin(id) {
   panel.classList.add('open');
   tabs.innerHTML = '<div class="rtab active">' + p.icon + ' ' + p.name + '<span class="close" onclick="closePanel()">✕</span></div>';
   // Adjust main width
-  document.getElementById('main').style.maxWidth = '';
+  document.getElementById('main').style.maxWidth = 'calc(100vw - 240px - 340px)';
   // Plugin content
   if (id === 'notes') renderNotesPanel(content);
   else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>即将上线</p>';
