@@ -671,21 +671,22 @@ def handle_input_detect_drop(params: dict, rid: str) -> dict:
 
 @method("commands.catalog")
 def handle_commands_catalog(params: dict, rid: str) -> dict:
-    """Return available slash commands to the TUI."""
-    return _ok(rid, {
-        "pairs": [
-            ["/help", "显示帮助"],
-            ["/clear", "清除当前对话"],
-            ["/undo", "回退上一步操作"],
-            ["/tools", "列出所有工具"],
-            ["/settings", "查看当前配置"],
-            ["/sessions", "查看历史会话"],
-            ["/exit", "退出"],
-        ],
-        "categories": [],
-        "canon": {},
-        "sub": {},
-    })
+    """返回所有可用命令列表"""
+    return _ok(rid, {"commands": _COMMANDS})
+
+
+@method("file.read")
+def handle_file_read(params: dict, rid: str) -> dict:
+    """读取文件内容（供桌面端插件使用）"""
+    filepath = params.get("filepath", "")
+    if not filepath:
+        return _err(rid, -32000, "缺少 filepath 参数")
+    try:
+        from tools.read_local_file import execute as read_file
+        content = read_file(filepath=filepath, max_chars=10000)
+        return _ok(rid, {"content": content})
+    except Exception as e:
+        return _err(rid, -32000, str(e))
 
 
 @method("completion")

@@ -647,11 +647,11 @@ on('notes.tree', function(payload) {
 function showNote(filepath) {
   var content = document.getElementById('right-content');
   content.innerHTML = '<div class="np"><h2>正在加载...</h2><p>' + esc(filepath) + '</p></div>';
-  call('read_local_file', { filepath: filepath }).then(function(r) {
-    if (r && typeof r === 'string') {
-      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(r.substring(0, 3000)) + '</pre></div>';
-    } else if (r && r.content) {
-      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(r.content.substring(0, 3000)) + '</pre></div>';
+  call('file.read', { filepath: filepath }).then(function(r) {
+    if (r && r.content) {
+      var txt = r.content;
+      if (typeof txt === 'string' && txt.length > 5000) txt = txt.substring(0, 5000) + '\n...（截断至 5000 字符）';
+      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(txt) + '</pre></div>';
     } else {
       content.innerHTML = '<div class="np"><p style="color:var(--text-muted);">无法加载文件</p></div>';
     }
