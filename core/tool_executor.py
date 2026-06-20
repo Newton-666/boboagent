@@ -31,7 +31,7 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
         return f"{output}（耗时: {duration:.1f}s）"
     except TimeoutError:
         duration = time.time() - start_time
-        return f"错误: 工具 '{tool_name}' 执行超时（{TOOL_TIMEOUT}秒，已等待 {duration:.1f}s）"
+        return f"工具 '{tool_name}' 执行超过 {TOOL_TIMEOUT}s（当前上限）。如果工具支持 timeout 参数，请指定更大值后重试（已等待 {duration:.1f}s）"
     except TypeError as e:
         return f"参数错误: {str(e)}"
     except ValueError as e:

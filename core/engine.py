@@ -272,6 +272,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     self.current_depth += 1
                     self._recent_tool_calls.clear()
                     return False
+        # 步骤预算渐进提醒
+        if self.current_depth == 20:
+            self._append_to_history("user", "提示: 你已执行 20 步。如果已有足够信息，请直接生成最终回复，不需要再调用工具。")
+            self.current_depth += 1
+            return False
+        if self.current_depth == 25:
+            self._append_to_history("user", "提示: 还剩 5 步，请尽快完成当前操作并生成回复。")
+            self.current_depth += 1
+            return False
+
         if self.current_tool_round > 90:
             # 达上限时请求总结，而不是直接报错
             summary = (
@@ -837,8 +847,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         while self.state not in (self.STATE_DONE, self.STATE_ERROR):
             self._step_count += 1
             if self._step_count > self.MAX_STEPS:
-                self._notify("error", {"content": f"执行步骤超过上限（{self.MAX_STEPS}步），已自动终止"})
-                self.state = self.STATE_ERROR
+                self._notify("thinking", {"phase": "continuing", "message": "步骤已用完，正在生成最终回复..."})
+                self.state = self.STATE_RESPONDING
                 break
             # 检查中断信号
             if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():

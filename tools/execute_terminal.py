@@ -95,8 +95,15 @@ def execute(command: str, timeout: int = 30) -> str:
         
         return output.strip()
         
-    except subprocess.TimeoutExpired:
-        return f"命令执行超时（{timeout}秒）"
+    except subprocess.TimeoutExpired as e:
+        partial = ""
+        if e.stdout:
+            try:
+                partial = e.stdout.decode() if isinstance(e.stdout, bytes) else str(e.stdout)[:2000]
+            except Exception:
+                partial = ""
+        hint = f"\n如果需要更长时间，请指定更大的 timeout 参数后重试。" if partial else "无输出。如果需要更长时间，请指定更大的 timeout 参数后重试。"
+        return f"命令执行超过 {timeout}s（当前上限），已终止。已有部分输出:\n{partial}{hint}"
     except Exception as e:
         return f"执行失败: {str(e)}"
 
