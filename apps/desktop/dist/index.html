@@ -53,6 +53,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .rtab .close { cursor:pointer; font-size:13px; color:var(--text-muted); margin-left:3px; }
 .rtab .close:hover { color:#f44336; }
 #right-content { flex:1; overflow-y:auto; padding:14px 16px; font-size:13px; color:var(--text2); line-height:1.7; }
+/* Resize handle */
+#resize-handle { width:4px; cursor:col-resize; background:transparent; flex-shrink:0; transition:background 0.15s; }
+#resize-handle:hover, #resize-handle.active { background:var(--border); }
 /* Note tree in right panel */
 .nt-item { padding:4px 6px; cursor:pointer; border-radius:4px; display:flex; align-items:center; gap:5px; font-size:13px; color:var(--text2); }
 .nt-item:hover { background:var(--bg2); }
@@ -198,6 +201,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       <button id="send" disabled>↑</button>
     </div>
   </div>
+  <div id="resize-handle"></div>
   <div id="right-panel">
     <div id="right-tabs"></div>
     <div id="right-content"></div>
@@ -612,6 +616,36 @@ function closePanel() {
   document.getElementById('main').style.maxWidth = '';
 }
 
+// ── Resizable right panel ──
+(function() {
+  var handle = document.getElementById('resize-handle');
+  var panel = document.getElementById('right-panel');
+  var mainEl = document.getElementById('main');
+  if (!handle || !panel) return;
+  var startX, startW;
+  handle.addEventListener('mousedown', function(e) {
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    handle.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!handle.classList.contains('active')) return;
+    var w = startW - (e.clientX - startX);
+    if (w < 200) w = 200;
+    if (w > 600) w = 600;
+    panel.style.width = w + 'px';
+    panel.style.minWidth = w + 'px';
+    mainEl.style.maxWidth = 'calc(100vw - 240px - ' + w + 'px)';
+  });
+  document.addEventListener('mouseup', function() {
+    handle.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
 function renderNotesPanel(el, tree) {
   if (!tree || tree.length === 0) {
     el.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">等待笔记数据...</p>';
@@ -646,14 +680,14 @@ on('notes.tree', function(payload) {
 
 function showNote(filepath) {
   var content = document.getElementById('right-content');
-  content.innerHTML = '<div class="np"><h2>正在加载...</h2><p>' + esc(filepath) + '</p></div>';
+  content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderNotesPanel(document.getElementById(\'right-content\'), _notesTree)" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span></div><div class="np"><p>正在加载...</p><p style="font-size:12px;color:var(--text-muted);">' + esc(filepath) + '</p></div>';
   call('file.read', { filepath: filepath }).then(function(r) {
     if (r && r.content) {
       var txt = r.content;
       if (typeof txt === 'string' && txt.length > 5000) txt = txt.substring(0, 5000) + '\n...（截断至 5000 字符）';
-      content.innerHTML = '<div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(txt) + '</pre></div>';
+      content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderNotesPanel(document.getElementById(\'right-content\'), _notesTree)" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span></div><div class="np"><pre style="white-space:pre-wrap;font-size:12px;color:var(--text2);">' + esc(txt) + '</pre></div>';
     } else {
-      content.innerHTML = '<div class="np"><p style="color:var(--text-muted);">无法加载文件</p></div>';
+      content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderNotesPanel(document.getElementById(\'right-content\'), _notesTree)" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span></div><div class="np"><p style="color:var(--text-muted);">无法加载文件</p></div>';
     }
   });
 }
