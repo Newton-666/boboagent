@@ -8,6 +8,8 @@ import getpass
 from datetime import datetime
 from pathlib import Path
 
+SESSION_VERSION = 1
+
 
 class SessionManager:
     def __init__(self, session_dir: str = None, author: str = None):
@@ -26,6 +28,7 @@ class SessionManager:
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_path = self.session_dir / f"{session_id}.json"
         session = {
+            "_version": SESSION_VERSION,
             "id": session_id,
             "created_at": datetime.now().isoformat(),
             "title": title or f"会话_{session_id}",
@@ -67,6 +70,7 @@ class SessionManager:
             return None
         with open(session_path, 'r', encoding='utf-8') as f:
             session = json.load(f)
+        session = self._migrate_session(session)
         self.current_session_id = session_id
         self.current_session = session
         return session
@@ -116,6 +120,19 @@ class SessionManager:
                 with open(session_path, 'r', encoding='utf-8') as f:
                     self.current_session = json.load(f)
 
+    def _migrate_session(self, session: dict) -> dict:
+        """升级旧会话文件到当前版本。"""
+        try:
+            version = session.get("_version", 0)
+            if version >= SESSION_VERSION:
+                return session
+            if version < 1:
+                session["_version"] = 1
+            # 未来 v1→v2 迁移在这里追加
+            return session
+        except Exception:
+            return session
+
     def _write_atomic(self, path: Path, data: dict):
         """原子写入：先写 .tmp 文件，再 rename，避免写操作中断导致文件损坏"""
         tmp_path = path.with_suffix(".json.tmp")
@@ -141,6 +158,7 @@ class SessionManager:
 
     def _save(self):
         if self.current_session and self.current_session_id:
+            self.current_session["_version"] = SESSION_VERSION
             self._write_atomic(
                 self.session_dir / f"{self.current_session_id}.json",
                 self.current_session
