@@ -130,9 +130,21 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
         )
 
     if count > 1:
+        # 取第一个匹配位置，展示前后文让 LLM 确认
+        idx = content.index(old_string)
+        line_start = content.rfind('\n', 0, idx) + 1 if '\n' in content[:idx] else 0
+        line_end = content.find('\n', idx + len(old_string))
+        if line_end == -1:
+            line_end = len(content)
+        before = content[max(0, line_start-60):line_start].strip()
+        after = content[line_end:min(len(content), line_end+60)].strip()
+        preview = content[line_start:line_end][:200].replace('\n', '\\n')
         return (
-            f"错误: old_string 在文件中出现了 {count} 次，不唯一。\n"
-            f"  请提供更多上下文（包含前后各 1-2 行），确保只匹配一处。"
+            f"old_string 在文件中出现了 {count} 次。取第一个匹配位置：\n"
+            f"  ┌─ 上文: ...{before[-40:]}\n"
+            f"  │  {preview}\n"
+            f"  └─ 下文: {after[:40]}...\n"
+            f"这是你要修改的位置吗？如果确认，加参数 confirm=true 执行替换。"
         )
 
     # ── 备份 ──

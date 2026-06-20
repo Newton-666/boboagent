@@ -760,6 +760,20 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     args = str(tc.get("function", {}).get("arguments", ""))[:60]
                     self._recent_tool_calls.append((name, args))
                 self._recent_tool_calls = self._recent_tool_calls[-12:]
+            # 记录已读文件，便于上下文压缩后恢复
+            if name == "read_local_file":
+                try:
+                    import json as _j
+                    a = _j.loads(args) if isinstance(args, str) else args
+                    fpath = a.get('file_path', '') or a.get('path', '')
+                    if fpath and tool_results and len(str(tool_results)) > 40:
+                        if not hasattr(self, '_read_files'):
+                            self._read_files = {}
+                        self._read_files[fpath] = str(tool_results)[:200]
+                        if len(self._read_files) > 10:
+                            self._read_files = dict(list(self._read_files.items())[-10:])
+                except Exception:
+                    pass
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
             self._pending_tool_calls = None

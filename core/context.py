@@ -72,6 +72,23 @@ class ContextMixin:
 
     def _compress_history(self):
         """将早期对话压缩为摘要，保留最近 KEEP_EXCHANGES 轮完整对话。"""
+        # 先尝试回收空间：丢弃工具状态和思考过程等低价值消息
+        total = sum(len(str(m)) for m in self.history)
+        if total > self.MAX_HISTORY_CHARS - 10000:
+            keep = []
+            dropped = 0
+            for m in self.history:
+                role = m.get("role", "")
+                kind = m.get("kind", "") or m.get("phase", "")
+                is_status = kind in ("continuing", "rate_limit", "undo") or "rate_limit" in str(m.get("text", ""))
+                if role == "assistant" and is_status and dropped < 10:
+                    dropped += 1
+                    continue
+                keep.append(m)
+            if len(keep) != len(self.history):
+                self.history = keep
+                total = sum(len(str(m)) for m in self.history)
+
         user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
         if len(user_indices) <= self.KEEP_EXCHANGES:
             return
@@ -113,6 +130,18 @@ class ContextMixin:
             self.history.insert(0, {
                 "role": "system",
                 "content": f"[对话历史摘要]:\n{summary}"
+            })
+
+        # 压缩后注入最近读过的文件摘要
+        if hasattr(self, '_read_files') and self._read_files:
+            recent = list(self._read_files.items())[-3:]
+            lines = ["[最近读过的文件]:", ""]
+            for fpath, preview in recent:
+                short = preview[:100].replace('\n', ' ').strip()
+                lines.append(f"  {fpath}: {short}...")
+            self.history.insert(0, {
+                "role": "system",
+                "content": "\n".join(lines)
             })
 
     def _classify_query(self) -> Optional[str]:
