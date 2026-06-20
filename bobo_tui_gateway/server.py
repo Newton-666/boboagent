@@ -21,6 +21,7 @@ from bobo_tui_gateway.transport import write_json
 logger = logging.getLogger(__name__)
 
 _sessions: dict[str, dict] = {}
+_sessions_lock = threading.Lock()
 _current_sid: str | None = None
 _methods: dict[str, callable] = {}
 _engine_cache: dict[str, Any] = {}
@@ -64,8 +65,9 @@ def register_engine_thread(t: threading.Thread):
 
 def shutdown_sessions():
     """保存所有活跃会话（在信号处理中调用）"""
-    for sid in list(_sessions.keys()):
-        _save_session_to_disk(sid)
+    with _sessions_lock:
+        for sid in list(_sessions.keys()):
+            _save_session_to_disk(sid)
     # 等待引擎线程完成（最多 3 秒）
     with _engine_threads_lock:
         threads = list(_active_engine_threads)
@@ -117,7 +119,8 @@ def _get_llm_caller():
 
 def _save_session_to_disk(sid: str):
     """将内存中的会话保存到磁盘"""
-    session = _sessions.get(sid)
+    with _sessions_lock:
+        session = _sessions.get(sid)
     if not session:
         return
     mgr = _get_session_mgr()
@@ -258,9 +261,10 @@ def handle_session_create(params: dict, rid: str) -> dict:
         "created_at": time.time(),
         "messages": [],
     }
-    _sessions[sid] = session
-    global _current_sid
-    _current_sid = sid
+    with _sessions_lock:
+        _sessions[sid] = session
+        global _current_sid
+        _current_sid = sid
 
     # 保存到磁盘
     _save_session_to_disk(sid)
@@ -275,7 +279,8 @@ def handle_session_create(params: dict, rid: str) -> dict:
 def handle_session_title(params: dict, rid: str) -> dict:
     sid = params.get("session_id", "")
     title = params.get("title", "")
-    session = _sessions.get(sid)
+    with _sessions_lock:
+        session = _sessions.get(sid)
     if session and title:
         session["title"] = title
         _save_session_to_disk(sid)
@@ -341,14 +346,15 @@ def handle_session_resume(params: dict, rid: str) -> dict:
         except Exception:
             created_at = 0
 
-    _sessions[sid] = {
-        "id": sid,
-        "title": session_data.get("title", sid),
-        "created_at": created_at,
-        "messages": messages,
-    }
-    global _current_sid
-    _current_sid = sid
+    with _sessions_lock:
+        _sessions[sid] = {
+            "id": sid,
+            "title": session_data.get("title", sid),
+            "created_at": created_at,
+            "messages": messages,
+        }
+        global _current_sid
+        _current_sid = sid
 
     return _ok(rid, {
         "session_id": sid,
@@ -364,7 +370,8 @@ def handle_session_resume(params: dict, rid: str) -> dict:
 def handle_session_close(params: dict, rid: str) -> dict:
     sid = params.get("session_id", "")
     _save_session_to_disk(sid)
-    _sessions.pop(sid, None)
+    with _sessions_lock:
+        _sessions.pop(sid, None)
     return _ok(rid, {"closed": sid})
 
 
@@ -378,7 +385,8 @@ def handle_session_delete(params: dict, rid: str) -> dict:
     bak = path.with_suffix(".json.bak")
     if bak.exists():
         bak.unlink()
-    _sessions.pop(sid, None)
+    with _sessions_lock:
+        _sessions.pop(sid, None)
     return _ok(rid, {"deleted": sid})
 
 
@@ -386,7 +394,8 @@ def handle_session_delete(params: dict, rid: str) -> dict:
 def handle_session_rename(params: dict, rid: str) -> dict:
     sid = params.get("session_id", "")
     title = params.get("title", "").strip() or "未命名"
-    session = _sessions.get(sid)
+    with _sessions_lock:
+        session = _sessions.get(sid)
     if session:
         session["title"] = title[:50]
         _save_session_to_disk(sid)
@@ -396,12 +405,12 @@ def handle_session_rename(params: dict, rid: str) -> dict:
 @method("session.interrupt")
 def handle_session_interrupt(params: dict, rid: str) -> dict:
     sid = params.get("session_id", "")
-    with _current_engines_lock:
-        event = _current_engines.pop(sid, None)
-    if event:
-        event.set()  # 通知引擎线程中断
+    try:
+        from core.engine_adapter import cancel
+        cancel(sid)
         return _ok(rid, {"interrupted": True})
-    return _ok(rid, {"interrupted": False})
+    except Exception:
+        return _ok(rid, {"interrupted": False})
 
 
 @method("session.steer")
@@ -439,7 +448,8 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
     if not text:
         return _err(rid, -32000, "消息不能为空")
 
-    session = _sessions.get(sid)
+    with _sessions_lock:
+        session = _sessions.get(sid)
     if not session:
         return _err(rid, -32000, "会话不存在")
 
@@ -617,8 +627,9 @@ def handle_terminal_resize(params: dict, rid: str) -> dict:
 @method("session.active_list")
 def handle_session_active_list(params: dict, rid: str) -> dict:
     items = []
-    for sid, session in _sessions.items():
-        items.append({
+    with _sessions_lock:
+        for sid, session in _sessions.items():
+            items.append({
             "id": sid,
             "title": session.get("title", sid),
             "status": "idle",

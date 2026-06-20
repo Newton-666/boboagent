@@ -3,7 +3,27 @@
 server.py 通过此模块调用 engine，不直接 import Engine 类。
 """
 
+import time
 import threading
+
+# 运行中引擎的注册表（sid → interrupt_event）
+_running: dict[str, threading.Event] = {}
+_running_lock = threading.Lock()
+_RUN_TIMEOUT = 120  # 引擎最大运行秒数
+
+
+def cancel(sid: str):
+    """请求中断指定会话的 engine 执行。"""
+    with _running_lock:
+        event = _running.get(sid)
+    if event:
+        event.set()
+
+
+def is_running(sid: str) -> bool:
+    """检查指定会话的 engine 是否正在执行。"""
+    with _running_lock:
+        return sid in _running
 
 
 def run_engine(
@@ -24,6 +44,18 @@ def run_engine(
     save_session_to_disk,
 ):
     """在独立线程中执行 Engine，通过 emit 向桌面端/TUI 发送事件。"""
+    start_time = time.time()
+
+    def _check_timeout():
+        """检查是否超时，超时则设置中断信号。"""
+        if time.time() - start_time > _RUN_TIMEOUT:
+            with _running_lock:
+                event = _running.get(sid)
+            if event:
+                event.set()
+            return True
+        return False
+
     try:
         from core.engine import Engine
         from core.tool_executor import execute_tool
@@ -33,6 +65,8 @@ def run_engine(
         last_usage = [{}]
 
         def on_event(event_type, data):
+            # 每次收到事件时检查超时
+            _check_timeout()
             if event_type == "thinking":
                 msg = data.get("message", "")
                 if msg:
@@ -122,6 +156,8 @@ def run_engine(
         emit("message.start", sid, {"session_id": sid})
 
         interrupt_event = threading.Event()
+        with _running_lock:
+            _running[sid] = interrupt_event
         with current_engines_lock:
             current_engines[sid] = interrupt_event
 
@@ -133,6 +169,8 @@ def run_engine(
 
         session["checkpoints"] = engine._checkpoints
 
+        with _running_lock:
+            _running.pop(sid, None)
         with current_engines_lock:
             current_engines.pop(sid, None)
 
