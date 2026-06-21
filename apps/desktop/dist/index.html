@@ -720,7 +720,10 @@ var _projectTree = null;
 
 function renderProjectPanel(el) {
   if (_projectTree && _projectTree.length > 0) {
-    el.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--text2);">📁 项目</div>' +
+    el.innerHTML = '<div style="margin-bottom:8px;display:flex;align-items:center;gap:4px;">' +
+      '<span style="font-size:12px;color:var(--text2);flex:1;">📁 项目</span>' +
+      '<span onclick="importProject()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">更换</span>' +
+      '<span onclick="clearProject()" style="cursor:pointer;font-size:13px;color:var(--text-muted);margin-left:4px;">✕</span></div>' +
       renderProjectTree(_projectTree);
     return;
   }
@@ -730,6 +733,12 @@ function renderProjectPanel(el) {
     '<p style="font-size:11px;color:var(--text-muted);margin-bottom:20px;">选择一个项目文件夹，Bobo 将自动浏览其中的文件</p>' +
     '<button onclick="importProject()" style="padding:10px 24px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font:inherit;font-size:13px;">📂 从Mac导入</button>' +
     '</div>';
+}
+
+function clearProject() {
+  _projectTree = null;
+  var content = document.getElementById('right-content');
+  renderProjectPanel(content);
 }
 
 function renderProjectTree(nodes) {
