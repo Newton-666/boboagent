@@ -184,7 +184,29 @@ ipcMain.handle('backend-send-sync', async (_event, msg) => {
   return sendToBackend(msg)
 })
 
-// ── Backend install (first launch or update) ──
+// ── First-run config: write .env directly (no RPC) ──
+ipcMain.handle('save-env', async (_event, data) => {
+  const envDir = path.join(os.homedir(), '.bobo')
+  if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true })
+  const envPath = path.join(envDir, '.env')
+  let lines = []
+  if (fs.existsSync(envPath)) {
+    lines = fs.readFileSync(envPath, 'utf8').split('\n').filter(l => {
+      const t = l.trim(); if (!t || t.startsWith('#')) return true
+      return !data[t.split('=')[0].trim()]
+    })
+  }
+  for (const [k, v] of Object.entries(data)) {
+    if (v) lines.push(`${k}=${v}`)
+  }
+  fs.writeFileSync(envPath, lines.join('\n') + '\n', 'utf8')
+  console.log('[bobo-desktop] Saved .env')
+  stopBackend()
+  setTimeout(() => startBackend(), 500)
+  return { ok: true }
+})
+
+// ── Backend install ──
 function installBoboBackend() {
   const srcDir = path.join(process.resourcesPath, 'bobo-backend')
   const destDir = path.join(os.homedir(), '.bobo')

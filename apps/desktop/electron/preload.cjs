@@ -24,4 +24,7 @@ contextBridge.exposeInMainWorld('boboAPI', {
 
   // Open native macOS folder picker
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+
+  // Save .env config (bypasses backend, writes directly)
+  saveEnv: (data) => ipcRenderer.invoke('save-env', data),
 })

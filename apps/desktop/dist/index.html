@@ -1101,23 +1101,24 @@ document.getElementById('setup-save').onclick = function() {
   var msg = document.getElementById('setup-msg');
   if (!key) { msg.textContent = '请输入 API Key'; return; }
   msg.textContent = '正在保存...';
-  // Call the RPC to save config
-  call('config.set', {
-    key: 'DEEPSEEK_API_KEY', value: key
-  }).then(function() {
-    if (url) call('config.set', { key: 'DEEPSEEK_API_BASE_URL', value: url });
-    if (model) call('config.set', { key: 'DEEPSEEK_API_MODEL', value: model });
-    msg.textContent = '已保存，正在重启后端...';
-    setTimeout(function() {
-      hideSetup();
-      // Trigger backend restart
-      if (window.boboAPI && window.boboAPI.send) {
-        window.boboAPI.send({ jsonrpc:'2.0', id:'restart', method:'setup.submit', params:{ api_key:key, api_url:url, model:model } });
+  if (window.boboAPI && window.boboAPI.saveEnv) {
+    window.boboAPI.saveEnv({
+      DEEPSEEK_API_KEY: key,
+      DEEPSEEK_API_BASE_URL: url || '',
+      DEEPSEEK_API_MODEL: model || ''
+    }).then(function(r) {
+      if (r && r.ok) {
+        msg.textContent = '已保存，正在重启...';
+        setTimeout(function() {
+          hideSetup();
+        }, 1500);
       } else {
-        location.reload();
+        msg.textContent = '保存失败';
       }
-    }, 1000);
-  });
+    });
+  } else {
+    msg.textContent = '不在桌面端环境中';
+  }
 };
 
 on('approval.request', function(data) {
