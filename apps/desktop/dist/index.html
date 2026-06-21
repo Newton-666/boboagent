@@ -678,8 +678,8 @@ on('notes.tree', function(payload) {
   }
 });
 
-// Listen for notes.changed — show rendered note with diff summary when Bobo edits a file
-on('notes.changed', function(payload) {
+// Listen for notes.changed [DISABLED — auto-popup deferred to later fix]
+/* on('notes.changed', function(payload) {
   if (!payload || !payload.file) return;
   var diff = (payload.diff || '').substring(0, 3000);
   var p = document.getElementById('right-panel');
@@ -687,7 +687,6 @@ on('notes.changed', function(payload) {
     openPlugin('notes');
   }
   var content = document.getElementById('right-content');
-  // Count added/removed lines from diff
   var added = 0, removed = 0;
   if (diff) {
     diff.split('\n').forEach(function(l) {
@@ -713,7 +712,7 @@ on('notes.changed', function(payload) {
       '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + summary + '</span></div>' +
       body;
   });
-});
+}); */
 
 function showNote(filepath) {
   var content = document.getElementById('right-content');
