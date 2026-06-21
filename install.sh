@@ -44,7 +44,7 @@ fi
 
 # ── Mount .dmg ──
 echo "📂 正在挂载磁盘映像..."
-MOUNT_POINT=$(hdiutil attach -nobrowse "$BOBO_DMG" 2>/dev/null | tail -1 | awk '{print $3}')
+MOUNT_POINT=$(hdiutil attach -nobrowse "$BOBO_DMG" 2>/dev/null | tail -1 | awk '{$1=$2=""; sub(/^[[:space:]]+/, ""); print}')
 if [ -z "$MOUNT_POINT" ]; then
   echo "❌ 挂载失败"
   exit 1
@@ -54,12 +54,15 @@ echo "   已挂载到: $MOUNT_POINT"
 # ── Install .app ──
 echo "📦 正在安装到 /Applications..."
 rm -rf "/Applications/Bobo.app" 2>/dev/null
-cp -R "$MOUNT_POINT/Bobo.app" "/Applications/" 2>/dev/null || {
-  echo "❌ 复制失败（可能需要 sudo）"
-  hdiutil detach "$MOUNT_POINT" &>/dev/null
-  sudo cp -R "$MOUNT_POINT/Bobo.app" "/Applications/"
+if ditto "$MOUNT_POINT/Bobo.app" "/Applications/Bobo.app" 2>/dev/null; then
+  :
+elif sudo ditto "$MOUNT_POINT/Bobo.app" "/Applications/Bobo.app" 2>/dev/null; then
   echo "   已通过 sudo 完成"
-}
+else
+  echo "❌ 复制失败，请手动将 Bobo.app 拖到 Applications 文件夹"
+  hdiutil detach "$MOUNT_POINT" &>/dev/null
+  exit 1
+fi
 
 # ── Unmount ──
 hdiutil detach "$MOUNT_POINT" &>/dev/null
@@ -69,23 +72,14 @@ echo "   已卸载磁盘映像"
 xattr -rd com.apple.quarantine "/Applications/Bobo.app" 2>/dev/null
 echo "🔓 已解除隔离标记"
 
-# ── First launch: install backend + create CLI ──
-echo "🚀 首次启动（安装后端组件）..."
-open -W -a "Bobo" --args --install-only 2>/dev/null || \
-  open -W -a "Bobo" 2>/dev/null || true
-sleep 5
-
-# ── Check if backend was installed ──
-if [ -d ~/.bobo/core ] && [ -d ~/.bobo/bin ]; then
-  echo "✅ 后端已安装到 ~/.bobo/"
-  echo ""
-  echo "🔗 添加 bobo 命令到 PATH:"
-  echo "   echo 'export PATH=\"\$HOME/.bobo/bin:\$PATH\"' >> ~/.zshrc"
-  echo "   source ~/.zshrc"
-  echo "   之后在终端输入 bobo 即可启动 TUI"
-  echo ""
-  echo "🎉 Bobo 安装完成！"
-  echo "   启动: open /Applications/Bobo.app"
-else
-  echo "⚠️  后端安装可能未完成，请手动启动 Bobo 应用"
-fi
+# ── First launch: prompt user ──
+echo ""
+echo "✅ Bobo 已安装到 /Applications/"
+echo ""
+echo "🔗 添加 bobo 命令到 PATH（可选）:"
+echo '   echo '"'"'export PATH="$HOME/.bobo/bin:$PATH"'"'"' >> ~/.zshrc'
+echo "   source ~/.zshrc"
+echo "   之后在终端输入 bobo 即可启动 TUI"
+echo ""
+echo "🎉 安装完成！首次启动时会自动安装后端组件。"
+echo "   启动: open /Applications/Bobo.app"
