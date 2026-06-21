@@ -264,6 +264,17 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     </div>
   </div>
 </div>
+<div id="setup-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;flex-direction:column;align-items:center;justify-content:center;">
+  <div style="max-width:400px;text-align:center;padding:40px;">
+    <div style="font-size:36px;margin-bottom:12px;">◆ <span style="color:#e8913a;">Bobo</span></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">首次使用 — 配置 API Key</p>
+    <input id="setup-key" type="password" placeholder="API Key" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
+    <input id="setup-url" type="text" placeholder="API Base URL (可选)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
+    <input id="setup-model" type="text" placeholder="Model (默认: deepseek-chat)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:20px;">
+    <button id="setup-save" style="width:100%;padding:10px;border:none;border-radius:6px;background:#e8913a;color:#fff;cursor:pointer;font:inherit;font-size:13px;">保存并启动</button>
+    <p id="setup-msg" style="font-size:11px;color:var(--text-muted);margin-top:10px;"></p>
+  </div>
+</div>
 <script>
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
@@ -1066,7 +1077,49 @@ on('status.update', function(data) {
   if (t === '工具执行完成' || t === '正在思考...') return;
   addStatus(t);
 });
-on('backend.exited', function() { setConnected(false); debug('Backend disconnected'); });
+on('backend.exited', function(data) {
+  setConnected(false);
+  debug('Backend disconnected' + (data && data.code ? ' (code ' + data.code + ')' : ''));
+  // Show setup screen on any backend crash (no .env detected)
+  showSetup();
+});
+
+// ── Setup screen (first-run config) ──
+function showSetup() {
+  var el = document.getElementById('setup-screen');
+  if (el) el.style.display = 'flex';
+}
+function hideSetup() {
+  var el = document.getElementById('setup-screen');
+  if (el) el.style.display = 'none';
+}
+
+document.getElementById('setup-save').onclick = function() {
+  var key = document.getElementById('setup-key').value.trim();
+  var url = document.getElementById('setup-url').value.trim();
+  var model = document.getElementById('setup-model').value.trim();
+  var msg = document.getElementById('setup-msg');
+  if (!key) { msg.textContent = '请输入 API Key'; return; }
+  msg.textContent = '正在保存...';
+  // Call the RPC to save config
+  call('config.set', {
+    key: 'DEEPSEEK_API_KEY', value: key
+  }).then(function() {
+    if (url) call('config.set', { key: 'DEEPSEEK_API_BASE_URL', value: url });
+    if (model) call('config.set', { key: 'DEEPSEEK_API_MODEL', value: model });
+    msg.textContent = '已保存，正在重启后端...';
+    setTimeout(function() {
+      hideSetup();
+      // Trigger backend restart
+      if (window.boboAPI && window.boboAPI.send) {
+        window.boboAPI.send({ jsonrpc:'2.0', id:'restart', method:'setup.submit', params:{ api_key:key, api_url:url, model:model } });
+      } else {
+        location.reload();
+      }
+    }, 1000);
+  });
+};
+
 on('approval.request', function(data) {
   var cmd = data.command || data.description || 'unknown';
   if (confirm('Bobo 想要执行:\n\n' + cmd + '\n\n是否允许？')) {

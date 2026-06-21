@@ -219,6 +219,21 @@ function installBoboBackend() {
     fs.chmodSync(cliPath, 0o755)
   }
   console.log(`[bobo-desktop] Installed backend to ${destDir} (${copied} items)`)
+
+  // Auto-install Python deps
+  const python = resolvePython()
+  if (python) {
+    try {
+      require('child_process').execSync(
+        `${python} -m pip install --user --break-system-packages python-dotenv httpx Pillow -q`,
+        { timeout: 60000, stdio: 'pipe' }
+      )
+      console.log('[bobo-desktop] Python deps installed')
+    } catch (e) {
+      console.log(`[bobo-desktop] pip install warning: ${e.message}`)
+    }
+  }
+
   return true
 }
 
