@@ -962,14 +962,12 @@ on('gateway.ready', async function() {
     currentSessionId = sessions[0].id;
     await loadSession(sessions[0].id);
     renderSessions();
-    renderPluginList();
-    // Default: Plugin section closed
-    document.getElementById('body-plugin').classList.add('closed');
-    document.getElementById('arr-plugin').classList.add('closed');
   } else {
-    // First-time user: auto-create a session
     await newChat();
   }
+  renderPluginList();
+  document.getElementById('body-plugin').classList.add('closed');
+  document.getElementById('arr-plugin').classList.add('closed');
   debug('Ready'); inputEl.focus();
 });
 
