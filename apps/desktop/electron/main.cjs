@@ -203,6 +203,14 @@ ipcMain.on('backend-get-pending', (event) => {
 
 app.whenReady().then(() => {
   app.setName('Bobo')
+  // Set dock icon (overrides Electron default in dev mode)
+  try {
+    const nativeImage = require('electron').nativeImage
+    const iconPath = path.join(__dirname, '..', 'build', 'icon.icns')
+    if (require('fs').existsSync(iconPath)) {
+      app.dock.setIcon(nativeImage.createFromPath(iconPath))
+    }
+  } catch (_) {}
   startBackend()
   createWindow()
 
