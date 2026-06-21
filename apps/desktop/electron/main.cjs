@@ -179,6 +179,15 @@ ipcMain.handle('backend-send-sync', async (_event, msg) => {
   return sendToBackend(msg)
 })
 
+const { dialog } = require('electron')
+ipcMain.handle('select-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+})
+
 // Renderer requests any buffered backend messages that arrived before IPC was ready
 ipcMain.on('backend-get-pending', (event) => {
   if (pendingMessages.length > 0) {

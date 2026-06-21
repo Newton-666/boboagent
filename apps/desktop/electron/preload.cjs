@@ -21,4 +21,7 @@ contextBridge.exposeInMainWorld('boboAPI', {
     ipcRenderer.on('backend-status', handler)
     return () => ipcRenderer.removeListener('backend-status', handler)
   },
+
+  // Open native macOS folder picker
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
 })

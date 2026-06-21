@@ -578,7 +578,7 @@ function toggleSection(name) {
 
 var plugins = [
   { id:'notes', icon:'📝', name:'笔记', desc:'浏览 Obsidian 笔记' },
-  { id:'project', icon:'📁', name:'项目', desc:'当前项目文件树' },
+  { id:'project', icon:'📁', name:'项目', desc:'项目文件浏览器' },
   { id:'terminal', icon:'⚡', name:'终端', desc:'命令执行记录' },
 ];
 
@@ -608,6 +608,7 @@ function openPlugin(id) {
   document.getElementById('main').style.maxWidth = 'calc(100vw - 240px - 340px)';
   // Plugin content
   if (id === 'notes') renderNotesPanel(content, _notesTree);
+  else if (id === 'project') renderProjectPanel(content);
   else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>即将上线</p>';
 }
 
@@ -713,6 +714,72 @@ on('notes.tree', function(payload) {
       body;
   });
 }); */
+
+// ── Project Plugin ──
+var _projectTree = null;
+
+function renderProjectPanel(el) {
+  if (_projectTree && _projectTree.length > 0) {
+    el.innerHTML = '<div style="margin-bottom:8px;font-size:12px;color:var(--text2);">📁 项目</div>' +
+      renderProjectTree(_projectTree);
+    return;
+  }
+  el.innerHTML = '' +
+    '<div style="text-align:center;margin-top:40px;">' +
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">📁 导入项目文件夹</p>' +
+    '<p style="font-size:11px;color:var(--text-muted);margin-bottom:20px;">选择一个项目文件夹，Bobo 将自动浏览其中的文件</p>' +
+    '<button onclick="importProject()" style="padding:10px 24px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font:inherit;font-size:13px;">📂 从Mac导入</button>' +
+    '</div>';
+}
+
+function renderProjectTree(nodes) {
+  var html = '';
+  nodes.forEach(function(n) {
+    if (n.type === 'folder') {
+      html += '<div class="nt-item folder">📁 ' + n.name + '</div>';
+      html += '<div class="nt-children">' + renderProjectTree(n.children || []) + '</div>';
+    } else {
+      html += '<div class="nt-item file" onclick="showProjectFile(\'' + esc(n.path) + '\')">📄 ' + n.name + '</div>';
+    }
+  });
+  return html;
+}
+
+function importProject() {
+  if (!window.boboAPI || !window.boboAPI.selectFolder) return;
+  window.boboAPI.selectFolder().then(function(path) {
+    if (!path) return;
+    call('project.set_root', { path: path, session_id: currentSessionId }).then(function(r) {
+      if (r && r.error) { alert(r.error); return; }
+    });
+  });
+}
+
+// Listen for project.tree from backend
+on('project.tree', function(payload) {
+  if (!payload) return;
+  _projectTree = payload.tree || [];
+  // Refresh the panel if it's open
+  var content = document.getElementById('right-content');
+  var parentEl = content && content.closest ? content.closest('#right-panel') : null;
+  if (parentEl && parentEl.classList.contains('open') && content && content.innerHTML.indexOf('nt-item') === -1) {
+    renderProjectPanel(content);
+  }
+});
+
+function showProjectFile(filepath) {
+  var content = document.getElementById('right-content');
+  content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderProjectPanel(document.getElementById(\'right-content\'))" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span><span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><p style="color:var(--text-muted);">正在加载...</p>';
+  call('file.read', { filepath: filepath }).then(function(r) {
+    if (r && r.content) {
+      var txt = r.content;
+      if (typeof txt === 'string' && txt.length > 10000) txt = txt.substring(0, 10000) + '\n...（截断至 10000 字符）';
+      content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderProjectPanel(document.getElementById(\'right-content\'))" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span><span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div>' + md(txt);
+    } else {
+      content.innerHTML = '<div style="margin-bottom:10px;"><span onclick="renderProjectPanel(document.getElementById(\'right-content\'))" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span></div><p style="color:var(--text-muted);">无法加载文件</p>';
+    }
+  });
+}
 
 function showNote(filepath) {
   var content = document.getElementById('right-content');

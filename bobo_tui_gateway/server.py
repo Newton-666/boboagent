@@ -675,6 +675,51 @@ def handle_commands_catalog(params: dict, rid: str) -> dict:
     return _ok(rid, {"commands": _COMMANDS})
 
 
+@method("project.set_root")
+def handle_project_set_root(params: dict, rid: str) -> dict:
+    """设置项目根目录，扫描并发射文件树"""
+    root = params.get("path", "")
+    if not root or not os.path.isdir(root):
+        return _err(rid, -32000, "路径不存在或不是目录")
+    tree = _scan_directory(root)
+    _emit("project.tree", "", {"tree": tree, "root": root})
+    # 注入 system 消息到当前会话，通知 Bobo 项目路径
+    sid = params.get("session_id", "")
+    if sid and sid in _sessions:
+        with _sessions_lock:
+            session = _sessions.get(sid)
+            if session:
+                session.setdefault("messages", []).append({
+                    "role": "system",
+                    "content": f"📁 已导入项目: {root}。问及文件时，优先从该项目目录查找。"
+                })
+    return _ok(rid, {"root": root, "count": len(tree)})
+
+
+def _scan_directory(path: str, max_depth: int = 4) -> list:
+    """递归扫描目录，返回文件树结构"""
+    tree = []
+    try:
+        for entry in sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name)):
+            if entry.name.startswith('.'):
+                continue
+            if len(tree) >= 100:
+                break
+            if entry.is_dir():
+                if max_depth > 0:
+                    children = _scan_directory(entry.path, max_depth - 1)
+                else:
+                    children = []
+                tree.append({"name": entry.name, "type": "folder", "children": children})
+            else:
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in ('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.json', '.md', '.txt', '.c', '.h', '.go', '.rs', '.rb', '.yaml', '.yml', '.toml', '.sh', '.env', '.gitignore', '.cfg', '.ini', '.conf', '.sql', '.java', '.swift', '.kt'):
+                    tree.append({"name": entry.name, "type": "file", "path": entry.path})
+    except PermissionError:
+        pass
+    return tree
+
+
 @method("file.read")
 def handle_file_read(params: dict, rid: str) -> dict:
     """读取文件内容（供桌面端插件使用）"""
