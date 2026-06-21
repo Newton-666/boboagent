@@ -20,10 +20,11 @@ function resolvePython() {
   const configured = process.env.BOBO_PYTHON
   if (configured && fs.existsSync(configured)) return configured
 
-  for (const cmd of ['python3', 'python']) {
+  // Homebrew paths (Apple Silicon / Intel)
+  for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3', 'python3', 'python']) {
     try {
-      const result = require('child_process').execSync(`${cmd} --version`, { timeout: 3000 })
-      if (result) return cmd
+      const result = require('child_process').execSync(`${p} --version`, { timeout: 3000 })
+      if (result) return p
     } catch {}
   }
   return 'python3'
@@ -60,7 +61,7 @@ function startBackend() {
   backendProcess.on('error', (err) => {
     console.error(`[bobo-desktop] Backend spawn error: ${err.message}`)
     if (mainWindow) {
-      mainWindow.webContents.send('backend-status', { status: 'error', message: err.message })
+      mainWindow.webContents.send('backend-status', { status: 'error', message: `后端启动失败: ${err.message}` })
     }
   })
 
@@ -68,7 +69,7 @@ function startBackend() {
     console.log(`[bobo-desktop] Backend exited with code ${code}`)
     backendProcess = null
     if (mainWindow) {
-      mainWindow.webContents.send('backend-status', { status: 'exited', code })
+      mainWindow.webContents.send('backend-status', { status: 'exited', code, message: code !== 0 ? `后端进程异常退出 (代码: ${code})` : '' })
     }
     // Auto-restart with backoff (up to MAX_BACKEND_RESTARTS times)
     if (code !== 0 && backendRestartCount < MAX_BACKEND_RESTARTS) {
