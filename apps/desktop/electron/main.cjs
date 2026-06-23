@@ -1,7 +1,7 @@
 // Bobo Desktop — Electron main process
 // Spawns Python backend, bridges JSON-RPC between renderer and backend.
 
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
