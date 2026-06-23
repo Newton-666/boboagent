@@ -198,8 +198,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     last_error = {"error": message, "error_type": error_type, "retryable": True}
                     continue
                 else:
+                    detail = response.text[:500].strip()
+                    detailed_msg = f"{message} — {detail}" if detail else message
                     return {
-                        "error": message,
+                        "error": detailed_msg,
                         "error_type": error_type,
                         "retryable": retryable
                     }
