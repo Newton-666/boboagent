@@ -409,32 +409,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         })
         return f"已回退到: {label}{file_info}\n\n要继续对话吗？"
 
-    def _context_lifecycle(self):
-        """Replace stale file content in history with summaries to free context space."""
-        if not hasattr(self, '_file_last_step') or not self._file_last_step:
-            return
-        STALE_THRESHOLD = 5
-        replaced = 0
-        for i, msg in enumerate(self.history):
-            if msg.get("role") != "tool":
-                continue
-            content = str(msg.get("content", "") or "")
-            if len(content) < 500:
-                continue
-            # Check if this tool result matches a stale file
-            for fpath, last_step in list(self._file_last_step.items()):
-                if fpath in content and (self.current_depth - last_step) > STALE_THRESHOLD:
-                    summary = self._read_files.get(fpath, "") or fpath
-                    if len(summary) < len(content) - 200:
-                        self.history[i]["content"] = f"[文件摘要] {fpath}: {summary[:200]}"
-                        replaced += 1
-                    break
-        if replaced:
-            pass  # silently freed context space
-
     def _call_llm(self) -> Tuple[str, list]:
-        # 文件上下文生命周期管理：用摘要替换过期文件内容
-        self._context_lifecycle()
 
         # 硬限制：超过上限的消息数，丢弃最早的消息
         if len(self.history) > self.MAX_HISTORY_MESSAGES:
@@ -455,31 +430,6 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._compress_history()
 
         messages = [{"role": "system", "content": self.system_prompt}] + self.history
-
-        # 过滤长工具结果：把文件全文替换为文件标记，节省上下文空间
-        # self.history 保持不变（用户看到的聊天记录不受影响）
-        for i in range(len(messages)):
-            msg = messages[i]
-            if msg.get("role") != "tool":
-                continue
-            content = str(msg.get("content", "") or "")
-            if len(content) < 2000:
-                continue
-            # Find matching file from _read_files
-            fpath = ""
-            if hasattr(self, '_read_files') and self._read_files:
-                for fp in self._read_files:
-                    if fp in content:
-                        fpath = fp
-                        break
-            if fpath:
-                # Extract first meaningful line
-                first_line = content.split("\n")[0][:80]
-                summary = self._read_files.get(fpath, "")[:150]
-                messages[i] = {
-                    "role": "tool",
-                    "content": f"[文件已加载: {fpath}]\n摘要: {summary}\n首行: {first_line}"
-                }
 
         if self._pending_diff:
             diff_preview = self._pending_diff[:4000]
