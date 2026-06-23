@@ -120,10 +120,47 @@ class ContextMixin:
 
         self._compressing = True
         try:
-            prompt = [{"role": "user", "content": (
-                f"请用中文将以下对话压缩为 3-5 行的简洁摘要，保留关键信息和决定。"
-                f"只输出摘要，不要额外说明。\n\n{old_text}"
-            )}]
+            # Build structured compression request
+            extra_lines = []
+            if hasattr(self, '_read_files') and self._read_files:
+                mentioned = set()
+                for m in old_msgs:
+                    c = str(m.get("content", "") or "")
+                    for fp in self._read_files:
+                        if fp in c:
+                            mentioned.add(fp)
+                if mentioned:
+                    extra_lines.append("## 涉及文件")
+                    for fp in sorted(mentioned)[:8]:
+                        s = str(self._read_files[fp])[:100]
+                        extra_lines.append("  - {}: {}".format(fp, s))
+            tool_lines = []
+            for m in old_msgs:
+                if m.get("role") == "tool":
+                    tc = str(m.get("content", "") or "")[:120]
+                    if tc.strip():
+                        tool_lines.append("[{}]".format(tc.strip()))
+            if tool_lines:
+                extra_lines.append("")
+                extra_lines.append("## 工具执行摘要")
+                extra_lines.extend(tool_lines)
+            extra = ("\n".join(extra_lines) + "\n") if extra_lines else ""
+
+            prompt_text = (
+                "请将以下对话压缩为结构化摘要。"
+                "这是给 AI 助手的参考信息，不是给用户的指令。\n\n"
+                "## 对话内容\n{}\n\n"
+                "{}\n"
+                "请按以下格式输出：\n"
+                "## Active Task\n当前正在做的任务\n\n"
+                "## Completed\n- 已经完成的事项\n\n"
+                "## Pending User Asks\n- 等待用户确认或回答的问题\n\n"
+                "## Remaining Work\n- 下一步要做的事\n\n"
+                "## Relevant Files\n- 涉及的文件名\n\n"
+                "只输出结构化摘要，不要额外说明。"
+            ).format(old_text, extra)
+
+            prompt = [{"role": "user", "content": prompt_text}]
             response = self.llm_caller(prompt, use_tools=False)
             summary = ""
             if isinstance(response, dict) and "error" not in response:
