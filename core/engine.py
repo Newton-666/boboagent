@@ -28,7 +28,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
     STATE_DONE = "done"
     STATE_ERROR = "error"
 
-    MAX_STEPS = 50
+    MAX_STEPS = 70
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
                  confirm_callback: Callable = None, test_mode: bool = False):
@@ -920,6 +920,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._notify("thinking", {"phase": "continuing", "message": "步骤已用完，正在生成最终回复..."})
                 self.state = self.STATE_RESPONDING
                 break
+            if self._step_count >= 50 and self._step_count % 5 == 0:
+                self._notify("thinking", {"phase": "continuing",
+                    "message": f"已用 {self._step_count}/{self.MAX_STEPS} 步"})
             # 检查中断信号
             if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
                 self._notify("error", {"content": "用户中断了操作"})
