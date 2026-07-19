@@ -62,6 +62,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._pending_diff: str = ""
         self._verification_attempted = False  # 防止验证死循环
         self._checkpoints: list[dict] = []   # 对话回退快照
+        self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类

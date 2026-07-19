@@ -47,7 +47,9 @@ _worker_depth = threading.local()
 _worker_depth.depth = 0
 
 # 存储 Worker 完成的结果摘要（name → 摘要全文），供 read_worker_result 查询
+# 有意为进程级共享：Worker 在线程中写入，主 Engine 通过 read_worker_result 工具跨调用读取
 _WORKER_RESULTS: dict[str, str] = {}
+_WORKER_RESULTS_LOCK = threading.Lock()
 
 # LLM caller 缓存（会话内 provider 和 schema 不变，无需重复创建）
 _llm_caller_cache = None
@@ -241,7 +243,8 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
         # 存储完整摘要，供 read_worker_result 查询
         # 有 name 则存储（重名会覆盖），无 name 不存
         if name:
-            _WORKER_RESULTS[name] = result
+            with _WORKER_RESULTS_LOCK:
+                _WORKER_RESULTS[name] = result
 
         # 返回轻量标记：有 name 时只带状态摘要，无 name 时返回全文
         if name:
@@ -320,10 +323,11 @@ READ_WORKER_TOOL_NAME = "read_worker_result"
 
 def execute_read_worker_result(name: str) -> str:
     """获取指定名称的 Worker 的完整结果摘要。"""
-    full = _WORKER_RESULTS.get(name)
-    if full is None:
-        available = ', '.join(_WORKER_RESULTS.keys()) or "(无)"
-        return f"没有找到 Worker '{name}' 的结果。可用的 Worker: {available}"
+    with _WORKER_RESULTS_LOCK:
+        full = _WORKER_RESULTS.get(name)
+        if full is None:
+            available = ', '.join(_WORKER_RESULTS.keys()) or "(无)"
+            return f"没有找到 Worker '{name}' 的结果。可用的 Worker: {available}"
     return full
 
 

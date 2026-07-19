@@ -12,7 +12,8 @@ class ToolRunnerMixin:
     """为 Engine 提供工具执行、结果加工能力。"""
 
     MAX_TOOL_RESULT_LENGTH = 40000
-    _file_checkpoints: dict[str, str] = {}  # path -> content before write
+    # path -> content before write；实例属性，由 Engine.__init__ 初始化（避免类属性在实例间共享）
+    _file_checkpoints: dict[str, str]
 
     SECRET_PATTERNS = [
         re.compile(r'(sk-|sk-ant-)[a-zA-Z0-9_\-]{20,}'),
