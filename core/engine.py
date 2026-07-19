@@ -508,10 +508,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if not has_worker:
                 self.history.insert(0, {
                     "role": "system",
-                    "content": "注意：如果这个任务还需要多个工具调用才能完成，"
-                    "考虑用 spawn_worker 将独立子任务派给子 Agent 执行。"
-                    "每个 Worker 只做一个明确的子任务。"
-                    "如果只是简单任务，直接继续即可。"
+                    "content": "注意：这个任务涉及多个步骤或文件，你应该用 spawn_worker "
+                    "将独立子任务派给子 Agent 执行。每个 Worker 只做一个明确的子任务，"
+                    "Worker 专注单一模块产出质量更好。如果只是简单任务，直接继续即可。"
                 })
                 self._worker_reminded = True
 
