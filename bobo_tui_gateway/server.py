@@ -577,15 +577,60 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"  提供商: {ACTIVE_PROVIDER}",
             f"  模型: {API_MODEL_NAME}",
             f"",
-            f"要修改配置，直接在聊天中说:",
-            f"  \"切换到 OpenAI\"",
-            f"  \"使用 gpt-4o 模型\"",
-            f"  \"更新 API 密钥\"",
-            f"  \"查看我的配置\"",
-            f"",
+            f"可用命令:",
+            f"  /provider              — 列出所有提供商",
+            f"  /provider <名称>       — 切换到指定提供商",
+            f"  /model <名称>          — 切换模型",
             f"配置文件位置: ~/.bobo/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
+    elif command.startswith("provider"):
+        from core.provider import PROVIDERS, resolve_provider
+        arg = command[8:].strip()
+        if arg:
+            # 切换提供商
+            provider_name = arg.lower()
+            if provider_name not in PROVIDERS:
+                available = ", ".join(PROVIDERS.keys())
+                return _ok(rid, {"output": f"未知提供商: {provider_name}\n可用: {available}"})
+            # 写入 .env
+            env_path = os.path.expanduser("~/.bobo/.env")
+            try:
+                lines = []
+                if os.path.exists(env_path):
+                    with open(env_path) as f:
+                        lines = f.readlines()
+                # 更新或追加 BOBO_PROVIDER
+                found = False
+                for i, line in enumerate(lines):
+                    if line.strip().startswith("BOBO_PROVIDER="):
+                        lines[i] = f"BOBO_PROVIDER={provider_name}\n"
+                        found = True
+                        break
+                if not found:
+                    lines.append(f"BOBO_PROVIDER={provider_name}\n")
+                # 也写上对应的 API_KEY 占位提示
+                p = PROVIDERS[provider_name]
+                if p.get("env_key"):
+                    key_present = any(line.strip().startswith(p["env_key"] + "=") for line in lines)
+                    if not key_present:
+                        lines.append(f"# {p['env_key']}=your_api_key_here\n")
+                with open(env_path, "w") as f:
+                    f.writelines(lines)
+                return _ok(rid, {"output": f"已切换到提供商: {provider_name}\n重启 Bobo 后生效。\n如果尚未配置 API 密钥，请编辑 ~/.bobo/.env 添加 {PROVIDERS[provider_name].get('env_key', '')}"})
+            except Exception as e:
+                return _ok(rid, {"output": f"写入 .env 失败: {e}"})
+        else:
+            # 列出所有提供商
+            current = resolve_provider()["name"]
+            lines = ["可用提供商:"]
+            for name, p in PROVIDERS.items():
+                marker = "*" if name == current else " "
+                models = ", ".join(p.get("models", []) or ["(自定义)"])
+                lines.append(f"  {marker} {name} — {models}")
+            lines.append("")
+            lines.append("切换: /provider <名称>")
+            return _ok(rid, {"output": "\n".join(lines)})
     else:
         return _ok(rid, {"output": f"未知命令: /{command}"})
 
