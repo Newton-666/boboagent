@@ -10,7 +10,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 TOOL_NAME = "spawn_worker"
-_WORKER_TIMEOUT = 110  # Worker 超时，低于 tool_executor 的 120s 上限
+_WORKER_TIMEOUT = 110  # 首次超时，低于 tool_executor 的 120s 上限
+_WORKER_RETRY_TIMEOUT = 300  # 超时重试时给更长时间
 
 # 代码修改关键词——用于轻量检测缺少前置分析
 _MODIFY_KEYWORDS = ["修改", "重构", "编辑", "改写", "重写", "添加功能",
@@ -47,6 +48,20 @@ _worker_depth.depth = 0
 
 # 存储 Worker 完成的结果摘要（name → 摘要全文），供 read_worker_result 查询
 _WORKER_RESULTS: dict[str, str] = {}
+
+
+def _run_worker_with_timeout(worker, worker_input: str, timeout: int) -> tuple[str, bool]:
+    """在独立线程中运行 Worker，返回 (result, timed_out)。"""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(worker.run, worker_input)
+        try:
+            future.result(timeout=timeout)
+            return ("", False)  # 正常完成，result 由调用方通过 _extract_worker_result 获取
+        except _FutTimeout:
+            if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
+                worker._interrupt_event.set()
+            return ("", True)
 
 
 def _extract_worker_result(history: list) -> str:
@@ -107,18 +122,27 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
         # ── 设置嵌套检测标志 ──
         _worker_depth.depth = getattr(_worker_depth, "depth", 0) + 1
 
-        # ── 在独立线程中运行 Worker ──
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(worker.run, worker_input)
-            try:
-                future.result(timeout=_WORKER_TIMEOUT)
-            except TimeoutError:
-                if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
-                    worker._interrupt_event.set()
-                partial = _extract_worker_result(worker.history)
+        # ── 在独立线程中运行 Worker，超时后自动重试一次 ──
+        result, timed_out = _run_worker_with_timeout(worker, worker_input, _WORKER_TIMEOUT)
+
+        if timed_out:
+            partial = _extract_worker_result(worker.history)
+            if partial and partial != "(Worker 没有产生回复)":
+                # 有进度且超时 → 重试一次，给更长时间
+                worker2 = Engine(
+                    llm_caller=llm_caller,
+                    tool_executor=execute_tool,
+                    test_mode=False,
+                )
+                worker2.system_prompt = worker_prompt
+                _worker_depth.depth = getattr(_worker_depth, "depth", 0) + 1
+                result2, _ = _run_worker_with_timeout(worker2, worker_input, _WORKER_RETRY_TIMEOUT)
+                _worker_depth.depth = max(0, getattr(_worker_depth, "depth", 0) - 1)
+                return result2
+            else:
+                # 没进度 → 直接返回超时错误
                 return (
-                    f"[WORKER_TIMEOUT] Worker 执行超过 {_WORKER_TIMEOUT}s。\n"
-                    f"已完成部分:\n{partial}"
+                    f"[WORKER_TIMEOUT] Worker 执行超过 {_WORKER_TIMEOUT}s，无有效输出。\n"
                 )
 
         # ── 提取结果 ──

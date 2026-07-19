@@ -37,8 +37,9 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
     try:
         func = TOOL_FUNCTIONS[tool_name]
         future = _executor.submit(func, **arguments)
-        # spawn_worker、execute_terminal 需要更长的超时时间
-        timeout = 120 if tool_name in ("spawn_worker", "execute_terminal") else TOOL_TIMEOUT
+        # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之
+        _timeout_map = {"spawn_worker": 310, "execute_terminal": 120}
+        timeout = _timeout_map.get(tool_name, TOOL_TIMEOUT)
         result = future.result(timeout=timeout)
         duration = time.time() - start_time
         output = str(result) if result else "执行成功"
