@@ -154,6 +154,13 @@ def run_engine(
 
         emit("message.start", sid, {"session_id": sid})
 
+        # 注入 Worker 事件发射器，让 spawn_worker 能实时向 TUI 发进度
+        try:
+            from tools.spawn_worker import set_worker_event_emitter
+            set_worker_event_emitter(emit)
+        except ImportError:
+            pass
+
         interrupt_event = threading.Event()
         with _running_lock:
             _running[sid] = interrupt_event
