@@ -10,7 +10,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 TOOL_NAME = "spawn_worker"
-_WORKER_TIMEOUT = 25  # Worker 超时，略低于 tool_executor 的 TOOL_TIMEOUT=30
+_WORKER_TIMEOUT = 110  # Worker 超时，低于 tool_executor 的 120s 上限
 
 # 线程局部变量：标记当前是否在 Worker 中运行
 _worker_depth = threading.local()
