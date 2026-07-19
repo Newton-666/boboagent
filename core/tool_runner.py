@@ -35,8 +35,17 @@ class ToolRunnerMixin:
         lines = content.split('\n')
         seen = set()
         unique_lines = []
+        in_code_block = False
         for line in lines:
             stripped = line.strip()
+            # 代码围栏内的行不参与去重，原样保留（代码里合法的重复行不能删）
+            if stripped.startswith('```'):
+                in_code_block = not in_code_block
+                unique_lines.append(line)
+                continue
+            if in_code_block:
+                unique_lines.append(line)
+                continue
             if stripped and stripped not in seen:
                 seen.add(stripped)
                 unique_lines.append(line)
