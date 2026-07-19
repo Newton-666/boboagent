@@ -19,22 +19,33 @@
 
 ### Step 1: Check prerequisites
 
+Bobo's TUI requires **Node.js v18+** and **Python 3.10+**.
+
 ```bash
 node --version    # need v18+. Install: brew install node (or https://nodejs.org)
-python3 --version # need 3.10+. Install: brew install python@3.11
+python3 --version # need 3.10+. macOS 14+ comes with Python 3.12+
 ```
 
 ### Step 2: Install
 
-```bash
-pip3 install --upgrade bobo-agent
-```
-
-If pip fails with SSL errors, install from GitHub directly:
+**Recommended** — Clone the repo and add an alias:
 
 ```bash
-pip3 install --upgrade git+https://github.com/Newton-666/boboagent.git
+git clone https://github.com/Newton-666/boboagent.git ~/boboagent
+echo 'alias bobo="cd ~/boboagent && python3 -m bobo_tui_gateway.entry"' >> ~/.zshrc
+source ~/.zshrc
 ```
+
+**Alternative** — Install from PyPI (if `pip3 install` works on your system):
+
+```bash
+pip3 install --user --upgrade bobo-agent
+# If `bobo` is not found after install, add Python's bin to PATH:
+echo 'export PATH="$HOME/Library/Python/3.12/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+> **macOS Sequoia+ note**: If pip complains `externally-managed-environment`, use `--user` as shown above, or create a virtual environment.
 
 ### Step 3: Get an API key
 
@@ -49,8 +60,8 @@ mkdir -p ~/.bobo && cat > ~/.bobo/.env << 'EOF'
 DEEPSEEK_API_KEY=sk-your-key-here
 BOBO_PROVIDER=deepseek
 API_MODEL_NAME=deepseek-chat
-BOBO_READ_TIMEOUT=120
-BOBO_MAX_RETRIES=4
+TOOL_TIMEOUT=20
+MAX_LOOPS=4
 EOF
 ```
 
@@ -62,17 +73,11 @@ Replace `sk-your-key-here` with your actual DeepSeek API key.
 bobo
 ```
 
-If `bobo: command not found`:
+If you installed via PyPI and get `bobo: command not found`, either:
+- Add Python's bin to PATH: `echo 'export PATH="$HOME/Library/Python/3.12/bin:$PATH"' >> ~/.zshrc`
+- Or use alias: `echo 'alias bobo="python3 -m bobo_tui_gateway.entry"' >> ~/.zshrc`
 
-```bash
-python3 -m bobo_tui_gateway.entry
-```
-
-Or add to PATH permanently:
-
-```bash
-echo 'alias bobo="python3 -m bobo_tui_gateway.entry"' >> ~/.zshrc && source ~/.zshrc
-```
+Then `source ~/.zshrc` and run `bobo` again.
 
 ### Verify everything works
 
