@@ -75,6 +75,36 @@ def _extract_worker_result(history: list) -> str:
     return "(Worker 没有产生回复)"
 
 
+def _extract_tool_log(history: list) -> str:
+    """从 Worker 的 history 中提取工具调用记录。"""
+    entries = []
+    pending_names = {}  # tool_call_id → tool_name
+    for msg in history:
+        role = msg.get("role", "")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                tid = tc.get("id", "")
+                fn = tc.get("function", {})
+                if fn.get("name"):
+                    pending_names[tid] = fn["name"]
+        elif role == "tool":
+            content = msg.get("content", "") or ""
+            # 从 tool result 中提取耗时
+            duration = ""
+            import re as _re
+            m = _re.search(r"（耗时: ([\d.]+)s）", content)
+            if m:
+                duration = m.group(1) + "s"
+            entries.append((pending_names.get(msg.get("tool_call_id", ""), "?"), duration))
+    if not entries:
+        return ""
+    lines = ["━━ 执行记录 ━━"]
+    for name, dur in entries:
+        d = f" → {dur}" if dur else ""
+        lines.append(f"  ✓ {name}{d}")
+    return "\n".join(lines)
+
+
 def execute(instruction: str, name: str = "", context: str = "") -> str:
     """执行子任务并返回轻量标记，完整结果可通过 read_worker_result 获取。"""
     # ── 禁止嵌套 spawn ──
@@ -147,6 +177,9 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
 
         # ── 提取结果 ──
         result = _extract_worker_result(worker.history)
+        tool_log = _extract_tool_log(worker.history)
+        if tool_log:
+            result = f"{tool_log}\n\n━━ 结果摘要 ━━\n{result}"
         state = getattr(worker, "state", "")
         if state == worker.STATE_ERROR if hasattr(worker, "STATE_ERROR") else False:
             return f"[WORKER_ERROR]\n{result}"
@@ -167,7 +200,10 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
 
         # 返回轻量标记：有 name 时只带状态摘要，无 name 时返回全文
         if name:
-            summary = result[:120].replace('\n', ' ').strip()
+            tool_count = result.count("✓")
+            summary = result.split("━━ 结果摘要 ━━")[-1].strip()[:100].replace('\n', ' ').strip()
+            if tool_count:
+                return f"[WORKER_COMPLETE:{name}] 调用 {tool_count} 个工具，{summary}"
             return f"[WORKER_COMPLETE:{name}] {summary}"
         return result
 
