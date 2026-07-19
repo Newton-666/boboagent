@@ -356,10 +356,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
     # ── 阶段管理与上下文交接 ──────────────────────────────────────────
 
     _PHASE_COMPLETE_PATTERNS = [
-        r"阶段\s*[\w\d]+\s*完成",
+        r"阶段\s*[\w\d]+\s*完成",  # "阶段1完成" — LLM 实际完成一个阶段后输出
         r"进入阶段",
         r"开始阶段",
-        r"\[PLAN\].*?\[/PLAN\]",
     ]
 
     def _is_phase_complete(self, text: str) -> bool:
@@ -870,7 +869,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # Check for completion claims without tool evidence
         completion_markers = ["已完成", "已经完成", "已创建", "已写入",
                               "done", "finished", "created", "written",
-                              "fixed", "已修复", "已修改", "已添加", "已删除"]
+                              "fixed", "已修复", "已修改", "已添加", "已删除",
+                              "完成", "阶段"]
         text_lower = content.lower()
         for marker in completion_markers:
             if marker.lower() in text_lower:
