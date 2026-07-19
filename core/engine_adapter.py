@@ -166,6 +166,14 @@ def run_engine(
         engine._interrupt_event = interrupt_event
         engine.run(text)
 
+        # 中断后直接退出，不写 stdout、不存 session
+        if interrupt_event and interrupt_event.is_set():
+            with _running_lock:
+                _running.pop(sid, None)
+            with current_engines_lock:
+                current_engines.pop(sid, None)
+            return
+
         session["checkpoints"] = engine._checkpoints
 
         with _running_lock:
@@ -188,5 +196,12 @@ def run_engine(
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
+        # 中断导致的异常不 emit，避免干扰主线程
+        if interrupt_event and interrupt_event.is_set():
+            with _running_lock:
+                _running.pop(sid, None)
+            with current_engines_lock:
+                current_engines.pop(sid, None)
+            return
         logger.exception("prompt.submit 后台线程执行失败")
         emit("error", sid, {"message": str(e), "session_id": sid})
