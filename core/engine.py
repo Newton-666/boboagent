@@ -509,7 +509,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self.history.insert(0, {
                     "role": "system",
                     "content": "注意：这个任务涉及多个步骤或文件。\n"
-                    "选项 A：用 spawn_worker 拆分成独立子任务（推荐，各模块上下文隔离、质量更好）\n"
+                    "选项 A：用 spawn_worker 拆分成独立子任务（推荐，可并行，各模块上下文隔离、质量更好）\n"
                     "选项 B：全部自己执行（请简要说明理由）\n"
                     "请在下一步回复中做出选择。"
                 })
