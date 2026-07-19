@@ -49,6 +49,27 @@ _worker_depth.depth = 0
 # 存储 Worker 完成的结果摘要（name → 摘要全文），供 read_worker_result 查询
 _WORKER_RESULTS: dict[str, str] = {}
 
+# LLM caller 缓存（会话内 provider 和 schema 不变，无需重复创建）
+_llm_caller_cache = None
+
+
+def _get_llm_caller():
+    """获取缓存的 LLM caller，首次调用时创建。"""
+    global _llm_caller_cache
+    if _llm_caller_cache is not None:
+        return _llm_caller_cache
+    from core.llm_caller import create_llm_caller
+    from core.provider import resolve_provider
+    from tools import TOOLS_SCHEMA
+    config = resolve_provider()
+    _llm_caller_cache = create_llm_caller(
+        api_key=config["api_key"],
+        api_url=config["base_url"],
+        model_name=config["model"],
+        tools_schema=TOOLS_SCHEMA,
+    )
+    return _llm_caller_cache
+
 
 def _run_worker_with_timeout(worker, worker_input: str, timeout: int) -> tuple[str, bool]:
     """在独立线程中运行 Worker，返回 (result, timed_out)。"""
@@ -116,20 +137,11 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
 
     try:
         # ── 加载依赖（确保在 tool context 内延迟导入） ──
-        from core.llm_caller import create_llm_caller
-        from core.provider import resolve_provider
+        # ── 解析/获取缓存的 LLM caller ──
+        llm_caller = _get_llm_caller()
+
         from core.engine import Engine
         from core.tool_executor import execute_tool
-        from tools import TOOLS_SCHEMA
-
-        # ── 解析当前 API 配置 ──
-        config = resolve_provider()
-        llm_caller = create_llm_caller(
-            api_key=config["api_key"],
-            api_url=config["base_url"],
-            model_name=config["model"],
-            tools_schema=TOOLS_SCHEMA,
-        )
 
         # ── 构建 Worker 的 system prompt ──
         worker_prompt = _build_worker_prompt(instruction, name)
