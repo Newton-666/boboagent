@@ -12,6 +12,31 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 TOOL_NAME = "spawn_worker"
 _WORKER_TIMEOUT = 110  # Worker 超时，低于 tool_executor 的 120s 上限
 
+
+def _build_worker_prompt(instruction: str, name: str) -> str:
+    """构建 Worker 的 system prompt。"""
+    role_line = f"你的 role：{name}" if name else "你的 role：由主 Engine 的指令指定"
+    return (
+        f"你是 Bobo 派出的 Worker Agent。\n\n"
+        f"## 身份\n"
+        f"{role_line}\n\n"
+        f"## 任务\n"
+        f"完成主 Engine 交给你的指令。完成之前不要停。\n"
+        f"完成之后返回结果摘要。主 Engine 只看你的摘要来做出下一步判断。\n\n"
+        f"## 你必须遵守\n"
+        f"- **禁止嵌套**：不要 spawn 子 Worker。你做的所有事自己完成。\n"
+        f"- **纯文字 = 任务结束**：如果你还有工作要做，回复必须同时携带工具调用。\n"
+        f"  只说下一步而不调工具，主 Engine 会认为你完成了。\n"
+        f"- **诚实**：工具失败了换方法试，实在不行就如实报告失败原因。\n"
+        f"- **安全**：不要执行 rm -rf、sudo、chmod 777 等危险命令。\n\n"
+        f"## 输出要求\n"
+        f"任务完成后，输出一段简洁的摘要：\n"
+        f"- 做了什么\n"
+        f"- 结果是什么\n"
+        f"- 有什么需要注意的\n"
+        f"不要输出过程汇报。\n"
+    )
+
 # 线程局部变量：标记当前是否在 Worker 中运行
 _worker_depth = threading.local()
 _worker_depth.depth = 0
@@ -55,19 +80,7 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
         )
 
         # ── 构建 Worker 的 system prompt ──
-        worker_prompt = (
-            "你是 Bobo 的 Worker Agent。\n\n"
-            "## 核心规则\n"
-            "- 你的角色在指令中指定。完成指令后返回结果摘要。\n"
-            "- **重要规则：单独的纯文字回复 = 任务结束。"
-            "如果你还有工作要做，回复必须同时包含工具调用。不要只做'进度汇报'而不调工具。**\n"
-            "- 如果工具调用失败，尝试替代方案。\n"
-            "- 在完成任务之前，继续调用工具。不要提前停止。\n"
-            "- **禁止调用 spawn_worker 工具（禁止嵌套）。**\n\n"
-            "## 输出要求\n"
-            "- 任务完成后，输出一段简洁的摘要，包含：做了什么、结果是什么、需注意的事项。\n"
-            '- 不要输出"第X步完成"之类的进度汇报。\n'
-        )
+        worker_prompt = _build_worker_prompt(instruction, name)
 
         # ── 构建 Worker 的输入 ──
         worker_input = instruction
