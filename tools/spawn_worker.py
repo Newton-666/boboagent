@@ -1,7 +1,7 @@
 """spawn_worker — 将子任务派给独立 Worker Agent 执行
 
 Worker 有独立上下文，不会污染主 Engine 的对话。
-完成任务后返回结果摘要。
+完成任务后返回轻量标记，完整摘要可通过 read_worker_result 获取。
 禁止嵌套 spawn（代码层拦截）。
 """
 
@@ -45,6 +45,9 @@ def _build_worker_prompt(instruction: str, name: str) -> str:
 _worker_depth = threading.local()
 _worker_depth.depth = 0
 
+# 存储 Worker 完成的结果摘要（name → 摘要全文），供 read_worker_result 查询
+_WORKER_RESULTS: dict[str, str] = {}
+
 
 def _extract_worker_result(history: list) -> str:
     """从 Worker 的 history 中提取最终回复作为结果摘要。"""
@@ -58,7 +61,7 @@ def _extract_worker_result(history: list) -> str:
 
 
 def execute(instruction: str, name: str = "", context: str = "") -> str:
-    """执行子任务并返回结果摘要。"""
+    """执行子任务并返回轻量标记，完整结果可通过 read_worker_result 获取。"""
     # ── 禁止嵌套 spawn ──
     if getattr(_worker_depth, "depth", 0) > 0:
         return (
@@ -132,6 +135,16 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
                 f"如果结果不符合预期，建议先 spawn 大局分析 Worker 进行代码理解。\n\n"
                 f"{result}"
             )
+
+        # 存储完整摘要，供 read_worker_result 查询
+        # 有 name 则存储（重名会覆盖），无 name 不存
+        if name:
+            _WORKER_RESULTS[name] = result
+
+        # 返回轻量标记：有 name 时只带状态摘要，无 name 时返回全文
+        if name:
+            summary = result[:120].replace('\n', ' ').strip()
+            return f"[WORKER_COMPLETE:{name}] {summary}"
         return result
 
     except Exception as e:
@@ -140,13 +153,16 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
         _worker_depth.depth = max(0, getattr(_worker_depth, "depth", 0) - 1)
 
 
+# ── spawn_worker 工具 ──
+
 TOOL_FUNC = execute
 TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
         "description": (
-            "将一个子任务派给独立的 Worker Agent 执行，完成后返回结果摘要。\n"
+            "将一个子任务派给独立的 Worker Agent 执行，完成后返回轻量标记。\n"
+            "完整结果可通过 read_worker_result 获取。\n"
             "Worker 有独立的对话上下文，不会污染当前对话。\n"
             "适用场景：需要长时间独立运行的任务、多文件大规模改动、独立研究。\n"
             "不适用于：单步简单操作（直接调工具即可）。\n"
@@ -171,7 +187,8 @@ TOOL_SCHEMA = {
                 "name": {
                     "type": "string",
                     "description": (
-                        "可选。Worker 的名称，用于跟踪和调试。"
+                        "可选。Worker 的名称，用于跟踪、调试和获取完整结果。\n"
+                        "提供 name 后返回轻量标记，完整摘要通过 read_worker_result 获取。\n"
                         "如 'researcher'、'big-picture-analyzer'、'bug-fixer'。"
                     ),
                 },
@@ -189,5 +206,43 @@ TOOL_SCHEMA = {
 }
 
 
+# ── read_worker_result 工具 ──
+
+READ_WORKER_TOOL_NAME = "read_worker_result"
+
+
+def execute_read_worker_result(name: str) -> str:
+    """获取指定名称的 Worker 的完整结果摘要。"""
+    full = _WORKER_RESULTS.get(name)
+    if full is None:
+        available = ', '.join(_WORKER_RESULTS.keys()) or "(无)"
+        return f"没有找到 Worker '{name}' 的结果。可用的 Worker: {available}"
+    return full
+
+
+READ_TOOL_FUNC = execute_read_worker_result
+READ_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": READ_WORKER_TOOL_NAME,
+        "description": (
+            "获取指定名称的 Worker 的完整结果摘要。\n"
+            "spawn_worker 返回标记后，如果你需要查看详细内容，可以调此工具。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Worker 的名称（spawn_worker 时传入的 name 参数值）",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+}
+
+
 def register(reg):
     reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)
+    reg(READ_WORKER_TOOL_NAME, READ_TOOL_FUNC, READ_TOOL_SCHEMA)
