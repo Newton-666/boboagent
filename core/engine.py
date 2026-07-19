@@ -109,13 +109,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
 **优先使用 spawn_worker 拆分子任务**：将每个独立子任务派给一个 Worker。
 - 每个 Worker 只做一个明确的子任务（如"调研方案"、"改文件 A"、"跑测试"）
 - 给 Worker 起有意义的 name（如 "researcher"、"bug-fixer"），方便后续获取完整结果
-- Worker 成功后返回轻量标记，需要详细结果可通过 read_worker_result 获取
+- Worker 成功后返回轻量标记 `[WORKER_COMPLETE:name]`，需要详细结果可通过 read_worker_result 获取
 - 简单任务（1-2 步、1 个文件）直接调工具即可，不需要 spawn
-
-**连续步骤用 [PLAN] 管理**：如果一个子任务内部有多个连续步骤（如调研完成后必须马上写代码），用 `[PLAN]` 组织。
-- `[PLAN]` 适用于单个 Worker 内部或简单任务的步骤管理
-- 每完成一个阶段，说"阶段X完成"同时带上下一步的工具调用
-- **注意**：说"阶段X完成"时必须同时带上下一步的工具调用。单独的文字汇报会被视为任务结束。
 
 **简单任务**（1 个文件、几步就能完成）：直接执行，不需要规划阶段。
 
