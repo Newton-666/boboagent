@@ -12,6 +12,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 TOOL_NAME = "spawn_worker"
 _WORKER_TIMEOUT = 110  # Worker 超时，低于 tool_executor 的 120s 上限
 
+# 代码修改关键词——用于轻量检测缺少前置分析
+_MODIFY_KEYWORDS = ["修改", "重构", "编辑", "改写", "重写", "添加功能",
+                     "implement", "refactor", "modify", "edit", "rewrite"]
+
 
 def _build_worker_prompt(instruction: str, name: str) -> str:
     """构建 Worker 的 system prompt。"""
@@ -119,6 +123,15 @@ def execute(instruction: str, name: str = "", context: str = "") -> str:
         state = getattr(worker, "state", "")
         if state == worker.STATE_ERROR if hasattr(worker, "STATE_ERROR") else False:
             return f"[WORKER_ERROR]\n{result}"
+
+        # 轻量检测：代码修改任务缺少前置分析 context
+        if not context and any(kw in instruction.lower() for kw in _MODIFY_KEYWORDS):
+            result = (
+                f"[NOTE] 该 Worker 的执行指令包含代码修改关键词，"
+                f"但未提供前置分析的 context。\n"
+                f"如果结果不符合预期，建议先 spawn 大局分析 Worker 进行代码理解。\n\n"
+                f"{result}"
+            )
         return result
 
     except Exception as e:
@@ -136,11 +149,12 @@ TOOL_SCHEMA = {
             "将一个子任务派给独立的 Worker Agent 执行，完成后返回结果摘要。\n"
             "Worker 有独立的对话上下文，不会污染当前对话。\n"
             "适用场景：需要长时间独立运行的任务、多文件大规模改动、独立研究。\n"
-            "不适用于：单步简单操作（直接调工具即可）。\n\n"
-            "代码修改任务建议分三步：\n"
+            "不适用于：单步简单操作（直接调工具即可）。\n"
+            "**代码修改任务必须经过三个步骤：**\n"
             "1. 先 spawn 大局分析 Worker（只读代码，输出方案）\n"
-            "2. 再 spawn 修改 Worker（按方案执行，需要传入分析结果作为 context）\n"
-            "3. 可复用大局 Worker 验证修改（传入 diff 作为 context）"
+            "2. 再 spawn 修改 Worker（传入分析结果作为 context 执行修改）\n"
+            "3. 可复用大局 Worker 验证修改（传入 diff 作为 context）\n"
+            "不要直接 spawn 修改 Worker 而不提供前置分析的 context。\n"
         ),
         "parameters": {
             "type": "object",
