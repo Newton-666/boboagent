@@ -67,7 +67,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
         self._phase_pending_cleanup: bool = False
         self._phase_summary: str = ""
-        self._plan_reminded: bool = False
+        self._worker_reminded: bool = False
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -495,15 +495,25 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._handle_phase_transition()
             self._phase_pending_cleanup = False
 
-        # 首次工具调用后提醒 LLM 规划阶段（避免自指问题）
-        if not self._plan_reminded and self._step_count >= 1:
-            has_plan = any("[PLAN]" in str(m.get("content", "")) for m in self.history)
-            if not has_plan:
+        # 首次工具调用后提醒 LLM 考虑用 spawn_worker 拆分子任务
+        if not self._worker_reminded and self._step_count >= 1:
+            has_worker = any(
+                "spawn_worker" in str(m.get("content", ""))
+                or any(
+                    tc.get("function", {}).get("name") == "spawn_worker"
+                    for tc in m.get("tool_calls") or []
+                )
+                for m in self.history
+            )
+            if not has_worker:
                 self.history.insert(0, {
                     "role": "system",
-                    "content": "注意：如果这个任务还需要多个工具调用才能完成，请先输出带 [PLAN] 的阶段计划。每个阶段完成后说'阶段X完成'。如果只是简单任务，直接继续即可。"
+                    "content": "注意：如果这个任务还需要多个工具调用才能完成，"
+                    "考虑用 spawn_worker 将独立子任务派给子 Agent 执行。"
+                    "每个 Worker 只做一个明确的子任务。"
+                    "如果只是简单任务，直接继续即可。"
                 })
-                self._plan_reminded = True
+                self._worker_reminded = True
 
         # 硬限制：超过上限的消息数，丢弃最早的消息
         if len(self.history) > self.MAX_HISTORY_MESSAGES:
