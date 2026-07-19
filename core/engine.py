@@ -93,7 +93,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 - 用户让你做简单的事时直接执行。复杂任务先列计划再逐步执行。
 - **可以一次发送多个不冲突的编辑操作（edit_file/file_operation）。不冲突的判断标准：同时改不同文件是安全的，同时改同一文件的不同部分是安全的。如果两个编辑操作要改同一段代码，先改一个，结果返回后再改另一个。**
-- 每完成一步自检："第1步完成，进入第2步"。
+- **重要规则：单独的纯文字回复 = 任务结束。如果你还有工作要做，回复必须同时包含工具调用。不要只做"进度汇报"而不调工具。**
 - 如果工具调用失败，尝试替代方案，不要编造结果。诚实报告阻塞比伪造输出好。
 - 在完成任务之前，继续调用工具。不要提前停止。
 
@@ -859,9 +859,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
     def _needs_verification(self, content: str) -> bool:
         """Check if the LLM's response needs verification."""
-        # Only trigger on the first step (no prior tool calls)
-        if self.current_tool_round > 0:
-            return False
+        # 移除 round 限制，所有轮次都检测（第二里程碑修复）
         # Check for completion claims without tool evidence
         completion_markers = ["已完成", "已经完成", "已创建", "已写入",
                               "done", "finished", "created", "written",
