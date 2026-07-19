@@ -486,7 +486,46 @@ def handle_config_get(params: dict, rid: str) -> dict:
 
 @method("config.set")
 def handle_config_set(params: dict, rid: str) -> dict:
-    return _ok(rid, {"value": params.get("value", "")})
+    key = params.get("key", "")
+    value = params.get("value", "")
+    if key == "model" and value:
+        # 解析 value: "deepseek-reasoner" 或 "deepseek-reasoner --provider deepseek #tui"
+        import re
+        model_name = value.split("--provider")[0].strip()
+        model_name = re.sub(r"\s+#tui\s*$", "", model_name).strip()
+        # 写入 .env
+        env_path = os.path.expanduser("~/.bobo/.env")
+        try:
+            lines = []
+            if os.path.exists(env_path):
+                with open(env_path) as f:
+                    lines = f.readlines()
+            found = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith("API_MODEL_NAME="):
+                    lines[i] = f"API_MODEL_NAME={model_name}\n"
+                    found = True
+                    break
+            if not found:
+                lines.append(f"API_MODEL_NAME={model_name}\n")
+            # 如果 value 中包含 --provider，也更新 BOBO_PROVIDER
+            provider_match = re.search(r"--provider\s+(\S+)", value)
+            if provider_match:
+                prov = provider_match.group(1)
+                found_p = False
+                for i, line in enumerate(lines):
+                    if line.strip().startswith("BOBO_PROVIDER="):
+                        lines[i] = f"BOBO_PROVIDER={prov}\n"
+                        found_p = True
+                        break
+                if not found_p:
+                    lines.append(f"BOBO_PROVIDER={prov}\n")
+            with open(env_path, "w") as f:
+                f.writelines(lines)
+            return _ok(rid, {"value": model_name, "saved": True})
+        except Exception as e:
+            return _ok(rid, {"value": value, "error": str(e)})
+    return _ok(rid, {"value": value})
 
 
 @method("config.full")
