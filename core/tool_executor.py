@@ -28,8 +28,8 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
 
     start_time = time.time()
 
-    # 命令缓存：相同的工具+参数在 30s 内返回缓存结果
-    if tool_name in ("execute_terminal", "git_status", "grep_code", "search_code"):
+    # 命令缓存：只缓存纯读工具（execute_terminal 有副作用，不缓存；审计 #18）
+    if tool_name in ("git_status", "grep_code", "search_code"):
         arg_key = str(arguments)[:200]
         cache_key = (tool_name, arg_key)
         cached = None
@@ -49,8 +49,8 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
         result = future.result(timeout=timeout)
         duration = time.time() - start_time
         output = str(result) if result else "执行成功"
-        # 写入缓存
-        if tool_name in ("execute_terminal", "git_status", "grep_code", "search_code"):
+        # 写入缓存（只缓存读工具；审计 #18）
+        if tool_name in ("git_status", "grep_code", "search_code"):
             arg_key = str(arguments)[:200]
             with _COMMAND_CACHE_LOCK:
                 _COMMAND_CACHE[(tool_name, arg_key)] = (time.time(), output)
@@ -62,7 +62,7 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
         return f"{output}（耗时: {duration:.1f}s）"
     except TimeoutError:
         duration = time.time() - start_time
-        return f"工具 '{tool_name}' 执行超过 {TOOL_TIMEOUT}s（当前上限）。如果工具支持 timeout 参数，请指定更大值后重试（已等待 {duration:.1f}s）"
+        return f"工具 '{tool_name}' 执行超过 {timeout}s（上限）。如果工具支持 timeout 参数，请指定更大值后重试（已等待 {duration:.1f}s）"
     except TypeError as e:
         return f"参数错误: {str(e)}"
     except ValueError as e:
