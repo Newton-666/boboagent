@@ -36,8 +36,17 @@ class ToolRunnerMixin:
         lines = content.split('\n')
         seen = set()
         unique_lines = []
+        in_code_block = False
         for line in lines:
             stripped = line.strip()
+            # 代码围栏内的行不参与去重，原样保留（代码里合法的重复行不能删）
+            if stripped.startswith('```'):
+                in_code_block = not in_code_block
+                unique_lines.append(line)
+                continue
+            if in_code_block:
+                unique_lines.append(line)
+                continue
             if stripped and stripped not in seen:
                 seen.add(stripped)
                 unique_lines.append(line)
@@ -402,16 +411,25 @@ class ToolRunnerMixin:
                 result = "\n".join(lines)
         elif path and path.startswith("trash:"):
             trash_name = path.split(":", 1)[1]
-            trash_dir = os.path.expanduser("~/.bobo/trash")
-            trash_path = os.path.join(trash_dir, trash_name)
-            if not os.path.exists(trash_path):
+            # 源端防穿越：realpath 后必须仍在 trash 目录内（审计发现 #7）
+            trash_dir = os.path.realpath(os.path.expanduser("~/.bobo/trash"))
+            trash_path = os.path.realpath(os.path.join(trash_dir, trash_name))
+            if not trash_path.startswith(trash_dir + os.sep):
+                result = f"❌ 非法的回收站路径: {trash_name[:60]}"
+            elif not os.path.exists(trash_path):
                 result = f"回收站中未找到: {trash_name}"
             else:
                 # Try to restore to original location (extract from backup name)
                 vault = os.environ.get("OBSIDIAN_VAULT", "")
-                base_name = trash_name.rsplit("_", 1)[0]  # remove timestamp
+                # basename 剥掉任何目录成分，防止 base_name 带 ../ 逃逸
+                base_name = os.path.basename(trash_name.rsplit("_", 1)[0])  # remove timestamp
                 restore_path = os.path.join(vault, base_name) if vault else os.path.join(os.getcwd(), base_name)
-                if os.path.exists(restore_path):
+                # 目的端防穿越：恢复位置必须仍在 vault 内
+                if vault and not os.path.realpath(restore_path).startswith(
+                    os.path.realpath(vault) + os.sep
+                ):
+                    result = f"❌ 恢复目标不在笔记库范围内，已拒绝"
+                elif os.path.exists(restore_path):
                     result = f"文件已存在: {restore_path}，请先删除旧文件再恢复"
                 else:
                     import shutil

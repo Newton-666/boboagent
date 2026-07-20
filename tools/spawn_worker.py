@@ -5,6 +5,7 @@ Worker 有独立上下文，不会污染主 Engine 的对话。
 禁止嵌套 spawn（代码层拦截）。
 """
 
+import hashlib
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -52,7 +53,9 @@ _WORKER_RESULTS: dict[str, str] = {}
 _WORKER_RESULTS_LOCK = threading.Lock()
 
 # LLM caller 缓存（会话内 provider 和 schema 不变，无需重复创建）
+# 缓存 key 为 (provider, model, api_key 哈希)，切换 provider/model/key 后自动 miss
 _llm_caller_cache = None
+_llm_caller_cache_key = None
 
 # ── Worker 实时事件回调 ──
 # 被 engine_adapter.run_engine 注入，用于向 TUI 发送 Worker 进度
@@ -88,20 +91,24 @@ def _make_worker_callback(name: str):
 
 
 def _get_llm_caller():
-    """获取缓存的 LLM caller，首次调用时创建。"""
-    global _llm_caller_cache
-    if _llm_caller_cache is not None:
-        return _llm_caller_cache
+    """获取缓存的 LLM caller，配置变化时重新创建。"""
+    global _llm_caller_cache, _llm_caller_cache_key
     from core.llm_caller import create_llm_caller
     from core.provider import resolve_provider
     from tools import TOOLS_SCHEMA
     config = resolve_provider()
+    # api_key 只存短哈希，避免明文驻留缓存 key
+    key_hash = hashlib.md5((config["api_key"] or "").encode()).hexdigest()[:12]
+    cache_key = (config["name"], config["model"], key_hash)
+    if _llm_caller_cache is not None and _llm_caller_cache_key == cache_key:
+        return _llm_caller_cache
     _llm_caller_cache = create_llm_caller(
         api_key=config["api_key"],
         api_url=config["base_url"],
         model_name=config["model"],
         tools_schema=TOOLS_SCHEMA,
     )
+    _llm_caller_cache_key = cache_key
     return _llm_caller_cache
 
 
