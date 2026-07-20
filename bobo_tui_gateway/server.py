@@ -118,23 +118,29 @@ def _get_llm_caller():
 
 
 def _save_session_to_disk(sid: str):
-    """将内存中的会话保存到磁盘"""
+    """将内存中的会话保存到磁盘（直接原子写入，不触碰 mgr.current_session 以避免跨会话竞态）。"""
     with _sessions_lock:
         session = _sessions.get(sid)
     if not session:
         return
     mgr = _get_session_mgr()
-    # 尝试加载已有会话，如果没有则新建
-    existing = mgr.load_session(sid)
-    if existing:
-        existing["messages"] = session.get("messages", [])
-        existing["title"] = session.get("title", existing["title"])
-        mgr.current_session = existing
-        mgr.current_session_id = sid
-        mgr._save()
-    else:
-        # 新建会话文件
-        session_path = mgr.session_dir / f"{sid}.json"
+    session_path = mgr.session_dir / f"{sid}.json"
+    # 尝试加载已有会话以便保留元数据（created_at 等），否则新建
+    try:
+        if session_path.exists():
+            with open(session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["messages"] = session.get("messages", [])
+            data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
+        else:
+            data = {
+                "id": sid,
+                "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
+                "title": session.get("title", f"会话_{sid}"),
+                "messages": session.get("messages", []),
+                "summary": None,
+            }
+    except Exception:
         data = {
             "id": sid,
             "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
@@ -142,7 +148,7 @@ def _save_session_to_disk(sid: str):
             "messages": session.get("messages", []),
             "summary": None,
         }
-        mgr._write_atomic(session_path, data)
+    mgr._write_atomic(session_path, data)
 
 
 def _build_session_info(sid: str) -> dict:
@@ -247,9 +253,9 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
                 content += "\n" + prov_line + provider
         with open(env_path, "w") as f:
             f.write(content)
-        return {"ok": True, "message": f"{provider} 已配置", "provider_configured": True}
+        return _ok(rid, {"ok": True, "message": f"{provider} 已配置", "provider_configured": True})
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return _ok(rid, {"ok": False, "error": str(e)})
 
 
 @method("session.create")
@@ -452,6 +458,11 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
         session = _sessions.get(sid)
     if not session:
         return _err(rid, -32000, "会话不存在")
+
+    # 审计 #12：防止同一会话并发提交，导致两个 engine 线程同时写 history
+    from core.engine_adapter import is_running
+    if is_running(sid):
+        return _err(rid, -32000, "该会话正在处理上一个请求，请等待完成")
 
     # 在后台线程中运行引擎，主线程继续处理 stdin
     from core.engine_adapter import run_engine as _run_engine_adapter

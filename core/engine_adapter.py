@@ -42,6 +42,7 @@ def run_engine(
     save_session_to_disk,
 ):
     """在独立线程中执行 Engine，通过 emit 向桌面端/TUI 发送事件。"""
+    interrupt_event = None  # 审计 #20a：提前声明，确保 finally 中可引用
     try:
         from core.engine import Engine
         from core.tool_executor import execute_tool
@@ -175,18 +176,9 @@ def run_engine(
 
         # 中断后直接退出，不写 stdout、不存 session
         if interrupt_event and interrupt_event.is_set():
-            with _running_lock:
-                _running.pop(sid, None)
-            with current_engines_lock:
-                current_engines.pop(sid, None)
             return
 
         session["checkpoints"] = engine._checkpoints
-
-        with _running_lock:
-            _running.pop(sid, None)
-        with current_engines_lock:
-            current_engines.pop(sid, None)
 
         if engine.history:
             session["messages"] = engine.history
@@ -203,12 +195,13 @@ def run_engine(
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        # 中断导致的异常不 emit，避免干扰主线程
         if interrupt_event and interrupt_event.is_set():
-            with _running_lock:
-                _running.pop(sid, None)
-            with current_engines_lock:
-                current_engines.pop(sid, None)
-            return
+            return  # 用户中断：不 emit error
         logger.exception("prompt.submit 后台线程执行失败")
         emit("error", sid, {"message": str(e), "session_id": sid})
+    finally:
+        # 确保 _running 和 current_engines 注册表一定被清理，防止 is_running 永久卡 True
+        with _running_lock:
+            _running.pop(sid, None)
+        with current_engines_lock:
+            current_engines.pop(sid, None)
