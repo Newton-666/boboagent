@@ -450,9 +450,16 @@ def rename_note(old_name: str, new_name: str) -> str:
     
     if not os.path.exists(old_path):
         return f"我注意到 {old_name} 这个文件不存在。请检查文件名。"
-    
+
+    # 审计 #19：防止静默覆盖已存在的目标文件
+    if old_path != new_path and os.path.exists(new_path):
+        return f"❌ 目标文件已存在: {new_name}。请先删除或重命名它，然后再试。"
+
     try:
         _trash_file(old_path)
+        # 目标文件存在且与源文件不同时，也备份（双重保险）
+        if old_path != new_path and os.path.exists(new_path):
+            _trash_file(new_path)
         os.rename(old_path, new_path)
         _cleanup_trash()
         return f"✅ 已重命名: {old_name} -> {new_name}（可撤销）"

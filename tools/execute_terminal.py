@@ -11,7 +11,7 @@ TOOL_NAME = "execute_terminal"
 # 真正危险的命令模式（与 engine.py DANGEROUS_PATTERNS 保持一致，
 # 作为最后一道防线——engine 已通过 _classify_command + 用户确认做了一级防护）
 DANGEROUS_PATTERNS = [
-    r'rm\s+(-rf?|--recursive)\s+',      # rm -rf /path
+    r'rm\s+(-[rRf]|--recursive|--force)',      # rm -rf /path（对齐 engine.py:772）
     r'sudo\s+',                          # sudo 命令
     r'chmod\s+777\s+',                   # chmod 777
     r'chown\s+',                         # chown
@@ -64,7 +64,9 @@ def execute(command: str, timeout: int = 30) -> str:
         
         # 安全检查
         if is_dangerous(command):
-            return f"⚠️ 危险命令: {command}\n此命令需要用户明确确认。"
+            # 审计 #27：engine 已做确认流程，工具层是最后一道防线；
+            # 被拦时明确告知"已拦截"而非误导"需要确认"
+            return f"⛔ 安全策略拦截: {command}\n此命令已被内置黑名单拦截，请换用安全替代方案。"
         
         # 使用 shell 执行（支持管道、重定向），环境变量已脱敏
         # 安全防护由上游 Engine 的 _is_high_risk_tool + 用户确认机制保障
