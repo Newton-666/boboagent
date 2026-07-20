@@ -31,20 +31,30 @@ class EmailModule:
     def _connect_imap(self):
         if not self.enabled:
             raise Exception("邮箱未配置")
-        mail = imaplib.IMAP4_SSL(self.config["imap_server"], self.config["imap_port"])
+        # 审计 #10：加 timeout 防永久阻塞（4 次卡死就占满全局线程池）
+        mail = imaplib.IMAP4_SSL(
+            self.config["imap_server"], self.config["imap_port"],
+            timeout=30
+        )
         mail.login(self.config["email"], self.config["auth_code"])
+        # 审计 #28：启用 UTF-8 支持中文关键词搜索（服务器不支持则退化为 ASCII）
+        try:
+            mail.enable("UTF8=ACCEPT")
+        except imaplib.IMAP4.error:
+            pass
         return mail
     
     def read_recent(self, limit=5):
         """读取最近邮件"""
         if not self.enabled:
             return "❌ 邮箱未配置，请在 ~/.bobo/mail.json 中配置"
-        
+        mail = None
         try:
             mail = self._connect_imap()
             mail.select("INBOX")
-            
             result, data = mail.search(None, "ALL")
+            if result != "OK" or not data[0]:
+                return "📭 收件箱为空"
             email_ids = data[0].split()
             latest_ids = email_ids[-limit:]
             
@@ -83,7 +93,7 @@ class EmailModule:
         """读取指定邮件的完整内容"""
         if not self.enabled:
             return "❌ 邮箱未配置"
-        
+        mail = None
         try:
             mail = self._connect_imap()
             mail.select("INBOX")
@@ -144,7 +154,7 @@ class EmailModule:
         """搜索邮件"""
         if not self.enabled:
             return "❌ 邮箱未配置"
-        
+        mail = None
         try:
             mail = self._connect_imap()
             mail.select("INBOX")
@@ -191,7 +201,7 @@ class EmailModule:
         """分析近期邮件"""
         if not self.enabled:
             return "❌ 邮箱未配置"
-        
+        mail = None
         try:
             mail = self._connect_imap()
             mail.select("INBOX")
@@ -234,13 +244,19 @@ class EmailModule:
             result += f"     • 商业机构 (.com): {com_count} 封\n"
             
             return result
-            
         except Exception as e:
             return f"❌ 分析失败: {str(e)}"
+        finally:
+            if mail is not None:
+                try: mail.close()
+                except Exception: pass
+                try: mail.logout()
+                except Exception: pass
     
     def health_check(self):
         if not self.enabled:
             return {"status": "disabled", "message": "邮箱未配置"}
+        mail = None
         try:
             mail = self._connect_imap()
             mail.select("INBOX")
@@ -249,6 +265,12 @@ class EmailModule:
             return {"status": "healthy", "message": "邮箱连接正常"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+        finally:
+            if mail is not None:
+                try: mail.close()
+                except Exception: pass
+                try: mail.logout()
+                except Exception: pass
 
 
 # 供 Bobo 调用的包装函数
