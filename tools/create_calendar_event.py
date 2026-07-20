@@ -9,7 +9,8 @@ TOOL_NAME = "create_calendar_event"
 def execute(summary: str, start_date: str = "", end_date: str = "") -> str:
     if not summary:
         return "请提供事件标题"
-    safe_summary = summary.replace('"', '\\"')
+    # AppleScript 注入防护：先转义反斜杠再转义引号（审计发现 #9）
+    safe_summary = summary.replace('\\', '\\\\').replace('"', '\\"')
     script = (
         f'tell application "Calendar" to tell calendar 1 '
         f'to make new event at end with properties {{summary:"{safe_summary}"}}'

@@ -7,6 +7,13 @@ TOOL_NAME = "list_calendar_events"
 
 def execute(days: int = 7) -> str:
     """List calendar events for the next N days."""
+    # 类型强制：LLM 可能传字符串，拼进 AppleScript 前必须整数化
+    try:
+        days = int(days)
+    except (ValueError, TypeError):
+        return "❌ days 参数必须是整数"
+    if days < 1 or days > 365:
+        return "❌ days 必须在 1-365 之间"
     script = (
         'tell application "Calendar" to set eventList to '
         'every event of calendar 1 whose start date is greater than '

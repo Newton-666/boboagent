@@ -9,9 +9,9 @@ NOTIFICATION_TIMEOUT = 5  # 通知超时时间（秒）
 def send(title: str, message: str) -> str:
     """发送系统通知"""
     try:
-        # 转义双引号，防止破坏 AppleScript 语法
-        title_escaped = title.replace('"', '\\"')
-        message_escaped = message.replace('"', '\\"')
+        # 转义反斜杠和双引号，防止 AppleScript 注入（审计发现 #9）
+        title_escaped = title.replace('\\', '\\\\').replace('"', '\\"')
+        message_escaped = message.replace('\\', '\\\\').replace('"', '\\"')
 
         subprocess.run(
             ['osascript', '-e', f'display notification "{message_escaped}" with title "{title_escaped}"'],
