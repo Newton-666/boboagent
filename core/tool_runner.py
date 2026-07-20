@@ -702,6 +702,16 @@ class ToolRunnerMixin:
                 or raw_result.startswith("⛔")):  # ⛔
             return raw_result
 
+        # 产品级：全局开关 + 最小字符阈值
+        try:
+            from config import BOBO_CONTEXT_MARKING, BOBO_CONTEXT_MARKING_MIN_CHARS
+        except ImportError:
+            BOBO_CONTEXT_MARKING, BOBO_CONTEXT_MARKING_MIN_CHARS = True, 2000
+        if not BOBO_CONTEXT_MARKING:
+            return raw_result
+        if len(raw_result) < BOBO_CONTEXT_MARKING_MIN_CHARS:
+            return raw_result
+
         try:
             import hashlib
             import json as _mj
@@ -733,6 +743,13 @@ class ToolRunnerMixin:
                 f"  → {summary}\n"
                 f"  → id: {marker_id}, {len(raw_result)} chars"
             )
+            # 产品级：追踪标记效果（marked / chars_saved）
+            try:
+                from tools.load_result import _update_stats
+                _update_stats("marked")
+                _update_stats("total_chars_saved", len(raw_result) - len(marker))
+            except ImportError:
+                pass
             return marker
         except Exception:
             return raw_result

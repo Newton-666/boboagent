@@ -12,6 +12,44 @@ import os
 TOOL_NAME = "load_result"
 WORKSPACE_DIR = os.path.expanduser("~/.bobo/workspace")
 
+_STATS_PATH = os.path.join(WORKSPACE_DIR, "_stats.json")
+
+def _update_stats(key: str, delta: int = 1):
+    """Atomically increment a counter in workspace/_stats.json."""
+    os.makedirs(WORKSPACE_DIR, exist_ok=True)
+    import threading, tempfile
+    _stats_lock = threading.Lock()
+    with _stats_lock:
+        stats = {}
+        if os.path.exists(_STATS_PATH):
+            try:
+                with open(_STATS_PATH, 'r', encoding='utf-8') as f:
+                    stats = json.load(f)
+            except Exception:
+                stats = {}
+        stats[key] = stats.get(key, 0) + delta
+        fd, tmp = tempfile.mkstemp(dir=WORKSPACE_DIR, suffix='.json', prefix='.st_')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(stats, f, ensure_ascii=False, indent=2)
+            import shutil
+            shutil.move(tmp, _STATS_PATH)
+        except Exception:
+            try: os.unlink(tmp)
+            except Exception: pass
+
+
+def get_marking_stats() -> dict:
+    """Return current marking statistics: marked, loaded, load_miss, total_chars_saved."""
+    if not os.path.exists(_STATS_PATH):
+        return {"marked": 0, "loaded": 0, "load_miss": 0, "total_chars_saved": 0}
+    try:
+        with open(_STATS_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {"marked": 0, "loaded": 0, "load_miss": 0, "total_chars_saved": 0}
+
+
 
 def execute(id: str, max_chars: int = 5000) -> str:
     """Load the full content of a previously marked tool result by its ID.
@@ -32,6 +70,7 @@ def execute(id: str, max_chars: int = 5000) -> str:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
+        _update_stats("load_miss")
         return f"[ERROR] Failed to read result '{id}': {e}"
 
     content = data.get("content", "")
@@ -45,6 +84,7 @@ def execute(id: str, max_chars: int = 5000) -> str:
             + f"\n...(截断，共 {total_chars} 字符，仅显示前 {max_chars})"
         )
 
+    _update_stats("loaded")
     return f"[FULL RESULT] {tool}({args})\n\n{content}"
 
 

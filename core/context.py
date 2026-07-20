@@ -97,7 +97,11 @@ class ContextMixin:
             content = m.get("content", "")
             if role in ("user", "assistant") and content:
                 label = "用户" if role == "user" else "Bobo"
-                text_parts.append(f"{label}: {content[:200]}")
+                # [RESULT] 标记已经是压缩态，保留完整 ID（审计 #4 压缩集成）
+                if "[RESULT]" in content:
+                    text_parts.append(f"{label}: {content[:400]}")
+                else:
+                    text_parts.append(f"{label}: {content[:200]}")
         if not text_parts:
             return
         old_text = "\n".join(text_parts)

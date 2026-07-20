@@ -27,13 +27,23 @@ class TestMarkingLogic:
         return Engine(caller, None, test_mode=True)
 
     def test_qualifying_tool_gets_marked(self, engine):
+        # 需要超 2000 字符才触发标记（默认阈值 BOBO_CONTEXT_MARKING_MIN_CHARS=2000）
+        big_result = "x" * 2500
         result = engine._maybe_mark_result(
             "read_local_file", {"file_path": "/tmp/x.txt"},
-            "第一行\n第二行\n第三行", 3,
+            big_result, 3,
         )
         assert result.startswith("[RESULT]")
         assert "id:" in result
         assert "3_" in result  # round number in ID
+
+    def test_below_threshold_not_marked(self, engine):
+        result = engine._maybe_mark_result(
+            "read_local_file", {"file_path": "/tmp/x.txt"},
+            "short result", 3,
+        )
+        assert not result.startswith("[RESULT]")
+        assert result == "short result"
 
     def test_non_qualifying_tool_passes_through(self, engine):
         result = engine._maybe_mark_result(

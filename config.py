@@ -53,6 +53,10 @@ MAX_LOOPS = int(os.environ.get("MAX_LOOPS", "4"))
 BLOCKED_FOLDERS = [f.strip() for f in os.environ.get("BLOCKED_FOLDERS", "Private,Archive,日记").split(",") if f.strip()]
 EMAIL_PRIVACY_MODE = os.environ.get("EMAIL_PRIVACY_MODE", "ask")
 
+# Context Engineering — Result Marking System（产品级配置）
+BOBO_CONTEXT_MARKING = os.environ.get("BOBO_CONTEXT_MARKING", "true").lower() in ("true", "1", "yes")
+BOBO_CONTEXT_MARKING_MIN_CHARS = int(os.environ.get("BOBO_CONTEXT_MARKING_MIN_CHARS", "2000"))
+
 # 会话目录配置
 _DEFAULT_SESSION_DIR = Path.home() / ".bobo_v2" / "sessions"
 SESSION_DIR = os.environ.get("BOBO_SESSION_DIR", str(_DEFAULT_SESSION_DIR))
