@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】在已有笔记末尾追加新内容，不影响原有内容。
 【适用场景】用户要求"补充笔记"、"追加到笔记"、"在笔记后面加上"。
 【注意】不会覆盖原有内容。""",
-        "parameters": {"type": "object", "properties": {"filename": {"type": "string"}, "content": {"type": "string"}}, "required": ["filename", "content"]}
+        "parameters": {"type": "object", "properties": {"filename": {"type": "string", "description": "要追加内容的笔记文件名"}, "content": {"type": "string", "description": "要追加到文件末尾的内容"}}, "required": ["filename", "content"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

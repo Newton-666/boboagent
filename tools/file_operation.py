@@ -140,16 +140,17 @@ TOOL_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["read", "write", "delete", "exists", "batch_write"]},
-                "path": {"type": "string"},
-                "content": {"type": "string"},
+                "action": {"type": "string", "description": "操作类型：read（读取）, write（写入）, delete（删除）, exists（检查存在）, batch_write（批量写入）", "enum": ["read", "write", "delete", "exists", "batch_write"]},
+                "path": {"type": "string", "description": "文件路径（如 ~/project/main.py）"},
+                "content": {"type": "string", "description": "要写入的内容（write/batch_write 时需要）"},
                 "files": {
                     "type": "array",
+                    "description": "批量写入的文件列表，每项含 path 和 content（batch_write 时需要）",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string"},
-                            "content": {"type": "string"}
+                            "path": {"type": "string", "description": "文件路径（如 ~/project/main.py）"},
+                            "content": {"type": "string", "description": "要写入的内容（write/batch_write 时需要）"}
                         }
                     }
                 }

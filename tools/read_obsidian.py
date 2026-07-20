@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】读取并返回 Obsidian 笔记的完整内容。
 【适用场景】用户问"帮我看看这个笔记写了什么"、"打开某某笔记"、"笔记里有没有提到XX"。
 【注意】此工具只读取，不修改任何文件。""",
-        "parameters": {"type": "object", "properties": {"filename": {"type": "string"}}, "required": ["filename"]}
+        "parameters": {"type": "object", "properties": {"filename": {"type": "string", "description": "Obsidian 笔记的文件名（含 .md 扩展名或不含均可）"}}, "required": ["filename"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

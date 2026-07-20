@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】创建新笔记或覆盖已有笔记的完整内容。
 【适用场景】用户要求"写个笔记"、"保存这段内容"、"创建新笔记"。
 【注意】此工具会覆盖原有内容，如需追加请用 append_obsidian。""",
-        "parameters": {"type": "object", "properties": {"filename": {"type": "string"}, "content": {"type": "string"}}, "required": ["filename", "content"]}
+        "parameters": {"type": "object", "properties": {"filename": {"type": "string", "description": "要创建或覆盖的笔记文件名"}, "content": {"type": "string", "description": "要写入的笔记内容"}}, "required": ["filename", "content"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

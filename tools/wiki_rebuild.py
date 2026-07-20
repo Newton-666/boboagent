@@ -142,7 +142,7 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "扫描 Obsidian 笔记库，自动发现笔记之间的关联，创建/更新交叉链接的 Hub 页面。如果配置了 Notion 或邮箱，也会搜索它们的内容并加入链接。",
+        "description": "扫描 Obsidian 笔记库，自动发现笔记之间的关联，创建/更新交叉链接的 Hub 页面。",
         "parameters": {"type": "object", "properties": {}}
     }
 }

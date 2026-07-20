@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】读取指定邮件的完整正文内容。
 【适用场景】用户说"看看第一封邮件的内容"、"这封邮件说了什么"。
 【注意】需要先知道邮件序号（从 read_recent 获取）。""",
-        "parameters": {"type": "object", "properties": {"index": {"type": "integer"}}, "required": []}
+        "parameters": {"type": "object", "properties": {"index": {"type": "integer", "description": "邮件序号（1 为最新），默认 1"}}, "required": []}
     }
 }
 _check = lambda: __import__('os').path.exists(__import__('os').path.expanduser('~/.bobo/mail.json'))

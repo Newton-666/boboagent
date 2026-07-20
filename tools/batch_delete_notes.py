@@ -25,7 +25,7 @@ TOOL_SCHEMA = {
         "description": """【用途】批量删除多个笔记文件。
 【适用场景】用户要求"删除这几个文件"、"清理这些笔记"。
 【警告】删除后不可恢复。""",
-        "parameters": {"type": "object", "properties": {"filenames": {"type": "array", "items": {"type": "string"}}}, "required": ["filenames"]}
+        "parameters": {"type": "object", "properties": {"filenames": {"type": "array", "description": "要批量删除的笔记文件名列表", "items": {"type": "string"}}}, "required": ["filenames"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

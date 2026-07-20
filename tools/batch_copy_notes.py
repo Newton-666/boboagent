@@ -67,8 +67,8 @@ TOOL_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "filenames": {"type": "array", "items": {"type": "string"}},
-                "destination": {"type": "string"}
+                "filenames": {"type": "array", "description": "要复制的笔记文件名列表", "items": {"type": "string"}},
+                "destination": {"type": "string", "description": "目标文件夹路径（相对于 vault 根目录）"}
             },
             "required": ["filenames", "destination"]
         }

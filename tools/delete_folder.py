@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】删除空文件夹。
 【适用场景】用户要求"删除文件夹"。
 【注意】只能删除空文件夹，force=true 可强制删除非空文件夹。""",
-        "parameters": {"type": "object", "properties": {"folder_name": {"type": "string"}, "force": {"type": "boolean"}}, "required": ["folder_name"]}
+        "parameters": {"type": "object", "properties": {"folder_name": {"type": "string", "description": "要删除的文件夹名称"}, "force": {"type": "boolean", "description": "设为 true 时递归删除非空文件夹，默认 false"}}, "required": ["folder_name"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

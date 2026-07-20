@@ -11,10 +11,10 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": """【用途】在整个 Obsidian 笔记库中搜索包含特定关键词的笔记。
+        "description": """【用途】在整个 Obsidian 笔记库中搜索包含特定关键词的笔记（大小写不敏感）。
 【适用场景】用户问"找一下关于XX的笔记"、"搜索笔记"、"有没有提到XX"、"帮我找找XX"。
 【返回】匹配的笔记列表（路径和文件名）。""",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+        "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词（大小写不敏感，非正则）"}}, "required": ["query"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

@@ -13,7 +13,7 @@ TOOL_SCHEMA = {
         "name": TOOL_NAME,
         "description": """【用途】在长期记忆库中搜索之前保存的信息。
 【适用场景】用户问"还记得XX吗"、"我之前让你记住的XX是什么"。""",
-        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+        "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词"}}, "required": ["query"]}
     }
 }
 def register(reg): pass  # search_memory 由 v5_memory.py 统一注册（避免双重注册导致 schema/func 错配，审计 #15）

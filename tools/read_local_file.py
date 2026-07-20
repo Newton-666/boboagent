@@ -184,8 +184,8 @@ TOOL_SCHEMA = {
         "name": TOOL_NAME,
         "description": "读取本地文件或目录内容（默认上限 40000 字符）。支持 .md, .txt, .py, .pdf, .docx 等。大文件可用 offset+limit 分页读取，防止撑爆上下文。目录返回结构预览。",
         "parameters": {"type": "object", "properties": {
-            "filepath": {"type": "string"},
-            "max_chars": {"type": "integer"},
+            "filepath": {"type": "string", "description": "要读取的文件绝对路径"},
+            "max_chars": {"type": "integer", "description": "最大返回字符数，超出的内容截断"},
             "offset": {"type": "integer", "description": "从第几行开始读（0=开头），大文件分页用"},
             "limit": {"type": "integer", "description": "最多读取行数，配合 offset 分页"}
         }, "required": ["filepath"]}

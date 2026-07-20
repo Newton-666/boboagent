@@ -32,7 +32,7 @@ TOOL_SCHEMA = {
     "function": {
         "name": "save_skill",
         "description": "【用途】将刚才执行的一系列操作保存为一个技能，下次可以直接调用。适用场景：用户说'把这些步骤保存成技能'、'记住这个流程'。",
-        "parameters": {"type": "object", "properties": {"skill_name": {"type": "string"}, "description": {"type": "string"}}, "required": ["skill_name"]}
+        "parameters": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "要保存的技能名称"}, "description": {"type": "string", "description": "技能的简要描述"}}, "required": ["skill_name"]}
     }
 }
 

@@ -98,7 +98,7 @@ TOOL_SCHEMA = {
         "description": (
             "将代码审查结果保存为 Obsidian 笔记，形成可搜索的审查历史。"
             "审查 PR 后使用此工具沉淀发现的问题。"
-            "审查笔记自动链接到项目知识图谱。"
+            ""
         ),
         "parameters": {
             "type": "object",

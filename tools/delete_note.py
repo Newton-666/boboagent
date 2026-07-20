@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】永久删除笔记文件。此操作不可恢复。
 【适用场景】用户明确要求"删除这个笔记"、"清理这个文件"。
 【警告】谨慎使用，删除后无法恢复。""",
-        "parameters": {"type": "object", "properties": {"filename": {"type": "string"}}, "required": ["filename"]}
+        "parameters": {"type": "object", "properties": {"filename": {"type": "string", "description": "要删除的笔记文件名"}}, "required": ["filename"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

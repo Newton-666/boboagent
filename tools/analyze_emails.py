@@ -13,7 +13,7 @@ TOOL_SCHEMA = {
         "name": TOOL_NAME,
         "description": """【用途】统计分析近期邮件的发送者域名、类型分布等。
 【适用场景】用户问"分析一下我的邮件"、"最近谁给我发邮件最多"。""",
-        "parameters": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}
+        "parameters": {"type": "object", "properties": {"days": {"type": "integer", "description": "分析最近 N 天的邮件，默认 7"}}, "required": []}
     }
 }
 _check = lambda: __import__('os').path.exists(__import__('os').path.expanduser('~/.bobo/mail.json'))

@@ -496,7 +496,7 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "执行代码并获取输出。支持 Python、JavaScript、Bash、Go、Rust。失败时自动修复（需 llm_caller）。",
+        "description": "执行代码并获取输出。支持 Python、JavaScript、Bash、Go、Rust。",
         "parameters": {
             "type": "object",
             "properties": {

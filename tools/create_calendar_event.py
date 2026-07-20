@@ -8,7 +8,7 @@ TOOL_NAME = "create_calendar_event"
 
 def execute(summary: str, start_date: str = "", end_date: str = "") -> str:
     if not summary:
-        return "请提供事件标题"
+        return "请提供事件标题（注：start_date/end_date 参数暂未实现，事件创建在当前默认日历中）"
     # AppleScript 注入防护：先转义反斜杠再转义引号（审计发现 #9）
     safe_summary = summary.replace('\\', '\\\\').replace('"', '\\"')
     script = (
@@ -34,8 +34,7 @@ TOOL_SCHEMA = {
             "type": "object",
             "properties": {
                 "summary": {"type": "string", "description": "事件标题"},
-                "start_date": {"type": "string", "description": "开始时间"},
-                "end_date": {"type": "string", "description": "结束时间"}
+                
             },
             "required": ["summary"]
         }

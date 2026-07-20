@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】获取指定网址的完整网页文本内容。
 【适用场景】用户提供了链接并要求"看看这篇文章"、"抓取这个网页"、"读取这个页面"。
 【注意】需要用户提供完整 URL。""",
-        "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}
+        "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "要抓取的网页 URL"}}, "required": ["url"]}
     }
 }
 def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)

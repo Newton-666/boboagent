@@ -13,7 +13,7 @@ TOOL_SCHEMA = {
         "name": TOOL_NAME,
         "description": """【用途】在 Bobo 数据库中创建新文件夹。
 【适用场景】用户要求"创建文件夹"、"新建目录"、"建一个分类文件夹"。""",
-        "parameters": {"type": "object", "properties": {"folder_name": {"type": "string"}}, "required": ["folder_name"]}
+        "parameters": {"type": "object", "properties": {"folder_name": {"type": "string", "description": "要创建的文件夹名称"}}, "required": ["folder_name"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

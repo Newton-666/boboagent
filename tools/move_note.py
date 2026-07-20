@@ -14,7 +14,7 @@ TOOL_SCHEMA = {
         "description": """【用途】将单个笔记文件移动到另一个文件夹。
 【适用场景】用户要求"移动这个文件"、"把这个笔记归类到XX文件夹"。
 【注意】如需批量移动，请使用 batch_move_notes。""",
-        "parameters": {"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}}, "required": ["source", "destination"]}
+        "parameters": {"type": "object", "properties": {"source": {"type": "string", "description": "源文件路径"}, "destination": {"type": "string", "description": "目标文件路径"}}, "required": ["source", "destination"]}
     }
 }
 _check = lambda: bool(__import__('os').environ.get('OBSIDIAN_VAULT', ''))

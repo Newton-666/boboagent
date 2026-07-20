@@ -28,8 +28,8 @@ TOOL_SCHEMA = {
 - "记住我的邮箱是 xxx@example.com" → 保存到记忆
 - "记住我喜欢喝咖啡" → 保存到记忆""",
         "parameters": {"type": "object", "properties": {
-            "content": {"type": "string"},
-            "memory_type": {"type": "string"}
+            "content": {"type": "string", "description": "要保存的记忆内容"},
+            "memory_type": {"type": "string", "description": "记忆类型（如 knowledge、preference、fact）"}
         }, "required": ["content"]}
     }
 }

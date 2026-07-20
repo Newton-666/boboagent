@@ -35,14 +35,14 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "在 Pull Request 上发布评论。如果指定 path 和 line，可以针对特定代码行发表评论。需要已安装 gh CLI 并登录。",
+        "description": "在 Pull Request 上发布评论。需要已安装 gh CLI 并登录。",
         "parameters": {
             "type": "object",
             "properties": {
                 "pr_number": {"type": "integer", "description": "PR 编号"},
                 "body": {"type": "string", "description": "评论内容"},
-                "commit_id": {"type": "string", "description": "提交 SHA（可选，内联评论时需要）"},
-                "path": {"type": "string", "description": "文件路径（可选，指定后为内联评论）"},
+                "commit_id": {"type": "string", "description": "提交 SHA（可选）"},
+                "path": {"type": "string", "description": "文件路径（可选）"},
                 "line": {"type": "integer", "description": "行号（可选）"}
             },
             "required": ["pr_number", "body"]

@@ -79,7 +79,7 @@ TOOL_SCHEMA = {
         "name": TOOL_NAME,
         "description": """【用途】列出目录内容。
 【适用场景】用户问"有什么文件"、"当前目录有什么"、"浏览文件夹"等。
-【注意】访问系统敏感目录时需要用户确认。""",
+""",
         "parameters": {
             "type": "object",
             "properties": {
