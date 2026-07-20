@@ -72,32 +72,16 @@ class ContextMixin:
 
     def _compress_history(self):
         """将早期对话压缩为摘要，保留最近 KEEP_EXCHANGES 轮完整对话。"""
-        # 工具结果预算：tool 消息独立设 30K 字符上限
+        # 审计 #22：tool 消息的 key 是 "content" 而非 "tool_results"（此前键名不匹配导致
+        # 30K 截断永不生效）；kind/phase/text 也不存在于 history 消息中（死代码已移除）
         tool_msgs = [(i, m) for i, m in enumerate(self.history) if m.get("role") == "tool"]
-        total_tool = sum(len(str(m.get("tool_results", []))) for _, m in tool_msgs)
+        total_tool = sum(len(str(m.get("content", ""))) for _, m in tool_msgs)
         if tool_msgs and total_tool > 30000:
             per_tool = max(500, 30000 // len(tool_msgs))
             for i, m in tool_msgs:
-                tr = m.get("tool_results", "")
+                tr = m.get("content", "")
                 if len(str(tr)) > per_tool:
-                    m["tool_results"] = str(tr)[:per_tool] + f"\n...(截断，原{len(str(tr))}字符)"
-
-        # 先尝试回收空间：丢弃工具状态和思考过程等低价值消息
-        total = sum(len(str(m)) for m in self.history)
-        if total > self.MAX_HISTORY_CHARS - 10000:
-            keep = []
-            dropped = 0
-            for m in self.history:
-                role = m.get("role", "")
-                kind = m.get("kind", "") or m.get("phase", "")
-                is_status = kind in ("continuing", "rate_limit", "undo") or "rate_limit" in str(m.get("text", ""))
-                if role == "assistant" and is_status and dropped < 10:
-                    dropped += 1
-                    continue
-                keep.append(m)
-            if len(keep) != len(self.history):
-                self.history = keep
-                total = sum(len(str(m)) for m in self.history)
+                    m["content"] = str(tr)[:per_tool] + f"\n...(截断，原{len(str(tr))}字符)"
 
         user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
         if len(user_indices) <= self.KEEP_EXCHANGES:
@@ -195,17 +179,18 @@ class ContextMixin:
         from tools import TOOLS_SCHEMA
         category = self._classify_query()
 
+        # obsidian/notion/email 类查询始终返回全部工具，不裁剪
+        # （审计 #21：此前 _used_categories 扩张后会意外缩小工具集）
+        if category in self._NO_FILTER_CATEGORIES:
+            return None
+
         # 如果没有分类也没有已扩张的类别，返回全部
-        if (category is None or category in self._NO_FILTER_CATEGORIES) and not extra_categories:
+        if category is None and not extra_categories:
             return None
 
         allowed_names = set()
-        if category and category not in self._NO_FILTER_CATEGORIES:
+        if category:
             for cat in [category] + self._FALLBACK_CATEGORIES:
-                allowed_names.update(self.TOOL_CATEGORIES.get(cat, []))
-        elif category in self._NO_FILTER_CATEGORIES and extra_categories:
-            allowed_names.update(self.TOOL_CATEGORIES.get(category, []))
-            for cat in self._FALLBACK_CATEGORIES:
                 allowed_names.update(self.TOOL_CATEGORIES.get(cat, []))
 
         # 合并已扩张的类别
