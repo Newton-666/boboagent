@@ -35,9 +35,9 @@ def _search_python(search_dir: Path, pattern: str, file_types: list[str],
             continue
         if file_types and file_path.suffix not in file_types:
             continue
-        # 跳过常见非代码目录
-        parts = file_path.parts
-        if any(p.startswith(".") and p not in (".", "..") for p in parts):
+        # 审计 #34：只跳过以点开头的文件名（隐藏文件），不再误伤点目录
+        # （如 ~/.bobo/tools/）下的所有正常文件
+        if file_path.name.startswith("."):
             continue
         if any(p in ("node_modules", "__pycache__", ".git", ".venv", "venv",
                      "dist", "build", ".next", "coverage") for p in parts):

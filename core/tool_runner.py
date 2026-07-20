@@ -322,8 +322,10 @@ class ToolRunnerMixin:
                 if filepath.endswith(".py"):
                     try:
                         cwd = os.getcwd()
+                        from core.file_safety import sanitize_env
                         run_result = subprocess.run(
-                            ["python3", filepath], capture_output=True, text=True, cwd=cwd, timeout=10
+                            ["python3", filepath], capture_output=True, text=True,
+                            cwd=cwd, timeout=10, env=sanitize_env()
                         )
                         parts = []
                         if run_result.stdout.strip():

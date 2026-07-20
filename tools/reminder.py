@@ -33,6 +33,9 @@ def parse_time(text: str) -> tuple:
     time_match = re.search(r'(\d{1,2})点', text_lower)
     if time_match:
         hour = int(time_match.group(1))
+        # 审计 #30：下午/晚上加 12 小时
+        if any(kw in text_lower for kw in ("下午", "晚上", "pm")) and hour < 12:
+            hour += 12
         target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         if target < now:
             target += timedelta(days=1)

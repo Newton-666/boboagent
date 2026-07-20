@@ -144,7 +144,7 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
             f"  ┌─ 上文: ...{before[-40:]}\n"
             f"  │  {preview}\n"
             f"  └─ 下文: {after[:40]}...\n"
-            f"这是你要修改的位置吗？如果确认，加参数 confirm=true 执行替换。"
+            f"old_string 匹配到 {count} 处，不够精确。请增加前后文（包含前后 1-2 行），使其匹配唯一。\n提示：用 read_local_file 读取文件确认上下文。"
         )
 
     # ── 备份 ──
