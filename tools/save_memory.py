@@ -33,4 +33,4 @@ TOOL_SCHEMA = {
         }, "required": ["content"]}
     }
 }
-def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA)
+def register(reg): pass  # save_memory 由 v5_memory.py 统一注册（避免双重注册导致 schema/func 错配，审计 #15）

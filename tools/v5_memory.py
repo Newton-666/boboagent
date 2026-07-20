@@ -1,10 +1,11 @@
-# v5_memory.py — 知识库记忆系统（增强版：容量限制 + 原子写入）
+# v5_memory.py — 知识库记忆系统（增强版：容量限制 + 原子写入 + 线程安全）
 # 数据存储在 ~/.bobo_v2/ 下，不在项目目录中
 
 import json
 import os
 import tempfile
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -12,17 +13,26 @@ from pathlib import Path
 _MEMORY_DIR = Path.home() / ".bobo_v2"
 _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_DB = str(_MEMORY_DIR / "knowledge_base.json")
+_MEMORY_BACKUP = MEMORY_DB + ".bak"
 
 MAX_TOTAL_CHARS = 100000  # 总记忆字符限制（约 36k tokens）
 MAX_SINGLE_ENTRY_CHARS = 5000  # 单条记忆字符限制
 
+# 读改写操作锁：并行 save_memory 调用时防止 lost-update（审计 #14）
+_write_lock = threading.Lock()
+
 
 def _atomic_save(data):
-    """原子写入 JSON 文件（防止写入中断导致损坏）"""
+    """原子写入 JSON 文件（防止写入中断导致损坏）。同时保留 .bak 副本。"""
     dirname = os.path.dirname(MEMORY_DB)
     if dirname:
         os.makedirs(dirname, exist_ok=True)
-    
+    # 写入前先备份现有数据，防止损坏后无恢复路径（审计 #14）
+    if os.path.exists(MEMORY_DB):
+        try:
+            shutil.copy2(MEMORY_DB, _MEMORY_BACKUP)
+        except Exception:
+            pass
     fd, tmp_path = tempfile.mkstemp(dir=dirname or '.', suffix='.tmp', prefix='.mem_')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
@@ -37,16 +47,37 @@ def _atomic_save(data):
 
 
 def _load():
-    if os.path.exists(MEMORY_DB):
+    """加载知识库。JSON 损坏时不静默返回空结构，避免下次 _save 覆写清空（审计 #14）。"""
+    if not os.path.exists(MEMORY_DB):
+        return {'entries': [], 'folders': []}
+    try:
+        with open(MEMORY_DB, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if 'entries' not in data:
+                data = {'entries': [], 'folders': []}
+            return data
+    except Exception:
+        # 损坏了 → 移到 .broken，尝试从 .bak 恢复
+        broken_path = MEMORY_DB + ".broken." + datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            with open(MEMORY_DB, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            shutil.move(MEMORY_DB, broken_path)
+            import sys
+            print(f"  知识库文件损坏，已备份至 {broken_path}", file=sys.stderr)
+        except Exception:
+            pass
+        if os.path.exists(_MEMORY_BACKUP):
+            try:
+                with open(_MEMORY_BACKUP, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                shutil.copy2(_MEMORY_BACKUP, MEMORY_DB)
+                import sys
+                print(f"  已从备份恢复记忆", file=sys.stderr)
                 if 'entries' not in data:
                     data = {'entries': [], 'folders': []}
                 return data
-        except Exception:
-            pass
-    return {'entries': [], 'folders': []}
+            except Exception:
+                pass
+        return {'entries': [], 'folders': []}
 
 
 def _get_total_chars(entries):
@@ -88,8 +119,10 @@ def add_entry(text, entry_type="general", tags=None, folder=""):
         print(f"   💡 请删除一些旧记忆后再试")
         return None
     
+    # ID 用当前最大值 +1，避免删除后重复（审计 #14）
+    entry_id = max((e.get("id", 0) for e in entries), default=0) + 1
     entry = {
-        "id": len(entries) + 1,
+        "id": entry_id,
         "text": text,
         "type": entry_type,
         "tags": tags or [],
@@ -106,18 +139,16 @@ def delete_entry(entry_id, reason=None):
     """删除记忆条目（要求说明原因）"""
     if reason not in ["absorbed", "stale", "user_request"]:
         return {"error": "请说明删除原因: absorbed/stale/user_request"}
-    
-    data = _load()
-    entries = data.get('entries', [])
-    
-    for i, e in enumerate(entries):
-        if e.get('id') == entry_id:
-            removed = entries.pop(i)
-            data['entries'] = entries
-            _save(data)
-            return {"success": True, "removed": removed, "reason": reason}
-    
-    return {"error": f"未找到 ID: {entry_id}"}
+    with _write_lock:
+        data = _load()
+        entries = data.get('entries', [])
+        for i, e in enumerate(entries):
+            if e.get('id') == entry_id:
+                removed = entries.pop(i)
+                data['entries'] = entries
+                _save(data)
+                return {"success": True, "removed": removed, "reason": reason}
+        return {"error": f"未找到 ID: {entry_id}"}
 
 
 def get_memory_stats():
@@ -177,38 +208,35 @@ def delete_folder(name):
 
 
 def move_to_folder(entry_id, folder_name):
-    data = _load()
-    for e in data['entries']:
-        if e.get('id') == entry_id:
-            e['folder'] = folder_name
-            _save(data)
-            return True
-    return False
+    with _write_lock:
+        data = _load()
+        for e in data['entries']:
+            if e.get('id') == entry_id:
+                e['folder'] = folder_name
+                _save(data)
+                return True
+        return False
 
 
 def update_entry(entry_id, new_text):
     """更新条目内容（带容量检查）"""
     if len(new_text) > MAX_SINGLE_ENTRY_CHARS:
         return {"error": f"更新内容太长 ({len(new_text)} 字符)，超过限制 {MAX_SINGLE_ENTRY_CHARS}"}
-    
-    data = _load()
-    for e in data['entries']:
-        if e.get('id') == entry_id:
-            old_text = e['text']
-            e['text'] = new_text
-            e['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            # 重新计算总字符数
-            entries = data['entries']
-            total = _get_total_chars(entries)
-            if total > MAX_TOTAL_CHARS:
-                e['text'] = old_text
-                return {"error": f"更新后记忆总容量 ({total}) 超过限制 ({MAX_TOTAL_CHARS})"}
-            
-            _save(data)
-            return {"success": True, "entry": e}
-    
-    return {"error": f"未找到 ID: {entry_id}"}
+    with _write_lock:
+        data = _load()
+        for e in data['entries']:
+            if e.get('id') == entry_id:
+                old_text = e['text']
+                e['text'] = new_text
+                e['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                # 重新计算总字符数
+                total = _get_total_chars(data['entries'])
+                if total > MAX_TOTAL_CHARS:
+                    e['text'] = old_text
+                    return {"error": f"更新后记忆总容量 ({total}) 超过限制 ({MAX_TOTAL_CHARS})"}
+                _save(data)
+                return {"success": True, "entry": e}
+        return {"error": f"未找到 ID: {entry_id}"}
 
 
 def search_knowledge_base(query):
@@ -233,12 +261,20 @@ def search_knowledge_base(query):
     return output
 
 
-def save_to_knowledge_base(content, entry_type="general"):
-    """保存内容到知识库（供工具调用）"""
-    entry = add_entry(content, entry_type)
-    if entry:
-        return f"已保存到知识库 (ID: {entry['id']})"
-    return "保存失败"
+def save_to_knowledge_base(content, entry_type="general", **kwargs):
+    """保存内容到知识库（供工具调用）。
+
+    支持 target="profile" 路由到用户资料（kwargs 中可含 memory_type 作为 profile key）。
+    """
+    target = kwargs.get("target", "memory")
+    if target == "profile":
+        key = kwargs.get("memory_type", "") or "unnamed"
+        return save_user_profile(key, content)
+    with _write_lock:
+        entry = add_entry(content, entry_type)
+        if entry:
+            return f"已保存到知识库 (ID: {entry['id']})"
+        return "保存失败"
 
 
 def save_user_profile(key: str, value: str) -> str:
@@ -274,8 +310,8 @@ def format_all_memory(max_chars: int = 5000) -> str:
     entries = data.get("entries", [])
     if not entries:
         return ""
-    # Sort by recency (newest first)
-    sorted_entries = sorted(entries, key=lambda e: e.get("created_at", 0), reverse=True)
+    # Sort by recency (newest first): 写入键是 timestamp 不是 created_at
+    sorted_entries = sorted(entries, key=lambda e: e.get("timestamp", ""), reverse=True)
     lines = []
     total = 0
     for e in sorted_entries:
