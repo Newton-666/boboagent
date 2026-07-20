@@ -62,6 +62,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._pending_diff: str = ""
         self._verification_attempted = False  # 防止验证死循环
         self._checkpoints: list[dict] = []   # 对话回退快照
+        self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
@@ -787,20 +788,65 @@ class Engine(ContextMixin, ToolRunnerMixin):
         (r'wget.*\$\(', "wget + 命令替换"),
     ]
 
+    def _split_shell_segments(self, cmd_clean: str) -> list | None:
+        """用 shlex 按控制操作符（| && || ;）把命令切成若干段。
+
+        返回 token 段的列表；解析失败（如引号不配对）返回 None。
+        之前只按 "|" 分段，`git status && evil`、`ls; evil` 会以白名单
+        首命令命中而跳过整串检查（审计发现 #3）。
+        """
+        import shlex
+        try:
+            lexer = shlex.shlex(cmd_clean, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return None
+        segments, current = [], []
+        for tok in tokens:
+            if tok and set(tok) <= set("|&;"):  # 操作符 token：| || && ; |& 等
+                if current:
+                    segments.append(current)
+                    current = []
+            else:
+                current.append(tok)
+        if current:
+            segments.append(current)
+        return segments
+
+    def _check_redirect_targets(self, cmd_clean: str) -> tuple | None:
+        """检查 > / >> 重定向目标是否写入受保护文件。
+
+        此前分类器只看命令名不看重定向，`echo x >> ~/.zshrc` 会以 echo
+        命中白名单静默执行（审计发现 #3）。命中 is_write_denied 即 dangerous。
+        """
+        import re as _re
+        from core.file_safety import is_write_denied
+        # 匹配 > >> 2> 2>> &> &>> 的目标；(?!&) 跳过 >&1 之类的 fd 复制
+        for m in _re.finditer(r'(?:\d+|&)?>>?\s*(?!&)(\S+)', cmd_clean):
+            target = m.group(1).strip('"\'')
+            if not target or target.startswith("-"):
+                continue
+            if target in ("/dev/null", "/dev/stdout", "/dev/stderr"):
+                continue  # 常见且无害
+            denied, reason = is_write_denied(target)
+            if denied:
+                return ("dangerous", f"重定向写入受保护文件 — {reason}: {target[:60]}")
+        return None
+
     def _classify_command(self, command: str) -> tuple[str, str]:
         """分类命令：safe / dangerous / gray。返回 (等级, 原因)。
 
         检查优先级：
           1. 黑名单正则（全字符串匹配，拦截已知危险模式）
-          2. 管道分段检查（每段独立判定，防止白名单命令夹带危险管道）
-          3. 白名单（单命令，base_cmd 命中即安全）
-          4. 灰名单（兜底，需用户确认）
+          2. 重定向目标检查（> / >> 写入受保护文件即 dangerous）
+          3. 按控制操作符（| && || ;）分段，每段独立判定
+          4. 白名单（段首命令命中即安全）；灰名单兜底（需用户确认）
         """
         if not command or not command.strip():
             return ("safe", "")
 
         cmd_clean = command.strip()
-        base_cmd = cmd_clean.split()[0] if cmd_clean.split() else ""
 
         import re as _re
 
@@ -809,32 +855,41 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if _re.search(pattern, cmd_clean):
                 return ("dangerous", reason)
 
-        # ── 第 2 步：管道分段检查 ──
-        # 必须在白名单检查之前执行，否则 "ls | unknown_cmd"
-        # 会以 "ls" 命中白名单而跳过后续管道的安全检查。
-        if "|" in cmd_clean:
-            for segment in cmd_clean.split("|"):
-                seg = segment.strip()
-                seg_cmd = seg.split()[0] if seg.split() else ""
+        # ── 第 2 步：重定向目标 ──
+        redirect_result = self._check_redirect_targets(cmd_clean)
+        if redirect_result:
+            return redirect_result
+
+        # ── 第 3 步：分段检查（管道 + && || ; 链）──
+        # 必须在白名单检查之前执行，否则 "ls && unknown_cmd"
+        # 会以 "ls" 命中白名单而跳过后半段的安全检查。
+        segments = self._split_shell_segments(cmd_clean)
+        if segments is None:
+            return ("gray", "命令解析失败（引号可能不配对），需人工确认")
+        if len(segments) > 1:
+            for seg_tokens in segments:
+                seg_text = " ".join(seg_tokens)
+                seg_cmd = seg_tokens[0] if seg_tokens else ""
                 if not seg_cmd:
                     continue
                 # 每段先过黑名单
                 for pattern, reason in self.DANGEROUS_PATTERNS:
-                    if _re.search(pattern, seg):
-                        return ("dangerous", f"管道中的危险操作 — {reason}: {seg[:60]}")
+                    if _re.search(pattern, seg_text):
+                        return ("dangerous", f"链式命令中的危险操作 — {reason}: {seg_text[:60]}")
                 # 再检查白名单
                 if seg_cmd in self.SAFE_COMMANDS:
                     continue
                 # 不在白名单也不在黑名单 → 灰名单
-                return ("gray", f"管道中包含未知命令: {seg_cmd}")
+                return ("gray", f"链式命令中包含未知命令: {seg_cmd}")
             # 所有段都通过 → 安全
             return ("safe", "")
 
-        # ── 第 3 步：单命令白名单 ──
+        # ── 第 4 步：单命令白名单 ──
+        base_cmd = segments[0][0] if segments and segments[0] else ""
         if base_cmd in self.SAFE_COMMANDS:
             return ("safe", "")
 
-        # ── 第 4 步：灰名单兜底 ──
+        # ── 第 5 步：灰名单兜底 ──
         return ("gray", f"未知安全等级的命令: {base_cmd}")
 
     def _is_high_risk_tool(self, tool_name: str, tool_args: dict) -> Tuple[bool, str]:
