@@ -2,10 +2,20 @@
 
 import json
 import os
+import re
+import shlex
 import subprocess
+import sys
 
 TOOL_NAME = "bobo_schedule"
 SCHEDULE_FILE = os.path.expanduser("~/.bobo/schedules.json")
+
+# 任务名会写入 crontab 的注释行和 shell 命令，必须严格限制字符集
+# （允许中文，禁止空格/引号/换行/shell 元字符，防 cron 注入）
+_NAME_RE = re.compile(r"^[\w\-]{1,64}$", re.UNICODE)
+# 时间格式 HH:MM（00:00 - 23:59），防止非法值拼进 cron 表达式
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+_ALLOWED_REPEAT = {"daily", "weekdays", "hourly"}
 
 
 def _load_schedules() -> list:
@@ -26,9 +36,15 @@ def _save_schedules(schedules: list):
 
 def _install_cron(name: str, cron_expr: str):
     """Add or update a crontab entry for this schedule."""
-    runner = os.path.abspath(__file__)
+    # 指向真正会执行 engine 的入口（bobo_tui_gateway.entry --run-schedule），
+    # 全部参数 shlex.quote，防止路径含空格或注入
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     comment = f"# bobo_schedule:{name}"
-    cmd = f"cd {os.getcwd()} && python3 {runner} --run {name}\n"
+    cmd = (
+        f"cd {shlex.quote(project_root)} && "
+        f"{shlex.quote(sys.executable or 'python3')} -m bobo_tui_gateway.entry "
+        f"--run-schedule {shlex.quote(name)}\n"
+    )
 
     try:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
@@ -80,10 +96,12 @@ def _remove_cron(name: str):
 
 
 def _cron_expr(time_str: str, repeat: str) -> str:
-    """Convert "08:00" + "daily" to cron expression."""
-    parts = time_str.split(":")
-    hour = parts[0].strip().lstrip("0") or "0"
-    minute = parts[1].strip().lstrip("0") if len(parts) > 1 else "0"
+    """Convert "08:00" + "daily" to cron expression. 非法输入返回空串。"""
+    m = _TIME_RE.match((time_str or "").strip())
+    if not m:
+        return ""
+    hour = str(int(m.group(1)))
+    minute = str(int(m.group(2)))
     if repeat == "daily":
         return f"{minute} {hour} * * *"
     elif repeat == "weekdays":
@@ -102,13 +120,27 @@ def execute(action: str = "list", name: str = "", task: str = "",
             return "当前没有设置任何定时任务。可以说 '每天早上8点整理笔记' 来创建。"
         lines = ["已设置的定时任务:"]
         for s in schedules:
-            lines.append(f"  {s['name']} — {s['repeat']} at {s['time']}")
-            lines.append(f"    任务: {s['task'][:60]}")
+            if not isinstance(s, dict):
+                continue
+            lines.append(f"  {s.get('name', '?')} — {s.get('repeat', '?')} at {s.get('time', '?')}")
+            lines.append(f"    任务: {str(s.get('task', ''))[:60]}")
         return "\n".join(lines)
 
     if action == "create":
         if not name or not task or not time:
             return "需要提供 name, task, time"
+
+        # 参数校验（任务名和时间都会写入 crontab，必须防止注入）
+        if not _NAME_RE.match(name):
+            return "❌ 任务名称只能包含中英文、数字、下划线和连字符（最长 64，不能有空格）"
+        if repeat not in _ALLOWED_REPEAT:
+            return "❌ repeat 只支持: daily / weekdays / hourly"
+        if not _TIME_RE.match(time.strip()):
+            return "❌ time 格式应为 HH:MM（如 08:00、23:30）"
+
+        cron_expr = _cron_expr(time, repeat)
+        if not cron_expr:
+            return "❌ 无法生成 cron 表达式，请检查 time 格式"
 
         schedule = {
             "name": name,
@@ -128,7 +160,6 @@ def execute(action: str = "list", name: str = "", task: str = "",
         _save_schedules(schedules)
 
         # Install cron job
-        cron_expr = _cron_expr(time, repeat)
         ok = _install_cron(name, cron_expr)
 
         if ok:
@@ -143,6 +174,8 @@ def execute(action: str = "list", name: str = "", task: str = "",
         return f"任务已保存但 cron 安装失败。请手动添加: {cron_expr} python3 ..."
 
     if action == "delete":
+        if not _NAME_RE.match(name):
+            return "❌ 任务名称只能包含中英文、数字、下划线和连字符"
         schedules = _load_schedules()
         before = len(schedules)
         schedules = [s for s in schedules if s["name"] != name]
@@ -155,20 +188,20 @@ def execute(action: str = "list", name: str = "", task: str = "",
     return "支持的操作: list, create, delete"
 
 
-# Allow direct execution by cron
+# Backward-compatible entry: old crontab lines call `bobo_schedule.py --run <name>`.
+# 转发到真正会执行 engine 的入口，保证旧 cron 行也能正常工作。
 if __name__ == "__main__":
-    import sys
     if "--run" in sys.argv:
         idx = sys.argv.index("--run")
         if idx + 1 < len(sys.argv):
             name = sys.argv[idx + 1]
-            schedules = _load_schedules()
-            for s in schedules:
-                if s["name"] == name:
-                    print(f"执行定时任务: {s['name']}")
-                    # Run the task description as a prompt via the engine
-                    # This file is called by cron, which triggers the agent
-                    break
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            os.chdir(project_root)  # python -m 需要以项目根为 cwd 才能找到包
+            os.execvp(sys.executable, [
+                sys.executable, "-m", "bobo_tui_gateway.entry",
+                "--run-schedule", name,
+            ])
+    print("用法: python3 -m bobo_tui_gateway.entry --run-schedule <任务名>")
 
 
 TOOL_FUNC = execute
