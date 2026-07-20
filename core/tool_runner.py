@@ -210,6 +210,13 @@ class ToolRunnerMixin:
             future_map[future] = (tc, tool_name, tool_args)
         executor.shutdown(wait=False)
 
+        # 文件检查点已填充完毕，此时存快照才能正确覆盖本轮即将被修改的文件
+        # （审计 #17：此前 _save_checkpoint 在 engine._step 中早于本处调用，
+        #  _file_checkpoints 为空 → 快照的 files 总是上一轮的状态）
+        if hasattr(self, '_save_checkpoint'):
+            tool_names = [t for _, t, _ in prepared]
+            self._save_checkpoint(f"调用: {', '.join(tool_names[:3])}")
+
         # Phase 3: 收集结果
         for future in as_completed(future_map):
             tc, tool_name, tool_args = future_map[future]

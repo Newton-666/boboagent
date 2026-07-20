@@ -255,9 +255,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if teaching_result is not None:
             return teaching_result
         # 对话回退：支持自然语言和 /undo 命令
-        undo_keywords = ["回退", "撤销", "撤销刚才", "回到上一步", "回到之前", "恢复上一步",
-                         "undo", "revert", "go back"]
-        if any(kw in user_input.lower() for kw in undo_keywords) and self._checkpoints:
+        # 短关键词只做精确匹配，防止 "这个有回退机制吗" 误触发 undo（审计 #25）
+        undo_exact = {"回退", "撤销", "undo", "revert", "go back", "/undo"}
+        undo_substr = ["撤销刚才", "回到上一步", "回到之前", "恢复上一步"]
+        stripped = user_input.strip().lower()
+        if (stripped in undo_exact or any(kw in stripped for kw in undo_substr)) and self._checkpoints:
             return self._do_undo()
         if self.teaching_mode:
             return None
@@ -437,7 +439,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if not self._checkpoints:
             return None
         if not target:
-            return len(self._checkpoints) - 2  # 回退到倒数第二个（恢复一步）
+            # 回退一步（倒数第二个快照）；只有一个快照时回到它（恢复之前状态）
+            return max(0, len(self._checkpoints) - 2)
         # 数字
         try:
             steps = int(target)
@@ -983,9 +986,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._pending_content = content
             self._pending_tool_calls = tool_calls
             if tool_calls:
-                # 工具执行前保存快照，用于回退
-                tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls]
-                self._save_checkpoint(f"调用: {', '.join(tool_names[:3])}")
+                # 快照由 tool_runner._execute_tool_loop 在 _file_checkpoints
+                # 填充之后保存，确保首个修改轮次的文件也能回退（审计 #17）
                 self.state = self.STATE_EXECUTING
             else:
                 # flash model sometimes returns empty — retry once
@@ -1042,55 +1044,50 @@ class Engine(ContextMixin, ToolRunnerMixin):
             # 检测阶段完成信号
             if self._pending_content and self._is_phase_complete(self._pending_content):
                 self._phase_pending_cleanup = True
-            # 记录工具调用用于循环检测
+            # 边执行边扩张 + 改动日志 + 已读文件（审计 #24：全部在同一个
+            # for 循环内，不再用泄漏变量只记录最后一个工具）
             if self._pending_tool_calls:
+                import json as _je
                 for tc in self._pending_tool_calls:
                     name = tc.get("function", {}).get("name", "")
-                    args = str(tc.get("function", {}).get("arguments", ""))[:60]
-                    self._recent_tool_calls.append((name, args))
-                self._recent_tool_calls = self._recent_tool_calls[-12:]
-                # 边执行边扩张：根据实际调用的工具名，把对应分类加入已启用集合
-                for tc in self._pending_tool_calls:
-                    n = tc.get("function", {}).get("name", "")
+                    args_str = tc.get("function", {}).get("arguments", "{}")
+                    # 边执行边扩张
                     for cat, tools in self.TOOL_CATEGORIES.items():
-                        if n in tools:
+                        if name in tools:
                             self._used_categories.add(cat)
-            # 记录改动日志
-            if name in ("edit_file", "file_operation"):
-                try:
-                    import json as _je
-                    a = _je.loads(tc.get("function", {}).get("arguments", "{}"))
-                    fpath = a.get('file_path', '') or a.get('path', '')
-                    if fpath:
-                        if not hasattr(self, '_change_log'):
-                            self._change_log = []
-                        if name == "edit_file":
-                            old = a.get("old_string", "")[:40]
-                            new = a.get("new_string", "")[:40]
-                            desc = f"{fpath}: {old} → {new}"
-                        else:
-                            desc = f"{fpath}（{a.get('action','write')}）"
-                        self._change_log.append({"ts": time.time(), "desc": desc})
-                except Exception:
-                    pass
-            # 记录已读文件，便于上下文压缩后恢复
-            if name == "read_local_file":
-                try:
-                    import json as _j
-                    a = _j.loads(args) if isinstance(args, str) else args
-                    fpath = a.get('file_path', '') or a.get('path', '')
-                    if fpath and tool_results and len(str(tool_results)) > 40:
-                        if not hasattr(self, '_read_files'):
-                            self._read_files = {}
-                        self._read_files[fpath] = str(tool_results)[:200]
-                        if len(self._read_files) > 10:
-                            self._read_files = dict(list(self._read_files.items())[-10:])
-                        # Track last step for this file
-                        if not hasattr(self, '_file_last_step'):
-                            self._file_last_step = {}
-                        self._file_last_step[fpath] = self.current_depth
-                except Exception:
-                    pass
+                    # 记录改动日志
+                    if name in ("edit_file", "file_operation"):
+                        try:
+                            a = _je.loads(args_str) if isinstance(args_str, str) else args_str
+                            fpath = a.get('file_path', '') or a.get('path', '')
+                            if fpath:
+                                if not hasattr(self, '_change_log'):
+                                    self._change_log = []
+                                if name == "edit_file":
+                                    old = a.get("old_string", "")[:40]
+                                    new = a.get("new_string", "")[:40]
+                                    desc = f"{fpath}: {old} → {new}"
+                                else:
+                                    desc = f"{fpath}（{a.get('action','write')}）"
+                                self._change_log.append({"ts": time.time(), "desc": desc})
+                        except Exception:
+                            pass
+                    # 记录已读文件，便于上下文压缩后恢复
+                    if name == "read_local_file":
+                        try:
+                            a = _je.loads(args_str) if isinstance(args_str, str) else args_str
+                            fpath = a.get('file_path', '') or a.get('path', '')
+                            if fpath and tool_results and len(str(tool_results)) > 40:
+                                if not hasattr(self, '_read_files'):
+                                    self._read_files = {}
+                                self._read_files[fpath] = str(tool_results)[:200]
+                                if len(self._read_files) > 10:
+                                    self._read_files = dict(list(self._read_files.items())[-10:])
+                                if not hasattr(self, '_file_last_step'):
+                                    self._file_last_step = {}
+                                self._file_last_step[fpath] = self.current_depth
+                        except Exception:
+                            pass
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
             self._pending_tool_calls = None
