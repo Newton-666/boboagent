@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
-from .obsidian_tools import _normalize_path
+from .obsidian_tools import _normalize_path, _path_denied_message
 
 # ============================================================
 # 辅助函数
@@ -68,12 +68,16 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
     
     try:
         filepath = _normalize_path(filename)
-        
+
         # 多个同名文件时，让用户选择
         if isinstance(filepath, str) and filepath.startswith("__MULTIPLE_MATCHES__"):
             paths = filepath.split(":", 1)[1].split("|")
             return f"找到多个同名文件，请指定具体路径:\n" + "\n".join(f"  {p}" for p in paths)
-        
+
+        denied = _path_denied_message(filepath)
+        if denied:
+            return denied
+
         # 检查是否在屏蔽文件夹中
         for blocked in BLOCKED_FOLDERS:
             blocked = blocked.strip()
@@ -109,6 +113,10 @@ def append_obsidian(filename: str, content: str, auto_backup: bool = True) -> st
         if isinstance(filepath, str) and filepath.startswith("__MULTIPLE_MATCHES__"):
             paths = filepath.split(":", 1)[1].split("|")
             return f"找到多个同名文件，请指定具体路径:\n" + "\n".join(f"  {p}" for p in paths)
+
+        denied = _path_denied_message(filepath)
+        if denied:
+            return denied
 
         # 检查文件是否存在
         if not os.path.exists(filepath):

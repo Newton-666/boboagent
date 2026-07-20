@@ -29,6 +29,10 @@ def execute(pr_number: int, project: str, title: str = "",
     if not vault:
         return "OBSIDIAN_VAULT 未配置，无法保存审查记录"
 
+    # project 会拼进文件路径，必须防止路径穿越
+    if not project or project in (".", "..") or "/" in project or "\\" in project:
+        return "❌ project 参数非法：不能为空或包含路径分隔符"
+
     # Try to get PR title if not provided
     pr_title = title
     if not pr_title:

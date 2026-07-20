@@ -2,8 +2,12 @@
 
 import json
 import os
+import re
 
 TOOL_NAME = "api_register"
+
+# API 名称将拼进文件路径 ~/.bobo/apis/{name}.json，必须严格限制字符集
+_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def execute(name: str, base_url: str, auth_type: str = "",
@@ -11,6 +15,9 @@ def execute(name: str, base_url: str, auth_type: str = "",
     """Register a custom API. Provide base URL, auth, and endpoint definitions."""
     if not name or not base_url:
         return "需要提供 API 名称和 base_url"
+
+    if not _NAME_PATTERN.match(name):
+        return "❌ API 名称只能包含字母、数字、下划线和连字符（最长 64 字符）"
 
     # Parse endpoints from JSON string
     try:

@@ -19,6 +19,11 @@ def execute(filepath: str, title: str = "") -> str:
         if os.path.exists(full_path + ".md"):
             full_path = full_path + ".md"
 
+    # 防止路径穿越：读取范围必须限制在 vault 内
+    vault_real = os.path.realpath(vault)
+    if not os.path.realpath(full_path).startswith(vault_real + os.sep):
+        return "❌ 拒绝访问: 路径不在笔记库范围内（路径穿越防护）"
+
     if not os.path.exists(full_path):
         return f"文件不存在: {filepath}"
 

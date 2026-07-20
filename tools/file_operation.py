@@ -62,20 +62,32 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
             return "错误: batch_write 需要提供 files 参数"
         results = []
         for f in files:
+            if not isinstance(f, dict):
+                results.append(f"  ❌ 无效条目（期望 {{path, content}} 对象）: {str(f)[:50]}")
+                continue
             f_path = f.get("path", "")
             f_content = f.get("content", "")
+            # 与单文件 write 保持同一安全水位：批量写入也要过 is_write_denied
+            denied, reason = is_write_denied(os.path.expanduser(f_path))
+            if denied:
+                results.append(f"  ❌ {reason}")
+                continue
             result = _write_single_file(f_path, f_content)
             results.append(f"  {result}")
-        success_count = sum(1 for r in results if not r.startswith("  写入失败"))
+        success_count = sum(1 for r in results if r.startswith("  已写入"))
         fail_count = len(results) - success_count
         summary = f"批量写入完成: {success_count} 个成功"
         if fail_count:
             summary += f", {fail_count} 个失败"
         return f"{summary}\n" + "\n".join(results)
-    
+
     full_path = os.path.expanduser(path) if path else ""
-    
+
     if action == "read":
+        # 与 read_local_file 保持同一安全水位：敏感文件/二进制检查
+        warning = safe_read_check(full_path)
+        if warning:
+            return warning
         cache_key = full_path
         if cache_key in _read_cache:
             cached_hash, cached_content = _read_cache[cache_key]

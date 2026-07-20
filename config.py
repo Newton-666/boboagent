@@ -49,8 +49,8 @@ ACTIVE_PROVIDER = _provider["name"]
 TOOL_TIMEOUT = int(os.environ.get("TOOL_TIMEOUT", "20"))
 MAX_LOOPS = int(os.environ.get("MAX_LOOPS", "4"))
 
-# 隐私配置
-BLOCKED_FOLDERS = os.environ.get("BLOCKED_FOLDERS", "Private,Archive,日记").split(",")
+# 隐私配置（strip 防止 "Private, Archive" 带空格导致匹配失效）
+BLOCKED_FOLDERS = [f.strip() for f in os.environ.get("BLOCKED_FOLDERS", "Private,Archive,日记").split(",") if f.strip()]
 EMAIL_PRIVACY_MODE = os.environ.get("EMAIL_PRIVACY_MODE", "ask")
 
 # 会话目录配置

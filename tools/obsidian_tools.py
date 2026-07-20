@@ -10,8 +10,49 @@ from pathlib import Path
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
 
 
+_PATH_DENIED_PREFIX = "__PATH_DENIED__:"
+
+
+def _is_within_vault(path: str) -> bool:
+    """realpath 之后必须仍位于 vault 内（含 vault 根本身）。
+
+    防止 `..`、绝对路径、符号链接等方式逃出笔记库。
+    """
+    if not path:
+        return True
+    try:
+        vault_real = os.path.realpath(OBSIDIAN_VAULT)
+        path_real = os.path.realpath(path)
+    except Exception:
+        return False
+    return path_real == vault_real or path_real.startswith(vault_real + os.sep)
+
+
+def _path_denied_message(filepath: str) -> str | None:
+    """若 filepath 是 __PATH_DENIED__ 哨兵，返回面向用户的错误消息，否则 None。"""
+    if isinstance(filepath, str) and filepath.startswith(_PATH_DENIED_PREFIX):
+        original = filepath[len(_PATH_DENIED_PREFIX):]
+        return f"❌ 拒绝访问: '{original}' 不在笔记库范围内（路径穿越防护）"
+    return None
+
+
 def _normalize_path(filename: str, is_destination: bool = False, for_append: bool = False) -> str:
-    """规范化文件路径
+    """规范化文件路径（含 vault 范围校验）
+
+    返回值可能是哨兵：
+      __MULTIPLE_MATCHES__:a|b  — 多个同名文件
+      __PATH_DENIED__:<原输入>   — 解析结果逃出 vault（调用方必须用 _path_denied_message 检查）
+    """
+    result = _normalize_path_inner(filename, is_destination, for_append)
+    if not result or result.startswith("__MULTIPLE_MATCHES__"):
+        return result
+    if not _is_within_vault(result):
+        return f"{_PATH_DENIED_PREFIX}{filename}"
+    return result
+
+
+def _normalize_path_inner(filename: str, is_destination: bool = False, for_append: bool = False) -> str:
+    """规范化文件路径（仅拼接与查找，不做范围校验）
 
     Args:
         filename: 文件名或路径
@@ -92,8 +133,17 @@ def _normalize_path(filename: str, is_destination: bool = False, for_append: boo
 
 
 def _is_blocked_path(path: str) -> bool:
+    # 大小写不敏感 + 忽略首尾空格（macOS APFS 默认大小写不敏感，
+    # "private/日记.md" 不应绕过 "Private" 的拦截）。
+    # 注意：只匹配 vault 内部的路径组件，避免系统目录（如 /private/tmp）
+    # 撞上被屏蔽文件夹名导致整个 vault 被误伤。
+    p = str(path)
+    vault = str(OBSIDIAN_VAULT)
+    if vault and (p == vault or p.startswith(vault.rstrip(os.sep) + os.sep)):
+        p = os.path.relpath(p, vault)
+    parts = [x.lower() for x in p.split(os.sep)]
     for blocked in BLOCKED_FOLDERS:
-        if blocked in path.split(os.sep):
+        if blocked.strip().lower() in parts:
             return True
     return False
 
@@ -165,12 +215,16 @@ def search_obsidian_notes(query: str) -> str:
 
 def read_obsidian_note(filename: str, section: int = 0) -> str:
     filepath = _normalize_path(filename, is_destination=False)
-    
+
     # 多个同名文件时，让用户选择
     if isinstance(filepath, str) and filepath.startswith("__MULTIPLE_MATCHES__"):
         paths = filepath.split(":", 1)[1].split("|")
         return f"找到多个同名文件，请指定具体路径:\n" + "\n".join(f"  {p}" for p in paths)
-    
+
+    denied = _path_denied_message(filepath)
+    if denied:
+        return denied
+
     if _is_blocked_path(filepath):
         return f"❌ 无权访问该文件（隐私保护）"
     
@@ -237,7 +291,10 @@ def list_folder(folder_path: str = "") -> str:
     else:
         target = os.path.join(OBSIDIAN_VAULT, folder_path)
         display_name = folder_path
-    
+
+    if not _is_within_vault(target):
+        return f"❌ 拒绝访问: '{folder_path}' 不在笔记库范围内（路径穿越防护）"
+
     if _is_blocked_path(target):
         return f"❌ 无权访问 '{display_name}' 文件夹（隐私保护）"
     
@@ -287,7 +344,11 @@ def append_obsidian_note(filename: str, content: str) -> str:
 def move_note(source: str, destination: str) -> str:
     src = _normalize_path(source, is_destination=False)
     dst = _normalize_path(destination, is_destination=True)
-    
+
+    denied = _path_denied_message(src) or _path_denied_message(dst)
+    if denied:
+        return denied
+
     if _is_blocked_path(src) or _is_blocked_path(dst):
         return "❌ 无权操作该文件（隐私保护）"
     
@@ -356,7 +417,11 @@ def _cleanup_trash(max_age_hours: int = 24):
 
 def delete_note(filename: str) -> str:
     filepath = _normalize_path(filename, is_destination=False)
-    
+
+    denied = _path_denied_message(filepath)
+    if denied:
+        return denied
+
     if _is_blocked_path(filepath):
         return "❌ 无权删除该文件（隐私保护）"
     
@@ -375,8 +440,12 @@ def delete_note(filename: str) -> str:
 def rename_note(old_name: str, new_name: str) -> str:
     old_path = _normalize_path(old_name, is_destination=False)
     new_path = _normalize_path(new_name, is_destination=False)
-    
-    if _is_blocked_path(old_path):
+
+    denied = _path_denied_message(old_path) or _path_denied_message(new_path)
+    if denied:
+        return denied
+
+    if _is_blocked_path(old_path) or _is_blocked_path(new_path):
         return "❌ 无权操作该文件（隐私保护）"
     
     if not os.path.exists(old_path):
@@ -391,12 +460,30 @@ def rename_note(old_name: str, new_name: str) -> str:
         return f"❌ 重命名失败: {str(e)}"
 
 
+def _resolve_folder_under_bobo(folder_name: str) -> str | None:
+    """把 folder_name 解析到 vault/BOBO_FOLDER 之下。
+
+    返回 None 表示非法：空、"."、".."、绝对路径，或解析后逃出 BOBO_FOLDER。
+    """
+    if not folder_name or folder_name.strip() in ("", ".", ".."):
+        return None
+    if os.path.isabs(folder_name):
+        return None
+    base = os.path.realpath(os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER))
+    target = os.path.realpath(os.path.join(base, folder_name))
+    if target == base or not target.startswith(base + os.sep):
+        return None
+    return target
+
+
 def create_folder(folder_name: str) -> str:
-    folder_path = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, folder_name)
-    
+    folder_path = _resolve_folder_under_bobo(folder_name)
+    if folder_path is None:
+        return f"❌ 非法文件夹名: '{folder_name}'（路径穿越防护）"
+
     if os.path.exists(folder_path):
         return f"❌ 文件夹已存在: {folder_name}"
-    
+
     try:
         os.makedirs(folder_path, exist_ok=True)
         return f"✅ 已创建文件夹: {folder_name}"
@@ -405,14 +492,16 @@ def create_folder(folder_name: str) -> str:
 
 
 def delete_folder(folder_name: str, force: bool = False) -> str:
-    folder_path = os.path.join(OBSIDIAN_VAULT, BOBO_FOLDER, folder_name)
-    
+    folder_path = _resolve_folder_under_bobo(folder_name)
+    if folder_path is None:
+        return f"❌ 非法文件夹名: '{folder_name}'（路径穿越防护）"
+
     if _is_blocked_path(folder_path):
         return "❌ 无权删除该文件夹（隐私保护）"
-    
+
     if not os.path.exists(folder_path):
         return f"我找了一下，{folder_name} 文件夹不存在。你需要先创建它吗？"
-    
+
     try:
         if force:
             import shutil
