@@ -8,6 +8,48 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+
+def _build_result_summary(tool_name: str, raw_result: str) -> str:
+    """Build a tool-type-specific summary for the result marker."""
+    import re
+    lines = raw_result.strip().split("\n")
+    first_line = lines[0].strip() if lines else ""
+    if tool_name in ("grep_code", "search_code"):
+        # Count matches and list files: "N matches in M files: f1 (lines a,b), f2..."
+        file_hits = {}
+        for l in lines:
+            m = re.match(r"^(.+?):(\d+):", l)
+            if m:
+                file_hits.setdefault(m.group(1), []).append(m.group(2))
+        n_files = len(file_hits)
+        n_total = sum(len(v) for v in file_hits.values())
+        if n_files == 0:
+            return f"0 matches"
+        preview = []
+        for f, lns in list(file_hits.items())[:3]:
+            preview.append(f"{f} (lines {','.join(lns[:3])})")
+        return f"{n_total} matches in {n_files} files: " + "; ".join(preview)
+    elif tool_name == "read_local_file":
+        # "N lines. 开头: {first function or class name}"
+        n_lines = len(lines)
+        head = raw_result[:200].replace("\n", " ")
+        return f"{n_lines} lines. 开头: {head}..."
+    elif tool_name == "web_search":
+        # DuckDuckGo returns title + snippet, just use first 200 chars
+        return raw_result[:200].replace("\n", " ").strip()
+    elif tool_name in ("web_fetch", "web_extract"):
+        # "N chars. Title: {extracted_title}"
+        title_match = re.search(r"[Tt]itle[:\s]*(.+)", first_line)
+        title = (title_match.group(1)[:80] + "...") if title_match else first_line[:80]
+        return f"{len(raw_result)} chars. Title: {title}"
+    elif tool_name in ("read_obsidian", "notion_read_page"):
+        # "N chars. 标题: {title}，开头: {first_sentence}"
+        title = first_line.lstrip("#").strip()[:50]
+        first_sentence = raw_result[:150].split("。")[0].replace("\n", " ").strip()
+        return f"{len(raw_result)} chars. 标题: {title}，开头: {first_sentence}"
+    else:
+        return raw_result[:150].replace("\n", " ").strip()
+
 class ToolRunnerMixin:
     """为 Engine 提供工具执行、结果加工能力。"""
 
@@ -347,9 +389,16 @@ class ToolRunnerMixin:
                 "result_truncated": len(result) > 8000,
                 "duration": duration, "success": not result.startswith("错误")
             })
+            # Context Engineering: 大结果 → workspace 外部存储 + 历史只留标记
+            round_num = getattr(self, 'current_tool_round', 0)
+            displayed = self._maybe_mark_result(
+                tool_name, tool_args,
+                result[:self.MAX_TOOL_RESULT_LENGTH],
+                round_num,
+            )
             tool_results.append({
                 "tool_call_id": tc.get("id", ""), "role": "tool",
-                "content": result[:self.MAX_TOOL_RESULT_LENGTH]
+                "content": displayed,
             })
             self._record_message("tool_result", result=result[:200])
 
@@ -631,3 +680,59 @@ class ToolRunnerMixin:
         self._notify("tool_result", {"name": "cross_search", "args": tool_args, "result": result[:200], "duration": 0, "success": True})
         tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
         self._record_message("tool_result", result=result[:200])
+
+    # ── Context Engineering: Result Marking ───────────────────────────
+    MARKING_TOOLS = frozenset({
+        "read_local_file", "web_search", "web_fetch", "web_extract",
+        "grep_code", "search_code", "cross_search",
+        "read_obsidian", "search_obsidian",
+        "notion_read_page", "notion_search",
+    })
+    WORKSPACE_DIR = os.path.expanduser("~/.bobo/workspace")
+
+    def _maybe_mark_result(self, tool_name: str, tool_args: dict,
+                           raw_result: str, round_num: int) -> str:
+        """If the tool qualifies, save full result to workspace and return a marker.
+
+        Otherwise return the result unchanged.
+        """
+        if (tool_name not in self.MARKING_TOOLS
+                or raw_result.startswith("错误")
+                or raw_result.startswith("❌")  # ❌
+                or raw_result.startswith("⛔")):  # ⛔
+            return raw_result
+
+        try:
+            import hashlib
+            import json as _mj
+
+            args_key = _mj.dumps(tool_args, sort_keys=True, ensure_ascii=False)
+            marker_id = f"{round_num}_{hashlib.sha256(args_key.encode()).hexdigest()[:8]}"
+            summary = _build_result_summary(tool_name, raw_result)
+
+            # Save full result atomically
+            os.makedirs(self.WORKSPACE_DIR, exist_ok=True)
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=self.WORKSPACE_DIR, suffix='.json', prefix='.rs_')
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    _mj.dump({
+                        "tool": tool_name,
+                        "args": _mj.dumps(tool_args, ensure_ascii=False),
+                        "content": raw_result,
+                    }, f, ensure_ascii=False, indent=2)
+                import shutil
+                shutil.move(tmp, os.path.join(self.WORKSPACE_DIR, f"{marker_id}.json"))
+            except Exception:
+                try: os.unlink(tmp)
+                except Exception: pass
+                return raw_result
+
+            marker = (
+                f"[RESULT] {tool_name}(...)\n"
+                f"  → {summary}\n"
+                f"  → id: {marker_id}, {len(raw_result)} chars"
+            )
+            return marker
+        except Exception:
+            return raw_result
