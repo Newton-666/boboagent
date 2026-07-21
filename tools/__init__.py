@@ -1,13 +1,25 @@
 """工具目录 - 自动发现所有工具"""
 
 import sys
+import logging
 import importlib.util
 import re
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 TOOL_FUNCTIONS = {}
 TOOLS_SCHEMA = []
 TOOL_CHECKS = {}  # tool_name -> callable returning bool
+
+_LOAD_ERRORS: list[tuple[str, str]] = []  # (文件名, 错误摘要) — 加载失败的工具
+
+def report_load_errors() -> str:
+    """返回工具加载失败的启动警告文本；无失败时返回空串。"""
+    if not _LOAD_ERRORS:
+        return ""
+    details = "；".join(f"{fname} ({summary})" for fname, summary in _LOAD_ERRORS)
+    return f"⚠️ {len(_LOAD_ERRORS)} 个工具加载失败：{details}"
 
 def register_tool(name, func, schema, check_fn=None):
     TOOL_FUNCTIONS[name] = func
@@ -32,7 +44,9 @@ def discover_tools():
                 if hasattr(module, 'register'):
                     module.register(register_tool)
         except Exception as e:
-            pass
+            summary = f"{type(e).__name__}: {e}"
+            _LOAD_ERRORS.append((py_file.name, summary))
+            logger.exception("工具加载失败: %s", py_file.name)
 
 discover_tools()
 

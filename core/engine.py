@@ -5,14 +5,17 @@ import os
 import json
 import re
 import time
+import logging
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Tuple
 
+logger = logging.getLogger(__name__)
+
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
 
-from tools import TOOLS_SCHEMA
+from tools import TOOLS_SCHEMA, report_load_errors
 from core.tool_executor import execute_tool
 from core.skill_manager import get_skill_manager
 from core.skill_executor import get_skill_executor
@@ -21,6 +24,8 @@ from core.tool_runner import ToolRunnerMixin
 
 
 class Engine(ContextMixin, ToolRunnerMixin):
+    _tool_load_warning_shown = False  # 进程级：工具加载失败警告只打印一次
+
     STATE_IDLE = "idle"
     STATE_THINKING = "thinking"
     STATE_EXECUTING = "executing"
@@ -72,6 +77,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 主动模式：off / subtle / full
         self._proactive_mode: str = "off"
         self._proactive_stats: dict = {"offered": 0, "engaged": 0}
+
+        # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
+        if not Engine._tool_load_warning_shown:
+            warning = report_load_errors()
+            if warning:
+                print(warning, file=sys.stderr)
+                logger.warning(warning)
+            Engine._tool_load_warning_shown = True
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -493,8 +506,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 with open(path, "w", encoding="utf-8") as _f:
                     _f.write(content)
                 restored.append(_os.path.basename(path))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("回退恢复文件失败 (%s): %s", path, e)
         # 恢复状态
         self.current_depth = cp["depth"]
         self.current_tool_round = cp["tool_round"]
@@ -548,8 +561,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         connections.append(f"[记忆 {ts}] {e.get('text','')[:120]}")
                         if len(connections) >= 3:
                             break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("主动模式搜索记忆失败: %s", e)
         try:
             from tools.obsidian_tools import search_obsidian_notes
             obs_result = search_obsidian_notes(topic)
@@ -561,8 +574,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         connections.append(f"[笔记] {line[2:]}")
                         if len(connections) >= 5:
                             break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("主动模式搜索 Obsidian 失败: %s", e)
         return connections
 
     def _inject_connection_context(self, messages: list) -> list:
@@ -718,8 +731,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         step_lines.append(f"    {si}. {sn}: {sa[:200]}")
                                 if step_lines:
                                     matched.append("\n".join(step_lines))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("注入技能步骤失败 (%s): %s", name, e)
                     else:
                         others.append(f"  {name}: {desc[:100]}")
                 lines = []
@@ -737,8 +750,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     "role": "system",
                     "content": "\n".join(lines)
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("注入技能工作流失败: %s", e)
 
         # 注入已注册的自定义 API 列表
         apis_dir = os.path.expanduser("~/.bobo/apis")
@@ -751,8 +764,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             cfg = json.load(f)
                         eps = [ep.get("name", "?") for ep in cfg.get("endpoints", [])]
                         apis.append(f"{cfg.get('name', fname)} ({', '.join(eps)})")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("解析自定义 API 配置失败 (%s): %s", fname, e)
             if apis:
                 messages.insert(1, {
                     "role": "system",
@@ -776,8 +789,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         "role": "system",
                         "content": all_mem
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("注入用户资料/记忆失败: %s", e)
 
         # 注入 AGENTS.md（来自 Obsidian vault 的项目规则）
         try:
@@ -793,8 +806,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             "role": "system",
                             "content": f"[项目规则 (AGENTS.md)]:\n{agents_content}"
                         })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("注入 AGENTS.md 失败: %s", e)
 
         # 注入改动日志和已读文件摘要
         if hasattr(self, '_change_log') and self._change_log:

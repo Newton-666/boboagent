@@ -1,11 +1,14 @@
 """工具执行 — 并行调度、错误分析、密钥脱敏、自动 diff、自动运行、文件回滚"""
 
 import json
+import logging
 import os
 import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -380,8 +383,8 @@ class ToolRunnerMixin:
                             result += "\n\n[自动运行] 执行成功（无输出）"
                     except subprocess.TimeoutExpired:
                         result += "\n\n[自动运行] 执行超时（>10秒）"
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("自动运行 %s 失败: %s", filepath, e)
 
             self._notify("tool_result", {
                 "name": tool_name, "args": tool_args,
@@ -520,6 +523,7 @@ class ToolRunnerMixin:
         import os as _os
 
         items = []  # [{platform, title, date, detail}]
+        platform_errors = []  # 单平台失败标注，避免"挂了"表现为"没结果"
 
         # ── Obsidian ──
         try:
@@ -547,8 +551,9 @@ class ToolRunnerMixin:
                                 })
                             except Exception:
                                 pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("cross_search: obsidian 搜索失败")
+            platform_errors.append(f"obsidian 搜索失败: {type(e).__name__}: {e}")
 
         # ── Notion ──
         if _os.environ.get("NOTION_API_KEY", ""):
@@ -590,8 +595,9 @@ class ToolRunnerMixin:
                             "date_str": date_str,
                             "detail": page.get("url", ""),
                         })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("cross_search: notion 搜索失败")
+                platform_errors.append(f"notion 搜索失败: {type(e).__name__}: {e}")
 
         # ── Email ──
         if _os.path.exists(_os.path.expanduser("~/.bobo/mail.json")):
@@ -629,8 +635,9 @@ class ToolRunnerMixin:
                                     "date_str": "",
                                     "detail": "",
                                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("cross_search: email 搜索失败")
+                platform_errors.append(f"email 搜索失败: {type(e).__name__}: {e}")
 
         # ── 合并、去重、排序 ──
         if not items:
@@ -676,6 +683,10 @@ class ToolRunnerMixin:
             lines.append(f"\n来源: {', '.join(platforms_found)} （共 {len(unique)} 条）")
 
             result = "\n".join(lines)
+
+        # 平台失败标注：让用户看到"失败了"而不是"没有结果"
+        if platform_errors:
+            result += "\n" + "\n".join(f"⚠️ [{err}]" for err in platform_errors)
 
         self._notify("tool_result", {"name": "cross_search", "args": tool_args, "result": result[:200], "duration": 0, "success": True})
         tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
