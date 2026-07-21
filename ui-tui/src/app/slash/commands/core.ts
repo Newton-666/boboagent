@@ -608,6 +608,25 @@ export const coreCommands: SlashCommand[] = [
   },
 
   {
+    help: '查看 Bobo 最近读取了哪些文件、调了什么工具（数据访问审计日志）',
+    name: 'bobo-audit',
+    usage: '/bobo-audit [行数，默认50]',
+    run: (arg, ctx) => {
+      const limit = arg.trim() ? ` ${arg.trim()}` : ''
+      ctx.gateway.gw
+        .request<{ output: string }>('slash.exec', { command: `bobo-audit${limit}`, session_id: ctx.sid ?? '' })
+        .then(r => {
+          if (r?.output) {
+            const text = r.output
+            const long = text.length > 180 || text.split('\n').filter(Boolean).length > 5
+            long ? ctx.transcript.page(text, 'Bobo Audit') : ctx.transcript.sys(text)
+          }
+        })
+        .catch(() => ctx.transcript.sys('/bobo-audit: 读取失败'))
+    },
+  },
+
+  {
     help: '切换主动模式：关闭 / 轻度（静默注入）/ 完整（可主动提议）',
     name: 'mode',
     usage: '/mode [off|subtle|full]',

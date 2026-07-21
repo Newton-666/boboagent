@@ -570,7 +570,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode"})
+        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /bobo-audit"})
     elif command == "clear":
         _emit("session.cleared", sid, {"session_id": sid})
         return _ok(rid, {"output": ""})
@@ -637,6 +637,34 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"配置文件位置: ~/.bobo/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
+    elif command == "bobo-audit" or command.startswith("bobo-audit "):
+        import json as _aj
+        log_path = os.path.expanduser("~/.bobo/access_log.jsonl")
+        arg = command[11:].strip()  # "bobo-audit 20" → "20"
+        limit = 50
+        if arg and arg.isdigit():
+            limit = int(arg)
+        try:
+            lines = []
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            recent = lines[-limit:]
+            if not recent:
+                return _ok(rid, {"output": "暂无审计记录。Bobo 还没有执行过任何工具调用。"})
+            output_lines = [f"最近 {len(recent)} 条工具调用:",
+                            f"{'时间':<20} {'工具':<22} {'参数':<40} {'大小':>8}",
+                            "-" * 92]
+            for line in recent:
+                e = _aj.loads(line)
+                ts = e.get("ts", "")[11:19]  # HH:MM:SS
+                tool = e.get("tool", "")[:22]
+                args = ", ".join(f"{k}={v}" for k, v in e.get("args", {}).items())[:38]
+                size = f"{e.get('size', 0):,}B"
+                output_lines.append(f"{ts:<20} {tool:<22} {args:<40} {size:>8}")
+            return _ok(rid, {"output": "\n".join(output_lines)})
+        except Exception as e:
+            return _ok(rid, {"output": f"读取审计日志失败: {e}"})
     elif command == "mode" or command.startswith("mode "):
         from config import BOBO_PROACTIVE_MODE as _cfg_mode
         arg = command[4:].strip()  # "mode off" → "off"
@@ -803,6 +831,7 @@ def handle_input_detect_drop(params: dict, rid: str) -> dict:
 
 _COMMANDS = {
     "canon": {
+        "/bobo-audit": "/bobo-audit",
         "/mode": "/mode",
         "/help": "/help",
         "/clear": "/clear",

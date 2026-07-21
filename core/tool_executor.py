@@ -2,12 +2,42 @@
 core/tool_executor.py - 工具执行器（带超时保护 + 错误分类 + 参数校验 + 执行统计）
 """
 
+import json
+import os
 import threading
 import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from tools import TOOL_FUNCTIONS
 
 TOOL_TIMEOUT = 30
+
+# ── 审计日志：记录每次工具调用（数据访问透明度 Layer 1）────────────
+_ACCESS_LOG = os.path.expanduser("~/.bobo/access_log.jsonl")
+_AUDIT_LOCK = threading.Lock()
+
+# 审计日志不记录的工具（纯计算零数据访问 + 审计日志自己）
+_SKIP_AUDIT = frozenset({"get_current_time", "save_memory", "search_memory",
+                          "load_result", "bobo_config"})
+
+def _log_access(tool_name: str, args: dict, result: str, duration: float):
+    """追加一行 JSONL 到 ~/.bobo/access_log.jsonl（异步轻量，<1ms）。"""
+    try:
+        os.makedirs(os.path.dirname(_ACCESS_LOG) or ".", exist_ok=True)
+        summary = {k: str(v)[:80] for k, v in args.items()} if args else {}
+        entry = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "tool": tool_name,
+            "args": summary,
+            "size": len(result),
+            "duration_ms": int(duration * 1000),
+        }
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with _AUDIT_LOCK:
+            with open(_ACCESS_LOG, "a", encoding="utf-8") as f:
+                f.write(line)
+    except Exception:
+        pass  # 审计日志写入失败不影响工具执行
 
 # 审计 #11 + 脆弱链 2：不再使用全局共享线程池。每个工具调用创建独立的
 # 1-worker executor，shutdown(wait=False)。一个工具卡死不会占用槽位影响
@@ -68,6 +98,9 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
                         old_keys = sorted(_COMMAND_CACHE.keys(), key=lambda k: _COMMAND_CACHE[k][0])[:20]
                         for k in old_keys:
                             _COMMAND_CACHE.pop(k, None)
+            # 审计日志：旁路记录，不影响工具执行（<1ms）
+            if tool_name not in _SKIP_AUDIT:
+                _log_access(tool_name, arguments, output, duration)
             return f"{output}（耗时: {duration:.1f}s）"
         finally:
             executor.shutdown(wait=False)  # 不等待卡死的线程
