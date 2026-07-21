@@ -1,6 +1,7 @@
 """搜索邮件"""
 
 TOOL_NAME = "search_emails"
+from config import BOBO_DATA_DIR
 
 def execute(keyword: str) -> str:
     from .email_module import EmailModule
@@ -16,6 +17,6 @@ TOOL_SCHEMA = {
         "parameters": {"type": "object", "properties": {"keyword": {"type": "string", "description": "邮件搜索关键词"}}, "required": ["keyword"]}
     }
 }
-_check = lambda: __import__('os').path.exists(__import__('os').path.expanduser('~/.bobo/mail.json'))
+_check = lambda: __import__('os').path.exists(str(BOBO_DATA_DIR / 'mail.json'))
 
 def register(reg): reg(TOOL_NAME, TOOL_FUNC, TOOL_SCHEMA, check_fn=_check)

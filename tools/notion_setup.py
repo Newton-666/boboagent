@@ -1,6 +1,7 @@
 """Configure Notion integration with an API key."""
 
 import os
+from config import BOBO_DATA_DIR
 import re
 
 TOOL_NAME = "notion_setup"
@@ -11,7 +12,7 @@ def execute(api_key: str) -> str:
     if not api_key or len(api_key) < 10:
         return "Notion API Key 无效，请在 https://www.notion.so/my-integrations 创建"
 
-    env_path = os.path.expanduser("~/.bobo/.env")
+    env_path = str(BOBO_DATA_DIR / ".env")
     os.makedirs(os.path.dirname(env_path), exist_ok=True)
 
     try:

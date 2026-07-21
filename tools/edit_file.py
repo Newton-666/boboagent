@@ -7,7 +7,7 @@
 
 特点：
     - old_string 必须在文件中恰好出现一次（防止误改）
-    - 写入前自动备份到 ~/.bobo/trash/
+    - 写入前自动备份到 BOBO_DATA_DIR/trash/
     - 替换后自动捕获 git diff 注入下一轮 LLM 调用
 """
 
@@ -15,9 +15,10 @@ import os
 import time
 from pathlib import Path
 from core.file_safety import is_write_denied
+from config import BOBO_DATA_DIR
 
 
-TRASH_DIR = Path.home() / ".bobo" / "trash"
+TRASH_DIR = BOBO_DATA_DIR / "trash"
 
 
 def _backup(file_path: Path) -> str | None:
@@ -159,7 +160,7 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
 
     old_lines = content.count("\n") + 1
     new_lines = new_content.count("\n") + 1
-    backup_info = f"\n  备份: ~/.bobo/trash/{backup_name}" if backup_name else ""
+    backup_info = f"\n  备份: {BOBO_DATA_DIR}/trash/{backup_name}" if backup_name else ""
 
     return (
         f"已替换: {path}\n"

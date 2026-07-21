@@ -1,6 +1,7 @@
 """Configure GitHub CLI with a Personal Access Token."""
 
 import os
+from config import BOBO_DATA_DIR
 import subprocess
 
 TOOL_NAME = "github_setup"
@@ -11,7 +12,7 @@ def execute(token: str) -> str:
         return "❌ 请输入有效的 GitHub Personal Access Token"
     
     # Save to .env
-    env_path = os.path.expanduser("~/.bobo/.env")
+    env_path = str(BOBO_DATA_DIR / ".env")
     try:
         os.makedirs(os.path.dirname(env_path), exist_ok=True)
     except Exception:
@@ -46,13 +47,13 @@ def execute(token: str) -> str:
             return "✅ GitHub CLI 已配置成功。现在可以创建仓库、推送代码和审查 PR。"
         # gh might not be installed
         return (
-            f"✅ Token 已保存到 ~/.bobo/.env\n"
+            f"✅ Token 已保存到 {BOBO_DATA_DIR}/.env\n"
             f"⚠️ 但 gh auth login 执行失败: {result.stderr.strip()}\n"
             f"请安装 GitHub CLI: brew install gh"
         )
     except FileNotFoundError:
         return (
-            f"✅ Token 已保存到 ~/.bobo/.env\n"
+            f"✅ Token 已保存到 {BOBO_DATA_DIR}/.env\n"
             f"⚠️ GitHub CLI 未安装。请运行: brew install gh"
         )
     except Exception as e:

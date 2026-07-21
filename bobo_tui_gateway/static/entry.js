@@ -59831,6 +59831,48 @@ ${clipped}`;
         }
       },
       {
+        help: "\u67E5\u770B Bobo \u6700\u8FD1\u8BFB\u53D6\u4E86\u54EA\u4E9B\u6587\u4EF6\u3001\u8C03\u4E86\u4EC0\u4E48\u5DE5\u5177\uFF08\u6570\u636E\u8BBF\u95EE\u5BA1\u8BA1\u65E5\u5FD7\uFF09",
+        name: "bobo-audit",
+        usage: "/bobo-audit [\u884C\u6570\uFF0C\u9ED8\u8BA450]",
+        run: (arg, ctx) => {
+          const limit = arg.trim() ? ` ${arg.trim()}` : "";
+          ctx.gateway.gw.request("slash.exec", { command: `bobo-audit${limit}`, session_id: ctx.sid ?? "" }).then((r) => {
+            if (r?.output) {
+              const text = r.output;
+              const long = text.length > 180 || text.split("\n").filter(Boolean).length > 5;
+              long ? ctx.transcript.page(text, "Bobo Audit") : ctx.transcript.sys(text);
+            }
+          }).catch(() => ctx.transcript.sys("/bobo-audit: \u8BFB\u53D6\u5931\u8D25"));
+        }
+      },
+      {
+        help: "\u5207\u6362\u4E3B\u52A8\u6A21\u5F0F\uFF1A\u5173\u95ED / \u8F7B\u5EA6\uFF08\u9759\u9ED8\u6CE8\u5165\uFF09/ \u5B8C\u6574\uFF08\u53EF\u4E3B\u52A8\u63D0\u8BAE\uFF09",
+        name: "mode",
+        usage: "/mode [off|subtle|full]",
+        run: (arg, ctx) => {
+          const mode = arg.trim().toLowerCase();
+          const valid = ["off", "subtle", "full"];
+          const labels = {
+            off: "\u5173\u95ED\uFF08\u7EAF\u54CD\u5E94\uFF09",
+            subtle: "\u8F7B\u5EA6\uFF08\u9759\u9ED8\u6CE8\u5165\uFF0C\u611F\u77E5\u4E0D\u5230\uFF09",
+            full: "\u5B8C\u6574\uFF08\u53EF\u4E3B\u52A8\u63D0\u8BAE\uFF09"
+          };
+          if (!mode) {
+            ctx.gateway.gw.request("slash.exec", { command: "mode", session_id: ctx.sid ?? "" }).then((r) => {
+              if (r?.output) ctx.transcript.sys(r.output);
+            }).catch(() => ctx.transcript.sys("\u7528\u6CD5: /mode off|subtle|full"));
+            return;
+          }
+          if (valid.includes(mode)) {
+            ctx.gateway.gw.request("slash.exec", { command: `mode ${mode}`, session_id: ctx.sid ?? "" }).then((r) => {
+              if (r?.output) ctx.transcript.sys(r.output);
+            }).catch(() => ctx.transcript.sys(`/mode ${mode}: \u8BBE\u7F6E\u5931\u8D25`));
+            return;
+          }
+          ctx.transcript.sys(`\u7528\u6CD5: /mode off|subtle|full\uFF08\u5F53\u524D: ${mode} \u4E0D\u662F\u6709\u6548\u503C\uFF09`);
+        }
+      },
+      {
         help: "retry last user message",
         name: "retry",
         run: (_arg, ctx) => {

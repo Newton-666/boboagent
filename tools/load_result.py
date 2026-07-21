@@ -7,10 +7,11 @@ it calls load_result(id) to retrieve what was saved.
 """
 
 import json
+from config import BOBO_DATA_DIR
 import os
 
 TOOL_NAME = "load_result"
-WORKSPACE_DIR = os.path.expanduser("~/.bobo/workspace")
+WORKSPACE_DIR = str(BOBO_DATA_DIR / "workspace")
 
 _STATS_PATH = os.path.join(WORKSPACE_DIR, "_stats.json")
 

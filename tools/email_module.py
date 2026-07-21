@@ -4,6 +4,7 @@
 """
 
 import json
+from config import BOBO_DATA_DIR
 import imaplib
 import email
 from email.header import decode_header
@@ -19,7 +20,7 @@ class EmailModule:
         self.enabled = self.config is not None
     
     def _load_config(self):
-        config_path = os.path.expanduser("~/.bobo/mail.json")
+        config_path = str(BOBO_DATA_DIR / "mail.json")
         if not os.path.exists(config_path):
             return None
         try:
@@ -47,7 +48,7 @@ class EmailModule:
     def read_recent(self, limit=5):
         """读取最近邮件"""
         if not self.enabled:
-            return "❌ 邮箱未配置，请在 ~/.bobo/mail.json 中配置"
+            return f"❌ 邮箱未配置，请在 {BOBO_DATA_DIR}/mail.json 中配置"
         mail = None
         try:
             mail = self._connect_imap()

@@ -5,9 +5,16 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 加载 ~/.bobo/.env 文件
-BOBO_CONFIG_DIR = Path.home() / ".bobo"
-BOBO_ENV_FILE = BOBO_CONFIG_DIR / ".env"
+# 所有 Bobo 运行时数据统一放在项目仓库的 data/ 目录下
+# （之前分散在 ~/.bobo 和 ~/.bobo_v2 两个地方）
+# 可通过 BOBO_DATA_DIR 环境变量覆盖
+_BOBO_REPO_ROOT = Path(__file__).resolve().parent
+_DEFAULT_DATA_DIR = _BOBO_REPO_ROOT / "data"
+BOBO_DATA_DIR = Path(os.environ.get("BOBO_DATA_DIR", str(_DEFAULT_DATA_DIR)))
+BOBO_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# .env 文件路径
+BOBO_ENV_FILE = BOBO_DATA_DIR / ".env"
 
 if BOBO_ENV_FILE.exists():
     load_dotenv(BOBO_ENV_FILE)
@@ -62,7 +69,7 @@ BOBO_PROACTIVE_MODE = os.environ.get("BOBO_PROACTIVE_MODE", "off")
 assert BOBO_PROACTIVE_MODE in ("off", "subtle", "full"), f"BOBO_PROACTIVE_MODE 必须是 off/subtle/full，当前: {BOBO_PROACTIVE_MODE}"
 
 # 会话目录配置
-_DEFAULT_SESSION_DIR = Path.home() / ".bobo_v2" / "sessions"
+_DEFAULT_SESSION_DIR = str(BOBO_DATA_DIR / "sessions")
 SESSION_DIR = os.environ.get("BOBO_SESSION_DIR", str(_DEFAULT_SESSION_DIR))
 
 # 项目代码保存目录

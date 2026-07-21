@@ -1,6 +1,7 @@
 """Schedule recurring tasks using cron."""
 
 import json
+from config import BOBO_DATA_DIR
 import os
 import re
 import shlex
@@ -8,7 +9,7 @@ import subprocess
 import sys
 
 TOOL_NAME = "bobo_schedule"
-SCHEDULE_FILE = os.path.expanduser("~/.bobo/schedules.json")
+SCHEDULE_FILE = str(BOBO_DATA_DIR / "schedules.json")
 
 # 任务名会写入 crontab 的注释行和 shell 命令，必须严格限制字符集
 # （允许中文，禁止空格/引号/换行/shell 元字符，防 cron 注入）

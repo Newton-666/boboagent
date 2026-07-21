@@ -1,6 +1,7 @@
 """Call a registered custom API endpoint."""
 
 import json
+from config import BOBO_DATA_DIR
 import os
 import requests
 
@@ -10,7 +11,7 @@ TOOL_NAME = "api_call"
 def execute(api: str, endpoint: str, params: str = "", body: str = "") -> str:
     """Call a registered API endpoint with optional params/body."""
     # Load the API config
-    path = os.path.expanduser(f"~/.bobo/apis/{api}.json")
+    path = os.path.expanduser(f"{BOBO_DATA_DIR}/apis/{api}.json")
     if not os.path.exists(path):
         available = _list_apis()
         hint = f"\n已注册的 API: {', '.join(available)}" if available else ""
@@ -87,7 +88,7 @@ def execute(api: str, endpoint: str, params: str = "", body: str = "") -> str:
 
 
 def _list_apis() -> list:
-    apis_dir = os.path.expanduser("~/.bobo/apis")
+    apis_dir = str(BOBO_DATA_DIR / "apis")
     if not os.path.exists(apis_dir):
         return []
     return sorted(

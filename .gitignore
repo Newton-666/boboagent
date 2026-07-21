@@ -45,3 +45,4 @@ ui-tui/node_modules/
 build/
 dist/
 *.egg-info/
+data/

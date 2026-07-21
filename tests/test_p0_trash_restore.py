@@ -14,15 +14,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """隔离的 HOME + vault + trash 目录。"""
+    """隔离的 HOME + vault + BOBO_DATA_DIR/trash 目录。"""
     home = tmp_path / "home"
-    trash = home / ".bobo" / "trash"
+    data = home / "data"
+    trash = data / "trash"
     trash.mkdir(parents=True)
     vault = tmp_path / "vault"
     vault.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
-    return {"home": home, "trash": trash, "vault": vault}
+    monkeypatch.setenv("BOBO_DATA_DIR", str(data))
+    return {"home": home, "trash": trash, "vault": vault, "data": data}
 
 
 def _engine():
@@ -42,7 +44,7 @@ def _restore(engine, path_arg):
 class TestTrashRestoreTraversal:
     def test_source_dotdot_blocked(self, env):
         # 在 trash 外放一个"受害文件"
-        victim = env["home"] / ".bobo" / "important_20260101"
+        victim = env["data"] / "important_20260101"
         victim.write_text("重要数据", encoding="utf-8")
         result = _restore(_engine(), "trash:../important_20260101")
         assert "非法的回收站路径" in result

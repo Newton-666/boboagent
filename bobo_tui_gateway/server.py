@@ -213,7 +213,7 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
     if not api_key:
         return _ok(rid, {"ok": False, "error": "API Key 不能为空"})
     
-    env_path = os.path.expanduser("~/.bobo/.env")
+    env_path = str(BOBO_DATA_DIR / ".env")
     os.makedirs(os.path.dirname(env_path), exist_ok=True)
     
     from core.provider import get_provider
@@ -505,7 +505,7 @@ def handle_config_set(params: dict, rid: str) -> dict:
         model_name = value.split("--provider")[0].strip()
         model_name = re.sub(r"\s+#tui\s*$", "", model_name).strip()
         # 写入 .env
-        env_path = os.path.expanduser("~/.bobo/.env")
+        env_path = str(BOBO_DATA_DIR / ".env")
         try:
             lines = []
             if os.path.exists(env_path):
@@ -634,12 +634,12 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"  /provider <名称>       — 切换到指定提供商",
             f"  /model <名称>          — 切换模型",
             f"  /mode off|subtle|full  — 切换主动模式",
-            f"配置文件位置: ~/.bobo/.env",
+            f"配置文件位置: {BOBO_DATA_DIR}/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
     elif command == "bobo-audit" or command.startswith("bobo-audit "):
         import json as _aj
-        log_path = os.path.expanduser("~/.bobo/access_log.jsonl")
+        log_path = str(BOBO_DATA_DIR / "access_log.jsonl")
         arg = command[11:].strip()  # "bobo-audit 20" → "20"
         limit = 50
         if arg and arg.isdigit():
@@ -670,7 +670,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
         arg = command[4:].strip()  # "mode off" → "off"
         if arg in ("off", "subtle", "full"):
             import re as _mre
-            env_path = os.path.expanduser("~/.bobo/.env")
+            env_path = str(BOBO_DATA_DIR / ".env")
             try:
                 if os.path.exists(env_path):
                     with open(env_path, "r", encoding="utf-8") as f:
@@ -709,7 +709,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
                 available = ", ".join(PROVIDERS.keys())
                 return _ok(rid, {"output": f"未知提供商: {provider_name}\n可用: {available}"})
             # 写入 .env
-            env_path = os.path.expanduser("~/.bobo/.env")
+            env_path = str(BOBO_DATA_DIR / ".env")
             try:
                 lines = []
                 if os.path.exists(env_path):
@@ -732,7 +732,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
                         lines.append(f"# {p['env_key']}=your_api_key_here\n")
                 with open(env_path, "w") as f:
                     f.writelines(lines)
-                return _ok(rid, {"output": f"已切换到提供商: {provider_name}\n重启 Bobo 后生效。\n如果尚未配置 API 密钥，请编辑 ~/.bobo/.env 添加 {PROVIDERS[provider_name].get('env_key', '')}"})
+                return _ok(rid, {"output": f"已切换到提供商: {provider_name}\n重启 Bobo 后生效。\n如果尚未配置 API 密钥，请编辑 {BOBO_DATA_DIR}/.env 添加 {PROVIDERS[provider_name].get('env_key', '')}"})
             except Exception as e:
                 return _ok(rid, {"output": f"写入 .env 失败: {e}"})
         else:

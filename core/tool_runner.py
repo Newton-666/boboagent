@@ -1,6 +1,7 @@
 """工具执行 — 并行调度、错误分析、密钥脱敏、自动 diff、自动运行、文件回滚"""
 
 import json
+from config import BOBO_DATA_DIR
 import logging
 import os
 import re
@@ -132,7 +133,7 @@ class ToolRunnerMixin:
             "notion_create_page": "Notion 创建失败 → 用 write_obsidian(path) 保存到本地，或检查 Notion 权限",
             "notion_append": "Notion 追加失败 → 用 notion_read_page 读取后用 notion_create_page 重建",
             # Email 类
-            "search_emails": "邮件搜索失败 → 检查 ~/.bobo/mail.json 是否配置，或用 read_email_content(id) 直接读取",
+            "search_emails": "邮件搜索失败 → 检查 {BOBO_DATA_DIR}/mail.json 是否配置，或用 read_email_content(id) 直接读取",
             "read_email_content": "邮件读取失败 → 用 search_emails 重新搜索，或检查邮箱配置",
             # GitHub 类
             "git_status": "Git 状态失败 → 用 execute_terminal('git status') 查看",
@@ -473,7 +474,7 @@ class ToolRunnerMixin:
         elif path and path.startswith("trash:"):
             trash_name = path.split(":", 1)[1]
             # 源端防穿越：realpath 后必须仍在 trash 目录内（审计发现 #7）
-            trash_dir = os.path.realpath(os.path.expanduser("~/.bobo/trash"))
+            trash_dir = os.path.realpath(str(BOBO_DATA_DIR / "trash"))
             trash_path = os.path.realpath(os.path.join(trash_dir, trash_name))
             if not trash_path.startswith(trash_dir + os.sep):
                 result = f"❌ 非法的回收站路径: {trash_name[:60]}"
@@ -600,7 +601,7 @@ class ToolRunnerMixin:
                 platform_errors.append(f"notion 搜索失败: {type(e).__name__}: {e}")
 
         # ── Email ──
-        if _os.path.exists(_os.path.expanduser("~/.bobo/mail.json")):
+        if _os.path.exists(_str(BOBO_DATA_DIR / "mail.json")):
             try:
                 from tools.email_module import EmailModule
                 mail = EmailModule()
@@ -699,7 +700,7 @@ class ToolRunnerMixin:
         "read_obsidian", "search_obsidian",
         "notion_read_page", "notion_search",
     })
-    WORKSPACE_DIR = os.path.expanduser("~/.bobo/workspace")
+    WORKSPACE_DIR = str(BOBO_DATA_DIR / "workspace")
 
     def _maybe_mark_result(self, tool_name: str, tool_args: dict,
                            raw_result: str, round_num: int) -> str:

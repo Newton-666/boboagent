@@ -1,5 +1,5 @@
 # v5_memory.py — 知识库记忆系统（增强版：容量限制 + 原子写入 + 线程安全）
-# 数据存储在 ~/.bobo_v2/ 下，不在项目目录中
+# 数据存储在 {BOBO_DATA_DIR}/ 下，不在项目目录中
 
 import json
 import os
@@ -9,8 +9,9 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-# 数据存储目录：用户目录下的 .bobo_v2，不在项目目录中
-_MEMORY_DIR = Path.home() / ".bobo_v2"
+from config import BOBO_DATA_DIR
+
+_MEMORY_DIR = BOBO_DATA_DIR
 _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_DB = str(_MEMORY_DIR / "knowledge_base.json")
 _MEMORY_BACKUP = MEMORY_DB + ".bak"
