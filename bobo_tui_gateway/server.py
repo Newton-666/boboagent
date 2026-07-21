@@ -569,7 +569,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions"})
+        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode"})
     elif command == "clear":
         _emit("session.cleared", sid, {"session_id": sid})
         return _ok(rid, {"output": ""})
@@ -621,16 +621,18 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
         names = [t.get("function", t).get("name", "") for t in TOOLS_SCHEMA]
         return _ok(rid, {"output": "可用工具:\n  " + "\n  ".join(names)})
     elif command == "settings":
-        from config import API_MODEL_NAME, ACTIVE_PROVIDER
+        from config import API_MODEL_NAME, ACTIVE_PROVIDER, BOBO_PROACTIVE_MODE
         lines = [
             f"Bobo 当前配置:",
             f"  提供商: {ACTIVE_PROVIDER}",
             f"  模型: {API_MODEL_NAME}",
+            f"  主动模式: {BOBO_PROACTIVE_MODE}（用 /mode off|subtle|full 切换）",
             f"",
             f"可用命令:",
             f"  /provider              — 列出所有提供商",
             f"  /provider <名称>       — 切换到指定提供商",
             f"  /model <名称>          — 切换模型",
+            f"  /mode off|subtle|full  — 切换主动模式",
             f"配置文件位置: ~/.bobo/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
