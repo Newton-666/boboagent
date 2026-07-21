@@ -636,9 +636,9 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"配置文件位置: ~/.bobo/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
-    elif command.startswith("mode"):
+    elif command == "mode" or command.startswith("mode "):
         from config import BOBO_PROACTIVE_MODE as _cfg_mode
-        arg = command[4:].strip()
+        arg = command[4:].strip()  # "mode off" → "off"
         if arg in ("off", "subtle", "full"):
             env_path = os.path.expanduser("~/.bobo/.env")
             try:
@@ -795,6 +795,21 @@ def handle_session_activate(params: dict, rid: str) -> dict:
 @method("input.detect_drop")
 def handle_input_detect_drop(params: dict, rid: str) -> dict:
     return _ok(rid, {"dropped": False})
+
+
+_COMMANDS = {
+    "canon": {
+        "/mode": "/mode",
+        "/help": "/help",
+        "/clear": "/clear",
+        "/undo": "/undo",
+        "/tools": "/tools",
+        "/settings": "/settings",
+        "/exit": "/exit",
+        "/sessions": "/sessions",
+        "/provider": "/provider",
+    }
+}
 
 
 @method("commands.catalog")
