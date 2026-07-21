@@ -57,6 +57,10 @@ EMAIL_PRIVACY_MODE = os.environ.get("EMAIL_PRIVACY_MODE", "ask")
 BOBO_CONTEXT_MARKING = os.environ.get("BOBO_CONTEXT_MARKING", "true").lower() in ("true", "1", "yes")
 BOBO_CONTEXT_MARKING_MIN_CHARS = int(os.environ.get("BOBO_CONTEXT_MARKING_MIN_CHARS", "2000"))
 
+# 主动模式：off = 纯响应, subtle = 静默注入不给用户看, full = LLM 可主动提议
+BOBO_PROACTIVE_MODE = os.environ.get("BOBO_PROACTIVE_MODE", "off")
+assert BOBO_PROACTIVE_MODE in ("off", "subtle", "full"), f"BOBO_PROACTIVE_MODE 必须是 off/subtle/full，当前: {BOBO_PROACTIVE_MODE}"
+
 # 会话目录配置
 _DEFAULT_SESSION_DIR = Path.home() / ".bobo_v2" / "sessions"
 SESSION_DIR = os.environ.get("BOBO_SESSION_DIR", str(_DEFAULT_SESSION_DIR))

@@ -634,6 +634,37 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"配置文件位置: ~/.bobo/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
+    elif command.startswith("mode"):
+        from config import BOBO_PROACTIVE_MODE as _cfg_mode
+        arg = command[4:].strip()
+        if arg in ("off", "subtle", "full"):
+            env_path = os.path.expanduser("~/.bobo/.env")
+            try:
+                lines = []
+                if os.path.exists(env_path):
+                    with open(env_path) as f:
+                        lines = f.readlines()
+                found = False
+                key_prefix = "BOBO_PROACTIVE_MODE="
+                for i, line in enumerate(lines):
+                    if line.startswith(key_prefix):
+                        lines[i] = key_prefix + arg + "\n"
+                        found = True
+                        break
+                if not found:
+                    lines.append(key_prefix + arg + "\n")
+                os.makedirs(os.path.dirname(env_path), exist_ok=True)
+                with open(env_path, "w") as f:
+                    f.writelines(lines)
+                os.environ["BOBO_PROACTIVE_MODE"] = arg
+                labels = {"off": "关闭（纯响应）", "subtle": "轻度（静默注入）", "full": "完整（可主动提议）"}
+                return _ok(rid, {"output": f"主动模式已设置为: {arg} ({labels.get(arg, '')})\n重启 Bobo 后生效。"})
+            except Exception as e:
+                return _ok(rid, {"output": f"设置失败: {e}"})
+        else:
+            labels = {"off": "关闭（纯响应）", "subtle": "轻度（静默注入）", "full": "完整（可主动提议）"}
+            current = labels.get(_cfg_mode, _cfg_mode)
+            return _ok(rid, {"output": f"当前主动模式: {_cfg_mode} ({current})\n用法: /mode off|subtle|full"})
     elif command.startswith("provider"):
         from core.provider import PROVIDERS, resolve_provider
         arg = command[8:].strip()

@@ -169,6 +169,7 @@ def run_engine(
             current_engines[sid] = interrupt_event
 
         engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
+        engine._load_proactive_config()
         engine.history = session.get("messages", [])
         engine._checkpoints = session.get("checkpoints", [])
         engine._interrupt_event = interrupt_event

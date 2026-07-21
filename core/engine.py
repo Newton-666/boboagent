@@ -69,6 +69,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_pending_cleanup: bool = False
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
+        # 主动模式：off / subtle / full
+        self._proactive_mode: str = "off"
+        self._proactive_stats: dict = {"offered": 0, "engaged": 0}
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -265,6 +268,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def _handle_pre_input(self, user_input: str) -> Optional[str]:
         if not user_input:
             return None
+        # 主动模式：追踪用户是否在回应上轮连接提议
+        self._track_engagement(user_input)
         teaching_result = self._handle_teaching_mode(user_input)
         if teaching_result is not None:
             return teaching_result
@@ -506,6 +511,117 @@ class Engine(ContextMixin, ToolRunnerMixin):
         })
         return f"已回退到: {label}{file_info}\n\n要继续对话吗？"
 
+    # ── 主动模式：连接发现（Layer 1 — 对话内注入）────────────────
+
+    def _load_proactive_config(self):
+        """从 config 或环境变量加载主动模式级别。engine_adapter 创建 Engine 后应调用此方法。"""
+        try:
+            from config import BOBO_PROACTIVE_MODE
+            self._proactive_mode = BOBO_PROACTIVE_MODE
+        except (ImportError, AssertionError):
+            self._proactive_mode = "off"
+
+    def _extract_topic(self, messages: list) -> str:
+        """从最近几条用户消息中提取对话主题（用于搜索相关连接）。"""
+        user_msgs = [m.get("content", "") for m in messages[-6:]
+                     if m.get("role") == "user" and m.get("content")]
+        if not user_msgs:
+            return ""
+        # 取最近 2 条用户消息拼接，不超过 200 字
+        topic = " ".join(user_msgs[-2:])
+        return topic[:200]
+
+    def _find_connections(self, topic: str) -> list[str]:
+        """搜索记忆和 Obsidian 中与当前主题相关的内容。返回连接简述列表。"""
+        if not topic or len(topic) < 3:
+            return []
+        connections = []
+        try:
+            from tools.v5_memory import search_knowledge_base, get_all
+            mem_result = search_knowledge_base(topic)
+            if mem_result and "未找到" not in str(mem_result):
+                # 提取条目摘要
+                data = get_all()
+                for e in data.get("entries", [])[-10:]:
+                    if topic.lower() in e.get("text", "").lower():
+                        ts = e.get("timestamp", "")[:10]
+                        connections.append(f"[记忆 {ts}] {e.get('text','')[:120]}")
+                        if len(connections) >= 3:
+                            break
+        except Exception:
+            pass
+        try:
+            from tools.obsidian_tools import search_obsidian_notes
+            obs_result = search_obsidian_notes(topic)
+            if obs_result and "没有找到" not in str(obs_result):
+                lines = str(obs_result).split("\n")
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("- "):
+                        connections.append(f"[笔记] {line[2:]}")
+                        if len(connections) >= 5:
+                            break
+        except Exception:
+            pass
+        return connections
+
+    def _inject_connection_context(self, messages: list) -> list:
+        """主动模式 Layer 1：在 _call_llm 前注入相关背景。
+
+        off  — 零开销直接返回
+        subtle — 静默注入 [相关背景]，LLM 自己决定用不用
+        full  — 注入 + 引导 LLM 自然引用
+        """
+        if self._proactive_mode == "off":
+            return messages
+
+        topic = self._extract_topic(messages)
+        if not topic:
+            return messages
+
+        connections = self._find_connections(topic)
+        if not connections:
+            return messages
+
+        prefix = "[相关背景] 以下内容来自用户的记忆和笔记，可能与当前对话主题相关。"
+        if self._proactive_mode == "full":
+            prefix += ("\n如果这些背景能补充你的回答或提供有用的上下文，"
+                       "可以自然地在回复中提到。如果无关，忽略即可。")
+        else:
+            prefix += ("\n如果这些背景对你的回复有帮助，自然引用它们。"
+                       "如果和当前问题无关，忽略即可，不要在回复中提及。")
+
+        context = prefix + "\n\n" + "\n".join(connections)
+        messages_copy = list(messages)
+        messages_copy.insert(1, {"role": "system", "content": context})
+        self._proactive_stats["offered"] += 1
+        return messages_copy
+
+    def _track_engagement(self, user_input: str):
+        """用户消息是否引用了上次提出的连接（用于自动降级判断）。"""
+        if self._proactive_stats["offered"] == 0:
+            return
+        engagement_keywords = ["展开", "看看", "打开那篇", "详细说", "那篇笔记",
+                               "那个分析", "你提到的", "read_obsidian", "load_result"]
+        if any(kw in user_input for kw in engagement_keywords):
+            self._proactive_stats["engaged"] += 1
+
+    def _maybe_downgrade(self) -> str | None:
+        """如果提出 ≥5 条连接但参与率 < 20%，自动降一级并告知用户。"""
+        s = self._proactive_stats
+        if s["offered"] >= 5 and s["offered"] > 0:
+            rate = s["engaged"] / s["offered"]
+            if rate < 0.2:
+                old = self._proactive_mode
+                if old == "full":
+                    self._proactive_mode = "subtle"
+                elif old == "subtle":
+                    self._proactive_mode = "off"
+                if self._proactive_mode != old:
+                    return (f"主动模式已从 {old} 降为 {self._proactive_mode}"
+                            f"（最近 {s['offered']} 条连接中只展开了 {s['engaged']} 条）")
+        return None
+
     def _call_llm(self) -> Tuple[str, list]:
 
         # 阶段交接清理：在当前 LLM 调用前清理上一阶段的上下文
@@ -707,6 +823,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 "kind": "rate_limit",
                 "text": f"API {message}，{int(delay)} 秒后重试...",
             })
+
+        # 主动模式 Layer 1：对话内连接发现注入（off 时零开销返回原 messages）
+        messages = self._inject_connection_context(messages)
 
         filtered_tools = self._get_filtered_tools(extra_categories=self._used_categories)
         if filtered_tools is not None:
