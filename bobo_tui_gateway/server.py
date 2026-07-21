@@ -566,6 +566,7 @@ def handle_tools_list(params: dict, rid: str) -> dict:
 
 @method("slash.exec")
 def handle_slash_exec(params: dict, rid: str) -> dict:
+    import os  # 必须在函数顶部，避免 elif 分支里的 import os 导致 UnboundLocalError
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
