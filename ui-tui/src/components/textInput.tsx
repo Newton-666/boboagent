@@ -144,6 +144,17 @@ export function shouldPreserveCtrlJNewline(env: MinimalEnv = process.env): boole
     return true
   }
 
+  // macOS 常见终端：iTerm2、Terminal.app、Warp
+  if ((env.TERM_PROGRAM ?? '').toLowerCase() === 'iterm.app') {
+    return true
+  }
+  if ((env.TERM_PROGRAM ?? '').toLowerCase() === 'apple_terminal') {
+    return true
+  }
+  if ((env.TERM ?? '').toLowerCase().includes('warp')) {
+    return true
+  }
+
   return (env.WSL_DISTRO_NAME ?? '').toLowerCase().includes('microsoft')
 }
 

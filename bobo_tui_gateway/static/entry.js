@@ -62299,6 +62299,17 @@ function useInputHandlers(ctx) {
     if (key.escape && terminal.hasSelection) {
       return clearSelection2();
     }
+    if ((key.ctrl || key.meta) && ch === "k") {
+      cActions.setInput("");
+      return;
+    }
+    if (key.escape) {
+      const dismissible = overlay.sessions || overlay.agents;
+      if (dismissible) {
+        patchOverlayState({ sessions: false, agents: false });
+        return;
+      }
+    }
     if (key.upArrow && !cState.inputBuf.length) {
       const inputSel = getInputSelection();
       const cursor = inputSel && inputSel.start === inputSel.end ? inputSel.start : null;
@@ -66344,6 +66355,15 @@ function shouldPreserveCtrlJNewline(env3 = process.env) {
     return true;
   }
   if ((env3.TERM_PROGRAM ?? "").toLowerCase() === "ghostty") {
+    return true;
+  }
+  if ((env3.TERM_PROGRAM ?? "").toLowerCase() === "iterm.app") {
+    return true;
+  }
+  if ((env3.TERM_PROGRAM ?? "").toLowerCase() === "apple_terminal") {
+    return true;
+  }
+  if ((env3.TERM ?? "").toLowerCase().includes("warp")) {
     return true;
   }
   return (env3.WSL_DISTRO_NAME ?? "").toLowerCase().includes("microsoft");
