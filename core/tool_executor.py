@@ -22,7 +22,9 @@ _SKIP_AUDIT = frozenset({"get_current_time", "save_memory", "search_memory",
                           "load_result", "bobo_config"})
 
 def _log_access(tool_name: str, args: dict, result: str, duration: float):
-    """追加一行 JSONL 到 {BOBO_DATA_DIR}/access_log.jsonl（异步轻量，<1ms）。"""
+    """追加一行 JSONL 到 access_log.jsonl（异步轻量，<1ms）。
+    自动检测隐私标签——如果读写的文件路径命中 privacy.toml 的标签，加入 tags 字段。
+    """
     try:
         os.makedirs(os.path.dirname(_ACCESS_LOG) or ".", exist_ok=True)
         summary = {k: str(v)[:80] for k, v in args.items()} if args else {}
@@ -33,6 +35,18 @@ def _log_access(tool_name: str, args: dict, result: str, duration: float):
             "size": len(result),
             "duration_ms": int(duration * 1000),
         }
+        # Privacy tags: 检测所有 path-like 参数是否命中隐私标签
+        try:
+            from core.privacy import match_tags
+            tags = set()
+            for key in ("filepath", "path", "file_path", "filename", "url"):
+                val = str(args.get(key, ""))
+                if val and ("/" in val or val.startswith("~")):
+                    tags.update(match_tags(val))
+            if tags:
+                entry["tags"] = sorted(tags)
+        except Exception:
+            pass
         line = json.dumps(entry, ensure_ascii=False) + "\n"
         with _AUDIT_LOCK:
             with open(_ACCESS_LOG, "a", encoding="utf-8") as f:
