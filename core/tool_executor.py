@@ -8,7 +8,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from tools import TOOL_FUNCTIONS
 
 TOOL_TIMEOUT = 30
-_executor = ThreadPoolExecutor(max_workers=4)
+
+# 审计 #11 + 脆弱链 2：不再使用全局共享线程池。每个工具调用创建独立的
+# 1-worker executor，shutdown(wait=False)。一个工具卡死不会占用槽位影响
+# 其他工具——下一个调用获得全新的 executor。
+# 代价：无法限制并发线程总数。实际场景中并行工具数由 LLM 的一次调用中
+# 的 tool_calls 数量自然限制（通常 ≤10），风险可控。
+_STUCK_WARN_THRESHOLD = 20  # 累计超过此阈值时日志警告
 
 # 命令结果缓存：key=(tool_name, args[:200]) → (timestamp, result)
 _COMMAND_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
@@ -42,24 +48,29 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
 
     try:
         func = TOOL_FUNCTIONS[tool_name]
-        future = _executor.submit(func, **arguments)
-        # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之
-        _timeout_map = {"spawn_worker": 310, "execute_terminal": 120}
-        timeout = _timeout_map.get(tool_name, TOOL_TIMEOUT)
-        result = future.result(timeout=timeout)
-        duration = time.time() - start_time
-        output = str(result) if result else "执行成功"
-        # 写入缓存（只缓存读工具；审计 #18）
-        if tool_name in ("git_status", "grep_code", "search_code"):
-            arg_key = str(arguments)[:200]
-            with _COMMAND_CACHE_LOCK:
-                _COMMAND_CACHE[(tool_name, arg_key)] = (time.time(), output)
-                # 限制缓存大小
-                if len(_COMMAND_CACHE) > 50:
-                    old_keys = sorted(_COMMAND_CACHE.keys(), key=lambda k: _COMMAND_CACHE[k][0])[:20]
-                    for k in old_keys:
-                        _COMMAND_CACHE.pop(k, None)
-        return f"{output}（耗时: {duration:.1f}s）"
+        # 每个工具独立 executor——一个卡死不占全局槽，不影响其他工具（脆弱链 2）
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(func, **arguments)
+            # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之
+            _timeout_map = {"spawn_worker": 310, "execute_terminal": 120}
+            timeout = _timeout_map.get(tool_name, TOOL_TIMEOUT)
+            result = future.result(timeout=timeout)
+            duration = time.time() - start_time
+            output = str(result) if result else "执行成功"
+            # 写入缓存（只缓存读工具；审计 #18）
+            if tool_name in ("git_status", "grep_code", "search_code"):
+                arg_key = str(arguments)[:200]
+                with _COMMAND_CACHE_LOCK:
+                    _COMMAND_CACHE[(tool_name, arg_key)] = (time.time(), output)
+                    # 限制缓存大小
+                    if len(_COMMAND_CACHE) > 50:
+                        old_keys = sorted(_COMMAND_CACHE.keys(), key=lambda k: _COMMAND_CACHE[k][0])[:20]
+                        for k in old_keys:
+                            _COMMAND_CACHE.pop(k, None)
+            return f"{output}（耗时: {duration:.1f}s）"
+        finally:
+            executor.shutdown(wait=False)  # 不等待卡死的线程
     except TimeoutError:
         duration = time.time() - start_time
         return f"工具 '{tool_name}' 执行超过 {timeout}s（上限）。如果工具支持 timeout 参数，请指定更大值后重试（已等待 {duration:.1f}s）"
