@@ -608,6 +608,41 @@ export const coreCommands: SlashCommand[] = [
   },
 
   {
+    help: '切换主动模式：关闭 / 轻度（静默注入）/ 完整（可主动提议）',
+    name: 'mode',
+    usage: '/mode [off|subtle|full]',
+    run: (arg, ctx) => {
+      const mode = arg.trim().toLowerCase()
+      const valid: string[] = ['off', 'subtle', 'full']
+      const labels: Record<string, string> = {
+        off: '关闭（纯响应）',
+        subtle: '轻度（静默注入，感知不到）',
+        full: '完整（可主动提议）',
+      }
+      if (!mode) {
+        // 无参数：显示当前状态和选项
+        ctx.gateway.gw
+          .request<{ output: string }>('slash.exec', { command: 'mode', session_id: ctx.sid ?? '' })
+          .then(r => {
+            if (r?.output) ctx.transcript.sys(r.output)
+          })
+          .catch(() => ctx.transcript.sys('用法: /mode off|subtle|full'))
+        return
+      }
+      if (valid.includes(mode)) {
+        ctx.gateway.gw
+          .request<{ output: string }>('slash.exec', { command: `mode ${mode}`, session_id: ctx.sid ?? '' })
+          .then(r => {
+            if (r?.output) ctx.transcript.sys(r.output)
+          })
+          .catch(() => ctx.transcript.sys(`/mode ${mode}: 设置失败`))
+        return
+      }
+      ctx.transcript.sys(`用法: /mode off|subtle|full（当前: ${mode} 不是有效值）`)
+    },
+  },
+
+  {
     help: 'retry last user message',
     name: 'retry',
     run: (_arg, ctx) => {
