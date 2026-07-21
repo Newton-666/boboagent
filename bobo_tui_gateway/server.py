@@ -640,29 +640,32 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
         from config import BOBO_PROACTIVE_MODE as _cfg_mode
         arg = command[4:].strip()  # "mode off" → "off"
         if arg in ("off", "subtle", "full"):
+            import re as _mre
             env_path = os.path.expanduser("~/.bobo/.env")
             try:
-                lines = []
                 if os.path.exists(env_path):
-                    with open(env_path) as f:
-                        lines = f.readlines()
-                found = False
-                key_prefix = "BOBO_PROACTIVE_MODE="
-                for i, line in enumerate(lines):
-                    if line.startswith(key_prefix):
-                        lines[i] = key_prefix + arg + "\n"
-                        found = True
-                        break
-                if not found:
-                    lines.append(key_prefix + arg + "\n")
-                os.makedirs(os.path.dirname(env_path), exist_ok=True)
-                with open(env_path, "w") as f:
-                    f.writelines(lines)
-                os.environ["BOBO_PROACTIVE_MODE"] = arg
-                labels = {"off": "关闭（纯响应）", "subtle": "轻度（静默注入）", "full": "完整（可主动提议）"}
-                return _ok(rid, {"output": f"主动模式已设置为: {arg} ({labels.get(arg, '')})\n重启 Bobo 后生效。"})
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                else:
+                    content = ""
+                if _mre.search(r"^BOBO_PROACTIVE_MODE=", content, _mre.MULTILINE):
+                    content = _mre.sub(
+                        r"^BOBO_PROACTIVE_MODE=.*$",
+                        f"BOBO_PROACTIVE_MODE={arg}",
+                        content, flags=_mre.MULTILINE
+                    )
+                else:
+                    content = content.rstrip("\n") + f"\nBOBO_PROACTIVE_MODE={arg}\n"
+                os.makedirs(os.path.dirname(env_path) or ".", exist_ok=True)
+                with open(env_path, "w", encoding="utf-8") as f:
+                    f.write(content)
             except Exception as e:
+                import traceback, sys
+                traceback.print_exc(file=sys.stderr)
                 return _ok(rid, {"output": f"设置失败: {e}"})
+            os.environ["BOBO_PROACTIVE_MODE"] = arg
+            labels = {"off": "关闭（纯响应）", "subtle": "轻度（静默注入）", "full": "完整（可主动提议）"}
+            return _ok(rid, {"output": f"主动模式已设置为: {arg} ({labels.get(arg, '')})\n下次对话生效。"})
         else:
             labels = {"off": "关闭（纯响应）", "subtle": "轻度（静默注入）", "full": "完整（可主动提议）"}
             current = labels.get(_cfg_mode, _cfg_mode)
