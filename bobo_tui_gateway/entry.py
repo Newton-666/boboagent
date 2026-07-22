@@ -83,7 +83,11 @@ def main():
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         env = os.environ.copy()
         env["BOBO_BACKEND"] = "1"
-        proc = subprocess.Popen(["node", str(tui_path)], env=env)
+        # SIG_IGN 会被 Node 子进程继承，导致 Apple Terminal 上中文 IME
+        # 组合事件异常（光标跳、文字重叠、多换行）。preexec_fn 在子进程
+        # exec 前恢复 SIGINT 为默认——父进程仍然忽略 Ctrl+C。
+        proc = subprocess.Popen(["node", str(tui_path)], env=env,
+                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         proc.wait()
         return
 
