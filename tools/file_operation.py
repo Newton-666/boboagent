@@ -96,9 +96,9 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
         with _read_cache_lock:
             if cache_key in _read_cache:
                 cached_hash, cached_content = _read_cache[cache_key]
-            current_hash = _get_file_hash(full_path)
-            if current_hash == cached_hash:
-                return f"文件内容（缓存）:\n{cached_content}"
+                current_hash = _get_file_hash(full_path)
+                if current_hash == cached_hash:
+                    return f"文件内容（缓存）:\n{cached_content}"
         
         try:
             with open(full_path, 'r', encoding='utf-8') as f:
