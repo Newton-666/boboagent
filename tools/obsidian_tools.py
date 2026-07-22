@@ -512,7 +512,10 @@ def delete_folder(folder_name: str, force: bool = False) -> str:
     try:
         if force:
             import shutil
-            shutil.rmtree(folder_path)
+            # 先移入 trash 再删除，保证可恢复（信任隐患维度 4）
+            trash_target = os.path.join(TRASH_DIR, f"{folder_name}_{int(time.time())}")
+            shutil.move(folder_path, trash_target)
+            # move 成功后源路径已不存在，无需再 rmtree
         else:
             os.rmdir(folder_path)
         return f"✅ 已删除文件夹: {folder_name}"

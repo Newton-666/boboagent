@@ -107,6 +107,21 @@ def _emit(event: str, sid: str, payload: dict | None = None):
         "params": {"type": event, "payload": payload or {}, "session_id": sid}
     })
 
+import tempfile, shutil as _sh
+
+def _write_atomic(path: str, content: str):
+    """原子写入：先写 tmp 再 rename，防止中途崩溃导致文件损坏。"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        _sh.move(tmp, path)
+    except Exception:
+        try: os.unlink(tmp)
+        except Exception: pass
+        raise
+
 
 def _get_llm_caller():
     if "_llm" not in _engine_cache:
@@ -251,8 +266,7 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
                     break
             if not found:
                 content += "\n" + prov_line + provider
-        with open(env_path, "w") as f:
-            f.write(content)
+        _write_atomic(env_path, content)
         return _ok(rid, {"ok": True, "message": f"{provider} 已配置", "provider_configured": True})
     except Exception as e:
         return _ok(rid, {"ok": False, "error": str(e)})
@@ -536,8 +550,7 @@ def handle_config_set(params: dict, rid: str) -> dict:
                         break
                 if not found_p:
                     lines.append(f"BOBO_PROVIDER={prov}\n")
-            with open(env_path, "w") as f:
-                f.writelines(lines)
+            _write_atomic(env_path, "".join(lines))
             return _ok(rid, {"value": model_name, "saved": True})
         except Exception as e:
             return _ok(rid, {"value": value, "error": str(e)})
@@ -690,9 +703,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
                     )
                 else:
                     content = content.rstrip("\n") + f"\nBOBO_PROACTIVE_MODE={arg}\n"
-                os.makedirs(os.path.dirname(env_path) or ".", exist_ok=True)
-                with open(env_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                _write_atomic(env_path, content)
             except Exception as e:
                 import traceback, sys
                 traceback.print_exc(file=sys.stderr)
@@ -735,8 +746,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
                     key_present = any(line.strip().startswith(p["env_key"] + "=") for line in lines)
                     if not key_present:
                         lines.append(f"# {p['env_key']}=your_api_key_here\n")
-                with open(env_path, "w") as f:
-                    f.writelines(lines)
+                _write_atomic(env_path, "".join(lines))
                 return _ok(rid, {"output": f"已切换到提供商: {provider_name}\n重启 Bobo 后生效。\n如果尚未配置 API 密钥，请编辑 {BOBO_DATA_DIR}/.env 添加 {PROVIDERS[provider_name].get('env_key', '')}"})
             except Exception as e:
                 return _ok(rid, {"output": f"写入 .env 失败: {e}"})
