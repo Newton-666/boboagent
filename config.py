@@ -45,12 +45,31 @@ BOBO_FOLDER = os.environ.get("BOBO_FOLDER", "Bobo数据库")
 MODEL_TYPE = os.environ.get("MODEL_TYPE", "api")
 
 # 从 provider 配置解析 API 设置（向后兼容已有的 DEEPSEEK_API_KEY 等环境变量）
-from core.provider import resolve_provider
-_provider = resolve_provider()
-API_KEY = os.environ.get("DEEPSEEK_API_KEY") or _provider["api_key"]
-API_BASE_URL = os.environ.get("API_BASE_URL") or _provider["base_url"]
-API_MODEL_NAME = os.environ.get("API_MODEL_NAME") or _provider["model"]
-ACTIVE_PROVIDER = _provider["name"]
+# 延迟到首次使用时才调用 resolve_provider()，避免 import-time 循环依赖
+# （config.py 未加载完 → tools 发现 → obsidian_tools 回 import config → BLOCKED_FOLDERS 未定义）
+_provider_cache = None
+
+def _get_provider():
+    global _provider_cache
+    if _provider_cache is None:
+        from core.provider import resolve_provider
+        _provider_cache = resolve_provider()
+    return _provider_cache
+
+def _lazy(key: str, default: str = "") -> str:
+    return os.environ.get(key) or _get_provider().get(key, default)
+
+def _lazy_provider_attr(key: str, env_override: str = "", fallback: str = "") -> str:
+    """惰性获取 provider 配置——使用方调用时才 resolve，避免 import-time 循环链。"""
+    val = os.environ.get(env_override) if env_override else ""
+    if not val:
+        val = _get_provider().get(key, fallback)
+    return val
+
+API_KEY = os.environ.get("DEEPSEEK_API_KEY") or _get_provider().get("api_key", "")
+API_BASE_URL = os.environ.get("API_BASE_URL") or _get_provider().get("base_url", "")
+API_MODEL_NAME = os.environ.get("API_MODEL_NAME") or _get_provider().get("model", "")
+ACTIVE_PROVIDER = _get_provider().get("name", "deepseek")
 
 # 其他配置
 TOOL_TIMEOUT = int(os.environ.get("TOOL_TIMEOUT", "20"))
