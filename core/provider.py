@@ -13,12 +13,6 @@ PROVIDERS = {
         "models": ["deepseek-chat", "deepseek-reasoner"],
         "context_length": 1000000,
     },
-    "kimi": {
-        "env_key": "KIMI_API_KEY",
-        "base_url": "https://api.moonshot.cn/v1/chat/completions",
-        "models": ["kimi-k3"],
-        "context_length": 128000,
-    },
     "openai": {
         "env_key": "OPENAI_API_KEY",
         "base_url": "https://api.openai.com/v1/chat/completions",
