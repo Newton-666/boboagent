@@ -6,8 +6,9 @@ import re
 from datetime import datetime, timedelta
 
 TOOL_NAME = "reminder"
-
-_active_reminders = []
+import threading as _rt
+_reminder_lock = _rt.Lock()
+_active_reminders = []  # 冲突 #5：Timer 线程和引擎线程并发读写
 
 
 def _escape_applescript(text: str) -> str:
@@ -75,19 +76,23 @@ def execute(message: str) -> str:
     
     thread = threading.Thread(target=remind, daemon=True)
     thread.start()
-    _active_reminders.append({"message": message, "seconds": seconds})
+    with _reminder_lock:
+        _active_reminders.append({"message": message, "seconds": seconds})
     
     return f"✅ 已设置提醒: {time_desc}后提醒「{message}」"
 
 
 def list_reminders() -> str:
-    if not _active_reminders:
+    with _reminder_lock:
+        snapshot = list(_active_reminders)
+    if not snapshot:
         return "📭 当前没有活跃的提醒"
-    result = f"📋 活跃提醒 ({len(_active_reminders)}个):\n"
-    for i, r in enumerate(_active_reminders, 1):
-        result += f"  {i}. {r['message']}\n"
+    result = f"📋 活跃提醒 ({len(snapshot)}个):
+"
+    for i, r in enumerate(snapshot, 1):
+        result += f"  {i}. {r['message']}
+"
     return result
-
 
 _check = lambda: __import__('sys').platform == 'darwin'
 

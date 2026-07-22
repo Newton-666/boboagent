@@ -8,6 +8,9 @@ from pathlib import Path
 from core.file_safety import is_write_denied, safe_read_check
 
 TOOL_NAME = "file_operation"
+import threading as _ft
+_read_cache_lock = _ft.Lock()
+
 
 # 全局读取缓存（会话级别）
 _read_cache = {}
@@ -47,7 +50,8 @@ def _write_single_file(path: str, content: str) -> str:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        _read_cache.pop(full_path, None)
+        with _read_cache_lock:
+            _read_cache.pop(full_path, None)
         return f"已写入: {path}"
     except Exception as e:
         return f"写入失败 {path}: {e}"
@@ -89,8 +93,9 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
         if warning:
             return warning
         cache_key = full_path
-        if cache_key in _read_cache:
-            cached_hash, cached_content = _read_cache[cache_key]
+        with _read_cache_lock:
+            if cache_key in _read_cache:
+                cached_hash, cached_content = _read_cache[cache_key]
             current_hash = _get_file_hash(full_path)
             if current_hash == cached_hash:
                 return f"文件内容（缓存）:\n{cached_content}"
@@ -99,7 +104,8 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
             with open(full_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             file_hash = _get_file_hash(full_path)
-            _read_cache[cache_key] = (file_hash, content)
+            with _read_cache_lock:
+                _read_cache[cache_key] = (file_hash, content)
             return f"文件内容:\n{content}"
         except Exception as e:
             return f"读取失败: {e}"
@@ -119,7 +125,8 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
             if os.path.exists(full_path):
                 backup_name = _backup(full_path)
             os.remove(full_path)
-            _read_cache.pop(full_path, None)
+            with _read_cache_lock:
+                _read_cache.pop(full_path, None)
             return f"已删除: {path}"
         except Exception as e:
             return f"删除失败: {e}"
@@ -165,4 +172,5 @@ def register(reg):
 
 def clear_cache():
     global _read_cache
-    _read_cache = {}
+    with _read_cache_lock:
+        _read_cache = {}
