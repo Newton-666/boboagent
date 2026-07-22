@@ -459,10 +459,15 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
     if not session:
         return _err(rid, -32000, "会话不存在")
 
-    # 审计 #12：防止同一会话并发提交，导致两个 engine 线程同时写 history
-    from core.engine_adapter import is_running
+    # 审计 #12：上一个请求的 engine 仍在跑时，先中断它，再接受新请求。
+    # 之前的行为是直接拒绝——用户看到"发消息没反应"。
+    from core.engine_adapter import is_running, cancel
     if is_running(sid):
-        return _err(rid, -32000, "该会话正在处理上一个请求，请等待完成")
+        cancel(sid)
+        import time as _time
+        _time.sleep(0.3)  # 给旧线程 300ms 响应中断信号
+        if is_running(sid):
+            return _err(rid, -32000, "无法取消上一个请求，请稍后重试")
 
     # 在后台线程中运行引擎，主线程继续处理 stdin
     from core.engine_adapter import run_engine as _run_engine_adapter

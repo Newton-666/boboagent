@@ -9,7 +9,7 @@ class ContextMixin:
 
     MAX_HISTORY_CHARS = 80000
     MAX_HISTORY_MESSAGES = 200
-    KEEP_EXCHANGES = 3
+    KEEP_EXCHANGES = 5
 
     TOOL_CATEGORIES = {
         "general": [
