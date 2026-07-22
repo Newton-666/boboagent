@@ -319,64 +319,22 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._change_log = self._change_log[-20:]
 
     def _check_guards(self) -> bool:
-        # 循环检测：同一搜索类工具调用超过3次，注入停止提示
-        if len(self._recent_tool_calls) >= 3:
-            name_count = {}
-            for name, _ in self._recent_tool_calls[-8:]:
-                name_count[name] = name_count.get(name, 0) + 1
-            search_tools = {'web_search', 'web_fetch', 'web_extract', 'search_code',
-                           'search_obsidian', 'grep_code'}
-            search_count = sum(name_count.get(t, 0) for t in search_tools)
-            if search_count >= 3:
-                self._append_to_history("user",
-                    "提示: 搜索次数过多，请基于已有信息直接整理答案返回，不要再调用搜索工具。")
-                self.current_depth += 1
-                self._recent_tool_calls.clear()
-                return False
-            # 按目标检测重复：提取工具调用的搜索目标（文件路径/搜索模式）
-            # 不依赖工具名，LLM 换工具名也能检测到
-            import json as _jl
-            targets = []
-            for name, arg in self._recent_tool_calls[-8:]:
-                desc = arg[:40]
-                if name in ("read_local_file", "edit_file", "file_operation"):
-                    try:
-                        a = _jl.loads(arg) if isinstance(arg, str) else arg
-                        desc = a.get("file_path", "") or a.get("path", "") or desc[:30]
-                    except Exception:
-                        pass
-                targets.append(desc)
-            target_counts = {}
-            for t in targets:
-                target_counts[t] = target_counts.get(t, 0) + 1
-            # 如果有 >=3 次指向同一个文件或搜索内容
-            for t, c in target_counts.items():
-                if t and c >= 3:
-                    self._append_to_history("user",
-                        f"注意: 你已多次 [{t}] 相关操作（{c} 次）。如果之前的结果不理想，"
-                        f"请换一种策略或直接告知用户无法完成，不要重复尝试相同方向。")
-                    self.current_depth += 1
-                    self._recent_tool_calls.clear()
-                    return False
-        # 步骤预算渐进提醒
-        if self.current_depth == 35:
-            self._append_to_history("user", "提示: 你已执行 35 步，剩余步骤预算约一半。注意合理分配，不必着急收尾。")
-            self.current_depth += 1
-            return False
-        if self.current_depth == 45:
-            self._append_to_history("user", "提示: 还剩 5 步，请尽快完成当前操作并生成回复。")
-            self.current_depth += 1
-            return False
+        # 已移除 5 项不必要的护栏（2026-07-22 分析）：
+        # - 搜索 ≥3 次注入停止提示 → 复杂任务天然需要多次搜索
+        # - 同文件/搜索重复 ≥3 次 → 重读文件有合法理由
+        # - current_depth 35/45 步提醒 → LLM 无法理解步数含义
+        # 保留：
+        # - current_tool_round > 90 → 确实跑太久了，提醒收束
+        # - current_depth > 200 → 终极保险丝，防止真正的死循环
 
         if self.current_tool_round > 90:
-            # 达上限时请求总结，而不是直接报错
             summary = (
                 "你已达到最大工具调用轮次上限。请提供最终回复，"
                 "总结你已完成的内容，不需要再调用工具。"
             )
             self._append_to_history("user", summary)
             self.current_depth += 1
-            return False  # let LLM respond with summary
+            return False
         if self.current_depth > 200:
             self._notify("error", {"content": "已达最大循环深度"})
             return True

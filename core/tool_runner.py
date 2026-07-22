@@ -299,13 +299,8 @@ class ToolRunnerMixin:
                 self._tool_failures[tool_name] = self._tool_failures.get(tool_name, 0) + 1
             else:
                 self._tool_failures[tool_name] = 0
-
-            if self._tool_failures.get(tool_name, 0) >= 2:
-                alt = _TOOL_FALLBACKS.get(tool_name, "")
-                if alt:
-                    result = f"⚠️ 工具 '{tool_name}' 已连续失败 2 次，请停止使用此工具。\n{alt}"
-                else:
-                    result = f"⚠️ 工具 '{tool_name}' 已连续失败 2 次，请考虑完全不同的方法来解决用户的问题，而非继续用此工具"
+            # 已移除"连续失败 ≥2 次注入停用提示"的护栏（2026-07-22）：
+            # 网络抖动导致连续两次超时不代表工具不可用
 
             result = self._redact_secrets(result)
 
