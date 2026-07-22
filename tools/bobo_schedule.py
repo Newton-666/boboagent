@@ -183,8 +183,10 @@ def execute(action: str = "list", name: str = "", task: str = "",
         if len(schedules) == before:
             return f"没有找到定时任务: {name}"
         _save_schedules(schedules)
-        _remove_cron(name)
-        return f"定时任务已删除: {name}"
+        ok = _remove_cron(name)
+        if ok:
+            return f"定时任务已删除: {name}"
+        return f"任务已从列表删除，但 cron 卸载失败。请手动执行 crontab -e 删除对应行。"
 
     return "支持的操作: list, create, delete"
 

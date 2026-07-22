@@ -17,9 +17,13 @@ def write(content: str) -> str:
     try:
         process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
         process.communicate(content.encode())
+        if process.returncode and process.returncode != 0:
+            return f"❌ 写入剪贴板失败（pbcopy 返回 {process.returncode}）"
         return f"✅ 已写入剪贴板: {content[:50]}..."
-    except Exception:
-        return "❌ 写入剪贴板失败"
+    except FileNotFoundError:
+        return "❌ pbcopy 不可用（非 macOS 或缺少系统工具）"
+    except Exception as e:
+        return f"❌ 写入剪贴板失败: {e}"
 
 _check = lambda: __import__('sys').platform == 'darwin'
 
