@@ -135,6 +135,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                 # ── 流式模式 ──
                 if stream_callback:
                     full_content = ""
+                    full_reasoning = ""  # kimi-k3 等 reasoning 模型的思考过程
                     tool_calls_buffer = []
                     usage = {}
                     for line in response.iter_lines():
@@ -157,6 +158,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                         if not choices:
                             continue
                         delta = choices[0].get("delta", {})
+                        # reasoning_content：kimi-k3 等 reasoning 模型的思考过程
+                        reasoning = delta.get("reasoning_content", "")
+                        if reasoning:
+                            full_reasoning += reasoning
                         content = delta.get("content", "")
                         if content:
                             full_content += content
@@ -166,7 +171,9 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             tool_calls_buffer.extend(tc)
 
                     # 从流中重建完整响应
-                    choice = {"message": {"role": "assistant", "content": full_content}}
+                    # kimi-k3：如果 content 为空，尝试用 reasoning_content 兜底
+                    effective_content = full_content or full_reasoning or ""
+                    choice = {"message": {"role": "assistant", "content": effective_content}}
                     if tool_calls_buffer:
                         # 合并流式 tool_calls（OpenAI 流式格式是增量式的）
                         merged = {}
@@ -198,7 +205,12 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     last_error = {"error": message, "error_type": error_type, "retryable": True}
                     continue
                 else:
-                    detail = response.text[:500].strip()
+                    # 安全获取 response——如果异常来自 requests.post() 自身，
+                    # response 未定义，访问 response.text 会 UnboundLocalError
+                    try:
+                        detail = (response.text[:500] if 'response' in dir() else "").strip()
+                    except Exception:
+                        detail = ""
                     detailed_msg = f"{message} — {detail}" if detail else message
                     return {
                         "error": detailed_msg,
