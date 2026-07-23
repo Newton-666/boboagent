@@ -265,6 +265,17 @@ class ToolRunnerMixin:
 
         # Phase 3: 收集结果
         for future in as_completed(future_map):
+            # 用户发送了新消息 → cancel 设置中断信号 → 停止等待剩余结果
+            if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
+                for remaining in future_map:
+                    tc_r, name_r, args_r = future_map[remaining]
+                    if remaining.done():
+                        continue
+                    tool_results.append({
+                        "tool_call_id": tc_r.get("id", ""), "role": "tool",
+                        "content": "操作已取消（用户发送了新消息）",
+                    })
+                return tool_results
             tc, tool_name, tool_args = future_map[future]
             start_time = time.time()
             try:

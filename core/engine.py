@@ -1220,6 +1220,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
             return f"解析失败: {str(e)}", []
 
     def _step(self):
+        # 用户中断：收到新消息时 cancel 设置了中断信号，立刻退出
+        if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
+            self.state = self.STATE_ERROR
+            return
         # _check_guards 移到最外层，每个 step 都检查，防止无限循环
         if self._check_guards():
             self.state = self.STATE_ERROR
