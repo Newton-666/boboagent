@@ -169,7 +169,9 @@ def _extract_tool_log(history: list) -> str:
     return "\n".join(lines)
 
 
-def execute(instruction: str, name: str = "", context: str = "") -> str:
+def execute(instruction: str = "", name: str = "", context: str = "", task: str = "") -> str:
+    # task 是 instruction 的别名——LLM 常常猜 task 而不知道参数名是 instruction
+    instruction = instruction or task
     """执行子任务并返回轻量标记，完整结果可通过 read_worker_result 获取。"""
     # ── 禁止嵌套 spawn ──
     if getattr(_worker_depth, "depth", 0) > 0:
@@ -317,6 +319,10 @@ TOOL_SCHEMA = {
                         "可选。Worker 执行前需要的背景信息。\n"
                         "如果是大量内容（如完整文件），传文件路径让 Worker 自己去读。"
                     ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": "instruction 的别名——如果没传 instruction 但传了 task，以 task 为准。",
                 },
             },
             "required": ["instruction"],
