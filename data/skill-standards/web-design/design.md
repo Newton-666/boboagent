@@ -8,11 +8,21 @@
 
 ## 约束
 
-- 如果用户没有明确要求，**禁止使用渐变（gradient）**，尤其是紫色渐变
-- **禁止使用 Emoji**（和禁渐变同理——不接受 AI 的默认审美装饰）
-- 必须使用语义化 HTML（`<article>` `<nav>` `<section>` 等）
-- 不能使用 `!important`
-- 所有图片必须有 `alt` 文本
+### 绝对禁止（违反任一条 = 不合格，必须重新生成）
+
+以下行为不是"不推荐"，是**被禁止的**。如果你的输出包含以下任何一项，说明你违反了本文档：
+
+- ❌ Emoji（任何 Unicode 表情符号：😊 🎉 ✅ ❌ 🚀 💡 🔥 ⭐ 等）
+- ❌ CSS gradient / linear-gradient / radial-gradient（任何渐变）
+- ❌ 紫色系渐变及其变体
+- ❌ `!important`
+- ❌ 内联 style 属性
+- ❌ 没有 alt 文本的 `<img>` 标签
+
+### 必须遵守
+
+- 语义化 HTML（`<article>` `<nav>` `<section>` `<header>` `<footer>` `<main>`）
+- 所有按钮使用 `<button>`，不是 `<div onclick>`
 
 ## 内容架构
 
