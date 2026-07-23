@@ -588,7 +588,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /bobo-audit"})
+        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /bobo-audit, /memory-consolidate"})
     elif command == "clear":
         _emit("session.cleared", sid, {"session_id": sid})
         return _ok(rid, {"output": ""})
@@ -655,6 +655,61 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             f"配置文件位置: {BOBO_DATA_DIR}/.env",
         ]
         return _ok(rid, {"output": "\n".join(lines)})
+    elif command == "memory-consolidate":
+        """后台合并：识别重复/相似记忆，合并内容，归档低分草稿。从不删除。"""
+        try:
+            from tools.v5_memory import get_all, bump_signal, _save, _write_lock
+            data = get_all()
+            entries = data.get("entries", [])
+            if len(entries) < 3:
+                return _ok(rid, {"output": f"只有 {len(entries)} 条记忆，不需要合并。"})
+            # 按文本相似度分组（共享词占比 > 60% 视为重复）
+            merged = 0
+            archived = 0
+            keep = []
+            seen = set()
+            for i, e1 in enumerate(entries):
+                if i in seen:
+                    continue
+                group = [e1]
+                t1 = set(e1.get("text", "").split())
+                for j, e2 in enumerate(entries):
+                    if j <= i or j in seen:
+                        continue
+                    t2 = set(e2.get("text", "").split())
+                    if t1 and t2:
+                        overlap = len(t1 & t2) / max(len(t1), len(t2))
+                        if overlap > 0.6:
+                            group.append(e2)
+                            seen.add(j)
+                if len(group) > 1:
+                    # 保留最高分的那条，合并文本
+                    best = max(group, key=lambda e: e.get("signal_score", 100))
+                    merged_texts = [e.get("text", "") for e in group if e != best]
+                    best["text"] = best.get("text", "") + "；也即：" + "；".join(merged_texts)[:200]
+                    best["signal_score"] = max(e.get("signal_score", 100) for e in group)
+                    best["consolidated_from"] = len(group)
+                    merged += len(group) - 1
+                    for e in group:
+                        if e != best:
+                            e["archived"] = True
+                            e["signal_score"] = 0
+                keep.append(e1)
+                seen.add(i)
+            # 归档低分草稿（signal_score < 20 且 is_draft）
+            for e in entries:
+                if e.get("is_draft") and e.get("signal_score", 100) < 20 and not e.get("archived"):
+                    e["archived"] = True
+                    e["signal_score"] = 0
+                    archived += 1
+            with _write_lock:
+                _save(data)
+            lines = [f"记忆合并完成：合并 {merged} 条重复记忆，归档 {archived} 条低分草稿。"]
+            lines.append(f"当前共 {len([e for e in entries if not e.get('archived')])} 条活跃记忆"
+                         f"（总计 {len(entries)} 条含归档）。")
+            return _ok(rid, {"output": "\n".join(lines)})
+        except Exception as e:
+            return _ok(rid, {"output": f"合并失败: {e}"})
     elif command == "bobo-audit" or command.startswith("bobo-audit "):
         import json as _aj
         log_path = str(BOBO_DATA_DIR / "access_log.jsonl")
@@ -847,6 +902,7 @@ def handle_input_detect_drop(params: dict, rid: str) -> dict:
 _COMMANDS = {
     "canon": {
         "/bobo-audit": "/bobo-audit",
+        "/memory-consolidate": "/memory-consolidate",
         "/mode": "/mode",
         "/help": "/help",
         "/clear": "/clear",
