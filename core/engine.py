@@ -62,6 +62,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._step_count = 0
         self._all_confirmed = False
         self._compressing = False
+        self._compressed_this_turn = False  # 本轮已压缩过——不再触发
         self._tool_failures: dict[str, int] = {}
         self._last_usage: dict = {}
         self._pending_diff: str = ""
@@ -290,6 +291,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def _handle_pre_input(self, user_input: str) -> Optional[str]:
         if not user_input:
             return None
+        # 每轮新用户消息到来时重置压缩标记
+        self._compressed_this_turn = False
         # 主动模式：追踪用户是否在回应上轮连接提议
         self._track_engagement(user_input)
         teaching_result = self._handle_teaching_mode(user_input)
@@ -782,12 +785,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         # 字符预算检查
         # 只在空闲态压缩——工具执行中途修改 history 会导致
-        # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃
-        if not self._compressing and self.state != self.STATE_EXECUTING:
+        # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃。
+        # 每轮最多压缩一次——压缩无效不再重试（防无限循环）。
+        if (not self._compressing and not self._compressed_this_turn
+                and self.state != self.STATE_EXECUTING):
             total_chars = sum(len(str(m)) for m in self.history)
             if total_chars > self.MAX_HISTORY_CHARS:
                 self._notify("thinking", {"phase": "compressing", "message": "正在压缩历史上下文..."})
                 self._compress_history()
+                self._compressed_this_turn = True
 
         # 动态匹配项目标准（design.md），替换系统提示中的占位符
         skill_std = self._load_skill_standard()
@@ -1410,6 +1416,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             total_chars = sum(len(str(m)) for m in self.history)
             if total_chars > self.MAX_HISTORY_CHARS:
                 self._compress_history()
+                self._compressed_this_turn = True
 
         while self.state not in (self.STATE_DONE, self.STATE_ERROR):
             self._step_count += 1
