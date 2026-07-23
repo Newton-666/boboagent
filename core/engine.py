@@ -146,6 +146,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
 **原则**：标注结果不是限制你获取信息——它是"按需取回"。加载全文不会破坏上下文预算，
 因为即便每次标记都加载，上下文仍然比不标记时少一半。拿不准就加载，不要犹豫。
 
+## 项目标准 — 必须遵守
+
+如果当前任务涉及网页设计/前端开发，你必须严格遵守以下标准。违反任何一条都视为不合格。
+
+{skill_standard}
+
 ## 防循环规则（重要）
 
 - **不要重复调用同一个工具读取同一个文件**。read_local_file 读一次就够了，内容不会变。
@@ -666,6 +672,40 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             pass
 
+    def _load_skill_standard(self) -> str:
+        """扫描 data/skill-standards/*/design.md，返回空或当前匹配到的标准内容。"""
+        try:
+            import os as _os
+            std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.abspath(__file__))), "data", "skill-standards")
+            if not _os.path.isdir(std_dir):
+                return ""
+            # 从最近用户消息提取主题关键词
+            user_msgs = [m.get("content", "") for m in self.history[-4:]
+                         if m.get("role") == "user" and m.get("content")]
+            topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
+            best_match = None
+            best_score = 0
+            for entry in _os.listdir(std_dir):
+                path = _os.path.join(std_dir, entry, "design.md")
+                if not _os.path.isfile(path):
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                # 简单评分：文件名/标题和话题的关键词重叠越多，匹配度越高
+                keywords = set(topic.split())
+                title_line = content.split("\n")[0].lower() if content else ""
+                text_sample = (entry + " " + title_line).lower()
+                score = sum(1 for kw in keywords if kw in text_sample)
+                if score > best_score:
+                    best_score = score
+                    best_match = content
+            if best_match and best_score > 0:
+                return best_match
+        except Exception:
+            pass
+        return ""
+
     def _extract_takeaways(self) -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
         try:
@@ -741,7 +781,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._notify("thinking", {"phase": "compressing", "message": "正在压缩历史上下文..."})
                 self._compress_history()
 
-        messages = [{"role": "system", "content": self.system_prompt}] + self.history
+        # 动态匹配项目标准（design.md），替换系统提示中的占位符
+        skill_std = self._load_skill_standard()
+        prompt = self.system_prompt.replace(
+            "{skill_standard}",
+            skill_std or "（当前任务无匹配的项目标准）"
+        )
+        messages = [{"role": "system", "content": prompt}] + self.history
 
         if self._pending_diff:
             diff_preview = self._pending_diff[:4000]
