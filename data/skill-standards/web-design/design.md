@@ -40,12 +40,33 @@
 - 内容区宽度不超过 960px，居中
 - 段落行高 ≥ 1.5
 
-## 字体（原则）
+## 字体
 
-- 系统默认无衬线优先（`-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`）
-- 不引入第三方字体
+### 标题（h1-h4）
+```
+font-family: "Anthropic Serif", Georgia, serif;
+```
+- 字重 600-700
+- h1: 32px / h2: 24px / h3: 20px / h4: 18px
+
+### 正文 & UI（body, p, button, input, label）
+```
+font-family: -apple-system, "SF Pro", "Noto Sans SC", system-ui, sans-serif;
+```
+- 字重 400（正文）/ 500（按钮、标签）
+- 正文: 16px / 辅助文字: 13px / 按钮: 14px
+- 行高 1.6（正文）/ 1.4（UI 组件）
+
+### 代码（pre, code）
+```
+font-family: "SF Mono", "Fira Code", monospace;
+```
+- 字号 14px
+- 行高 1.5
+
+### 通用
+- 不引入第三方字体——全部使用系统预装或安全回退
 - 同一页面字号不超过 4 种
-- 标题字重 600，正文 400
 
 ## 卡片 & 面板（原则）
 
