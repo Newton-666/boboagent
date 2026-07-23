@@ -680,7 +680,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 _os.path.abspath(__file__))), "data", "skill-standards")
             if not _os.path.isdir(std_dir):
                 return ""
-            # 从最近用户消息提取主题关键词
+            # 从最近用户消息提取主题关键词（中英文混合，逐个字符窗口匹配）
+            import re as _sre
             user_msgs = [m.get("content", "") for m in self.history[-4:]
                          if m.get("role") == "user" and m.get("content")]
             topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
@@ -692,11 +693,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     continue
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # 简单评分：文件名/标题和话题的关键词重叠越多，匹配度越高
-                keywords = set(topic.split())
-                title_line = content.split("\n")[0].lower() if content else ""
-                text_sample = (entry + " " + title_line).lower()
-                score = sum(1 for kw in keywords if kw in text_sample)
+                # 提取 design.md 的 keywords 行（正则匹配 > keywords: xxx 或 keywords: xxx）
+                kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
+                trigger_words = [w.strip().lower() for w in (kw_match.group(1).split(",") if kw_match else [])]
+                if not trigger_words:
+                    # 无 keywords 行 → 用文件名和标题兜底
+                    trigger_words = (entry + " " + content.split("\n")[0]).lower().split()
+                # 评分：话题中包含几个触发词
+                score = sum(1 for tw in trigger_words if tw and tw in topic)
                 if score > best_score:
                     best_score = score
                     best_match = content
