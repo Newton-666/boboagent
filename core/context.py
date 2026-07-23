@@ -88,6 +88,29 @@ class ContextMixin:
             return
 
         split_idx = user_indices[-self.KEEP_EXCHANGES]
+        # 安全边界：split 点不能切在 tool_calls/tool_result 配对中间。
+        # 如果 split 后的第一条是 tool 结果，向前移动直到遇到非 tool 消息，
+        # 确保 LLM 不会收到孤立 tool 结果（审计崩溃根因）。
+        while (split_idx < len(self.history) and
+               self.history[split_idx].get("role") == "tool"):
+            split_idx += 1
+        # 如果 old_msgs 的最后一条 assistant 有 tool_calls，
+        # 检查其 tool_call_id 对应的 tool 结果是否全在 old_msgs 中。
+        # 如果有孤立的 → 向前移 split 直到包含所有结果。
+        for m in reversed(self.history[:split_idx]):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                tc_ids = {tc.get("id", "") for tc in m["tool_calls"]}
+                for r in self.history[split_idx:]:
+                    if r.get("role") == "tool" and r.get("tool_call_id", "") in tc_ids:
+                        # 孤儿 tool 结果在 keep 部分 → 必须整个回卷
+                        tc_ids.discard(r.get("tool_call_id", ""))
+                    if not tc_ids:
+                        break
+                if tc_ids:
+                    # 还有没配对的 → 把这轮完整保留
+                    idx = self.history.index(m)
+                    split_idx = idx
+                break
         old_msgs = self.history[:split_idx]
         self.history = self.history[split_idx:]
 

@@ -781,7 +781,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self.history = self.history[split:]
 
         # 字符预算检查
-        if not self._compressing:
+        # 只在空闲态压缩——工具执行中途修改 history 会导致
+        # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃
+        if not self._compressing and self.state != self.STATE_EXECUTING:
             total_chars = sum(len(str(m)) for m in self.history)
             if total_chars > self.MAX_HISTORY_CHARS:
                 self._notify("thinking", {"phase": "compressing", "message": "正在压缩历史上下文..."})
