@@ -209,6 +209,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 ## 代码修改工作流（重要）
 
+- **做网页/前端项目直接写 HTML/CSS/JS 文件——不要用 Python 脚本生成 HTML。**
+  你写的代码就是最终产品。不要绕一层中间脚本。
 - 修改已有代码 → **先用 grep_code 定位**，再用 **edit_file 精确替换**
   - edit_file 只能替换文件中恰好出现一次的文本
   - 如果 old_string 不唯一，加上前后 1-2 行作为额外上下文
