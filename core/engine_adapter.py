@@ -158,7 +158,7 @@ def run_engine(
         # 注入 Worker 事件发射器，让 spawn_worker 能实时向 TUI 发进度
         try:
             from tools.spawn_worker import set_worker_event_emitter
-            set_worker_event_emitter(emit)
+            set_worker_event_emitter(emit, sid)
         except ImportError:
             pass
 

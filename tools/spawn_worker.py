@@ -60,12 +60,14 @@ _llm_caller_cache_key = None
 # ── Worker 实时事件回调 ──
 # 被 engine_adapter.run_engine 注入，用于向 TUI 发送 Worker 进度
 _worker_event_emitter = None
+_worker_sid = None
 
 
-def set_worker_event_emitter(emitter):
-    """设置 Worker 事件发射器（由 engine_adapter 在启动 engine 时注入）"""
-    global _worker_event_emitter
+def set_worker_event_emitter(emitter, sid: str = None):
+    """设置 Worker 事件发射器 + 当前会话 ID。"""
+    global _worker_event_emitter, _worker_sid
     _worker_event_emitter = emitter
+    _worker_sid = sid
 
 
 def _make_worker_callback(name: str):
@@ -86,7 +88,7 @@ def _make_worker_callback(name: str):
                     break
         emitter = _worker_event_emitter
         if emitter:
-            emitter("thinking", "", {"message": f"[Worker {name}] {desc}"})
+            emitter("thinking", _worker_sid or "", {"message": f"[Worker {name}] {desc}"})
     return _cb
 
 
