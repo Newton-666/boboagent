@@ -237,10 +237,16 @@ def read_obsidian_note(filename: str, section: int = 0) -> str:
     except Exception as e:
         return f"❌ 读取失败: {str(e)}"
     
+    # 防御：LLM 可能传字符串类型的 section
+    try:
+        section = int(section)
+    except (ValueError, TypeError):
+        section = 0
+
     # 短文件直接返回
     if len(content) < 30000 and section == 0:
         return content
-    
+
     # 读取特定章节
     if section > 0:
         section_size = 8000
