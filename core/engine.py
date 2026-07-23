@@ -543,7 +543,23 @@ class Engine(ContextMixin, ToolRunnerMixin):
             from tools.v5_memory import get_top_memories, bump_signal
             candidates = get_top_memories(topic, limit=5)  # 先取 5 条候选
             # RAG-lite: LLM 语义过滤，只保留真正相关的
-            top = self._semantic_filter(topic, candidates)[:3]
+            filtered = self._semantic_filter(topic, candidates)
+            # 去重：两条文本重叠 > 80% 的只保留高分那条
+            top = []
+            seen_texts = []
+            for e in sorted(filtered, key=lambda x: x.get("signal_score", 100), reverse=True):
+                words = set(e.get("text", "").split())
+                is_dup = False
+                for seen in seen_texts:
+                    if words and seen:
+                        overlap = len(words & seen) / max(len(words), len(seen))
+                        if overlap > 0.8:
+                            is_dup = True
+                            break
+                if not is_dup:
+                    seen_texts.append(words)
+                    top.append(e)
+            top = top[:3]
             self._last_memory_ids = []  # 记录本轮注入的记忆 ID，用于后续引用追踪
             for e in top:
                 ts = e.get("timestamp", "")[:10]
