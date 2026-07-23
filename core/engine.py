@@ -503,14 +503,47 @@ class Engine(ContextMixin, ToolRunnerMixin):
         topic = " ".join(user_msgs[-2:])
         return topic[:200]
 
+    def _semantic_filter(self, topic: str, candidates: list) -> list:
+        """RAG-lite：LLM 批量判断每条记忆是否与当前话题语义相关。
+        返回通过过滤的记忆条目列表。无 embedding，无向量库——LLM 自己做判断。"""
+        if not candidates or len(candidates) <= 1:
+            return candidates  # 只有 1 条候选，不过滤
+        try:
+            items = "\n".join(f"[{i+1}] {e.get('text','')[:100]}"
+                             for i, e in enumerate(candidates))
+            prompt = [
+                {"role": "system", "content": (
+                    f"当前对话主题: {topic[:100]}\n\n"
+                    f"以下是从用户记忆库中检索到的条目。请判断每条是否与当前主题语义相关。\n"
+                    f"只回复相关条目的编号（如 1,3），不相关的不提。如果都不相关回复 0。\n\n"
+                    f"{items}"
+                )},
+            ]
+            response = self.llm_caller(prompt, use_tools=False)
+            if isinstance(response, dict) and "error" in response:
+                return candidates  # API 出错时不过滤，保持原样
+            content = (response.get("choices", [{}])[0]
+                       .get("message", {}).get("content", ""))
+            # 解析 "1,3" 或 "1 3" 或 "相关: 1,3"
+            import re
+            nums = re.findall(r'\d+', content)
+            ids = {int(n) - 1 for n in nums if 0 <= int(n) - 1 < len(candidates)}
+            if not ids or 0 in {int(n) for n in nums if int(n) == 0}:
+                return candidates[:1]  # LLM 说"都不相关" → 只保留第一条兜底
+            return [candidates[i] for i in sorted(ids)]
+        except Exception:
+            return candidates  # 异常时不过滤
+
     def _find_connections(self, topic: str) -> list[str]:
-        """Top-N 记忆注入（信号分排序）+ Obsidian 笔记连接。"""
+        """Top-N 记忆注入（信号分 + RAG-lite 语义过滤）+ Obsidian 笔记连接。"""
         if not topic or len(topic) < 3:
             return []
         connections = []
         try:
             from tools.v5_memory import get_top_memories, bump_signal
-            top = get_top_memories(topic, limit=3)
+            candidates = get_top_memories(topic, limit=5)  # 先取 5 条候选
+            # RAG-lite: LLM 语义过滤，只保留真正相关的
+            top = self._semantic_filter(topic, candidates)[:3]
             self._last_memory_ids = []  # 记录本轮注入的记忆 ID，用于后续引用追踪
             for e in top:
                 ts = e.get("timestamp", "")[:10]
