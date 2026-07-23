@@ -617,6 +617,36 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             pass
 
+    def _extract_takeaways(self) -> list[str]:
+        """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
+        try:
+            user_msgs = [m.get("content", "") for m in self.history[-4:]
+                         if m.get("role") == "user" and m.get("content")]
+            asst_msgs = [m.get("content", "") for m in self.history[-4:]
+                          if m.get("role") == "assistant" and m.get("content")]
+            if not user_msgs or not asst_msgs:
+                return []
+            context = f"用户: {user_msgs[-1][:300]}\nBobo: {asst_msgs[-1][:300]}"
+            prompt = [
+                {"role": "system", "content": (
+                    "你是一个对话总结器。从以下对话中提取 1-2 条值得记住的关键结论。"
+                    "只提取对用户有长期价值的信息：偏好、决策、项目进展、技术选型。"
+                    "不要提取闲聊、问候、过渡性内容。如果没有值得记住的，回复'无'。"
+                    "每条结论一行，不超过 60 字。不要编号。"
+                )},
+                {"role": "user", "content": context},
+            ]
+            response = self.llm_caller(prompt, use_tools=False)
+            if isinstance(response, dict) and "error" in response:
+                return []
+            content = (response.get("choices", [{}])[0]
+                       .get("message", {}).get("content", ""))
+            takeaways = [t.strip() for t in content.split("\n")
+                         if t.strip() and t.strip() != "无" and len(t.strip()) > 5]
+            return takeaways[:2]
+        except Exception:
+            return []
+
     def _call_llm(self) -> Tuple[str, list]:
 
         # 阶段交接清理：在当前 LLM 调用前清理上一阶段的上下文
@@ -1229,6 +1259,29 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 if getattr(self, '_last_memory_ids', None):
                     self._track_citation(self._pending_content, self._last_memory_ids)
                     self._last_memory_ids = []
+                # 自动草稿记忆：从本轮对话提取关键结论
+                if self._proactive_mode != "off":
+                    takeaways = self._extract_takeaways()
+                    if takeaways:
+                        try:
+                            from tools.v5_memory import add_entry, bump_signal
+                            for t in takeaways:
+                                entry = add_entry(t, entry_type="draft")
+                                if entry:
+                                    # 草稿记忆：低初始分，写入磁盘
+                                    entry["signal_score"] = 30
+                                    entry["is_draft"] = True
+                                    from tools.v5_memory import _save, _load, _write_lock
+                                    with _write_lock:
+                                        data = _load()
+                                        for e in data.get("entries", []):
+                                            if e.get("id") == entry["id"]:
+                                                e["signal_score"] = 30
+                                                e["is_draft"] = True
+                                                break
+                                        _save(data)
+                        except Exception:
+                            pass
                 content = self._format_final_output(self._pending_content)
                 self._notify("complete", {"content": content, "usage": self._last_usage})
             else:
