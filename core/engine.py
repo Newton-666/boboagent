@@ -77,6 +77,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 主动模式：off / subtle / full
         self._proactive_mode: str = "off"
         self._proactive_stats: dict = {"offered": 0, "engaged": 0}
+        self._last_memory_ids: list = []  # 本轮注入的记忆 ID
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -503,22 +504,19 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return topic[:200]
 
     def _find_connections(self, topic: str) -> list[str]:
-        """搜索记忆和 Obsidian 中与当前主题相关的内容。返回连接简述列表。"""
+        """Top-N 记忆注入（信号分排序）+ Obsidian 笔记连接。"""
         if not topic or len(topic) < 3:
             return []
         connections = []
         try:
-            from tools.v5_memory import search_knowledge_base, get_all
-            mem_result = search_knowledge_base(topic)
-            if mem_result and "未找到" not in str(mem_result):
-                # 提取条目摘要
-                data = get_all()
-                for e in data.get("entries", [])[-10:]:
-                    if topic.lower() in e.get("text", "").lower():
-                        ts = e.get("timestamp", "")[:10]
-                        connections.append(f"[记忆 {ts}] {e.get('text','')[:120]}")
-                        if len(connections) >= 3:
-                            break
+            from tools.v5_memory import get_top_memories, bump_signal
+            top = get_top_memories(topic, limit=3)
+            self._last_memory_ids = []  # 记录本轮注入的记忆 ID，用于后续引用追踪
+            for e in top:
+                ts = e.get("timestamp", "")[:10]
+                score = e.get("signal_score", 100)
+                connections.append(f"[记忆 {ts}|分{score}] {e.get('text','')[:120]}")
+                self._last_memory_ids.append(e.get("id"))
         except Exception as e:
             logger.debug("主动模式搜索记忆失败: %s", e)
         try:
@@ -537,10 +535,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return connections
 
     def _inject_connection_context(self, messages: list) -> list:
-        """主动模式 Layer 1：在 _call_llm 前注入相关背景。
+        """主动模式 Layer 2：Top-N 信号分记忆注入 + 衰减非引用记忆。
 
         off  — 零开销直接返回
-        subtle — 静默注入 [相关背景]，LLM 自己决定用不用
+        subtle — 静默注入 Top 3 高信号记忆
         full  — 注入 + 引导 LLM 自然引用
         """
         if self._proactive_mode == "off":
@@ -554,7 +552,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if not connections:
             return messages
 
-        prefix = "[相关背景] 以下内容来自用户的记忆和笔记，可能与当前对话主题相关。"
+        # 本轮未被注入的旧记忆做衰减
+        try:
+            from tools.v5_memory import decay_all
+            decay_all(decay=-5)
+        except Exception:
+            pass
+
+        prefix = "[相关背景｜按相关性排序] 以下内容来自用户记忆，可能与当前话题相关。"
         if self._proactive_mode == "full":
             prefix += ("\n如果这些背景能补充你的回答或提供有用的上下文，"
                        "可以自然地在回复中提到。如果无关，忽略即可。")
@@ -592,6 +597,25 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     return (f"主动模式已从 {old} 降为 {self._proactive_mode}"
                             f"（最近 {s['offered']} 条连接中只展开了 {s['engaged']} 条）")
         return None
+
+    def _track_citation(self, assistant_response: str, memory_ids: list):
+        """LLM 回复中若引用了注入的记忆，自动 bump 信号分。"""
+        try:
+            from tools.v5_memory import bump_signal, get_all
+            data = get_all()
+            for mid in memory_ids:
+                for e in data.get("entries", []):
+                    if e.get("id") == mid:
+                        text = e.get("text", "")
+                        # 简单检查：回复中是否包含记忆的前 30 个字符
+                        if text[:30].lower() in assistant_response.lower():
+                            bump_signal(mid, delta=10)
+                        else:
+                            # 没有直接引用但被注入了 → 轻微衰减
+                            bump_signal(mid, delta=-3)
+                        break
+        except Exception:
+            pass
 
     def _call_llm(self) -> Tuple[str, list]:
 
@@ -1201,6 +1225,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
         elif self.state == self.STATE_RESPONDING:
             if self._pending_content:
                 self._append_to_history("assistant", self._pending_content)
+                # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
+                if getattr(self, '_last_memory_ids', None):
+                    self._track_citation(self._pending_content, self._last_memory_ids)
+                    self._last_memory_ids = []
                 content = self._format_final_output(self._pending_content)
                 self._notify("complete", {"content": content, "usage": self._last_usage})
             else:

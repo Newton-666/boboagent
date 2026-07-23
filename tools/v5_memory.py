@@ -128,7 +128,9 @@ def add_entry(text, entry_type="general", tags=None, folder=""):
         "type": entry_type,
         "tags": tags or [],
         "folder": folder,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "signal_score": 100,  # 信号分：初始 100，引用 +10，忽略 -5，< 20 不再注入
+        "last_matched": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     entries.append(entry)
     data['entries'] = entries
@@ -331,6 +333,79 @@ def format_all_memory(max_chars: int = 5000) -> str:
     shown = len(lines)
     header = f"记忆 ({shown}/{total_all} 条, {total:,}/{max_chars:,} 字符)"
     return header + "\n" + "\n".join(lines)
+
+
+# ── 信号分系统：引用强化 + 忽略衰减 + 自然下沉 ──────────────────
+
+def bump_signal(entry_id: int, delta: int = 10):
+    """记忆被 LLM 引用时加分；被注入但未引用时减分（传负值）。"""
+    with _write_lock:
+        data = _load()
+        for e in data.get("entries", []):
+            if e.get("id") == entry_id:
+                e["signal_score"] = max(0, min(200, e.get("signal_score", 100) + delta))
+                e["last_matched"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                _save(data)
+                return e["signal_score"]
+    return None
+
+
+def get_top_memories(query: str = "", limit: int = 3) -> list:
+    """返回信号分最高的记忆条目（可选 query 过滤），用于 Top-N 注入。"""
+    data = _load()
+    entries = data.get("entries", [])
+    query_lower = query.lower() if query else ""
+    scored = []
+    for e in entries:
+        score = e.get("signal_score", 100)
+        if score < 20:
+            continue  # 自然下沉：低分的永不注入
+        relevance = 1.0
+        if query_lower:
+            text_lower = e.get("text", "").lower()
+            if query_lower in text_lower:
+                relevance = 2.0  # 关键词匹配加权
+            else:
+                words = set(query_lower.split())
+                text_words = set(text_lower.split())
+                overlap = len(words & text_words)
+                if overlap > 0:
+                    relevance = 1.0 + overlap * 0.5  # 词重叠加权
+                else:
+                    relevance = 0.0  # 完全不相关 → 跳过
+        if relevance <= 0:
+            continue
+        scored.append((e, score * relevance))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [e for e, _ in scored[:limit]]
+
+
+def decay_all(decay: int = -5):
+    """对所有未被最近匹配到的记忆做信号衰减（每次 LLM 调用后运行）。"""
+    with _write_lock:
+        data = _load()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        for e in data.get("entries", []):
+            last = e.get("last_matched", e.get("timestamp", ""))
+            if last < now[:16]:  # 本轮未被匹配到（last_matched 没更新）
+                e["signal_score"] = max(0, e.get("signal_score", 100) + decay)
+        _save(data)
+
+
+def memory_stats() -> dict:
+    """返回记忆系统的统计指标。"""
+    data = _load()
+    entries = data.get("entries", [])
+    total = len(entries)
+    if total == 0:
+        return {"total": 0, "high_signal_pct": 0, "avg_score": 0}
+    high = sum(1 for e in entries if e.get("signal_score", 100) >= 50)
+    avg = sum(e.get("signal_score", 100) for e in entries) / total
+    return {
+        "total": total,
+        "high_signal_pct": round(high / total * 100, 1),
+        "avg_score": round(avg, 1),
+    }
 
 
 def register(reg):
