@@ -1,6 +1,6 @@
 # Web Design Standard v2
 
-> keywords: web, 网页, 网站, blog, 博客, HTML, CSS, 前端, 页面, 设计, 布局, UI, landing, homepage
+> keywords: web, 网页, 网站, 落地页, 主页, 首页, blog, 博客, HTML, CSS, 前端, 页面, 设计, 布局, UI, 界面, 官网, landing, homepage, 做个, 做一个
 > Bobo 在做任何网页相关任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **设计哲学**: 不接受 AI 的默认输出。不接受默认紫色渐变、不接受 Emoji 装饰。
@@ -94,6 +94,7 @@ font-family: "SF Mono", "Fira Code", monospace;
 ### 核心规则
 
 - **以莫兰迪色系为主导**——所有颜色带灰调。dusty rose（赭粉）、sage green（灰绿）、muted blue（雾蓝）、warm gray（暖灰）。用 rust 不用 red，用 slate 不用 blue，用 burgundy 不用 crimson。颜色不刺眼，像蒙了一层薄雾，耐看。
+- **禁止深棕（#1A1410、#2D1B14 等）作为页面主背景色**——深棕+琥珀/金色的深色模式搭配是 AI 的另一个默认套路。如果必须用深色背景，用深灰蓝或深灰绿（莫兰迪深色调）。
 - **背景永不纯白**——使用暖米白（如 `#F5F0EB`、`#FCF5E2`、`#FFFBF0`）或暖灰。`#FFFFFF` 只在卡片表面局部使用。
 - **文字永不纯黑**——使用深棕或炭灰（如 `#2D1B14`、`#3D3929`、`#363636`）。
 - **主色饱和度 40-70%**，明度不过高。整体氛围像一本旧书，不是广告牌。
