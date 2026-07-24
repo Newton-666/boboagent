@@ -21,6 +21,7 @@
 
 ### 必须遵守
 
+- **页面必须包含 Logo**——左上角或顶部居中的品牌标记，使用 inline SVG（不引入外部图片资源）。Logo 风格与页面配色统一。
 - 语义化 HTML（`<article>` `<nav>` `<section>` `<header>` `<footer>` `<main>`）
 - 所有按钮使用 `<button>`，不是 `<div onclick>`
 
