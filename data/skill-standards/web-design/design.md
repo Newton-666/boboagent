@@ -93,7 +93,7 @@ font-family: "SF Mono", "Fira Code", monospace;
 
 ### 核心规则
 
-- **低饱和优先**——用 rust 不用 red，用 slate 不用 blue，用 burgundy 不用 crimson。颜色不刺眼，耐看。
+- **以莫兰迪色系为主导**——所有颜色带灰调。dusty rose（赭粉）、sage green（灰绿）、muted blue（雾蓝）、warm gray（暖灰）。用 rust 不用 red，用 slate 不用 blue，用 burgundy 不用 crimson。颜色不刺眼，像蒙了一层薄雾，耐看。
 - **背景永不纯白**——使用暖米白（如 `#F5F0EB`、`#FCF5E2`、`#FFFBF0`）或暖灰。`#FFFFFF` 只在卡片表面局部使用。
 - **文字永不纯黑**——使用深棕或炭灰（如 `#2D1B14`、`#3D3929`、`#363636`）。
 - **主色饱和度 40-70%**，明度不过高。整体氛围像一本旧书，不是广告牌。
