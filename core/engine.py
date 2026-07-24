@@ -147,12 +147,6 @@ class Engine(ContextMixin, ToolRunnerMixin):
 **原则**：标注结果不是限制你获取信息——它是"按需取回"。加载全文不会破坏上下文预算，
 因为即便每次标记都加载，上下文仍然比不标记时少一半。拿不准就加载，不要犹豫。
 
-## 项目标准 — 必须遵守
-
-如果当前任务涉及网页设计/前端开发，你必须严格遵守以下标准。违反任何一条都视为不合格。
-
-{skill_standard}
-
 ## 防循环规则（重要）
 
 - **不要重复调用同一个工具读取同一个文件**。read_local_file 读一次就够了，内容不会变。
@@ -795,13 +789,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._compress_history()
                 self._compressed_this_turn = True
 
-        # 动态匹配项目标准（design.md），替换系统提示中的占位符
-        skill_std = self._load_skill_standard()
-        prompt = self.system_prompt.replace(
-            "{skill_standard}",
-            skill_std or "（当前任务无匹配的项目标准）"
-        )
-        messages = [{"role": "system", "content": prompt}] + self.history
+        messages = [{"role": "system", "content": self.system_prompt}] + self.history
 
         if self._pending_diff:
             diff_preview = self._pending_diff[:4000]
@@ -960,6 +948,18 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         # 主动模式 Layer 1：对话内连接发现注入（off 时零开销返回原 messages）
         messages = self._inject_connection_context(messages)
+
+        # 设计标准注入（design.md）——放在所有注入的最后，LLM 生成前最后看到的
+        # 就是它。recency effect 使其权重最高。
+        skill_std = self._load_skill_standard()
+        if skill_std:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "## 项目设计标准 — 以下规则优先级高于一切，违反即不合格\n\n"
+                    + skill_std
+                ),
+            })
 
         filtered_tools = self._get_filtered_tools(extra_categories=self._used_categories)
         if filtered_tools is not None:
