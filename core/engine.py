@@ -671,43 +671,44 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             pass
 
-    def _load_skill_standard(self) -> str:
-        """扫描 data/skill-standards/*/design.md，返回空或当前匹配到的标准内容。"""
+    def _load_skill_standards(self) -> list[str]:
+        """扫描 data/skill-standards/*/standard.md，返回所有匹配的标准内容（按匹配度降序）。
+
+        自动发现：往 data/skill-standards/ 下新增一个文件夹、放入 standard.md 即生效。
+        不需要改任何代码、不需要注册、不需要更新索引。
+        每个 standard.md 通过 keywords 行声明自己的触发词。
+        """
         try:
             import os as _os
             std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
                 _os.path.abspath(__file__))), "data", "skill-standards")
             if not _os.path.isdir(std_dir):
-                return ""
-            # 从最近用户消息提取主题关键词（中英文混合，逐个字符窗口匹配）
+                return []
             import re as _sre
             user_msgs = [m.get("content", "") for m in self.history[-4:]
                          if m.get("role") == "user" and m.get("content")]
             topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
-            best_match = None
-            best_score = 0
+            matches = []
             for entry in _os.listdir(std_dir):
-                path = _os.path.join(std_dir, entry, "design.md")
+                path = _os.path.join(std_dir, entry, "standard.md")
                 if not _os.path.isfile(path):
                     continue
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # 提取 design.md 的 keywords 行（正则匹配 > keywords: xxx 或 keywords: xxx）
+                # 提取 standard.md 的 keywords 行
                 kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
                 trigger_words = [w.strip().lower() for w in (kw_match.group(1).split(",") if kw_match else [])]
                 if not trigger_words:
-                    # 无 keywords 行 → 用文件名和标题兜底
+                    # 无 keywords 行 → 用文件夹名和第一行标题兜底
                     trigger_words = (entry + " " + content.split("\n")[0]).lower().split()
                 # 评分：话题中包含几个触发词
                 score = sum(1 for tw in trigger_words if tw and tw in topic)
-                if score > best_score:
-                    best_score = score
-                    best_match = content
-            if best_match and best_score > 0:
-                return best_match
+                if score > 0:
+                    matches.append((score, content))
+            matches.sort(key=lambda x: x[0], reverse=True)
+            return [content for _, content in matches[:3]]  # 最多 3 个最相关的标准
         except Exception:
-            pass
-        return ""
+            return []
 
     def _extract_takeaways(self) -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
@@ -949,15 +950,17 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 主动模式 Layer 1：对话内连接发现注入（off 时零开销返回原 messages）
         messages = self._inject_connection_context(messages)
 
-        # 设计标准注入（design.md）——放在所有注入的最后，LLM 生成前最后看到的
-        # 就是它。recency effect 使其权重最高。
-        skill_std = self._load_skill_standard()
-        if skill_std:
+        # 技能标准注入（data/skill-standards/*/standard.md）
+        # 放在所有注入的最后，LLM 生成前最后看到的就是它。recency effect 使其权重最高。
+        # 自动发现：新增文件夹 + standard.md 即生效，无需改代码。
+        skill_stds = self._load_skill_standards()
+        if skill_stds:
+            combined = "\n\n---\n\n".join(skill_stds)
             messages.append({
                 "role": "system",
                 "content": (
-                    "## 项目设计标准 — 以下规则优先级高于一切，违反即不合格\n\n"
-                    + skill_std
+                    "## 项目标准 — 以下规则优先级高于一切，违反即不合格\n\n"
+                    + combined
                 ),
             })
 
