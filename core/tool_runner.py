@@ -607,7 +607,7 @@ class ToolRunnerMixin:
                 platform_errors.append(f"notion 搜索失败: {type(e).__name__}: {e}")
 
         # ── Email ──
-        if _os.path.exists(_str(BOBO_DATA_DIR / "mail.json")):
+        if _os.path.exists(str(BOBO_DATA_DIR / "mail.json")):
             try:
                 from tools.email_module import EmailModule
                 mail = EmailModule()
