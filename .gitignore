@@ -31,7 +31,6 @@ backups/
 # ── 个人技能（用户本地添加，不提交到 GitHub）
 skills/*.yaml
 skills/*.md
-!skills/index.json
 *.egg-info/
 .DS_Store
 projects/
