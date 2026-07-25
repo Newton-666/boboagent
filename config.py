@@ -72,10 +72,25 @@ def _lazy_provider_attr(key: str, env_override: str = "", fallback: str = "") ->
         val = _get_provider().get(key, fallback)
     return val
 
-API_KEY = os.environ.get("DEEPSEEK_API_KEY") or _get_provider().get("api_key", "")
-API_BASE_URL = os.environ.get("API_BASE_URL") or _get_provider().get("base_url", "")
-API_MODEL_NAME = os.environ.get("API_MODEL_NAME") or _get_provider().get("model", "")
-ACTIVE_PROVIDER = _get_provider().get("name", "deepseek")
+# 真正的惰性求值：模块级 __getattr__ 在首次访问时才解析 provider。
+# 此前 API_KEY / API_BASE_URL / API_MODEL_NAME / ACTIVE_PROVIDER 在 import 时
+# 就调了 _get_provider() → resolve_provider() → core.provider → 触发 tools 发现
+# → code_execution 等回 import config → 此时 config 还没执行到这行 → ImportError。
+# 注释（53-55 行）描述的正是这个 bug，却声称惰性加载规避了——实际上 75-78 行
+# 的模块级调用又把它请了回来。
+_LAZY_ATTRS = {
+    "API_KEY": ("DEEPSEEK_API_KEY", "api_key", ""),
+    "API_BASE_URL": ("API_BASE_URL", "base_url", ""),
+    "API_MODEL_NAME": ("API_MODEL_NAME", "model", ""),
+    "ACTIVE_PROVIDER": ("", "name", "deepseek"),
+}
+
+def __getattr__(name: str) -> str:
+    if name in _LAZY_ATTRS:
+        env_key, provider_key, default = _LAZY_ATTRS[name]
+        val = os.environ.get(env_key, "") if env_key else ""
+        return val or _get_provider().get(provider_key, default)
+    raise AttributeError(f"module 'config' has no attribute '{name}'")
 
 # 其他配置
 TOOL_TIMEOUT = int(os.environ.get("TOOL_TIMEOUT", "20"))

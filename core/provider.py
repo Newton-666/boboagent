@@ -53,8 +53,8 @@ PROVIDERS = {
         "name": "Moonshot (Kimi)",
         "env_key": "MOONSHOT_API_KEY",
         "base_url": "https://api.moonshot.cn/v1/chat/completions",
-        "models": ["kimi-k2", "kimi-latest", "kimi-k2-thinking"],
-        "context_length": 262144,  # 256k，不是 1M
+        "models": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code-highspeed"],
+        "context_length": 1048576,  # k3=1M, k2.6=256k, k2.7=256k
     },
     "custom": {
         "name": "Custom",
