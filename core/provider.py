@@ -11,7 +11,7 @@ PROVIDERS = {
         "name": "DeepSeek",
         "env_key": "DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com/v1/chat/completions",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
         "context_length": 1000000,
     },
     "openai": {
