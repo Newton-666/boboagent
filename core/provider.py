@@ -54,7 +54,9 @@ PROVIDERS = {
         "env_key": "MOONSHOT_API_KEY",
         "base_url": "https://api.moonshot.cn/v1/chat/completions",
         "models": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code-highspeed"],
-        "context_length": 1048576,  # k3=1M, k2.6=256k, k2.7=256k
+        "context_length": 1048576,
+        "temperature": 1.0,  # kimi-k3 强制要求 temperature=1
+        "max_tokens": 32768,  # reasoning 模型需要更大 token 预算
     },
     "custom": {
         "name": "Custom",
