@@ -560,6 +560,14 @@ def handle_config_set(params: dict, rid: str) -> dict:
             os.environ["API_MODEL_NAME"] = model_name
             if provider_match:
                 os.environ["BOBO_PROVIDER"] = prov
+            # 自动应用 provider 特定的默认参数（如 reasoning 模型需要 temperature=1.0）
+            from core.provider import get_provider as _get_prov
+            _active_prov = _get_prov(os.environ.get("BOBO_PROVIDER", "deepseek"))
+            if _active_prov:
+                if _active_prov.get("temperature") and not os.environ.get("BOBO_TEMPERATURE"):
+                    os.environ["BOBO_TEMPERATURE"] = str(_active_prov["temperature"])
+                if _active_prov.get("max_tokens") and not os.environ.get("BOBO_MAX_TOKENS"):
+                    os.environ["BOBO_MAX_TOKENS"] = str(_active_prov["max_tokens"])
             _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
             # 清除 config.py 的 provider 缓存（必须设为 None，空 dict 不触发重新解析）
             try:
