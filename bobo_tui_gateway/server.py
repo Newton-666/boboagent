@@ -127,9 +127,13 @@ def _write_atomic(path: str, content: str):
 def _get_llm_caller():
     if "_llm" not in _engine_cache:
         from core.llm_caller import create_llm_caller
-        from config import API_KEY, API_BASE_URL, API_MODEL_NAME
+        from core.provider import resolve_provider
         from tools import TOOLS_SCHEMA
-        _engine_cache["_llm"] = create_llm_caller(API_KEY, API_BASE_URL, API_MODEL_NAME, TOOLS_SCHEMA)
+        # resolve_provider() 实时读取 os.environ，不用 import 时冻结的模块常量
+        cfg = resolve_provider()
+        _engine_cache["_llm"] = create_llm_caller(
+            cfg["api_key"], cfg["base_url"], cfg["model"], TOOLS_SCHEMA
+        )
     return _engine_cache["_llm"]
 
 
@@ -557,11 +561,10 @@ def handle_config_set(params: dict, rid: str) -> dict:
             if provider_match:
                 os.environ["BOBO_PROVIDER"] = prov
             _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
-            # 清除 config.py 的 provider 缓存
+            # 清除 config.py 的 provider 缓存（必须设为 None，空 dict 不触发重新解析）
             try:
                 import config as _cfg
-                if hasattr(_cfg, '_provider_cache'):
-                    _cfg._provider_cache = {}
+                _cfg._provider_cache = None
             except Exception:
                 pass
             return _ok(rid, {"value": model_name, "saved": True,
