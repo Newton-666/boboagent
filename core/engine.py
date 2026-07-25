@@ -745,6 +745,30 @@ Bobo 有两套技能系统：
         except Exception:
             return []
 
+    def _list_available_standards(self) -> str:
+        """扫描 data/skill-standards/，返回所有可用标准的名称和触发关键词。"""
+        try:
+            import os as _os
+            std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.abspath(__file__))), "data", "skill-standards")
+            if not _os.path.isdir(std_dir):
+                return ""
+            import re as _sre
+            lines = []
+            for entry in sorted(_os.listdir(std_dir)):
+                path = _os.path.join(std_dir, entry, "standard.md")
+                if not _os.path.isfile(path):
+                    continue
+                with open(path, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+                title = content.split("\n")[0].lstrip("#").strip()
+                kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
+                keywords = kw_match.group(1).strip()[:80] if kw_match else ""
+                lines.append(f"  - {title} | 触发词: {keywords}")
+            return "\n".join(lines) if lines else ""
+        except Exception:
+            return ""
+
     def _extract_takeaways(self) -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
         try:
@@ -1087,6 +1111,17 @@ Bobo 有两套技能系统：
                     + combined
                 ),
             })
+        else:
+            # 没有命中任何标准时，仍然告知可用标准列表（让 Bobo 知道自己的技能）
+            available = self._list_available_standards()
+            if available:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "## 可用的项目标准（当前未命中，以下仅供参考）\n\n"
+                        + available
+                    ),
+                })
 
         filtered_tools = self._get_filtered_tools(extra_categories=self._used_categories)
         if filtered_tools is not None:
