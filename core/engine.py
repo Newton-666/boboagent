@@ -884,6 +884,28 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 self._save_patterns(data)
                 break
 
+    def _truncate_history(self):
+        """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。
+
+        与 _compress_history 的切点逻辑一致：不在 tool_calls/tool 配对中间切断。
+        """
+        user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
+        target_first = len(self.history) - self.MAX_HISTORY_MESSAGES
+        split = target_first
+        for idx in user_indices:
+            if idx >= target_first:
+                split = idx
+                break
+        # 孤儿保护：split 点不能切在 tool 消息上（它属于上一轮的 tool_calls 配对）
+        while (split < len(self.history) and
+               self.history[split].get("role") == "tool"):
+            split += 1
+        # 如果保留下来的第一段以 tool 消息开头（孤儿），跳过它们
+        while (split < len(self.history) and
+               self.history[split].get("role") == "tool"):
+            split += 1
+        self.history = self.history[split:]
+
     def _call_llm(self) -> Tuple[str, list]:
 
         # 阶段交接清理：在当前 LLM 调用前清理上一阶段的上下文
@@ -911,26 +933,21 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 })
                 self._worker_reminded = True
 
-        # 硬限制：超过上限的消息数，丢弃最早的消息
+        # 硬限制：超过上限的消息数，丢弃最早的消息（复用孤儿配对保护）
         if len(self.history) > self.MAX_HISTORY_MESSAGES:
-            user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
-            target_first = len(self.history) - self.MAX_HISTORY_MESSAGES
-            split = target_first
-            for idx in user_indices:
-                if idx >= target_first:
-                    split = idx
-                    break
-            self.history = self.history[split:]
+            self._truncate_history()
 
-        # 字符预算检查
+        # Token 预算检查（动态：从 provider context_length 推导）
         # 只在空闲态压缩——工具执行中途修改 history 会导致
         # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃。
         # 每轮最多压缩一次——压缩无效不再重试（防无限循环）。
         if (not self._compressing and not self._compressed_this_turn
                 and self.state != self.STATE_EXECUTING):
-            total_chars = sum(len(str(m)) for m in self.history)
-            if total_chars > self.MAX_HISTORY_CHARS:
-                self._notify("thinking", {"phase": "compressing", "message": "正在压缩历史上下文..."})
+            from core.context import _estimate_tokens, _get_context_budget
+            est_tokens = _estimate_tokens(self.history)
+            budget = _get_context_budget(self)
+            if est_tokens > budget:
+                self._notify("thinking", {"phase": "compressing", "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {budget}）"})
                 self._compress_history()
                 self._compressed_this_turn = True
 
@@ -1591,8 +1608,8 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self._all_confirmed = False
 
         if self.history and not self._compressing:
-            total_chars = sum(len(str(m)) for m in self.history)
-            if total_chars > self.MAX_HISTORY_CHARS:
+            from core.context import _estimate_tokens, _get_context_budget
+            if _estimate_tokens(self.history) > _get_context_budget(self):
                 self._compress_history()
                 self._compressed_this_turn = True
 

@@ -102,7 +102,7 @@ EMAIL_PRIVACY_MODE = os.environ.get("EMAIL_PRIVACY_MODE", "ask")
 
 # Context Engineering — Result Marking System（产品级配置）
 BOBO_CONTEXT_MARKING = os.environ.get("BOBO_CONTEXT_MARKING", "true").lower() in ("true", "1", "yes")
-BOBO_CONTEXT_MARKING_MIN_CHARS = int(os.environ.get("BOBO_CONTEXT_MARKING_MIN_CHARS", "2000"))
+BOBO_CONTEXT_MARKING_MIN_CHARS = int(os.environ.get("BOBO_CONTEXT_MARKING_MIN_CHARS", "500"))
 
 # 主动模式：off = 纯响应, subtle = 静默注入不给用户看, full = LLM 可主动提议
 BOBO_PROACTIVE_MODE = os.environ.get("BOBO_PROACTIVE_MODE", "off")

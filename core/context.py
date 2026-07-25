@@ -4,10 +4,54 @@ import re
 from typing import Optional
 
 
+# ── Token 估算（CJK 启发式，不引入 tiktoken 依赖）───────────────────
+
+def _estimate_tokens(messages: list) -> int:
+    """保守估算消息列表的 token 数。
+
+    CJK 字符（一-鿿, ぀-ヿ, 가-힯）按 1 token ≈ 1.5 字符；
+    其余字符按 1 token ≈ 4 字符。刻意偏保守（宁高估），保证不溢出。
+    """
+    total_chars = 0
+    cjk_chars = 0
+
+    for msg in messages:
+        text = str(msg)
+        for ch in text:
+            cp = ord(ch)
+            if (0x4E00 <= cp <= 0x9FFF or  # CJK Unified
+                0x3400 <= cp <= 0x4DBF or  # CJK Extension A
+                0x3040 <= cp <= 0x309F or  # Hiragana
+                0x30A0 <= cp <= 0x30FF or  # Katakana
+                0xAC00 <= cp <= 0xD7AF):    # Hangul
+                cjk_chars += 1
+            else:
+                total_chars += 1
+
+    total_chars += cjk_chars
+    # CJK: ~1.5 chars/token, non-CJK: ~4 chars/token
+    return int(cjk_chars / 1.5 + (total_chars - cjk_chars) / 4)
+
+
+def _get_context_budget(engine) -> int:
+    """返回当前模型的上下文预算（token 数）。
+
+    预算 = (context_length - max_tokens 预留) * BOBO_CONTEXT_BUDGET_RATIO
+    max_tokens 扣除上限不超过 context_length 的 50%（防止大 max_tokens 配小窗口时预算为 0）
+    """
+    import os
+    from core.provider import get_context_length
+
+    context_len = get_context_length()
+    raw_max_tokens = int(os.environ.get("BOBO_MAX_TOKENS", "8192"))
+    max_tokens = min(raw_max_tokens, int(context_len * 0.5))
+    ratio = float(os.environ.get("BOBO_CONTEXT_BUDGET_RATIO", "0.7"))
+    return max(int((context_len - max_tokens) * ratio), 1)  # 至少 1 token
+
+
 class ContextMixin:
     """为 Engine 提供上下文压缩和工具过滤能力。"""
 
-    MAX_HISTORY_CHARS = 80000
     MAX_HISTORY_MESSAGES = 200
     KEEP_EXCHANGES = 5
 
