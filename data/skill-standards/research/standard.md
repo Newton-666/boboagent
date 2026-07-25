@@ -1,6 +1,8 @@
 # Research Standard v1
 
 > keywords: 帮我查, 查一下, 搜一下, 调研, 搜索, 研究, 对比, 区别, vs, versus, 找一下, 有没有, search, research, look up, find, what is, how to, 怎么做, 怎么用, 什么意思, 和哪个好, 选哪个
+> excludes: 修, bug, 报错, 崩溃, error, 网页, 设计, 配色
+> requires: note-taking
 > Bobo 在做任何信息搜集/调研任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：

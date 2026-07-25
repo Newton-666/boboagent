@@ -1,6 +1,8 @@
 # Code Fix Standard v1
 
 > keywords: bug, 修复, 报错, error, fix, debug, 崩溃, crash, 改代码, 修改, 出问题, 不工作, 失败, failed, broken, traceback, stack trace, panic, exception, 异常, 改一下, 修一下
+> excludes: 样式, 配色, 设计, 布局, UI, 界面, 前端, 网页, 落地页, 美观, 好看
+> requires: git-workflow
 > Bobo 在做任何代码修复/调试任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：
