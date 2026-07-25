@@ -162,10 +162,9 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                         if not choices:
                             continue
                         delta = choices[0].get("delta", {})
-                        # reasoning_content 只推 TUI 作为保活信号，不存入对话历史
-                        reasoning = delta.get("reasoning_content", "")
-                        if reasoning and stream_callback:
-                            stream_callback(reasoning)
+                        # reasoning_content 不存入对话历史，也不通过 stream_callback 推 TUI
+                        # （否则会作为回复正文显示在对话中，造成"思考过程泄漏"）。
+                        # reasoning 模型的思考阶段 TUI 通过流式保活心跳感知，不在此处理。
                         content = delta.get("content", "")
                         if content:
                             full_content += content
