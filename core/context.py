@@ -33,7 +33,7 @@ def _estimate_tokens(messages: list) -> int:
     return int(cjk_chars / 1.5 + (total_chars - cjk_chars) / 4)
 
 
-def _get_context_budget(engine) -> int:
+def _get_context_budget(_engine=None) -> int:
     """返回当前模型的上下文预算（token 数）。
 
     预算 = (context_length - max_tokens 预留) * BOBO_CONTEXT_BUDGET_RATIO
@@ -53,7 +53,7 @@ class ContextMixin:
     """为 Engine 提供上下文压缩和工具过滤能力。"""
 
     MAX_HISTORY_MESSAGES = 200
-    KEEP_EXCHANGES = 5
+    KEEP_EXCHANGES = 10  # 最近 10 条消息完整保留，不参与压缩
 
     TOOL_CATEGORIES = {
         "general": [

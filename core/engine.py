@@ -885,10 +885,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 break
 
     def _truncate_history(self):
-        """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。
-
-        与 _compress_history 的切点逻辑一致：不在 tool_calls/tool 配对中间切断。
-        """
+        """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。"""
         user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
         target_first = len(self.history) - self.MAX_HISTORY_MESSAGES
         split = target_first
@@ -900,11 +897,48 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         while (split < len(self.history) and
                self.history[split].get("role") == "tool"):
             split += 1
-        # 如果保留下来的第一段以 tool 消息开头（孤儿），跳过它们
-        while (split < len(self.history) and
-               self.history[split].get("role") == "tool"):
-            split += 1
         self.history = self.history[split:]
+
+    def _retroactive_mark(self):
+        """追溯标记：扫描 10 轮以前 >500 字符且未标记的工具结果，补做 [RESULT] 标记。
+
+        复用 _maybe_mark_result 的现有管线（原子写入 + 标记替换）。
+        已被标记过的短结果自然跳过——每轮扫描的实际工作量是递减的。
+        """
+        from core.tool_runner import _build_result_summary
+        import hashlib, json as _mj
+        round_num = self.current_tool_round
+        # 找到最近 10 轮的位置（从后数第 10 个 tool 消息之前）
+        tool_positions = [i for i, m in enumerate(self.history) if m.get("role") == "tool"]
+        if len(tool_positions) < 10:
+            return
+        cutoff = tool_positions[-10]  # 最近 10 个 tool 消息之前的才扫描
+        for idx in range(cutoff):
+            msg = self.history[idx]
+            if msg.get("role") != "tool":
+                continue
+            content = msg.get("content", "")
+            if not content or len(content) < 500 or content.startswith("[RESULT]"):
+                continue
+            # 构造假 tool_name 和 args 用于生成 marker
+            marker_id = f"retro_{idx}_{hashlib.sha256(content.encode()).hexdigest()[:8]}"
+            summary = _build_result_summary("tool", content)
+            os.makedirs(self.WORKSPACE_DIR, exist_ok=True)
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=self.WORKSPACE_DIR, suffix='.json', prefix='.rs_')
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    _mj.dump({"tool": "tool", "args": "{}", "content": content}, f, ensure_ascii=False)
+                import shutil
+                shutil.move(tmp, os.path.join(self.WORKSPACE_DIR, f"{marker_id}.json"))
+                self.history[idx]["content"] = (
+                    f"[RESULT] tool\n  → {summary}\n  → id: {marker_id}, {len(content)} chars"
+                )
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
 
     def _call_llm(self) -> Tuple[str, list]:
 
@@ -945,7 +979,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 and self.state != self.STATE_EXECUTING):
             from core.context import _estimate_tokens, _get_context_budget
             est_tokens = _estimate_tokens(self.history)
-            budget = _get_context_budget(self)
+            budget = _get_context_budget()
+            # 追溯标记：估算超预算 50% 时扫描历史，给老工具结果补 [RESULT] 标记
+            if est_tokens > budget * 0.5:
+                self._retroactive_mark()
             if est_tokens > budget:
                 self._notify("thinking", {"phase": "compressing", "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {budget}）"})
                 self._compress_history()

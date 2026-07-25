@@ -554,23 +554,27 @@ def handle_config_set(params: dict, rid: str) -> dict:
                         break
                 if not found_p:
                     lines.append(f"BOBO_PROVIDER={prov}\n")
-            # 自动写入 provider 特定的默认参数（如 reasoning 模型 temperature=1.0）
-            # 必须在 _write_atomic 之前追加到 lines，确保持久化到 .env 文件
+            # 同步 provider 特定的默认参数到 .env + os.environ。
+            # 新 provider 有默认值 → 写入；没有 → 移除旧值（防 sticky 温度/token 残留）。
             from core.provider import get_provider as _get_prov
             _active_prov = _get_prov(prov if provider_match else "deepseek")
-            if _active_prov:
-                for _pkey, _envkey in [("temperature", "BOBO_TEMPERATURE"), ("max_tokens", "BOBO_MAX_TOKENS")]:
-                    _pval = _active_prov.get(_pkey)
-                    if _pval and not os.environ.get(_envkey):
-                        _found = False
-                        for _i, _line in enumerate(lines):
-                            if _line.strip().startswith(f"{_envkey}="):
-                                lines[_i] = f"{_envkey}={_pval}\n"
-                                _found = True
-                                break
-                        if not _found:
-                            lines.append(f"{_envkey}={_pval}\n")
-                        os.environ[_envkey] = str(_pval)
+            for _pkey, _envkey in [("temperature", "BOBO_TEMPERATURE"), ("max_tokens", "BOBO_MAX_TOKENS")]:
+                _pval = _active_prov.get(_pkey) if _active_prov else None
+                if _pval:
+                    # 写入/更新
+                    _found = False
+                    for _i, _line in enumerate(lines):
+                        if _line.strip().startswith(f"{_envkey}="):
+                            lines[_i] = f"{_envkey}={_pval}\n"
+                            _found = True
+                            break
+                    if not _found:
+                        lines.append(f"{_envkey}={_pval}\n")
+                    os.environ[_envkey] = str(_pval)
+                else:
+                    # 新 provider 无此默认 → 移除旧行 + 清理 os.environ
+                    lines = [_l for _l in lines if not _l.strip().startswith(f"{_envkey}=")]
+                    os.environ.pop(_envkey, None)
             _write_atomic(env_path, "".join(lines))
             # 热生效：更新基础 env vars + 清缓存
             os.environ["API_MODEL_NAME"] = model_name

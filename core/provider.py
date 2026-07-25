@@ -103,10 +103,14 @@ def resolve_provider(provider_name: str = None, env_file: str = None) -> dict:
         if name.startswith("custom:"):
             provider = get_provider("custom")
     if not provider:
-        name = "deepseek"
-        provider = get_provider("deepseek")
-        if not provider:
-            raise ValueError("Default provider 'deepseek' not found in registry")
+        # 未知 provider → 用 128k 保守窗口（避免 DeepSeek 1M 窗口导致溢出）
+        return {
+            "name": name,
+            "api_key": os.environ.get("CUSTOM_API_KEY", ""),
+            "base_url": os.environ.get("API_BASE_URL", ""),
+            "model": os.environ.get("API_MODEL_NAME", ""),
+            "context_length": 128000,
+        }
 
     env_key = provider["env_key"]
     api_key = os.environ.get(env_key, "") if env_key else ""
