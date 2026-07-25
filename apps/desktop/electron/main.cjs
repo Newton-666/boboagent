@@ -50,6 +50,7 @@ function startBackend() {
     BOBO_BACKEND: '1',
     PYTHONPATH: projectRoot,
     BOBO_CWD: process.cwd(),
+    BOBO_DATA_DIR: process.env.BOBO_DATA_DIR || path.join(require('os').homedir(), '.bobo'),
   }
 
   console.log(`[bobo-desktop] Starting backend: ${python} -m bobo_tui_gateway.entry`)

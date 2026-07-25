@@ -279,7 +279,10 @@ class ToolRunnerMixin:
             tc, tool_name, tool_args = future_map[future]
             start_time = time.time()
             try:
-                result = future.result(timeout=30)
+                # P1.1: 对齐 tool_executor 的每工具超时表
+                _per_tool_timeout = {"spawn_worker": 310, "execute_terminal": 120}
+                _tool_timeout = _per_tool_timeout.get(tool_name, 30)
+                result = future.result(timeout=_tool_timeout)
             except Exception as e:
                 error_detail = str(e)
                 # 根据异常类型给出更有用的提示
