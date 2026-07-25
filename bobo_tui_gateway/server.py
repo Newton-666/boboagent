@@ -36,13 +36,12 @@ _confirm_lock = threading.Lock()
 _CONTEXT_LENGTH = int(os.environ.get("CONTEXT_LENGTH", "0"))
 
 def _get_context_length() -> int:
-    """返回当前 provider 的上下文长度。优先使用环境变量覆盖。"""
+    """返回当前 model 的上下文长度（先查 model_context，再 provider，最后 128k 兜底）。"""
     if _CONTEXT_LENGTH:
         return _CONTEXT_LENGTH
     try:
-        from core.provider import resolve_provider
-        cfg = resolve_provider()
-        return cfg.get("context_length", 128000)
+        from core.provider import get_context_length
+        return get_context_length()
     except Exception:
         return 128000
 

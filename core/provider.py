@@ -54,9 +54,10 @@ PROVIDERS = {
         "env_key": "MOONSHOT_API_KEY",
         "base_url": "https://api.moonshot.cn/v1/chat/completions",
         "models": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code-highspeed"],
-        "context_length": 1048576,
-        "temperature": 1.0,  # kimi-k3 强制要求 temperature=1
-        "max_tokens": 32768,  # reasoning 模型需要更大 token 预算
+        "context_length": 1048576,  # k3=1M
+        "model_context": {"kimi-k2.6": 262144, "kimi-k2.7-code-highspeed": 262144},
+        "temperature": 1.0,
+        "max_tokens": 32768,
     },
     "custom": {
         "name": "Custom",
@@ -117,10 +118,36 @@ def resolve_provider(provider_name: str = None, env_file: str = None) -> dict:
     if not model and provider["models"]:
         model = provider["models"][0]
 
+    # 每模型上下文窗口：model_context[model] → provider context_length → 128k 兜底
+    model_ctx = (provider.get("model_context") or {}).get(model)
+    context_len = model_ctx or provider.get("context_length", 128000)
+
     return {
         "name": name,
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
-        "context_length": provider.get("context_length", 128000),
+        "context_length": context_len,
     }
+
+
+def get_context_length(provider_name: str = None, model_name: str = None) -> int:
+    """返回当前 provider/model 组合的上下文窗口大小（token 数）。
+    优先 BOBO_CONTEXT_LENGTH 环境变量覆盖，其次每模型配置，最后 provider 默认。
+    """
+    import os
+    env_override = os.environ.get("BOBO_CONTEXT_LENGTH", "")
+    if env_override:
+        try:
+            return int(env_override)
+        except ValueError:
+            pass
+    cfg = resolve_provider(provider_name)
+    # 如果指定了 model_name，再查一次 model_context（resolve_provider 已用 os.environ 中的 model）
+    if model_name and cfg.get("model") != model_name:
+        provider = get_provider(cfg["name"])
+        if provider:
+            model_ctx = (provider.get("model_context") or {}).get(model_name)
+            if model_ctx:
+                return model_ctx
+    return cfg.get("context_length", 128000)

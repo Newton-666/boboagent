@@ -727,7 +727,7 @@ class ToolRunnerMixin:
         try:
             from config import BOBO_CONTEXT_MARKING, BOBO_CONTEXT_MARKING_MIN_CHARS
         except ImportError:
-            BOBO_CONTEXT_MARKING, BOBO_CONTEXT_MARKING_MIN_CHARS = True, 2000
+            BOBO_CONTEXT_MARKING, BOBO_CONTEXT_MARKING_MIN_CHARS = True, 500
         if not BOBO_CONTEXT_MARKING:
             return raw_result
         if len(raw_result) < BOBO_CONTEXT_MARKING_MIN_CHARS:
