@@ -773,6 +773,95 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             return []
 
+    # ── Pattern Tracker：自动 skill 发现 ──────────────────────────────
+
+    def _pattern_tracker_path(self) -> str:
+        try:
+            from config import BOBO_DATA_DIR
+            return str(BOBO_DATA_DIR / "pattern_tracker.json")
+        except Exception:
+            return ""
+
+    def _load_patterns(self) -> dict:
+        path = self._pattern_tracker_path()
+        if not path or not os.path.exists(path):
+            return {"patterns": {}}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"patterns": {}}
+
+    def _save_patterns(self, data: dict):
+        path = self._pattern_tracker_path()
+        if not path:
+            return
+        import tempfile, shutil as _sh
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix='.tmp', prefix='.pt_')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            _sh.move(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
+    def _record_tool_pattern(self, tool_names: list):
+        """记录本轮工具调用序列模式。≥2 个不同工具才算模式。"""
+        if not tool_names or len(tool_names) < 2:
+            return
+        # 去重但保持首次出现顺序
+        seen = set()
+        unique = []
+        for t in tool_names:
+            if t not in seen:
+                seen.add(t)
+                unique.append(t)
+        if len(unique) < 2:
+            return
+        sig = " → ".join(unique)
+        data = self._load_patterns()
+        entry = data.setdefault("patterns", {}).get(sig, {
+            "count": 0, "first_seen": None, "last_seen": None,
+            "example_topics": [], "proposed": False,
+        })
+        entry["count"] += 1
+        today = time.strftime("%Y-%m-%d")
+        entry["last_seen"] = today
+        if not entry.get("first_seen"):
+            entry["first_seen"] = today
+        if self.current_user_input and len(entry.get("example_topics", [])) < 5:
+            topic = self.current_user_input[:80]
+            if topic not in entry["example_topics"]:
+                entry.setdefault("example_topics", []).append(topic)
+        data["patterns"][sig] = entry
+        self._save_patterns(data)
+
+    def _maybe_propose_skill(self):
+        """检查是否有 >=3 次的未提议模式，注入提议到对话历史。一次只提议一个。"""
+        data = self._load_patterns()
+        for sig, entry in data.get("patterns", {}).items():
+            if entry.get("count", 0) >= 3 and not entry.get("proposed"):
+                count = entry["count"]
+                examples = "、".join(entry.get("example_topics", [])[:3] or ["相关任务"])
+                proposal = (
+                    f"[Bobo 注意到] 我观察到你最近 {count} 次对话中"
+                    + f"重复了相似的操作流程：\n"
+                    + f"  {sig}\n"
+                    + f"  例子：{examples}\n\n"
+                    + f"这看起来像一个可复用的工作流。要不要我把它保存为一个 skill？"
+                    + f"以后你说对应的触发词我就会自动按这个流程来执行。\n"
+                    + f"回复“好”来创建，或“不用”来跳过。"
+                )
+                self._append_to_history("system", proposal)
+                entry["proposed"] = True
+                data["patterns"][sig] = entry
+                self._save_patterns(data)
+                break
+
     def _call_llm(self) -> Tuple[str, list]:
 
         # 阶段交接清理：在当前 LLM 调用前清理上一阶段的上下文
@@ -1395,6 +1484,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 self._file_last_step[fpath] = self.current_depth
                         except Exception:
                             pass
+            # 记录本轮工具调用模式（pattern tracker — 自动 skill 发现）
+            if self._pending_tool_calls:
+                round_names = [tc.get("function", {}).get("name", "")
+                              for tc in self._pending_tool_calls
+                              if tc.get("function", {}).get("name")]
+                self._record_tool_pattern(round_names)
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
             self._pending_tool_calls = None
@@ -1431,6 +1526,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         _save(data)
                         except Exception:
                             pass
+                # 自动 skill 发现：检查候选模式并主动提议
+                if self._proactive_mode != "off":
+                    self._maybe_propose_skill()
                 content = self._format_final_output(self._pending_content)
                 self._notify("complete", {"content": content, "usage": self._last_usage})
             else:
