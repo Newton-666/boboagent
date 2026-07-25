@@ -30,3 +30,61 @@ jobs:
         env:
           DEEPSEEK_API_KEY: "sk-test-placeholder"
           OBSIDIAN_VAULT: "/tmp"
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install .
+      - name: Smoke test — first-run setup + tool registration
+        run: |
+          export BOBO_DATA_DIR=$(mktemp -d)
+          mkdir -p "$BOBO_DATA_DIR"
+          export DEEPSEEK_API_KEY="sk-test-placeholder"
+
+          # 验证工具注册数（防循环 import / 语法错误类静默丢工具）
+          TOOL_COUNT=$(python3 -c "
+          import os, sys
+          os.environ['BOBO_DATA_DIR'] = '$BOBO_DATA_DIR'
+          os.environ['DEEPSEEK_API_KEY'] = 'sk-test'
+          sys.path.insert(0, '.')
+          from tools import TOOLS_SCHEMA
+          print(len(TOOLS_SCHEMA))
+          " 2>/dev/null)
+          echo "Tool count: $TOOL_COUNT"
+          if [ "$TOOL_COUNT" -lt 79 ]; then
+            echo "FAIL: tool count $TOOL_COUNT < 79 (possible import error)"
+            exit 1
+          fi
+          echo "PASS: tool count $TOOL_COUNT >= 79"
+
+          # 验证 setup.submit 不会因为 BOBO_DATA_DIR 未定义而崩溃
+          python3 -c "
+          import os, sys, json
+          os.environ['BOBO_DATA_DIR'] = '$BOBO_DATA_DIR'
+          os.environ['DEEPSEEK_API_KEY'] = 'sk-test-setup'
+          sys.path.insert(0, '.')
+          from bobo_tui_gateway.server import handle_setup_submit
+          result = handle_setup_submit(
+              {'provider': 'deepseek', 'api_key': 'sk-test-12345'}, 'test_rid'
+          )
+          data = result.get('result', {})
+          ok = data.get('ok', False)
+          print(f'setup.submit ok={ok}')
+          assert ok, f'setup.submit failed: {data}'
+          print('PASS: setup.submit works')
+
+          # 验证 .env 确实被写入
+          env_path = os.path.join('$BOBO_DATA_DIR', '.env')
+          assert os.path.exists(env_path), f'.env not created at {env_path}'
+          with open(env_path) as f:
+              content = f.read()
+          assert 'DEEPSEEK_API_KEY=sk-test-12345' in content, f'.env missing key'
+          print('PASS: .env written correctly')
+          "
+          echo "=== SMOKE TEST PASSED ==="
