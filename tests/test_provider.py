@@ -12,7 +12,7 @@ class TestGetProvider:
         cfg = get_provider("deepseek")
         assert cfg is not None
         assert cfg["env_key"] == "DEEPSEEK_API_KEY"
-        assert "deepseek-chat" in cfg["models"]
+        assert "deepseek-v4-pro" in cfg["models"]
         assert cfg["context_length"] == 1_000_000
 
     def test_known_provider_openai(self):
@@ -73,7 +73,7 @@ class TestResolveProvider:
         assert result["name"] == "deepseek"
         assert result["api_key"] == ""  # no key set
         assert "deepseek.com" in result["base_url"]
-        assert result["model"] == "deepseek-chat"
+        assert result["model"] == "deepseek-v4-pro"
 
     def test_explicit_name_overrides_env(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
