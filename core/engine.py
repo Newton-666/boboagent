@@ -1112,8 +1112,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
             return error_msg, []
         self._last_usage = response.get("usage", {})
         content, tool_calls = self._extract_response(response)
-        content = self._remove_emojis(content)
-        return content, tool_calls
+        content = self._remove_emojis(content or "")
+        return content or "", tool_calls
 
     def _append_to_history(self, role: str, content: str = None,
                            tool_calls: list = None, tool_results: list = None):
@@ -1346,8 +1346,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if isinstance(response, dict):
                 choice = response.get("choices", [{}])[0]
                 message = choice.get("message", {})
-                content = message.get("content", "")
-                tool_calls = message.get("tool_calls", [])
+                content = message.get("content") or ""  # 处理 API 返回 content: null
+                tool_calls = message.get("tool_calls") or []
                 return content, tool_calls
             if hasattr(response, 'choices') and response.choices:
                 message = response.choices[0].message
