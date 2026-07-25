@@ -555,19 +555,28 @@ def handle_config_set(params: dict, rid: str) -> dict:
                         break
                 if not found_p:
                     lines.append(f"BOBO_PROVIDER={prov}\n")
+            # 自动写入 provider 特定的默认参数（如 reasoning 模型 temperature=1.0）
+            # 必须在 _write_atomic 之前追加到 lines，确保持久化到 .env 文件
+            from core.provider import get_provider as _get_prov
+            _active_prov = _get_prov(prov if provider_match else "deepseek")
+            if _active_prov:
+                for _pkey, _envkey in [("temperature", "BOBO_TEMPERATURE"), ("max_tokens", "BOBO_MAX_TOKENS")]:
+                    _pval = _active_prov.get(_pkey)
+                    if _pval and not os.environ.get(_envkey):
+                        _found = False
+                        for _i, _line in enumerate(lines):
+                            if _line.strip().startswith(f"{_envkey}="):
+                                lines[_i] = f"{_envkey}={_pval}\n"
+                                _found = True
+                                break
+                        if not _found:
+                            lines.append(f"{_envkey}={_pval}\n")
+                        os.environ[_envkey] = str(_pval)
             _write_atomic(env_path, "".join(lines))
-            # 热生效：更新 os.environ + 清缓存（下一回合用新模型）
+            # 热生效：更新基础 env vars + 清缓存
             os.environ["API_MODEL_NAME"] = model_name
             if provider_match:
                 os.environ["BOBO_PROVIDER"] = prov
-            # 自动应用 provider 特定的默认参数（如 reasoning 模型需要 temperature=1.0）
-            from core.provider import get_provider as _get_prov
-            _active_prov = _get_prov(os.environ.get("BOBO_PROVIDER", "deepseek"))
-            if _active_prov:
-                if _active_prov.get("temperature") and not os.environ.get("BOBO_TEMPERATURE"):
-                    os.environ["BOBO_TEMPERATURE"] = str(_active_prov["temperature"])
-                if _active_prov.get("max_tokens") and not os.environ.get("BOBO_MAX_TOKENS"):
-                    os.environ["BOBO_MAX_TOKENS"] = str(_active_prov["max_tokens"])
             _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
             # 清除 config.py 的 provider 缓存（必须设为 None，空 dict 不触发重新解析）
             try:
