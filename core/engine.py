@@ -676,7 +676,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         自动发现：往 data/skill-standards/ 下新增一个文件夹、放入 standard.md 即生效。
         不需要改任何代码、不需要注册、不需要更新索引。
-        每个 standard.md 通过 keywords 行声明自己的触发词。
+
+        每个 standard.md 通过元数据行声明自己的行为：
+        - keywords: 触发词（逗号分隔）
+        - excludes: 排除词（话题含这些词时跳过本 skill）
+        - requires: 依赖 skill 名（本 skill 注入时连带加载）
         """
         try:
             import os as _os
@@ -688,25 +692,54 @@ class Engine(ContextMixin, ToolRunnerMixin):
             user_msgs = [m.get("content", "") for m in self.history[-4:]
                          if m.get("role") == "user" and m.get("content")]
             topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
-            matches = []
+
+            # 第一遍：加载所有 skill 的元数据（不评分）
+            entries = {}  # entry_name -> {content, trigger_words, exclude_words, requires}
             for entry in _os.listdir(std_dir):
                 path = _os.path.join(std_dir, entry, "standard.md")
                 if not _os.path.isfile(path):
                     continue
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # 提取 standard.md 的 keywords 行
-                kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
-                trigger_words = [w.strip().lower() for w in (kw_match.group(1).split(",") if kw_match else [])]
+                # keywords
+                kw = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
+                trigger_words = [w.strip().lower() for w in (kw.group(1).split(",") if kw else [])]
                 if not trigger_words:
-                    # 无 keywords 行 → 用文件夹名和第一行标题兜底
                     trigger_words = (entry + " " + content.split("\n")[0]).lower().split()
-                # 评分：话题中包含几个触发词
-                score = sum(1 for tw in trigger_words if tw and tw in topic)
+                # excludes（可选）
+                ex = _sre.search(r'excludes:\s*(.+)', content, _sre.IGNORECASE)
+                exclude_words = [w.strip().lower() for w in (ex.group(1).split(",") if ex else [])]
+                # requires（可选）
+                req = _sre.search(r'requires:\s*(.+)', content, _sre.IGNORECASE)
+                require_names = [w.strip() for w in (req.group(1).split(",") if req else [])]
+                entries[entry] = {
+                    "content": content,
+                    "trigger_words": trigger_words,
+                    "exclude_words": exclude_words,
+                    "require_names": require_names,
+                }
+
+            # 第二遍：评分 + 排除过滤
+            scored = []
+            for name, info in entries.items():
+                if info["exclude_words"] and any(ew in topic for ew in info["exclude_words"]):
+                    continue
+                score = sum(1 for tw in info["trigger_words"] if tw and tw in topic)
                 if score > 0:
-                    matches.append((score, content))
-            matches.sort(key=lambda x: x[0], reverse=True)
-            return [content for _, content in matches[:3]]  # 最多 3 个最相关的标准
+                    scored.append((score, name))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_names = [name for _, name in scored[:3]]
+            top_set = set(top_names)
+
+            # 解析 requires：连带加载依赖 skill（跳过 excludes 检查——被拉进来的不受排除影响）
+            for name in list(top_names):
+                for req_name in entries.get(name, {}).get("require_names", []):
+                    if req_name not in top_set and req_name in entries:
+                        top_set.add(req_name)
+                        top_names.append(req_name)
+
+            return [entries[name]["content"] for name in top_names]
         except Exception:
             return []
 

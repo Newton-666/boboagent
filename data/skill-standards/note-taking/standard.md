@@ -1,6 +1,8 @@
 # Note Taking Standard v1
 
 > keywords: 记下来, 保存, 笔记, 记录, 写入, 追加, Obsidian, 备忘录, 存档, 存一下, 帮我记, 记住这个, save, note, write, append
+> excludes: 代码, bug, 修复, error, 编译, 报错, 崩溃
+> requires: git-workflow
 > Bobo 在做任何笔记写入/记录任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：
