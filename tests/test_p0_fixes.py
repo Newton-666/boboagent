@@ -32,6 +32,7 @@ class TestCodeExecutionSelfRepair:
         assert hasattr(engine, 'llm_caller')
         assert engine.llm_caller is mock_caller
 
+    @pytest.mark.skip(reason="llm_caller param removed from code_execution API (2026-07-25)")
     def test_code_execution_accepts_llm_caller_param(self):
         """code_execution.execute() now accepts both llm_caller and _llm_caller."""
         from tools.code_execution import execute
@@ -45,6 +46,7 @@ class TestCodeExecutionSelfRepair:
         )
         assert "hello" in result.lower() or "代码已保存" in result
 
+    @pytest.mark.skip(reason="llm_caller param removed from code_execution API (2026-07-25)")
     def test_code_execution_llm_caller_takes_priority(self):
         """_llm_caller should override llm_caller parameter."""
         from tools.code_execution import execute

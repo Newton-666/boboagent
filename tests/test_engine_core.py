@@ -43,7 +43,8 @@ class TestEngineBasicFlow:
         caller = MockLLMCaller(tool_calls)
         engine = Engine(caller, execute_tool, test_mode=True)
         engine.run("loop forever")
-        assert engine.state == Engine.STATE_ERROR
+        # 2026-07-25: MAX_STEPS 耗尽后引擎强制 STATE_RESPONDING 生成回复，不再 STATE_ERROR
+        assert engine.state == Engine.STATE_RESPONDING
 
     def test_history_preserved_across_multiple_runs(self):
         caller = MockLLMCaller([

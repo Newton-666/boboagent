@@ -95,12 +95,16 @@ class TestSessionList:
         assert len(sessions) <= 2
 
     def test_list_sorted_most_recent_first(self, mgr):
-        mgr.new_session("Older")
-        import time
-        time.sleep(0.1)
-        mgr.new_session("Newer")
+        import os as _os
+        sid1 = mgr.new_session("Older")
+        sid2 = mgr.new_session("Newer")  # 同秒创建，mtime 相同
+        # 显式设置 mtime 差，消除同秒排序不确定性
+        f1 = mgr.session_dir / f"{sid1}.json"
+        f2 = mgr.session_dir / f"{sid2}.json"
+        st = _os.stat(f1)
+        _os.utime(f1, (st.st_atime, st.st_mtime - 10))  # Older: 10s earlier
+        _os.utime(f2, (st.st_atime, st.st_mtime))        # Newer: now
         sessions = mgr.list_sessions(limit=10)
-        # Most recent first
         assert sessions[0]["title"] == "Newer"
 
 

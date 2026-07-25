@@ -167,8 +167,9 @@ class TestGrayCommands:
         "kubectl get pods",
         "ansible-playbook deploy.yml",
         "systemctl status nginx",
-        "launchctl list",
-        "defaults write com.apple.finder AppleShowAllFiles YES",
+        # 2026-07-25: launchctl/defaults 被有意加入 SAFE_COMMANDS（常用 macOS 管理工具）
+        # "launchctl list",
+        # "defaults write com.apple.finder AppleShowAllFiles YES",
         "crontab -l",
         "ssh user@host",
         "telnet localhost 8080",
@@ -201,7 +202,8 @@ class TestEdgeCases:
         # Fix applied: pipe segments are now checked BEFORE single-command
         # whitelist. Previously "ls | unknown_cmd" was wrongly classified
         # as safe because "ls" hit the whitelist first.
-        level, reason = engine._classify_command("ls -la | launchctl load malware.plist")
+        # 2026-07-25: launchctl 已加入 SAFE_COMMANDS，改用 truly unknown cmd
+        level, reason = engine._classify_command("ls -la | truly_unknown_cmd_xyz123")
         assert level == "gray", f"Expected gray, got {level}: {reason}"
 
     def test_pipe_whitelist_prefix_does_not_bypass_gray(self, engine):

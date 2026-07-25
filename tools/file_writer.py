@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
-from .obsidian_tools import _normalize_path, _path_denied_message
+from tools.obsidian_tools import _normalize_path, _path_denied_message
 
 # ============================================================
 # 辅助函数

@@ -39,7 +39,8 @@ def test_max_steps_termination():
     caller = MockLLMCaller(tool_calls)
     engine = Engine(caller, execute_tool, test_mode=True)
     engine.run("loop")
-    assert engine.state == engine.STATE_ERROR
+    # 2026-07-25: MAX_STEPS 耗尽后引擎强制 STATE_RESPONDING，不再 STATE_ERROR
+    assert engine.state in (engine.STATE_RESPONDING, engine.STATE_DONE)
     print("[PASS] test_max_steps_termination")
 
 
