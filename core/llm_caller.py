@@ -101,6 +101,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
         }
 
         last_error = None
+        response = None  # 防止 except 块中 UnboundLocalError（P0.2）
 
         for attempt in range(MAX_RETRIES + 1):
             try:
@@ -198,7 +199,9 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     last_error = {"error": message, "error_type": error_type, "retryable": True}
                     continue
                 else:
-                    detail = response.text[:500].strip()
+                    detail = ""
+                    if response is not None:
+                        detail = response.text[:500].strip()
                     detailed_msg = f"{message} — {detail}" if detail else message
                     return {
                         "error": detailed_msg,
