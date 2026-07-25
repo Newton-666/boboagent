@@ -24,6 +24,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("OBSIDIAN_VAULT", str(vault))
     monkeypatch.setenv("BOBO_DATA_DIR", str(data))
+    # 2026-07-25: BOBO_DATA_DIR 被多个模块 import 为本地常量，需逐模块 patch
+    import config as _cfg
+    monkeypatch.setattr(_cfg, "BOBO_DATA_DIR", data)
+    import core.tool_runner as _tr
+    monkeypatch.setattr(_tr, "BOBO_DATA_DIR", data)
     return {"home": home, "trash": trash, "vault": vault, "data": data}
 
 
