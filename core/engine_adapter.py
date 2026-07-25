@@ -188,12 +188,16 @@ def run_engine(
 
         save_session_to_disk(sid)
 
-        if engine.state != engine.STATE_ERROR:
-            emit("message.complete", sid, {
-                "session_id": sid,
-                "final_text": result_text[0],
-                "usage": last_usage[0],
-            })
+        # 无论成功或失败，都要发射 message.complete 给 TUI。
+        # 此前 STATE_ERROR 时跳过了这个事件，TUI 的回合生命周期依赖
+        # message.complete / error / interrupt 三者之一来解除 busy 状态。
+        # gateway.error 事件在 Hermes fork 的 TUI 中没有处理器，被丢弃，
+        # 导致 busy 永不解锁 → Bobo 用户看到的"不回复"其实是 TUI 死锁。
+        emit("message.complete", sid, {
+            "session_id": sid,
+            "final_text": result_text[0],
+            "usage": last_usage[0],
+        })
 
     except Exception as e:
         import logging
