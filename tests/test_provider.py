@@ -104,10 +104,10 @@ class TestResolveProvider:
         result = resolve_provider(provider_name="deepseek")
         assert result["api_key"] == "sk-mytestkey123"
 
-    def test_fallback_to_deepseek_on_unknown(self, monkeypatch):
+    def test_fallback_uses_conservative_window(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "some_unknown_provider")
         result = resolve_provider()
-        assert result["name"] == "deepseek"  # fallback
+        assert result["context_length"] == 128000  # 未知 provider 保守 128k
 
     def test_custom_provider_prefix(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "custom:myproxy")

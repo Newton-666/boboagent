@@ -164,6 +164,7 @@ class TestHistoryCompression:
         assert len(engine.history) == 2
 
     def test_compression_flag_is_set_during_compression(self, engine):
+        engine.KEEP_EXCHANGES = 5  # 显式设回旧值兼容本测试
         engine.MAX_HISTORY_CHARS = 100
         # Create enough history to trigger compression
         for i in range(10):
