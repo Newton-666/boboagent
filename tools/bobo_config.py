@@ -8,7 +8,8 @@ TOOL_NAME = "bobo_config"
 
 def execute(action: str = "view", key: str = "", value: str = "") -> str:
     """View or modify Bobo configuration."""
-    env_path = os.path.expanduser("~/.bobo/.env")
+    from config import BOBO_DATA_DIR
+    env_path = str(BOBO_DATA_DIR / ".env")
 
     if action == "view":
         # Read current config from environment

@@ -552,7 +552,20 @@ def handle_config_set(params: dict, rid: str) -> dict:
                 if not found_p:
                     lines.append(f"BOBO_PROVIDER={prov}\n")
             _write_atomic(env_path, "".join(lines))
-            return _ok(rid, {"value": model_name, "saved": True})
+            # 热生效：更新 os.environ + 清缓存（下一回合用新模型）
+            os.environ["API_MODEL_NAME"] = model_name
+            if provider_match:
+                os.environ["BOBO_PROVIDER"] = prov
+            _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
+            # 清除 config.py 的 provider 缓存
+            try:
+                import config as _cfg
+                if hasattr(_cfg, '_provider_cache'):
+                    _cfg._provider_cache = {}
+            except Exception:
+                pass
+            return _ok(rid, {"value": model_name, "saved": True,
+                             "note": "已生效，下一回合将使用新模型"})
         except Exception as e:
             return _ok(rid, {"value": value, "error": str(e)})
     return _ok(rid, {"value": value})

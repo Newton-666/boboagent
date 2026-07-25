@@ -79,11 +79,15 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
     def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None):
+        # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
+        import os as _os
+        _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
+        _max_tokens = int(_os.environ.get("BOBO_MAX_TOKENS", "8192"))
         payload = {
             "model": model_name,
             "messages": messages,
-            "temperature": 0.3,
-            "max_tokens": 8192,
+            "temperature": _temperature,
+            "max_tokens": _max_tokens,
         }
         # 如果调用方传了 tools_override，用它替换默认的 tools_schema
         active_tools = tools_override if tools_override is not None else tools_schema
@@ -158,6 +162,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                         if not choices:
                             continue
                         delta = choices[0].get("delta", {})
+                        # reasoning_content 只推 TUI 作为保活信号，不存入对话历史
+                        reasoning = delta.get("reasoning_content", "")
+                        if reasoning and stream_callback:
+                            stream_callback(reasoning)
                         content = delta.get("content", "")
                         if content:
                             full_content += content

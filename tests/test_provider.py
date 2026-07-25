@@ -53,7 +53,7 @@ class TestListProviders:
         assert "google" in providers
         assert "ollama" in providers
         assert "custom" in providers
-        assert len(providers) == 7
+        assert len(providers) == 8  # deepseek, openai, anthropic, openrouter, google, ollama, moonshot, custom
 
     def test_returns_list(self):
         assert isinstance(list_providers(), list)
