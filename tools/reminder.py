@@ -87,11 +87,9 @@ def list_reminders() -> str:
         snapshot = list(_active_reminders)
     if not snapshot:
         return "📭 当前没有活跃的提醒"
-    result = f"📋 活跃提醒 ({len(snapshot)}个):
-"
+    result = f"📋 活跃提醒 ({len(snapshot)}个):\n"
     for i, r in enumerate(snapshot, 1):
-        result += f"  {i}. {r['message']}
-"
+        result += f"  {i}. {r['message']}\n"
     return result
 
 _check = lambda: __import__('sys').platform == 'darwin'

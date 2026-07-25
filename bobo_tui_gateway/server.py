@@ -17,6 +17,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from bobo_tui_gateway.transport import write_json
+from config import BOBO_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
