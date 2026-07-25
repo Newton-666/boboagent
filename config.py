@@ -5,12 +5,18 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 所有 Bobo 运行时数据统一放在项目仓库的 data/ 目录下
-# （之前分散在 ~/.bobo 和 ~/.bobo_v2 两个地方）
-# 可通过 BOBO_DATA_DIR 环境变量覆盖
+# Bobo 运行时数据目录。可通过 BOBO_DATA_DIR 环境变量覆盖。
+# 开发模式（仓库根目录有 data/）→ 使用仓库内 data/
+# pip 安装 / 桌面应用 → 使用 ~/.bobo（防止数据写入 site-packages 或 .app 包内）
 _BOBO_REPO_ROOT = Path(__file__).resolve().parent
-_DEFAULT_DATA_DIR = _BOBO_REPO_ROOT / "data"
-BOBO_DATA_DIR = Path(os.environ.get("BOBO_DATA_DIR", str(_DEFAULT_DATA_DIR)))
+_REPO_DATA = _BOBO_REPO_ROOT / "data"
+if os.environ.get("BOBO_DATA_DIR"):
+    _DEFAULT_DATA_DIR = Path(os.environ["BOBO_DATA_DIR"])
+elif _REPO_DATA.is_dir():
+    _DEFAULT_DATA_DIR = _REPO_DATA  # 开发模式：仓库内 data/
+else:
+    _DEFAULT_DATA_DIR = Path.home() / ".bobo"  # pip/桌面模式：用户目录
+BOBO_DATA_DIR = _DEFAULT_DATA_DIR
 BOBO_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # .env 文件路径
