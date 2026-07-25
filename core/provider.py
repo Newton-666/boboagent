@@ -43,6 +43,12 @@ PROVIDERS = {
         "models": ["llama3", "mistral", "qwen2.5"],
         "context_length": 32768,
     },
+    "moonshot": {
+        "env_key": "MOONSHOT_API_KEY",
+        "base_url": "https://api.moonshot.cn/v1/chat/completions",
+        "models": ["kimi-k2", "kimi-latest", "kimi-k2-thinking"],
+        "context_length": 262144,  # 256k，不是 1M
+    },
     "custom": {
         "env_key": "CUSTOM_API_KEY",
         "base_url": "",  # Must be set by user

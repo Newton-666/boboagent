@@ -1419,12 +1419,23 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 # 填充之后保存，确保首个修改轮次的文件也能回退（审计 #17）
                 self.state = self.STATE_EXECUTING
             else:
-                # flash model sometimes returns empty — retry once
-                if not content and not self._pending_tool_calls and self.current_depth < 2:
-                    self._pending_content = None
-                    self._pending_tool_calls = None
-                    self.current_depth += 1
-                    self.state = self.STATE_THINKING  # retry
+                # 空响应处理：flash model / reasoning 模型 token 耗尽 → 重试一次
+                if not content and not self._pending_tool_calls:
+                    if self.current_depth < 2:
+                        self._pending_content = None
+                        self._pending_tool_calls = None
+                        self.current_depth += 1
+                        self.state = self.STATE_THINKING  # retry
+                    else:
+                        # 重试后仍然空 → 明确报错，不静默结束
+                        err_msg = (
+                            "模型返回了空响应。可能原因：\n"
+                            "  - reasoning 模型的思考过程耗尽了 max_tokens（可调高 BOBO_MAX_TOKENS 环境变量）\n"
+                            "  - temperature 设置与模型要求不匹配（reasoning 模型通常需要 temperature=1.0，可设置 BOBO_TEMPERATURE）\n"
+                            "  - API 暂时异常"
+                        )
+                        self._pending_content = err_msg
+                        self.state = self.STATE_RESPONDING
                 # 检查是否需要验证：LLM 声称完成但没有使用任何工具
                 elif content and self._needs_verification(content) and not self._verification_attempted:
                     self._verification_attempted = True
