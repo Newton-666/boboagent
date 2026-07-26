@@ -1,6 +1,6 @@
-import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
+import { AlternateScreen, Box, invalidatePrevFrame, NoSelect, ScrollBox, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
-import { Fragment, memo, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useMemo, useRef } from 'react'
 
 import { useGateway } from '../app/gatewayContext.js'
 import type { AppLayoutProps } from '../app/interfaces.js'
@@ -182,9 +182,6 @@ const ComposerPane = memo(function ComposerPane({
   const inputColumns = stableComposerColumns(composer.cols, promptWidth, TERMUX_TUI_MODE)
   const inputHeight = inputVisualHeight(composer.input, inputColumns)
   const inputMouseRef = useRef<null | TextInputMouseApi>(null)
-  // IME 残影修复: 每次输入事件递增计数器，伴随的 state 更新触发 composer 区域
-  // React reconciler 重渲染，从而迫使 ink diff 重绘这些行，清除 OS IME 残留字符
-  const [imeTick, setImeTick] = useState(0)
 
   const captureInputDrag = (e: GutterMouseEvent) => {
     if (e.button !== 0) {
@@ -259,8 +256,7 @@ const ComposerPane = memo(function ComposerPane({
 
       <StatusRulePane at="top" composer={composer} status={status} />
 
-      {/* IME 残影修复: key 随输入变化，强制 React 卸载+重建子树 → ink 全量重绘 */}
-      <Box key={imeTick} flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
+      <Box flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
         <FloatingOverlays
           cols={composer.cols}
           compIdx={composer.compIdx}
@@ -314,7 +310,7 @@ const ComposerPane = memo(function ComposerPane({
                 <TextInput
                   columns={inputColumns}
                   mouseApiRef={inputMouseRef}
-                  onChange={(v: string) => { setImeTick(t => t + 1); composer.updateInput(v) }}
+                  onChange={(v: string) => { composer.updateInput(v); invalidatePrevFrame() }}
                   onPaste={composer.handleTextPaste}
                   onSubmit={composer.submit}
                   placeholder={composer.empty ? PLACEHOLDER : ui.busy ? 'Ctrl+C to interrupt…' : ''}

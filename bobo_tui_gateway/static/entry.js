@@ -44898,7 +44898,7 @@ async function createRoot({
     waitUntilExit: () => instance.waitUntilExit()
   };
 }
-var forceRedraw, renderSync, wrappedRender, root_default2, getOptions, getInstance;
+var forceRedraw, invalidatePrevFrame, renderSync, wrappedRender, root_default2, getOptions, getInstance;
 var init_root2 = __esm({
   "packages/hermes-ink/src/ink/root.ts"() {
     "use strict";
@@ -44911,6 +44911,14 @@ var init_root2 = __esm({
         return false;
       }
       instance.forceRedraw();
+      return true;
+    };
+    invalidatePrevFrame = (stdout = process.stdout) => {
+      const instance = instances_default.get(stdout);
+      if (!instance) {
+        return false;
+      }
+      instance.invalidatePrevFrame();
       return true;
     };
     renderSync = (node, options) => {
@@ -54915,6 +54923,7 @@ __export(entry_exports_exports, {
   createRoot: () => createRoot,
   evictInkCaches: () => evictInkCaches,
   forceRedraw: () => forceRedraw,
+  invalidatePrevFrame: () => invalidatePrevFrame,
   isXtermJs: () => isXtermJs,
   measureElement: () => measure_element_default,
   render: () => root_default2,
@@ -72318,7 +72327,6 @@ var init_appLayout = __esm({
       const inputColumns = stableComposerColumns(composer.cols, promptWidth, TERMUX_TUI_MODE);
       const inputHeight = inputVisualHeight(composer.input, inputColumns);
       const inputMouseRef = (0, import_react100.useRef)(null);
-      const [imeTick, setImeTick] = (0, import_react100.useState)(0);
       const captureInputDrag = (e) => {
         if (e.button !== 0) {
           return;
@@ -72413,8 +72421,8 @@ var init_appLayout = __esm({
                           columns: inputColumns,
                           mouseApiRef: inputMouseRef,
                           onChange: (v) => {
-                            setImeTick((t) => t + 1);
                             composer.updateInput(v);
+                            invalidatePrevFrame();
                           },
                           onPaste: composer.handleTextPaste,
                           onSubmit: composer.submit,
@@ -72428,7 +72436,7 @@ var init_appLayout = __esm({
                   }
                 )
               ] })
-            ] }, imeTick),
+            ] }),
             !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
               "\u2695 ",
               ui.status
