@@ -10462,13 +10462,6 @@ var init_dom = __esm({
       return node;
     };
     appendChildNode = (node, childNode) => {
-      if (childNode.style?.position === "absolute" || childNode.style?.borderStyle) {
-        try {
-          __require("node:fs").appendFileSync(`/tmp/ap_${process.pid}.log`, `[AP] parent=${node.nodeName} child=${childNode.nodeName} pos=${childNode.style?.position ?? "-"} border=${childNode.style?.borderStyle ?? "-"} parentKids=${node.childNodes.length}
-`);
-        } catch {
-        }
-      }
       if (childNode.parentNode) {
         removeChildNode(childNode.parentNode, childNode);
       }
@@ -37756,24 +37749,6 @@ function renderNodeToOutput(node, output, {
     if (y < 0 && node.style.position === "absolute") {
       y = 0;
     }
-    if (node.style.borderStyle) {
-      try {
-        __require("node:fs").appendFileSync(`/tmp/border_${process.pid}.log`, `[BORDER] x=${x} y=${y} w=${width} h=${height} pos=${node.style.position ?? "rel"} kids=${node.childNodes.length}
-`);
-      } catch {
-      }
-    }
-    if (node.style.position === "absolute") {
-      try {
-        const kids = node.childNodes.length;
-        const first = node.childNodes[0];
-        const fb = first?.style?.borderStyle ?? "-";
-        const fk = first?.childNodes?.length ?? -1;
-        __require("node:fs").appendFileSync(`/tmp/abs_${process.pid}.log`, `[ABS] x=${x} y=${y} w=${width} h=${height} dirty=${node.dirty} kids=${kids} firstBorder=${fb} firstKids=${fk}
-`);
-      } catch {
-      }
-    }
     const cached = nodeCache.get(node);
     if (!node.dirty && !skipSelfBlit && node.pendingScrollDelta === void 0 && cached && cached.x === x && cached.y === y && cached.width === width && cached.height === height && prevScreen) {
       const fx = Math.floor(x);
@@ -42995,18 +42970,9 @@ function createRenderer(node, stylePool) {
     resetScrollHint();
     resetScrollDrainNode();
     const absoluteRemoved = consumeAbsoluteRemovedFlag();
-    try {
-      render_node_to_output_default(node, output, {
-        prevScreen: absoluteRemoved || options.prevFrameContaminated ? void 0 : prevScreen
-      });
-    } catch (e) {
-      try {
-        __require("node:fs").appendFileSync(`/tmp/render_err_${process.pid}.log`, `${e?.stack ?? e}
-`);
-      } catch {
-      }
-      throw e;
-    }
+    render_node_to_output_default(node, output, {
+      prevScreen: absoluteRemoved || options.prevFrameContaminated ? void 0 : prevScreen
+    });
     const renderedScreen = output.get();
     const drainNode = getScrollDrainNode();
     if (drainNode) {
@@ -55664,10 +55630,12 @@ var init_theme = __esm({
         statusBad: "#FF8C00",
         statusCritical: "#FF6B6B",
         selectionBg: "#3a3a55",
-        diffAdded: "rgb(220,255,220)",
-        diffRemoved: "rgb(255,220,220)",
-        diffAddedWord: "rgb(36,138,61)",
-        diffRemovedWord: "rgb(207,34,46)",
+        diffAdded: "rgb(18,56,36)",
+        diffRemoved: "rgb(56,18,18)",
+        diffAddedWord: "rgb(120,220,140)",
+        diffRemovedWord: "rgb(240,140,140)",
+        diffAddedEmpty: "rgb(10,36,22)",
+        diffRemovedEmpty: "rgb(36,12,12)",
         shellDollar: "#4dabf7"
       },
       brand: BRAND,
@@ -55699,8 +55667,12 @@ var init_theme = __esm({
         statusBad: "#D84315",
         statusCritical: "#B71C1C",
         selectionBg: "#D4E4F7",
-        diffAdded: "rgb(200,240,200)",
-        diffRemoved: "rgb(240,200,200)",
+        diffAdded: "rgb(18,56,36)",
+        diffRemoved: "rgb(56,18,18)",
+        diffAddedWord: "rgb(120,220,140)",
+        diffRemovedWord: "rgb(240,140,140)",
+        diffAddedEmpty: "rgb(10,36,22)",
+        diffRemovedEmpty: "rgb(36,12,12)",
         diffAddedWord: "rgb(27,94,32)",
         diffRemovedWord: "rgb(183,28,28)",
         shellDollar: "#1565C0"
@@ -57675,13 +57647,7 @@ var init_overlayStore = __esm({
       )
     );
     getOverlayState = () => $overlayState.get();
-    patchOverlayState = (next) => {
-      try {
-        __require("node:fs").appendFileSync(`/tmp/ov_${process.pid}.log`, JSON.stringify(typeof next === "function" ? "fn" : next) + "\n");
-      } catch {
-      }
-      $overlayState.set(typeof next === "function" ? next($overlayState.get()) : { ...$overlayState.get(), ...next });
-    };
+    patchOverlayState = (next) => $overlayState.set(typeof next === "function" ? next($overlayState.get()) : { ...$overlayState.get(), ...next });
     resetFlowOverlays = () => $overlayState.set({
       ...buildOverlayState(),
       agents: $overlayState.get().agents,
@@ -60575,11 +60541,6 @@ var init_session = __esm({
         run: (arg, ctx) => {
           if (ctx.session.guardBusySessionSwitch("change models")) {
             return;
-          }
-          try {
-            __require("node:fs").appendFileSync(`/tmp/slash_${process.pid}.log`, `model run arg=${JSON.stringify(arg)}
-`);
-          } catch {
           }
           if (!arg.trim()) {
             return patchOverlayState({ modelPicker: true });
@@ -65638,11 +65599,6 @@ function StatusRule({
   ] });
 }
 function FloatBox({ children, color }) {
-  try {
-    __require("node:fs").appendFileSync(`/tmp/fb_${process.pid}.log`, `FloatBox render
-`);
-  } catch {
-  }
   return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
     Box_default,
     {
@@ -68515,18 +68471,13 @@ function FloatingOverlays({
   const overlay = useStore($overlayState);
   const sid = useStore($uiSessionId);
   const theme = useStore($uiTheme);
-  try {
-    __require("node:fs").appendFileSync(`/tmp/fo_${process.pid}.log`, `render modelPicker=${overlay.modelPicker} sessions=${overlay.sessions} comps=${completions.length}
-`);
-  } catch {
-  }
   const hasAny = overlay.modelPicker || overlay.pager || overlay.sessions || overlay.skillsHub || overlay.pluginsHub || completions.length;
   if (!hasAny) {
     return null;
   }
   const viewportSize = Math.min(COMPLETION_WINDOW, completions.length);
   const start = Math.max(0, Math.min(compIdx - Math.floor(COMPLETION_WINDOW / 2), completions.length - viewportSize));
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", width: "100%", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: [
     overlay.sessions && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
       ActiveSessionSwitcher,
       {
@@ -70392,31 +70343,68 @@ function MdImpl({ cols, compact, t, text }) {
         start("code");
         const isDiff = lang === "diff";
         const highlighted = !isDiff && isHighlightable(lang);
-        nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Box_default, { flexDirection: "column", paddingLeft: 2, children: [
-            lang && !isDiff && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: "\u2500 " + lang }),
-            block.map((l, j) => {
-              if (highlighted) {
-                return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: highlightLine(l, lang, t).map(
-                  ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: text2 }, kk)
-                ) }, j);
+        if (isDiff) {
+          const diffLang = void 0;
+          let oldLine = 0, newLine = 0;
+          const diffRows = [];
+          for (const l of block) {
+            const hdrMatch = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+            if (hdrMatch) {
+              oldLine = parseInt(hdrMatch[1], 10);
+              newLine = parseInt(hdrMatch[2], 10);
+              diffRows.push({ type: "hdr", oldN: 0, newN: 0, text: l, empty: false });
+            } else if (l.startsWith("+") || l.startsWith(">")) {
+              const text2 = l.slice(1);
+              diffRows.push({ type: "add", oldN: 0, newN: newLine++, text: text2, empty: !text2.trim() });
+            } else if (l.startsWith("-") || l.startsWith("<")) {
+              const text2 = l.slice(1);
+              diffRows.push({ type: "del", oldN: oldLine++, newN: 0, text: text2, empty: !text2.trim() });
+            } else if (l.startsWith(" ")) {
+              const text2 = l.slice(1);
+              diffRows.push({ type: "ctx", oldN: oldLine++, newN: newLine++, text: text2, empty: false });
+            }
+          }
+          const maxLine = Math.max(...diffRows.map((r) => Math.max(r.oldN || 0, r.newN || 0)), 1);
+          const gutterW = String(maxLine).length;
+          nodes2.push(
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", children: diffRows.map((row, j) => {
+              if (row.type === "hdr") {
+                return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: row.text }, j);
               }
-              const add = isDiff && l.startsWith("+");
-              const del = isDiff && l.startsWith("-");
-              const hunk = isDiff && l.startsWith("@@");
-              return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
-                Text,
-                {
-                  backgroundColor: add ? t.color.diffAdded : del ? t.color.diffRemoved : void 0,
-                  color: add ? t.color.diffAddedWord : del ? t.color.diffRemovedWord : hunk ? t.color.muted : void 0,
-                  dimColor: isDiff && !add && !del && !hunk && l.startsWith(" "),
-                  children: l
-                },
-                j
-              );
-            })
-          ] }, key)
-        );
+              const bg = row.type === "add" ? row.empty ? t.color.diffAddedEmpty : t.color.diffAdded : row.type === "del" ? row.empty ? t.color.diffRemovedEmpty : t.color.diffRemoved : void 0;
+              const fg = row.type === "add" ? t.color.diffAddedWord : row.type === "del" ? t.color.diffRemovedWord : void 0;
+              const num = row.type === "del" ? row.oldN : row.newN;
+              const sign = row.type === "add" ? "+" : row.type === "del" ? "-" : " ";
+              const numStr = String(num).padStart(gutterW);
+              const codeColor = row.type === "ctx" ? t.color.muted : void 0;
+              return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Box_default, { width: "100%", backgroundColor: bg, flexDirection: "row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: codeColor || fg || t.color.muted, children: [
+                  numStr,
+                  " ",
+                  sign,
+                  " "
+                ] }),
+                highlighted && diffLang ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: highlightLine(row.text, diffLang, t).map(
+                  ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: fg || void 0, children: text2 }, kk)
+                ) }) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: fg || codeColor, children: row.text })
+              ] }, j);
+            }) }, key)
+          );
+        } else {
+          nodes2.push(
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Box_default, { flexDirection: "column", paddingLeft: 2, children: [
+              lang && !isDiff && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: "\u2500 " + lang }),
+              block.map((l, j) => {
+                if (highlighted) {
+                  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: highlightLine(l, lang, t).map(
+                    ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: text2 }, kk)
+                  ) }, j);
+                }
+                return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: l }, j);
+              })
+            ] }, key)
+          );
+        }
         continue;
       }
       const mathOpen = line.match(MATH_BLOCK_OPEN_RE);
@@ -72461,7 +72449,6 @@ var init_appLayout = __esm({
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.label, children: "\u21B3 " }),
               status.stickyPrompt
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: 1, onMouseDown: captureInputDrag, onMouseDrag: dragFromSpacer, onMouseUp: endInputDrag }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "top", composer, status }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", marginTop: ui.statusBar === "top" ? 0 : 1, position: "relative", children: [
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
@@ -72515,14 +72502,14 @@ var init_appLayout = __esm({
                     ]
                   }
                 )
-              ] })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
             ] }),
             !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
               "\u2695 ",
               ui.status
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status }),
-            composer.cols >= 40 && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status })
           ]
         }
       );
@@ -72550,30 +72537,33 @@ var init_appLayout = __esm({
       if (ui.statusBar !== at) {
         return null;
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { marginTop: at === "top" ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
-        StatusRule,
-        {
-          bgCount: ui.bgTasks.size,
-          busy: ui.busy,
-          cols: composer.cols,
-          cwdLabel: status.cwdLabel,
-          indicatorStyle: ui.indicatorStyle,
-          liveSessionCount: ui.liveSessionCount,
-          model: ui.info?.model ?? "",
-          modelFast: ui.info?.fast || ui.info?.service_tier === "priority",
-          modelReasoningEffort: ui.info?.reasoning_effort,
-          notice: ui.notice,
-          onSessionCountClick: () => patchOverlayState({ sessions: true }),
-          sessionStartedAt: status.sessionStartedAt,
-          showCost: ui.showCost,
-          status: ui.status,
-          statusColor: status.statusColor,
-          t: ui.theme,
-          turnStartedAt: status.turnStartedAt,
-          usage: ui.usage,
-          voiceLabel: status.voiceLabel
-        }
-      ) });
+      return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(import_jsx_runtime39.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { marginTop: at === "top" ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+          StatusRule,
+          {
+            bgCount: ui.bgTasks.size,
+            busy: ui.busy,
+            cols: composer.cols,
+            cwdLabel: status.cwdLabel,
+            indicatorStyle: ui.indicatorStyle,
+            liveSessionCount: ui.liveSessionCount,
+            model: ui.info?.model ?? "",
+            modelFast: ui.info?.fast || ui.info?.service_tier === "priority",
+            modelReasoningEffort: ui.info?.reasoning_effort,
+            notice: ui.notice,
+            onSessionCountClick: () => patchOverlayState({ sessions: true }),
+            sessionStartedAt: status.sessionStartedAt,
+            showCost: ui.showCost,
+            status: ui.status,
+            statusColor: status.statusColor,
+            t: ui.theme,
+            turnStartedAt: status.turnStartedAt,
+            usage: ui.usage,
+            voiceLabel: status.voiceLabel
+          }
+        ) }),
+        at === "top" && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+      ] });
     });
     AppLayout = (0, import_react100.memo)(function AppLayout2({
       actions,
