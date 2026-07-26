@@ -61,9 +61,9 @@ fi
 # ── 3. Install ───────────────────────────────────────────────────────
 echo "正在安装 bobo-agent ..."
 
-# Collect pip output to diagnose failures (not everything is "network")
 PIP_LOG=$(mktemp)
 PIP_FAILED=false
+VENV_INSTALLED=false  # 标记是否为 venv 安装（跳过通用 PATH 警告）
 
 # Try: user-site first (handles PEP 668 EXTERNALLY-MANAGED)
 $PYTHON -m pip install --user --quiet git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1 || PIP_FAILED=true
@@ -72,7 +72,9 @@ if $PIP_FAILED; then
     # If --user failed, try pipx
     if command -v pipx &>/dev/null; then
         echo "  --user 失败，尝试 pipx ..."
-        pipx install git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1 || PIP_FAILED=true
+        if pipx install git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
+            PIP_FAILED=false
+        fi
     fi
 fi
 
@@ -82,12 +84,12 @@ if $PIP_FAILED; then
     VENV_DIR="$HOME/.bobo/venv"
     $PYTHON -m venv "$VENV_DIR" 2>/dev/null || true
     if [ -f "$VENV_DIR/bin/python" ]; then
-        "$VENV_DIR/bin/python" -m pip install --quiet git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1 && PIP_FAILED=false
-        if ! $PIP_FAILED; then
+        if "$VENV_DIR/bin/python" -m pip install --quiet git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
+            PIP_FAILED=false
+            VENV_INSTALLED=true
             echo -e "${GREEN}✓${NC} 已安装到 $VENV_DIR"
             echo ""
-            echo -e "  ${YELLOW}注意：bobo 在 venv 中，需先激活或使用完整路径：${NC}"
-            echo "    $VENV_DIR/bin/bobo"
+            echo -e "  启动: ${CYAN}$VENV_DIR/bin/bobo${NC}"
             echo ""
             echo "  添加 alias（推荐）："
             echo "    echo 'alias bobo=\"$VENV_DIR/bin/bobo\"' >> ~/.zshrc && source ~/.zshrc"
@@ -122,23 +124,26 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║     安装完成！                      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
-echo "  启动 Bobo:"
-if $BOBO_OK; then
+
+if $VENV_INSTALLED; then
+    # venv 安装：已在上面给出 alias 引导，不重复 PATH 警告
+    :
+elif $BOBO_OK; then
+    echo "  启动 Bobo:"
     echo -e "    ${CYAN}bobo${NC}"
 else
-    echo -e "    ${YELLOW}bobo 命令不在 PATH 上。${NC}"
-    # Try to find where pip installed it
-    BOBO_PATH=$($PYTHON -c "import shutil; p=shutil.which('bobo'); print(p) if p else print('')" 2>/dev/null || echo "")
-    if [ -n "$BOBO_PATH" ]; then
+    echo -e "  ${YELLOW}bobo 命令不在 PATH 上。${NC}"
+    # 从 Python user-site 推导 bobo 安装位置
+    USER_BIN=$($PYTHON -c "import sysconfig; print(sysconfig.get_path('scripts', 'posix_user'))" 2>/dev/null || echo "")
+    if [ -n "$USER_BIN" ] && [ -f "$USER_BIN/bobo" ]; then
+        BOBO_PATH="$USER_BIN/bobo"
         echo "    已找到: $BOBO_PATH"
         echo ""
         echo "    添加 PATH（推荐）："
-        echo "      echo 'export PATH=\"$(dirname "$BOBO_PATH"):\$PATH\"' >> ~/.zshrc"
+        echo "      echo 'export PATH=\"$USER_BIN:\$PATH\"' >> ~/.zshrc"
         echo "      source ~/.zshrc"
-        echo ""
-        echo "    或直接运行: $BOBO_PATH"
     else
-        echo "    尝试查找: find ~/Library/Python -name bobo 2>/dev/null"
+        echo "    尝试查找: find ~/Library/Python ~/.local -name bobo 2>/dev/null"
         echo "    找到后将所在目录加入 PATH"
     fi
 fi
