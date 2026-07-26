@@ -1251,6 +1251,25 @@ export default class Ink {
     this.prevFrameContaminated = true
   }
 
+  /** 帧缓存清零 + 下一帧全量重写，但不擦屏（不闪）。
+   *  forceRedraw 附带的 ERASE_SCREEN 会闪屏，不能每个按键用；
+   *  invalidatePrevFrame 的 damage 标记在 diffEach 里不影响逐格跳过。
+   *  这个是两者的精确交集：reset 帧缓存 → diff 引擎看到"全变" → 全量重写。 */
+  softRepaint(): void {
+    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) {
+      return
+    }
+
+    if (this.altScreenActive) {
+      this.resetFramesForAltScreen()
+    } else {
+      this.repaint()
+      this.prevFrameContaminated = true
+    }
+
+    this.onRender()
+  }
+
   /**
    * Called by the <AlternateScreen> component on mount/unmount.
    * Controls cursor.y clamping in the renderer and gates alt-screen-aware
