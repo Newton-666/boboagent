@@ -43888,6 +43888,22 @@ var init_ink = __esm({
       invalidatePrevFrame() {
         this.prevFrameContaminated = true;
       }
+      /** 帧缓存清零 + 下一帧全量重写，但不擦屏（不闪）。
+       *  forceRedraw 附带的 ERASE_SCREEN 会闪屏，不能每个按键用；
+       *  invalidatePrevFrame 的 damage 标记在 diffEach 里不影响逐格跳过。
+       *  这个是两者的精确交集：reset 帧缓存 → diff 引擎看到"全变" → 全量重写。 */
+      softRepaint() {
+        if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) {
+          return;
+        }
+        if (this.altScreenActive) {
+          this.resetFramesForAltScreen();
+        } else {
+          this.repaint();
+          this.prevFrameContaminated = true;
+        }
+        this.onRender();
+      }
       /**
        * Called by the <AlternateScreen> component on mount/unmount.
        * Controls cursor.y clamping in the renderer and gates alt-screen-aware
@@ -44898,7 +44914,7 @@ async function createRoot({
     waitUntilExit: () => instance.waitUntilExit()
   };
 }
-var forceRedraw, renderSync, wrappedRender, root_default2, getOptions, getInstance;
+var forceRedraw, softRepaint, invalidatePrevFrame, renderSync, wrappedRender, root_default2, getOptions, getInstance;
 var init_root2 = __esm({
   "packages/hermes-ink/src/ink/root.ts"() {
     "use strict";
@@ -44911,6 +44927,22 @@ var init_root2 = __esm({
         return false;
       }
       instance.forceRedraw();
+      return true;
+    };
+    softRepaint = (stdout = process.stdout) => {
+      const instance = instances_default.get(stdout);
+      if (!instance) {
+        return false;
+      }
+      instance.softRepaint();
+      return true;
+    };
+    invalidatePrevFrame = (stdout = process.stdout) => {
+      const instance = instances_default.get(stdout);
+      if (!instance) {
+        return false;
+      }
+      instance.invalidatePrevFrame();
       return true;
     };
     renderSync = (node, options) => {
@@ -54915,11 +54947,13 @@ __export(entry_exports_exports, {
   createRoot: () => createRoot,
   evictInkCaches: () => evictInkCaches,
   forceRedraw: () => forceRedraw,
+  invalidatePrevFrame: () => invalidatePrevFrame,
   isXtermJs: () => isXtermJs,
   measureElement: () => measure_element_default,
   render: () => root_default2,
   renderSync: () => renderSync,
   scrollFastPathStats: () => scrollFastPathStats,
+  softRepaint: () => softRepaint,
   stringWidth: () => stringWidth,
   useApp: () => use_app_default,
   useCursorAdvance: () => useCursorAdvance,
@@ -72372,6 +72406,7 @@ var init_appLayout = __esm({
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.label, children: "\u21B3 " }),
               status.stickyPrompt
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: 1, onMouseDown: captureInputDrag, onMouseDrag: dragFromSpacer, onMouseUp: endInputDrag }),
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "top", composer, status }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", marginTop: ui.statusBar === "top" ? 0 : 1, position: "relative", children: [
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
@@ -72410,7 +72445,10 @@ var init_appLayout = __esm({
                         {
                           columns: inputColumns,
                           mouseApiRef: inputMouseRef,
-                          onChange: composer.updateInput,
+                          onChange: (v) => {
+                            composer.updateInput(v);
+                            softRepaint();
+                          },
                           onPaste: composer.handleTextPaste,
                           onSubmit: composer.submit,
                           placeholder: composer.empty ? PLACEHOLDER : ui.busy ? "Ctrl+C to interrupt\u2026" : "",
@@ -72428,7 +72466,8 @@ var init_appLayout = __esm({
               "\u2695 ",
               ui.status
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status })
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status }),
+            composer.cols >= 40 && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
           ]
         }
       );
