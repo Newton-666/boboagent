@@ -86,8 +86,21 @@ def main():
         # SIG_IGN 会被 Node 子进程继承，导致 Apple Terminal 上中文 IME
         # 组合事件异常（光标跳、文字重叠、多换行）。preexec_fn 在子进程
         # exec 前恢复 SIGINT 为默认——父进程仍然忽略 Ctrl+C。
-        proc = subprocess.Popen(["node", str(tui_path)], env=env,
-                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        try:
+            proc = subprocess.Popen(["node", str(tui_path)], env=env,
+                                    preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        except FileNotFoundError:
+            print("=" * 60)
+            print("  未检测到 Node.js — Bobo TUI 依赖 Node.js 运行")
+            print("=" * 60)
+            print()
+            print("  macOS:  brew install node")
+            print("  Ubuntu: sudo apt install nodejs npm")
+            print("  或下载: https://nodejs.org")
+            print()
+            print("  安装 Node.js 后重新运行 bobo。")
+            print("=" * 60)
+            sys.exit(1)
         proc.wait()
         return
 
