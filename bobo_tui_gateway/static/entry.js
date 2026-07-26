@@ -72428,12 +72428,11 @@ var init_appLayout = __esm({
                   }
                 )
               ] })
-            ] }),
+            ] }, imeTick),
             !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
               "\u2695 ",
               ui.status
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: imeTick.current % 2 === 0 ? ui.theme.color.bg : ui.theme.color.bg, children: "\xA0" }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status }),
             composer.cols >= 40 && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
           ]
