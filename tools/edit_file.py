@@ -162,10 +162,38 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
     new_lines = new_content.count("\n") + 1
     backup_info = f"\n  备份: {BOBO_DATA_DIR}/trash/{backup_name}" if backup_name else ""
 
+    # ── 生成 inline diff（Claude Code 风格红绿对照）──
+    import difflib
+    diff_lines = list(difflib.unified_diff(
+        content.splitlines(keepends=True),
+        new_content.splitlines(keepends=True),
+        fromfile=str(path),
+        tofile=str(path),
+        lineterm="",
+    ))
+    diff_truncated = False
+    if len(diff_lines) > 40:
+        # 保留首尾各两个 hunk（约 20 行），中间截断
+        head = diff_lines[:20]
+        tail = diff_lines[-20:]
+        omitted = len(diff_lines) - 40
+        diff_lines = head + [f"... (省略 {omitted} 行)\n"] + tail
+        diff_truncated = True
+    added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+
+    diff_header = f"⎿  +{added} −{removed}"
+    if diff_truncated:
+        diff_header += f" (截断，共 {old_lines - new_lines:+d} 行变化)"
+    diff_text = diff_header + "\n" + "".join(diff_lines)
+
     return (
         f"已替换: {path}\n"
         f"  文件大小: {len(content)} → {len(new_content)} 字符\n"
-        f"  行数: {old_lines} → {new_lines} 行{backup_info}"
+        f"  行数: {old_lines} → {new_lines} 行{backup_info}\n"
+        f"<<<INLINE_DIFF>>>\n"
+        f"{diff_text}\n"
+        f"<<<END_INLINE_DIFF>>>"
     )
 
 

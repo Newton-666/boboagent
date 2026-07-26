@@ -70,12 +70,20 @@ def run_engine(
                 })
             elif event_type == "tool_result":
                 tool_output = data.get("result", "")
+                # 提取 inline diff（edit_file 附加在结果末尾的分隔块）
+                inline_diff = ""
+                if "<<<INLINE_DIFF>>>" in tool_output:
+                    tool_output, _, tail = tool_output.partition("<<<INLINE_DIFF>>>")
+                    inline_diff, _, _ = tail.partition("<<<END_INLINE_DIFF>>>")
+                    tool_output = tool_output.rstrip()
+                    inline_diff = inline_diff.strip()
                 emit("tool.complete", sid, {
                     "tool_id": data.get("name", ""),
                     "name": data.get("name", ""),
                     "arguments": data.get("args", {}),
                     "duration": data.get("duration", 0),
                     "result_text": tool_output,
+                    "inline_diff": inline_diff,
                     "error": "" if data.get("success", True) else (
                         tool_output[:200] if tool_output else "工具执行失败"
                     ),
