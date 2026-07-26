@@ -10462,6 +10462,13 @@ var init_dom = __esm({
       return node;
     };
     appendChildNode = (node, childNode) => {
+      if (childNode.style?.position === "absolute" || childNode.style?.borderStyle) {
+        try {
+          __require("node:fs").appendFileSync(`/tmp/ap_${process.pid}.log`, `[AP] parent=${node.nodeName} child=${childNode.nodeName} pos=${childNode.style?.position ?? "-"} border=${childNode.style?.borderStyle ?? "-"} parentKids=${node.childNodes.length}
+`);
+        } catch {
+        }
+      }
       if (childNode.parentNode) {
         removeChildNode(childNode.parentNode, childNode);
       }
@@ -37749,6 +37756,24 @@ function renderNodeToOutput(node, output, {
     if (y < 0 && node.style.position === "absolute") {
       y = 0;
     }
+    if (node.style.borderStyle) {
+      try {
+        __require("node:fs").appendFileSync(`/tmp/border_${process.pid}.log`, `[BORDER] x=${x} y=${y} w=${width} h=${height} pos=${node.style.position ?? "rel"} kids=${node.childNodes.length}
+`);
+      } catch {
+      }
+    }
+    if (node.style.position === "absolute") {
+      try {
+        const kids = node.childNodes.length;
+        const first = node.childNodes[0];
+        const fb = first?.style?.borderStyle ?? "-";
+        const fk = first?.childNodes?.length ?? -1;
+        __require("node:fs").appendFileSync(`/tmp/abs_${process.pid}.log`, `[ABS] x=${x} y=${y} w=${width} h=${height} dirty=${node.dirty} kids=${kids} firstBorder=${fb} firstKids=${fk}
+`);
+      } catch {
+      }
+    }
     const cached = nodeCache.get(node);
     if (!node.dirty && !skipSelfBlit && node.pendingScrollDelta === void 0 && cached && cached.x === x && cached.y === y && cached.width === width && cached.height === height && prevScreen) {
       const fx = Math.floor(x);
@@ -42970,9 +42995,18 @@ function createRenderer(node, stylePool) {
     resetScrollHint();
     resetScrollDrainNode();
     const absoluteRemoved = consumeAbsoluteRemovedFlag();
-    render_node_to_output_default(node, output, {
-      prevScreen: absoluteRemoved || options.prevFrameContaminated ? void 0 : prevScreen
-    });
+    try {
+      render_node_to_output_default(node, output, {
+        prevScreen: absoluteRemoved || options.prevFrameContaminated ? void 0 : prevScreen
+      });
+    } catch (e) {
+      try {
+        __require("node:fs").appendFileSync(`/tmp/render_err_${process.pid}.log`, `${e?.stack ?? e}
+`);
+      } catch {
+      }
+      throw e;
+    }
     const renderedScreen = output.get();
     const drainNode = getScrollDrainNode();
     if (drainNode) {
@@ -43902,7 +43936,7 @@ var init_ink = __esm({
           this.repaint();
           this.prevFrameContaminated = true;
         }
-        this.onRender();
+        this.scheduleRender();
       }
       /**
        * Called by the <AlternateScreen> component on mount/unmount.
@@ -57641,7 +57675,13 @@ var init_overlayStore = __esm({
       )
     );
     getOverlayState = () => $overlayState.get();
-    patchOverlayState = (next) => $overlayState.set(typeof next === "function" ? next($overlayState.get()) : { ...$overlayState.get(), ...next });
+    patchOverlayState = (next) => {
+      try {
+        __require("node:fs").appendFileSync(`/tmp/ov_${process.pid}.log`, JSON.stringify(typeof next === "function" ? "fn" : next) + "\n");
+      } catch {
+      }
+      $overlayState.set(typeof next === "function" ? next($overlayState.get()) : { ...$overlayState.get(), ...next });
+    };
     resetFlowOverlays = () => $overlayState.set({
       ...buildOverlayState(),
       agents: $overlayState.get().agents,
@@ -60535,6 +60575,11 @@ var init_session = __esm({
         run: (arg, ctx) => {
           if (ctx.session.guardBusySessionSwitch("change models")) {
             return;
+          }
+          try {
+            __require("node:fs").appendFileSync(`/tmp/slash_${process.pid}.log`, `model run arg=${JSON.stringify(arg)}
+`);
+          } catch {
           }
           if (!arg.trim()) {
             return patchOverlayState({ modelPicker: true });
@@ -65593,6 +65638,11 @@ function StatusRule({
   ] });
 }
 function FloatBox({ children, color }) {
+  try {
+    __require("node:fs").appendFileSync(`/tmp/fb_${process.pid}.log`, `FloatBox render
+`);
+  } catch {
+  }
   return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
     Box_default,
     {
@@ -68465,13 +68515,18 @@ function FloatingOverlays({
   const overlay = useStore($overlayState);
   const sid = useStore($uiSessionId);
   const theme = useStore($uiTheme);
+  try {
+    __require("node:fs").appendFileSync(`/tmp/fo_${process.pid}.log`, `render modelPicker=${overlay.modelPicker} sessions=${overlay.sessions} comps=${completions.length}
+`);
+  } catch {
+  }
   const hasAny = overlay.modelPicker || overlay.pager || overlay.sessions || overlay.skillsHub || overlay.pluginsHub || completions.length;
   if (!hasAny) {
     return null;
   }
   const viewportSize = Math.min(COMPLETION_WINDOW, completions.length);
   const start = Math.max(0, Math.min(compIdx - Math.floor(COMPLETION_WINDOW / 2), completions.length - viewportSize));
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", width: "100%", children: [
     overlay.sessions && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
       ActiveSessionSwitcher,
       {

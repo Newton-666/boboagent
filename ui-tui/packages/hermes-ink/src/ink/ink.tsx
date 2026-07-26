@@ -1267,7 +1267,10 @@ export default class Ink {
       this.prevFrameContaminated = true
     }
 
-    this.onRender()
+    // 用 scheduleRender（queueMicrotask）代替同步 onRender：
+    // 帧缓存已清零，下一帧全量重写。异步调度让 React overlay mount
+    // 先完成，避免 ModelPicker 弹窗在缓存清空后、mount 前被漏渲染。
+    this.scheduleRender()
   }
 
   /**
