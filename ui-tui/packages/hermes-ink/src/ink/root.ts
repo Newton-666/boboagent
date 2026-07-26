@@ -103,6 +103,19 @@ export const forceRedraw = (stdout: NodeJS.WriteStream = process.stdout): boolea
 
 /** 标记上一帧不可靠，下一帧做全量 diff（不清屏不闪屏）。
  *  用于清除 OS IME 在终端网格上残留的组合态字符。 */
+/** 帧缓存清零 + 全量重绘，不擦屏不闪屏。用于清除 OS IME 终端网格残留。 */
+export const softRepaint = (stdout: NodeJS.WriteStream = process.stdout): boolean => {
+  const instance = instances.get(stdout)
+
+  if (!instance) {
+    return false
+  }
+
+  instance.softRepaint()
+
+  return true
+}
+
 export const invalidatePrevFrame = (stdout: NodeJS.WriteStream = process.stdout): boolean => {
   const instance = instances.get(stdout)
 

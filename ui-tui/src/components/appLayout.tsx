@@ -1,4 +1,4 @@
-import { AlternateScreen, Box, invalidatePrevFrame, NoSelect, ScrollBox, Text } from '@hermes/ink'
+import { AlternateScreen, Box, NoSelect, ScrollBox, softRepaint, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { Fragment, memo, useMemo, useRef } from 'react'
 
@@ -310,7 +310,7 @@ const ComposerPane = memo(function ComposerPane({
                 <TextInput
                   columns={inputColumns}
                   mouseApiRef={inputMouseRef}
-                  onChange={(v: string) => { composer.updateInput(v); invalidatePrevFrame() }}
+                  onChange={(v: string) => { composer.updateInput(v); softRepaint() }}
                   onPaste={composer.handleTextPaste}
                   onSubmit={composer.submit}
                   placeholder={composer.empty ? PLACEHOLDER : ui.busy ? 'Ctrl+C to interrupt…' : ''}
