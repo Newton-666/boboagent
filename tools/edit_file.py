@@ -170,6 +170,8 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
         fromfile=str(path),
         tofile=str(path),
     ))
+    # 去掉 ---/+++ 路径行（前端渲染器会错误染色）
+    diff_lines = [l for l in diff_lines if not l.startswith("--- ") and not l.startswith("+++ ")]
     diff_truncated = False
     if len(diff_lines) > 40:
         # 保留首尾各两个 hunk（约 20 行），中间截断

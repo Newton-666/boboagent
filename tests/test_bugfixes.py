@@ -327,8 +327,8 @@ class TestEditFileContextAware:
         dash_count = sum(1 for l in lines if l.startswith("--- "))
         plus_count = sum(1 for l in lines if l.startswith("+++ "))
         at_count = sum(1 for l in lines if l.startswith("@@"))
-        assert dash_count == 1, f"Expected 1 '---' line, got {dash_count}"
-        assert plus_count == 1, f"Expected 1 '+++' line, got {plus_count}"
+        assert dash_count == 0, f"Should have 0 '---' lines, got {dash_count}"
+        assert plus_count == 0, f"Should have 0 '+++' lines, got {plus_count}"
         assert at_count >= 1, f"Expected >=1 '@@' hunk headers, got {at_count}"
 
         # Every @@ line must be at the start of its own line

@@ -40,19 +40,57 @@ def _get_file_hash(filepath: str) -> str:
     except Exception:
         return None
 
+def _generate_diff(old_lines: list[str], new_lines: list[str], file_path: str) -> str:
+    """生成 inline diff（去掉 ---/+++ 行，>40 行截断，与 edit_file 共享格式）。"""
+    import difflib
+    diff_lines = list(difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=file_path, tofile=file_path,
+    ))
+    # 去掉 ---/+++ 路径行（前端渲染器会错误染色）
+    diff_lines = [l for l in diff_lines if not l.startswith("--- ") and not l.startswith("+++ ")]
+    diff_truncated = False
+    if len(diff_lines) > 40:
+        head = diff_lines[:20]
+        tail = diff_lines[-20:]
+        omitted = len(diff_lines) - 40
+        diff_lines = head + [f"... (省略 {omitted} 行)\n"] + tail
+        diff_truncated = True
+    added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+    header = f"⎿  +{added} −{removed}"
+    if diff_truncated:
+        header += f" (截断)"
+    return f"<<<INLINE_DIFF>>>\n{header}\n{''.join(diff_lines)}<<<END_INLINE_DIFF>>>"
+
+
 def _write_single_file(path: str, content: str) -> str:
-    """写入单个文件（带自动备份）"""
+    """写入单个文件（带自动备份 + inline diff）"""
     full_path = os.path.expanduser(path)
     try:
-        # 写入前自动备份已有文件
+        old_content = ""
         if os.path.exists(full_path):
+            try:
+                old_content = open(full_path, 'r', encoding='utf-8').read()
+            except Exception:
+                pass  # 读旧内容失败不影响主流程
             _backup(full_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w', encoding='utf-8') as f:
             f.write(content)
         with _read_cache_lock:
             _read_cache.pop(full_path, None)
-        return f"已写入: {path}"
+
+        result = f"已写入: {path}"
+        # 生成 inline diff（覆盖/新建都支持）
+        try:
+            old_lines = old_content.splitlines(keepends=True) if old_content else []
+            new_lines = content.splitlines(keepends=True)
+            diff_block = _generate_diff(old_lines, new_lines, path)
+            result += "\n" + diff_block
+        except Exception:
+            pass
+        return result
     except Exception as e:
         return f"写入失败 {path}: {e}"
 

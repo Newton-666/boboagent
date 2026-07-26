@@ -750,6 +750,71 @@ function MdImpl({ cols, compact, t, text }: MdProps) {
         const isDiff = lang === 'diff'
         const highlighted = !isDiff && isHighlightable(lang)
 
+        if (isDiff) {
+          // Claude 风格 diff 渲染：行号 gutter + +/- 符号列 + 代码内容
+          const diffLang: string | undefined = undefined  // 暂无 fileExtensionToLanguage，后续可按 meta 推断
+          // 解析 hunk 头获取行号游标
+          let oldLine = 0, newLine = 0
+          const diffRows: { type: 'hdr' | 'add' | 'del' | 'ctx'; oldN: number; newN: number; text: string; empty: boolean }[] = []
+          for (const l of block) {
+            const hdrMatch = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/)
+            if (hdrMatch) {
+              oldLine = parseInt(hdrMatch[1]!, 10)
+              newLine = parseInt(hdrMatch[2]!, 10)
+              diffRows.push({ type: 'hdr', oldN: 0, newN: 0, text: l, empty: false })
+            } else if (l.startsWith('+') || l.startsWith('>')) {
+              const text = l.slice(1)
+              diffRows.push({ type: 'add', oldN: 0, newN: newLine++, text, empty: !text.trim() })
+            } else if (l.startsWith('-') || l.startsWith('<')) {
+              const text = l.slice(1)
+              diffRows.push({ type: 'del', oldN: oldLine++, newN: 0, text, empty: !text.trim() })
+            } else if (l.startsWith(' ')) {
+              const text = l.slice(1)
+              diffRows.push({ type: 'ctx', oldN: oldLine++, newN: newLine++, text, empty: false })
+            }
+          }
+          const maxLine = Math.max(...diffRows.map(r => Math.max(r.oldN || 0, r.newN || 0)), 1)
+          const gutterW = String(maxLine).length
+
+          nodes.push(
+            <Box flexDirection="column" key={key}>
+              {diffRows.map((row, j) => {
+                if (row.type === 'hdr') {
+                  return <Text color={t.color.muted} key={j}>{row.text}</Text>
+                }
+                const bg = row.type === 'add'
+                  ? (row.empty ? t.color.diffAddedEmpty : t.color.diffAdded)
+                  : row.type === 'del'
+                  ? (row.empty ? t.color.diffRemovedEmpty : t.color.diffRemoved)
+                  : undefined
+                const fg = row.type === 'add' ? t.color.diffAddedWord
+                  : row.type === 'del' ? t.color.diffRemovedWord
+                  : undefined
+                const num = row.type === 'del' ? row.oldN : row.newN
+                const sign = row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '
+                const numStr = String(num).padStart(gutterW)
+                const codeColor = row.type === 'ctx' ? t.color.muted : undefined
+
+                return (
+                  <Box key={j} width="100%" backgroundColor={bg} flexDirection="row">
+                    <Text color={codeColor || fg || t.color.muted}>{numStr} {sign} </Text>
+                    {highlighted && diffLang ? (
+                      <Text>
+                        {highlightLine(row.text, diffLang, t).map(([color, text], kk) =>
+                          color ? <Text color={color} key={kk}>{text}</Text>
+                                : <Text color={fg || undefined} key={kk}>{text}</Text>
+                        )}
+                      </Text>
+                    ) : (
+                      <Text color={fg || codeColor}>{row.text}</Text>
+                    )}
+                  </Box>
+                )
+              })}
+            </Box>
+          )
+        } else {
+
         nodes.push(
           <Box flexDirection="column" key={key} paddingLeft={2}>
             {lang && !isDiff && <Text color={t.color.muted}>{'─ ' + lang}</Text>}
@@ -771,23 +836,11 @@ function MdImpl({ cols, compact, t, text }: MdProps) {
                 )
               }
 
-              const add = isDiff && l.startsWith('+')
-              const del = isDiff && l.startsWith('-')
-              const hunk = isDiff && l.startsWith('@@')
-
-              return (
-                <Text
-                  backgroundColor={add ? t.color.diffAdded : del ? t.color.diffRemoved : undefined}
-                  color={add ? t.color.diffAddedWord : del ? t.color.diffRemovedWord : hunk ? t.color.muted : undefined}
-                  dimColor={isDiff && !add && !del && !hunk && l.startsWith(' ')}
-                  key={j}
-                >
-                  {l}
-                </Text>
-              )
+              return <Text key={j}>{l}</Text>
             })}
           </Box>
         )
+        }
 
         continue
       }
