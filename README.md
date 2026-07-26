@@ -1,6 +1,4 @@
 # Bobo Agent
-<img width="785" height="315" alt="截屏2026-06-05 22 58 35" src="https://github.com/user-attachments/assets/7dba3e2a-37e9-455c-92d9-44f313d85f54" />
-
 
 <p align="center">
   <b>A personal AI agent that lives across your knowledge</b><br>
@@ -10,124 +8,46 @@
 <p align="center">
   <a href="https://github.com/Newton-666/boboagent/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="#"><img src="https://img.shields.io/badge/status-active-brightgreen.svg" alt="Status: Active"></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-709%20passed-brightgreen.svg" alt="709 Tests Passed"></a>
 </p>
 
 ---
 
 ## Quick Start
 
-### Step 1: Check prerequisites
-
-Bobo's TUI requires **Node.js v18+** and **Python 3.10+**.
-
 ```bash
-node --version    # need v18+. Install: brew install node (or https://nodejs.org)
-python3 --version # need 3.10+. macOS 14+ comes with Python 3.12+
+curl -sSL https://raw.githubusercontent.com/Newton-666/boboagent/main/install.sh | bash
 ```
 
-### Step 2: Install
-
-**Recommended** — Clone the repo and add an alias:
-
-```bash
-git clone https://github.com/Newton-666/boboagent.git ~/boboagent
-echo 'alias bobo="cd ~/boboagent && python3 -m bobo_tui_gateway.entry"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-**Alternative** — Install from PyPI (if `pip3 install` works on your system):
-
-```bash
-pip3 install --user --upgrade bobo-agent
-# If `bobo` is not found after install, add Python's bin to PATH:
-echo 'export PATH="$HOME/Library/Python/3.12/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-> **macOS Sequoia+ note**: If pip complains `externally-managed-environment`, use `--user` as shown above, or create a virtual environment.
-
-### Step 3: Get an API key
-
-Get a free key at **https://platform.deepseek.com/api-keys** (recommended).
-
-Or use OpenAI, Anthropic, Google, OpenRouter, or Ollama — see [Configuration](#configuration).
-
-### Step 4: Configure (one command)
-
-```bash
-mkdir -p ~/.bobo && cat > ~/.bobo/.env << 'EOF'
-DEEPSEEK_API_KEY=sk-your-key-here
-BOBO_PROVIDER=deepseek
-API_MODEL_NAME=deepseek-chat
-TOOL_TIMEOUT=20
-MAX_LOOPS=4
-EOF
-```
-
-Replace `sk-your-key-here` with your actual DeepSeek API key.
-
-### Step 5: Run
+Then:
 
 ```bash
 bobo
 ```
 
-If you installed via PyPI and get `bobo: command not found`, either:
-- Add Python's bin to PATH: `echo 'export PATH="$HOME/Library/Python/3.12/bin:$PATH"' >> ~/.zshrc`
-- Or use alias: `echo 'alias bobo="python3 -m bobo_tui_gateway.entry"' >> ~/.zshrc`
+On first launch, the TUI setup wizard walks you through selecting a provider (DeepSeek, OpenAI, Anthropic, Kimi, Gemini, Ollama…) and entering your API key — no manual `.env` editing needed. Your key goes directly to disk, never through the LLM.
 
-Then `source ~/.zshrc` and run `bobo` again.
-
-### Verify everything works
-
-```bash
-python3 -c "from config import API_KEY; print('API key:', 'OK' if API_KEY else 'MISSING')"
-```
-
-### Optional: Obsidian
-
-```bash
-echo "OBSIDIAN_VAULT=/path/to/your/vault" >> ~/.bobo/.env
-```
-
-### Optional: GitHub
-
-```bash
-# Create a token at https://github.com/settings/tokens (needs repo + workflow scope)
-echo "GITHUB_TOKEN=ghp_your_token_here" >> ~/.bobo/.env
-# Then in Bobo chat: "connect GitHub"
-```
-
-### Optional: Notion
-
-```
-In Bobo chat: "connect Notion" — Bobo will ask for your Notion API key.
-```
-
-### Optional: Email (IMAP)
-
-```bash
-cat > ~/.bobo/mail.json << 'EOF'
-{"server": "imap.gmail.com", "port": 993,
- "username": "you@gmail.com", "password": "your-app-password"}
-EOF
-```
-
-### Uninstall
-
-```bash
-pip3 uninstall bobo-agent
-rm -rf ~/.bobo ~/.bobo_v2
-```
+**Prerequisites**: Python 3.10+ and Node.js v18+. The installer checks both and gives clear guidance if something is missing.
 
 ---
 
 ## What Makes Bobo Unique
 
-### 1. Cross-Platform Knowledge
+### Skill System — Teach Once, Use Forever
 
-Bobo is the only agent that searches, reads, writes, and links across multiple platforms simultaneously:
+Bobo's preset workflow standards (`data/skill-standards/`) are hard constraints injected automatically when you trigger them:
+
+| Skill | Trigger | What it enforces |
+|-------|---------|------------------|
+| **Code Fix** | Bug reports, compile errors | 5-phase state machine: locate → read → diagnose → fix → verify. No editing unread files, no claiming "fixed" without tests. |
+| **Web Design** | Landing pages, websites | Morandi color system, 3-layer visual hierarchy, no emoji, no gradient, SVG logo, CSS as separate file. 3-step workflow: exploration → spec → full page. |
+| **Note Taking** | Save to Obsidian | Search-before-write, auto-folder matching, mandatory frontmatter, write-then-verify. |
+| **Git Workflow** | Git operations | Branch → commit → tag → merge → push. Rollback tags on every merge. |
+| **Research** | Searches, comparisons | Multi-source cross-verification (≥2 searches, ≥2 sources), contradiction reporting, source attribution. |
+
+Add your own: create `data/skill-standards/<name>/standard.md` with a `keywords:` line and it auto-discovers. No code changes needed.
+
+### Cross-Platform Knowledge
 
 ```
 You: "find everything about API redesign"
@@ -135,265 +55,76 @@ Bobo: cross_search("API redesign")
   → [Obsidian] Projects/API-redesign.md
   → [Notion] Q1 Planning
   → [Email] "Re: API redesign feedback"
-  → "Found 5 items across 3 platforms"
 ```
 
-| Tool | What it does |
-|------|-------------|
-| `cross_search(query)` | Search Obsidian + Notion + email at once |
-| `copy_to_obsidian(page_id)` | Copy a Notion page to Obsidian as markdown |
-| `copy_to_notion(filepath)` | Copy an Obsidian note to Notion |
-| `wiki_rebuild()` | Auto-generate a Knowledge Hub with cross-links |
+### Interactive Model Switching
 
-### 2. Connect Any Service Without Code
+Type `/model` in the TUI → arrow keys to choose provider → choose model tier → enter API key inline. Switches hot-reload — no restart needed.
 
-Register any REST API in one command — no Python required:
+### 8 Built-in Providers
 
-```
-You: "connect my Jira"
-Bobo: api_register(
-        name="jira", base_url="https://company.atlassian.net/rest/api/3",
-        auth_type="bearer", auth_key="xxx",
-        endpoints='[{"name":"search","method":"GET","path":"/search?jql={query}"}]'
-      )
+DeepSeek · OpenAI · Anthropic · Google · OpenRouter · Ollama · **Moonshot (Kimi)** · Custom
 
-You: "find my open tickets"
-Bobo: api_call(api="jira", endpoint="search", params='{"query":"status=Open"}')
-```
+Set `BOBO_TEMPERATURE` and `BOBO_MAX_TOKENS` per model if needed (reasoning models like kimi-k3 auto-set `temperature=1.0`).
 
-All registered APIs are automatically advertised to the LLM on every call.
+### Context That Scales
 
-### 3. Autonomous Coding
+Dynamic context budget adjusts to your model's actual window (1M for kimi-k3, 128k for GPT-4o, 32k for Ollama). Retroactive result marking keeps old tool outputs from cluttering context. Compression only triggers when actually needed.
 
-- **Auto-run**: After writing a `.py` file, Bobo runs it and reports output/errors immediately
-- **Error enrichment**: Tracebacks become `[TypeError] main.py:42` — the LLM sees the problem instantly
-- **Auto-diff**: Git diff is captured after every file write and injected into the next LLM call
-- **Parallel execution**: Independent tools run simultaneously, not sequentially
-- **GitHub integration**: Create repos, push code, open PRs, review diffs
+### Privacy & Security
 
-### 4. Privacy & Security
-
-- **Secret redaction**: API keys, tokens, passwords are replaced with `[REDACTED]` before reaching the LLM
-- **Tool gating**: Tools with unmet prerequisites are invisible — no Obsidian tools if no vault configured
-- **Blocked folders**: `Private/`, `Archive/` folders are never read, written, or searched
-- **Atomic session writes**: `tmp → rename → bak` — session files never corrupt on crash
+- **Secret redaction**: API keys, tokens, passwords → `[REDACTED]` before reaching the LLM
 - **No telemetry**: Zero data leaves your machine except the LLM API calls you configure
-
-### 5. Memory That Works
-
-Save facts once, Bobo remembers them automatically:
-
-```
-You: "my favorite color is blue"
-Bobo: save_memory("my favorite color is blue")
-
-(next session)
-You: "what color do I like?"
-Bobo: [Memory injected automatically] → "You told me your favorite color is blue!"
-```
-
-No need to ask Bobo to "remember" — relevant memories are injected before every LLM call at ~0ms overhead.
-
-### 6. Scheduled Tasks
-
-Set recurring tasks with natural language:
-
-```
-You: "rebuild the knowledge hub every morning at 7"
-Bobo: bobo_schedule(action="create", name="wiki-daily", 
-        task="运行 wiki_rebuild 更新知识图谱",
-        time="07:00", repeat="daily")
-
-You: "cancel the morning task"
-Bobo: bobo_schedule(action="delete", name="wiki-daily")
-```
-
-Uses cron under the hood. List, create, delete from the chat.
+- **Atomic writes**: Session files never corrupt on crash
+- **Trash-based safety**: Deleted files go to `~/.bobo/trash/`, recoverable via `restore_checkpoint`
 
 ---
 
 ## Configuration
 
-### Providers
-
-Bobo supports 7 providers out of the box. Set `BOBO_PROVIDER` in `~/.bobo/.env`:
+Bobo auto-detects your config. To check or change:
 
 ```
-# DeepSeek (default)
-BOBO_PROVIDER=deepseek
-DEEPSEEK_API_KEY=sk-...
-
-# OpenAI
-BOBO_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-
-# Local (Ollama)
-BOBO_PROVIDER=ollama
+/model          Interactive provider/model picker (hot-reload)
+/provider       Switch provider
+/mode           Toggle proactive mode (off/subtle/full)
 ```
 
-Or run `/settings` in the TUI to see current config, or just tell Bobo "switch to OpenAI."
-
-### Obsidian Vault
+Or set environment variables in `~/.bobo/.env` (or `data/.env` in dev mode):
 
 ```bash
-echo "OBSIDIAN_VAULT=/path/to/your/vault" >> ~/.bobo/.env
+BOBO_PROVIDER=deepseek
+DEEPSEEK_API_KEY=sk-...
+API_MODEL_NAME=deepseek-v4-pro
+BOBO_TEMPERATURE=1.0        # reasoning models
+BOBO_MAX_TOKENS=32768
 ```
 
-17 tools for reading, writing, searching, classifying, and organizing notes.
+### Obsidian
 
-### Notion
-
-```
-You: "connect my Notion"
-Bobo: "请提供 Notion API Key"
-You: paste the key
-Bobo: "Notion 已连接"
-```
-
-### Email (IMAP)
-
-Create `~/.bobo/mail.json`:
-
-```json
-{
-  "server": "imap.gmail.com",
-  "port": 993,
-  "username": "you@gmail.com",
-  "password": "your-app-password"
-}
+```bash
+OBSIDIAN_VAULT=/path/to/your/vault
 ```
 
 ### GitHub
 
-```
-You: "connect GitHub"
-Bobo: "请提供 GitHub Personal Access Token"
-You: paste the token
-Bobo: "GitHub 已配置"
-```
+Talk to Bobo: "connect GitHub" — it'll ask for a Personal Access Token.
+
+### Notion
+
+Talk to Bobo: "connect Notion" — it'll ask for your Notion API key.
 
 ---
 
-## All Commands
+## Commands
 
 ```
-/help      — Show available commands
-/settings  — Show current provider, model, and API key status
-/tools     — List all available tools
-/clear     — Clear the current conversation
+/model      — Interactive provider + model picker
+/help       — Available commands
+/tools      — List all tools
+/clear      — Clear current conversation
+/mode       — Toggle proactive mode
 ```
-
-Settings can also be changed naturally: "use gpt-4o," "switch to OpenAI."
-
----
-
-## Tools (68 total)
-
-| Category | Tools |
-|----------|-------|
-| **General** | `cross_search`, `bobo_config`, `bobo_schedule`, `wiki_rebuild`, `api_register`, `api_call`, `get_current_time`, `save_memory`, `search_memory`, `save_skill`, `project_info`, `render`, `notion_setup` |
-| **Knowledge** | `search_obsidian`, `read_obsidian`, `write_obsidian`, `append_obsidian`, `notion_search`, `notion_read_page`, `notion_create_page`, `notion_append`, `search_emails`, `read_email_content`, `analyze_emails` |
-| **Code** | `code_execution`, `file_operation`, `write_obsidian`, `append_obsidian`, `execute_terminal`, `search_code`, `grep_code`, `edit_file`, `refactor`, `git_status`, `run_tests`, `github_create_repo`, `github_create_pr`, `github_pr_diff`, `github_pr_comment`, `github_check_auth`, `github_setup` |
-| **Files** | `read_local_file`, `list_directory`, `file_operation`, `restore_checkpoint` |
-| **Web** | `web_search`, `web_fetch`, `web_extract`, `browser_open`, `browser_get_title`, `open_url` |
-| **macOS** | `send_notification`, `read_clipboard`, `write_clipboard`, `set_reminder`, `list_reminders`, `create_calendar_event`, `list_calendar_events` |
-| **Obsidian** | `read_obsidian`, `write_obsidian`, `search_obsidian`, `append_obsidian`, `classify_note`, `batch_copy_notes`, `batch_delete_notes`, `batch_move_notes`, `create_folder`, `delete_folder`, `delete_note`, `list_folder`, `move_note`, `move_to_folder`, `rename_note`, `read_recent` |
-| **Skills** | `skill_coding_master`, `skill_Python__` (auto-registered from YAML files) |
-
----
-
-## Example Workflows
-
-```
-# Research → Note → Link
-"Research transformer architectures and save to Obsidian"
-  → web_search("transformer architectures 2026")
-  → write_obsidian("transformers.md", "...")
-  → wiki_rebuild()
-
-# Code → Test → Ship
-"Create a Python script to sort my Downloads folder, push to GitHub"
-  → file_writer("sort_downloads.py", "...")
-  → [auto-run] python3 sort_downloads.py
-  → github_create_repo("file-sorter")
-  → github_create_pr(title="Add file sorter")
-
-# Multi-platform search → Copy
-"Find the Q4 planning doc, copy it to Obsidian"
-  → cross_search("Q4 planning")
-  → notion_read_page("page-id-123")
-  → copy_to_obsidian("page-id-123")
-
-# Daily automation
-"Rebuild my knowledge hub every morning"
-  → wiki_rebuild()
-  → bobo_schedule(action="create", name="daily-hub",
-      task="运行 wiki_rebuild", time="07:00", repeat="daily")
-```
-
----
-
-## Common Installation Issues
-
-### `ModuleNotFoundError: No module named 'bobo_tui_gateway'`
-
-You have multiple Python versions installed and `pip3` installed to the wrong one.
-
-```bash
-# 1. Find which Python has bobo
-python3 -c "import bobo_tui_gateway; print('OK')" 2>&1
-
-# 2. If it fails, reinstall for THIS Python
-python3 -m pip install --upgrade bobo-agent
-
-# 3. If still failing, install from GitHub directly
-pip3 install --upgrade git+https://github.com/Newton-666/boboagent.git
-
-# 4. If Homebrew Python blocks pip (externally-managed-environment), use:
-pip3 install --user --upgrade bobo-agent
-# or install from GitHub with the Python that works:
-/usr/local/bin/python3 -m pip install --upgrade git+https://github.com/Newton-666/boboagent.git
-```
-
-### `gateway exited` loop / TUI crashes on startup
-
-This was a packaging bug in versions before v0.2.3. Upgrade:
-
-```bash
-pip3 install --upgrade bobo-agent   # must be >= 0.2.3
-```
-
-If you're on v0.2.3+ and still see this, run diagnostic and share the output:
-
-```bash
-which python3 && python3 --version && which bobo && python3 -c "from config import OBSIDIAN_VAULT; print('config OK')"
-```
-
-### "no TTY" or blank screen
-
-Bobo needs an interactive terminal. Make sure you're running in a real terminal app
-(Terminal.app, iTerm2, Warp, etc.), not a script or IDE output pane.
-
-### Node.js not found
-
-Bobo's TUI requires Node.js v18+. Install it:
-
-```bash
-brew install node          # macOS
-# or: https://nodejs.org
-```
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| TUI shows no response | Check API key in `~/.bobo/.env`. Run `/settings`. |
-| "Tool name must be unique" | Skills with Chinese names get sanitized. Rename skill files. |
-| Obsidian tools missing | Set `OBSIDIAN_VAULT` in `.env`. |
-| Notion tools missing | Run `notion_setup` with your API key. |
-| GitHub push fails | Run `gh auth login` or `github_setup`. |
-| Chinese input crashes TUI | Compact mode enabled. Use single-line input. |
-| Session can't be deleted | Fixed in v0.2.3+. Upgrade with `pip3 install --upgrade bobo-agent`. |
 
 ---
 
@@ -402,24 +133,17 @@ brew install node          # macOS
 ```
 bobo (CLI)
   └── ui-tui/              Hermes TUI frontend (React/Ink/TypeScript)
-        └── spawns python -m bobo_tui_gateway.entry
-              └── bobo_tui_gateway/    JSON-RPC gateway (stdin/stdout)
-                    ├── entry.py       Main loop + signal handling + setup wizard + cron scheduler
-                    ├── server.py      30+ RPC method handlers
-                    └── transport.py   Thread-safe stdout writer
-              └── core/               Agent engine (~340 LOC each)
-                    ├── engine.py      Conversation loop, state machine
-                    ├── context.py     History compression, query classification
-                    ├── tool_runner.py Tool execution, error enrichment, rollback
-                    ├── llm_caller.py  API caller with streaming + retry (3 attempts)
-                    ├── provider.py    7 built-in providers
-                    └── session_manager.py  Atomic session persistence
-              └── tools/              68 tools, auto-discovered with gating
-                    └── __init__.py    Auto-discovery + skill-as-tool registration
-              └── ~/.bobo/             User config directory
-                    ├── .env          Provider keys, vault paths
-                    ├── apis/         Registered custom APIs
-                    └── schedules.json Scheduled tasks
+        └── spawns python backend via JSON-RPC over stdin/stdout
+              └── core/    Agent engine (~340 LOC each)
+                    ├── engine.py      State machine, skill injection
+                    ├── context.py     Dynamic context budget, token estimation
+                    ├── tool_runner.py Parallel execution, result marking
+                    ├── llm_caller.py  API caller with streaming + retry
+                    ├── provider.py    8 built-in providers
+                    └── session_manager.py  Atomic persistence
+              └── tools/              78 auto-discovered tools with gating
+              └── data/skill-standards/ Preset workflow standards (auto-discovered)
+              └── ~/.bobo/             User config + data directory
 ```
 
 ---
@@ -427,38 +151,44 @@ bobo (CLI)
 ## Development
 
 ```bash
-# Set up
-git clone <repo>
-cd bobo-agent && pip install -e .
+git clone https://github.com/Newton-666/boboagent.git
+cd boboagent
+pip install -e ".[dev]"
 
-# Run tests (no API key needed)
-python3 tests/test_mock_engine.py
-
-# Add a tool
-# Create tools/my_tool.py with register(reg) function:
-def register(reg):
-    reg("my_tool", execute_func, schema, check_fn=optional_check)
+# Run tests (no API key needed, 709 passed / 0 failed)
+pytest tests/ -q
 ```
 
-To gate a tool behind a prerequisite:
+### Add a Skill Standard
 
-```python
-_check = lambda: bool(os.environ.get("MY_CONFIG", ""))
+```bash
+mkdir -p data/skill-standards/my-skill
+cat > data/skill-standards/my-skill/standard.md << 'EOF'
+# My Skill Standard v1
 
-def register(reg):
-    reg("my_tool", execute_func, schema, check_fn=_check)
+> keywords: trigger, words, here
+> excludes: avoid, these, topics
+> requires: git-workflow
+
+## Workflow
+
+1. Step one
+2. Step two
+
+## 禁止
+
+- ❌ Don't do this
+EOF
 ```
 
----
-
-## Acknowledgements
-
-The TUI frontend (`ui-tui/`) is based on [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research (MIT). Hermes Ink is a fork of [Ink](https://github.com/vadimdemedes/ink) by Vadim Demedes.
-
-See `NOTICE.md` for full details.
+Bobo auto-discovers it. No code changes, no registration.
 
 ---
 
 ## License
 
 MIT
+
+## Acknowledgements
+
+The TUI frontend is based on [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research (MIT). Hermes Ink is a fork of [Ink](https://github.com/vadimdemedes/ink) by Vadim Demedes.
