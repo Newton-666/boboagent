@@ -259,7 +259,8 @@ const ComposerPane = memo(function ComposerPane({
 
       <StatusRulePane at="top" composer={composer} status={status} />
 
-      <Box flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
+      {/* IME 残影修复: key 随输入变化，强制 React 卸载+重建子树 → ink 全量重绘 */}
+      <Box key={imeTick} flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
         <FloatingOverlays
           cols={composer.cols}
           compIdx={composer.compIdx}
@@ -331,9 +332,6 @@ const ComposerPane = memo(function ComposerPane({
       </Box>
 
       {!composer.empty && !ui.sid && <Text color={ui.theme.color.muted}>⚕ {ui.status}</Text>}
-
-      {/* IME 残影修复：随输入切换的不可见字符，迫使 ink diff 重绘 composer 行 */}
-      <Text color={imeTick.current % 2 === 0 ? ui.theme.color.bg : ui.theme.color.bg}>{' '}</Text>
 
       <StatusRulePane at="bottom" composer={composer} status={status} />
 
