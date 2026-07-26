@@ -1,6 +1,6 @@
 import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
-import { Fragment, memo, useMemo, useRef } from 'react'
+import { Fragment, memo, useMemo, useRef, useState } from 'react'
 
 import { useGateway } from '../app/gatewayContext.js'
 import type { AppLayoutProps } from '../app/interfaces.js'
@@ -182,6 +182,9 @@ const ComposerPane = memo(function ComposerPane({
   const inputColumns = stableComposerColumns(composer.cols, promptWidth, TERMUX_TUI_MODE)
   const inputHeight = inputVisualHeight(composer.input, inputColumns)
   const inputMouseRef = useRef<null | TextInputMouseApi>(null)
+  // IME 残影修复: 每次输入事件递增计数器，伴随的 state 更新触发 composer 区域
+  // React reconciler 重渲染，从而迫使 ink diff 重绘这些行，清除 OS IME 残留字符
+  const [imeTick, setImeTick] = useState(0)
 
   const captureInputDrag = (e: GutterMouseEvent) => {
     if (e.button !== 0) {
@@ -252,6 +255,8 @@ const ComposerPane = memo(function ComposerPane({
         <Box height={1} onMouseDown={captureInputDrag} onMouseDrag={dragFromSpacer} onMouseUp={endInputDrag} />
       )}
 
+      <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
+
       <StatusRulePane at="top" composer={composer} status={status} />
 
       <Box flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
@@ -308,7 +313,7 @@ const ComposerPane = memo(function ComposerPane({
                 <TextInput
                   columns={inputColumns}
                   mouseApiRef={inputMouseRef}
-                  onChange={composer.updateInput}
+                  onChange={(v: string) => { setImeTick(t => t + 1); composer.updateInput(v) }}
                   onPaste={composer.handleTextPaste}
                   onSubmit={composer.submit}
                   placeholder={composer.empty ? PLACEHOLDER : ui.busy ? 'Ctrl+C to interrupt…' : ''}
@@ -327,7 +332,14 @@ const ComposerPane = memo(function ComposerPane({
 
       {!composer.empty && !ui.sid && <Text color={ui.theme.color.muted}>⚕ {ui.status}</Text>}
 
+      {/* IME 残影修复：随输入切换的不可见字符，迫使 ink diff 重绘 composer 行 */}
+      <Text color={imeTick.current % 2 === 0 ? ui.theme.color.bg : ui.theme.color.bg}>{' '}</Text>
+
       <StatusRulePane at="bottom" composer={composer} status={status} />
+
+      {composer.cols >= 40 && (
+        <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
+      )}
     </NoSelect>
   )
 })

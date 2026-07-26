@@ -72318,6 +72318,7 @@ var init_appLayout = __esm({
       const inputColumns = stableComposerColumns(composer.cols, promptWidth, TERMUX_TUI_MODE);
       const inputHeight = inputVisualHeight(composer.input, inputColumns);
       const inputMouseRef = (0, import_react100.useRef)(null);
+      const [imeTick, setImeTick] = (0, import_react100.useState)(0);
       const captureInputDrag = (e) => {
         if (e.button !== 0) {
           return;
@@ -72372,6 +72373,7 @@ var init_appLayout = __esm({
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.label, children: "\u21B3 " }),
               status.stickyPrompt
             ] }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: 1, onMouseDown: captureInputDrag, onMouseDrag: dragFromSpacer, onMouseUp: endInputDrag }),
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "top", composer, status }),
             /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", marginTop: ui.statusBar === "top" ? 0 : 1, position: "relative", children: [
               /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
@@ -72410,7 +72412,10 @@ var init_appLayout = __esm({
                         {
                           columns: inputColumns,
                           mouseApiRef: inputMouseRef,
-                          onChange: composer.updateInput,
+                          onChange: (v) => {
+                            setImeTick((t) => t + 1);
+                            composer.updateInput(v);
+                          },
                           onPaste: composer.handleTextPaste,
                           onSubmit: composer.submit,
                           placeholder: composer.empty ? PLACEHOLDER : ui.busy ? "Ctrl+C to interrupt\u2026" : "",
@@ -72428,7 +72433,9 @@ var init_appLayout = __esm({
               "\u2695 ",
               ui.status
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status })
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: imeTick.current % 2 === 0 ? ui.theme.color.bg : ui.theme.color.bg, children: "\xA0" }),
+            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status }),
+            composer.cols >= 40 && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
           ]
         }
       );
