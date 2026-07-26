@@ -300,6 +300,48 @@ class TestEditFileContextAware:
         assert "文件中相似的行" in result  # hint section
         assert "hello" in result  # the similar line is shown
 
+    def test_inline_diff_format_on_success(self, tmp_path):
+        """Successful edit_file must produce correctly formatted inline diff."""
+        test_file = tmp_path / "test_diff.py"
+        test_file.write_text(
+            "def hello():\n    print('old')\n    return 1\n",
+            encoding="utf-8"
+        )
+
+        from tools.edit_file import execute
+        result = execute(
+            file_path=str(test_file),
+            old_string="    print('old')\n    return 1",
+            new_string="    print('new')\n    return 2"
+        )
+        assert "已替换" in result
+        assert "<<<INLINE_DIFF>>>" in result
+        assert "<<<END_INLINE_DIFF>>>" in result
+
+        # Extract diff block
+        _, _, tail = result.partition("<<<INLINE_DIFF>>>")
+        diff, _, _ = tail.partition("<<<END_INLINE_DIFF>>>")
+        lines = diff.strip().split("\n")
+
+        # ---, +++, @@ must each be on their own line (not glued)
+        dash_count = sum(1 for l in lines if l.startswith("--- "))
+        plus_count = sum(1 for l in lines if l.startswith("+++ "))
+        at_count = sum(1 for l in lines if l.startswith("@@"))
+        assert dash_count == 1, f"Expected 1 '---' line, got {dash_count}"
+        assert plus_count == 1, f"Expected 1 '+++' line, got {plus_count}"
+        assert at_count >= 1, f"Expected >=1 '@@' hunk headers, got {at_count}"
+
+        # Every @@ line must be at the start of its own line
+        for l in lines:
+            if "@@" in l and not l.startswith("@@"):
+                # If @@ appears mid-line, it's glued — fail
+                # (strip whitespace first — a valid @@ line may have leading spaces)
+                stripped = l.lstrip()
+                if stripped.startswith("@@"):
+                    continue
+                if "@@" in stripped:
+                    raise AssertionError(f"@@ glued to other content: {repr(l)}")
+
 
 # ── Phase 1-6: refactor interface redesign ──────────────────────────────
 

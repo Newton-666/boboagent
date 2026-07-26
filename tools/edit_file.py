@@ -169,7 +169,6 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
         new_content.splitlines(keepends=True),
         fromfile=str(path),
         tofile=str(path),
-        lineterm="",
     ))
     diff_truncated = False
     if len(diff_lines) > 40:
