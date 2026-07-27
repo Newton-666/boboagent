@@ -5,8 +5,14 @@
 
 import re as _re
 import shlex as _shlex
+import os as _os
 from typing import Tuple
 from core.file_safety import is_write_denied
+
+# Bobo 自身仓库根（core/ 的上级目录，即 ~/Desktop/BOBO_Project_Backup）
+_BOBO_REPO_ROOT = _os.path.abspath(
+    _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..")
+)
 
 
 # 白名单：日常安全命令，静默执行
@@ -157,9 +163,104 @@ def classify_command(command: str) -> tuple[str, str]:
     return ("gray", f"未知安全等级的命令: {base_cmd}")
 
 
+# ── self-hosting v2：自身仓库 git 操作物理闸 ──
+
+
+def _is_self_repo_destructive_git(command: str) -> bool:
+    """判定命令是否对 bobo 自身仓库执行 push/毁灭性 git 操作。
+
+    只拦截三种操作：git push（任何形式）、git reset --hard、git clean -f[d]。
+    其他 git 操作（status/log/merge/checkout）照常放行。
+
+    判定方法：
+    1. 从命令中解析目标目录（-C 参数 / cd 链 / 默认 cwd）
+    2. 从目标目录向上找 .git 得到 git 仓库根
+    3. 与 _BOBO_REPO_ROOT 比较
+
+    解析不清的路径宁可放行：误伤日常 git 比漏拦更糟——
+    漏拦还有 prompt 层和 reflog，误伤会让 bobo 在别的项目残废。
+    """
+    cmd = command.strip()
+    # 快速排除：不是 git 命令、或不含目标子命令
+    if not _re.search(r'\bgit\b', cmd):
+        return False
+    if not _re.search(r'\b(push|reset\s+--hard|clean\s+-f(?:d)?)\b', cmd):
+        return False
+
+    target_dir = _resolve_git_target_dir(cmd)
+    if target_dir is None:
+        target_dir = _os.getcwd()
+    return _is_bobo_repo_dir(target_dir)
+
+
+def _resolve_git_target_dir(command: str) -> str | None:
+    """从 git 命令中提取目标目录。
+
+    处理的形态（优先级）：
+    - git -C <path> ...
+    - cd <path> && ... git ...
+    - 无（返回 None，调用方用 cwd）
+
+    解析失败时返回 None（宁可放行）。
+    """
+    # 形态 a：git -C <path> ...
+    m = _re.search(r'git\s+-C\s+(\S+)', command)
+    if m:
+        try:
+            return _os.path.expanduser(m.group(1))
+        except Exception:
+            return None
+
+    # 形态 b：cd <path> && ... git ...
+    m = _re.search(r'cd\s+(\S+)\s*&&\s*.*git\s+', command)
+    if m:
+        try:
+            return _os.path.expanduser(m.group(1))
+        except Exception:
+            return None
+
+    # 形态 c：cd <path> ; ... git ...（分号链）
+    m = _re.search(r'cd\s+(\S+)\s*;\s*.*git\s+', command)
+    if m:
+        try:
+            return _os.path.expanduser(m.group(1))
+        except Exception:
+            return None
+
+    return None
+
+
+def _is_bobo_repo_dir(path: str) -> bool:
+    """判定给定路径是否位于 bobo 自身仓库内。
+
+    方法：从 path 向上遍历，找到 .git/ 目录后与 _BOBO_REPO_ROOT 比较。
+    文件系统和路径解析异常均返回 False（宁可漏拦，不可误伤）。
+    """
+    try:
+        p = _os.path.abspath(_os.path.expanduser(path))
+    except Exception:
+        return False
+    _repo_root_abs = _os.path.abspath(_BOBO_REPO_ROOT)
+    # 向上遍历找 .git
+    while p and p != _os.path.dirname(p):
+        if _os.path.isdir(_os.path.join(p, ".git")):
+            return _os.path.abspath(p) == _repo_root_abs
+        # 子目录也可判定：不等到 .git，直接比较前缀（仓库内任何子目录）
+        if p == _repo_root_abs or _repo_root_abs.startswith(p + _os.sep):
+            # p 是 repo_root 的祖先或等于，继续向上找 .git
+            pass
+        p = _os.path.dirname(p)
+    return False
+
+
 def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
     if tool_name == "execute_terminal":
         command = tool_args.get("command", "")
+
+        # ── self-hosting v2 物理闸：自身仓库的 push/毁灭性 git 操作 ──
+        if _is_self_repo_destructive_git(command):
+            return True, f"🚫 bobo 自身仓库：push/毁灭性操作仅限用户（self-hosting v2）: {command[:60]}"
+
         level, reason = classify_command(command)
         if level == "dangerous":
             return True, f"🚫 危险操作 — {reason}: {command[:60]}"

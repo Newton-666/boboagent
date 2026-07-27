@@ -255,3 +255,92 @@ class TestHighRiskTool:
     def test_shell_exec_is_always_high_risk(self, engine):
         is_risk, reason = is_high_risk_tool("shell.exec", {"command": "echo hello"})
         assert is_risk is True
+
+
+class TestSelfRepoGitGate:
+    """self-hosting v2：bobo 自身仓库的 git push/毁灭性操作物理闸。
+
+    所有测试通过 is_high_risk_tool("execute_terminal", ...) 走完整入口。
+    """
+
+    # ── 自身仓库：拦截 ──
+
+    def test_git_push_in_repo_dangerous(self):
+        """在 bobo 仓库内直接 git push → dangerous。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git push"})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_git_push_origin_main_in_repo_dangerous(self):
+        """git push origin main 也应被拦截。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git push origin main"})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_git_C_repo_root_push_dangerous(self):
+        """git -C 指向仓库根 push → dangerous。"""
+        import os as _ostest
+        repo = _ostest.path.dirname(_ostest.path.dirname(_ostest.path.abspath(__file__)))
+        cmd = f"git -C {repo} push"
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": cmd})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_cd_repo_and_git_push_dangerous(self):
+        """cd 进仓库 && git push → dangerous。"""
+        import os as _ostest
+        repo = _ostest.path.dirname(_ostest.path.dirname(_ostest.path.abspath(__file__)))
+        cmd = f"cd {repo} && git push"
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": cmd})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_git_reset_hard_dangerous(self):
+        """git reset --hard 在自身仓库 → dangerous。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git reset --hard HEAD~1"})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_git_clean_fd_dangerous(self):
+        """git clean -fd 在自身仓库 → dangerous。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git clean -fd"})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    def test_git_clean_f_dangerous(self):
+        """git clean -f 在自身仓库 → dangerous。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git clean -f"})
+        assert is_risk is True
+        assert "自身仓库" in reason
+
+    # ── 非自身仓库：放行（不 dangerous，走正常分类）──
+
+    def test_git_push_in_other_dir_safe(self):
+        """git -C /tmp push → is_high_risk 返回非自身仓库拦截（放行到正常流程）。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -C /tmp push origin main"})
+        # 不应是自身仓库拦截；可能因 "git push" 在白名单而 safe
+        assert "自身仓库" not in reason
+
+    def test_cd_tmp_and_git_push_safe(self):
+        """cd /tmp && git push → 放行。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "cd /tmp && git push"})
+        assert "自身仓库" not in reason
+
+    # ── 正常 git 操作零误伤 ──
+
+    def test_git_status_safe(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git status"})
+        assert is_risk is False  # safe, 静默执行
+
+    def test_git_log_safe(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git log --oneline -5"})
+        assert is_risk is False
+
+    def test_git_merge_safe(self):
+        """git merge 不在拦截列表 → 走正常分类（有 --no-edit 时为 safe）。"""
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git merge main --no-edit"})
+        assert is_risk is False
+
+    def test_git_checkout_b_safe(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git checkout -b feat/test-branch"})
+        assert is_risk is False
