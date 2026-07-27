@@ -218,11 +218,8 @@ def execute(instruction: str = "", name: str = "", context: str = "",
         # ── 设置嵌套检测标志 ──
         _worker_depth.depth = getattr(_worker_depth, "depth", 0) + 1
 
-        # ── 超时（可配置，None 用现有逻辑）──
+        # ── 超时 ──
         _timeout = timeout if timeout is not None else _WORKER_TIMEOUT
-        _retry_timeout = max(_timeout * 2, timeout) if timeout else _WORKER_RETRY_TIMEOUT if timeout is None else _WORKER_RETRY_TIMEOUT
-        if timeout:
-            _retry_timeout = _WORKER_RETRY_TIMEOUT  # 用户指定的 timeout 不触发重试逻辑
 
         # ── 在独立线程中运行 Worker ──
         result, timed_out = _run_worker_with_timeout(worker, worker_input, _timeout)
