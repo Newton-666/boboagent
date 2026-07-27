@@ -106,3 +106,32 @@ class TestExtractWorkerResult:
         ]
         result = _extract_worker_result(history)
         assert result == "实际内容"  # None/空串/纯空白均跳过
+
+    def test_tool_calls_empty_list_not_skipped(self):
+        """tool_calls 为空列表 [] 时不应触发跳过——空列表 bool([]) = False。"""
+        history = [
+            make_msg("user", "hi"),
+            make_msg("assistant", "这是正文，tool_calls 为空列表", tool_calls=[]),
+        ]
+        result = _extract_worker_result(history)
+        assert "这是正文" in result
+
+    def test_tool_calls_with_substantial_content_is_skipped(self):
+        """已知取舍：assistant 消息带 tool_calls 时，即使 content 有实质正文也整条跳过。
+
+        设计决策：工具调用轮中模型输出的 content 通常是过渡语（"让我查一下"），
+        不应污染结果摘要。若模型在同一消息中既写正文又调工具，正文会丢失——
+        这是已知取舍，通过此测试固化。"""
+        history = [
+            make_msg("user", "重构"),
+            make_msg("assistant", "重构方案：把 X 改成 Y。先看看文件结构。",
+                     tool_calls=[{"id": "1", "function": {"name": "read_local_file"}}]),
+            make_msg("tool", "文件内容..."),
+            make_msg("assistant", "已确认，修改完成。"),
+        ]
+        result = _extract_worker_result(history)
+        # 工具轮正文被整条丢弃
+        assert "重构方案" not in result
+        assert "把 X 改成 Y" not in result
+        # 最后的纯文本轮正常保留
+        assert "修改完成" in result
