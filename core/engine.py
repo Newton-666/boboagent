@@ -25,6 +25,7 @@ from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
 from core.command_safety import classify_command, is_high_risk_tool
 from core.verifier import Verifier
+from core.checkpoint import CheckpointManager
 
 
 class Engine(ContextMixin, ToolRunnerMixin):
@@ -71,7 +72,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._last_usage: dict = {}
         self._pending_diff: str = ""
         self.verifier = Verifier()  # 防止验证死循环
-        self._checkpoints: list[dict] = []   # 对话回退快照
+        self.checkpoint_mgr = CheckpointManager(
+            history_getter=lambda: self.history,
+            file_checkpoints_getter=lambda: self._file_checkpoints,
+            workspace_dir=getattr(self, 'WORKSPACE_DIR', ''),
+        )
         self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
         self.tracker = RoundTracker(self)  # 回合后处理（change_log / read_files / pattern）
         self._interrupt_event: threading.Event | None = None
@@ -300,8 +305,18 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         undo_exact = {"回退", "撤销", "undo", "revert", "go back", "/undo"}
         undo_substr = ["撤销刚才", "回到上一步", "回到之前", "恢复上一步"]
         stripped = user_input.strip().lower()
-        if (stripped in undo_exact or any(kw in stripped for kw in undo_substr)) and self._checkpoints:
-            return self._do_undo()
+        if (stripped in undo_exact or any(kw in stripped for kw in undo_substr)) and self.checkpoint_mgr:
+            success, msg, history, depth, tool_round, label = self.checkpoint_mgr.undo()
+            if not success:
+                return msg
+            self.history = history
+            self.current_depth = depth
+            self.current_tool_round = tool_round
+            self._pending_content = None
+            self._pending_tool_calls = None
+            # _notify 中的 file_info 已内嵌在 msg 内，此处复用 label 发通知
+            self._notify("status.update", {"kind": "undo", "text": f"已回退到: {label}"})
+            return msg
         if self.teaching_mode:
             return None
         skill_name = self._check_skill_match(user_input)
@@ -397,89 +412,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
 
-    # ── 对话回退 ──────────────────────────────────────────────────────
-
-    MAX_CHECKPOINTS = 20
-
-    def _save_checkpoint(self, label: str = ""):
-        """保存当前对话状态快照，用于回退。"""
-        import copy, os as _os
-        files = {}
-        for path, content in self._file_checkpoints.items():
-            if _os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as _f:
-                        files[path] = _f.read()
-                except Exception:
-                    files[path] = content
-        self._checkpoints.append({
-            "label": label or f"step_{self.current_depth}",
-            "history": copy.deepcopy(self.history),
-            "files": files,
-            "depth": self.current_depth,
-            "tool_round": self.current_tool_round,
-        })
-        # 只保留最近 N 个快照
-        if len(self._checkpoints) > self.MAX_CHECKPOINTS:
-            self._checkpoints = self._checkpoints[-self.MAX_CHECKPOINTS:]
-
-    def _find_checkpoint(self, target: str = "") -> int | None:
-        """查找快照索引。支持数字（回退 N 步）、关键词匹配 label、默认回退 1 步。"""
-        if not self._checkpoints:
-            return None
-        if not target:
-            # 回退一步（倒数第二个快照）；只有一个快照时回到它（恢复之前状态）
-            return max(0, len(self._checkpoints) - 2)
-        # 数字
-        try:
-            steps = int(target)
-            idx = len(self._checkpoints) - 1 - steps
-            return max(0, idx)
-        except ValueError:
-            pass
-        # 关键词
-        for i in range(len(self._checkpoints) - 1, -1, -1):
-            if target.lower() in self._checkpoints[i]["label"].lower():
-                return i
-        return None
-
-    def _do_undo(self, target: str = "") -> str:
-        """执行回退，返回给用户的消息。"""
-        if not self._checkpoints:
-            return "没有可回退的操作。"
-        idx = self._find_checkpoint(target)
-        if idx is None:
-            return f"未找到匹配的快照: {target}"
-
-        cp = self._checkpoints[idx]
-        # 恢复 history
-        self.history = cp["history"]
-        # 恢复文件
-        restored = []
-        import os as _os
-        for path, content in cp.get("files", {}).items():
-            try:
-                _os.makedirs(_os.path.dirname(path) or ".", exist_ok=True)
-                with open(path, "w", encoding="utf-8") as _f:
-                    _f.write(content)
-                restored.append(_os.path.basename(path))
-            except Exception as e:
-                logger.debug("回退恢复文件失败 (%s): %s", path, e)
-        # 恢复状态
-        self.current_depth = cp["depth"]
-        self.current_tool_round = cp["tool_round"]
-        self._pending_content = None
-        self._pending_tool_calls = None
-        # 截断后续快照
-        self._checkpoints = self._checkpoints[:idx + 1]
-
-        label = cp["label"]
-        file_info = f"\n文件已恢复: {', '.join(restored)}" if restored else ""
-        self._notify("status.update", {
-            "kind": "undo",
-            "text": f"已回退到: {label}{file_info}",
-        })
-        return f"已回退到: {label}{file_info}\n\n要继续对话吗？"
 
     # ── 主动模式：连接发现（Layer 1 — 对话内注入）────────────────
 
@@ -1337,5 +1269,5 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self._step_count = 0
         self._all_confirmed = False
         self.verifier.attempted = False
-        self._checkpoints.clear()
+        self.checkpoint_mgr.clear()
         self._notify("reset", {})

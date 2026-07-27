@@ -118,44 +118,44 @@ class TestTeachingMode:
 
 
 class TestUndoCheckpoint:
-    """Tests for conversation undo/checkpoint system."""
+    """Tests for conversation undo/checkpoint system (delegates to CheckpointManager)."""
 
     def test_save_checkpoint_adds_to_list(self, engine):
-        initial_count = len(engine._checkpoints)
-        engine._save_checkpoint("test_step")
-        assert len(engine._checkpoints) == initial_count + 1
+        initial_count = len(engine.checkpoint_mgr.checkpoints)
+        engine.checkpoint_mgr.save(label="test_step")
+        assert len(engine.checkpoint_mgr.checkpoints) == initial_count + 1
 
     def test_checkpoint_stores_history(self, engine):
         engine.history = [
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi there"},
         ]
-        engine._save_checkpoint("my_checkpoint")
-        cp = engine._checkpoints[-1]
+        engine.checkpoint_mgr.save(label="my_checkpoint")
+        cp = engine.checkpoint_mgr.checkpoints[-1]
         assert cp["label"] == "my_checkpoint"
         assert cp["history"] == engine.history
         assert cp["depth"] == engine.current_depth
 
     def test_max_checkpoints_limit(self, engine):
-        for i in range(engine.MAX_CHECKPOINTS + 5):
-            engine._save_checkpoint(f"step_{i}")
-        assert len(engine._checkpoints) <= engine.MAX_CHECKPOINTS
+        for i in range(engine.checkpoint_mgr.MAX_CHECKPOINTS + 5):
+            engine.checkpoint_mgr.save(label=f"step_{i}")
+        assert len(engine.checkpoint_mgr.checkpoints) <= engine.checkpoint_mgr.MAX_CHECKPOINTS
 
     def test_find_checkpoint_by_label(self, engine):
-        engine._save_checkpoint("important_step")
-        idx = engine._find_checkpoint("important")
+        engine.checkpoint_mgr.save(label="important_step")
+        idx = engine.checkpoint_mgr.find("important")
         assert idx is not None
 
     def test_find_checkpoint_by_number(self, engine):
-        engine._save_checkpoint("step_1")
-        engine._save_checkpoint("step_2")
-        engine._save_checkpoint("step_3")
+        engine.checkpoint_mgr.save(label="step_1")
+        engine.checkpoint_mgr.save(label="step_2")
+        engine.checkpoint_mgr.save(label="step_3")
         # Go back 1 step
-        idx = engine._find_checkpoint("1")
-        assert idx == len(engine._checkpoints) - 2
+        idx = engine.checkpoint_mgr.find("1")
+        assert idx == len(engine.checkpoint_mgr.checkpoints) - 2
 
     def test_find_checkpoint_not_found(self, engine):
-        idx = engine._find_checkpoint("nonexistent_target_string")
+        idx = engine.checkpoint_mgr.find("nonexistent_target_string")
         assert idx is None
 
     def test_do_undo_restores_history(self, engine):
@@ -164,19 +164,22 @@ class TestUndoCheckpoint:
             {"role": "assistant", "content": "reply 1"},
         ]
         engine.history = list(original_history)
-        engine._save_checkpoint("before_bad_change")
+        engine.checkpoint_mgr.save(label="before_bad_change")
 
         # Simulate a bad change
         engine.history.append({"role": "user", "content": "bad step"})
         engine.history.append({"role": "assistant", "content": "bad reply"})
 
-        result = engine._do_undo()
-        assert "已回退" in result
-        assert engine.history == original_history
+        success, msg, history, depth, tool_round, label = engine.checkpoint_mgr.undo()
+        assert success
+        assert "已回退" in msg
+        assert history == original_history
 
     def test_do_undo_with_no_checkpoints(self, engine):
-        result = engine._do_undo()
-        assert "没有可回退" in result
+        engine.checkpoint_mgr.clear()
+        success, msg, history, depth, tool_round, label = engine.checkpoint_mgr.undo()
+        assert not success
+        assert "没有可回退" in msg
 
 
 class TestMessageRecording:
