@@ -295,8 +295,8 @@ export const DARK_THEME: Theme = {
 
     diffAdded: 'rgb(18,56,36)',
     diffRemoved: 'rgb(56,18,18)',
-    diffAddedWord: 'rgb(120,220,140)',
-    diffRemovedWord: 'rgb(240,140,140)',
+    diffAddedWord: '#e8e8e8',
+    diffRemovedWord: '#e8e8e8',
     diffAddedEmpty: 'rgb(10,36,22)',
     diffRemovedEmpty: 'rgb(36,12,12)',
     shellDollar: '#4dabf7'
@@ -340,14 +340,12 @@ export const LIGHT_THEME: Theme = {
     statusCritical: '#B71C1C',
     selectionBg: '#D4E4F7',
 
-    diffAdded: 'rgb(18,56,36)',
-    diffRemoved: 'rgb(56,18,18)',
-    diffAddedWord: 'rgb(120,220,140)',
-    diffRemovedWord: 'rgb(240,140,140)',
-    diffAddedEmpty: 'rgb(10,36,22)',
-    diffRemovedEmpty: 'rgb(36,12,12)',
+    diffAdded: 'rgb(200,255,200)',
+    diffRemoved: 'rgb(255,200,200)',
     diffAddedWord: 'rgb(27,94,32)',
     diffRemovedWord: 'rgb(183,28,28)',
+    diffAddedEmpty: 'rgb(180,235,180)',
+    diffRemovedEmpty: 'rgb(235,180,180)',
     shellDollar: '#1565C0'
   },
 

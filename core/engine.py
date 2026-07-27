@@ -1468,7 +1468,8 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             fpath = a.get('file_path', '') or a.get('filepath', '') or a.get('path', '')
                             tc_id = tc.get("id", "")
                             match = next((r for r in tool_results if r.get("tool_call_id") == tc_id), None)
-                            self.tracker.record_read(fpath, str(match) if match else "")
+                            content = match.get("content", "") if isinstance(match, dict) else ""
+                            self.tracker.record_read(fpath, content)
                         except Exception:
                             pass
             # 工具调用模式 → tracker
