@@ -459,6 +459,51 @@ class TestSpawnWorkerAllowTools:
         ), "LLM should have responded after seeing tool stub"
 
 
+class TestPyCompileAutoCheck:
+    """写 .py 后自动 py_compile——edit_file 和 file_operation 各测一组。"""
+
+    def test_edit_file_correct_py_gets_check_pass(self, tmp_path):
+        p = tmp_path / "ok.py"
+        p.write_text("x = 1\n", encoding="utf-8")
+        from tools.edit_file import execute
+        r = execute(str(p), "x = 1", "x = 42")
+        assert "✅ py_compile 通过" in r
+
+    def test_edit_file_broken_py_gets_check_fail(self, tmp_path):
+        p = tmp_path / "bad.py"
+        p.write_text("x = 1\n", encoding="utf-8")
+        from tools.edit_file import execute
+        r = execute(str(p), "x = 1", "else:\n    pass")
+        assert "❌ py_compile 失败" in r
+        assert "禁止交付" in r
+
+    def test_edit_file_non_py_skips_check(self, tmp_path):
+        p = tmp_path / "readme.md"
+        p.write_text("# hello\n", encoding="utf-8")
+        from tools.edit_file import execute
+        r = execute(str(p), "# hello", "# hi")
+        assert "py_compile" not in r
+
+    def test_file_operation_correct_py_gets_check_pass(self, tmp_path):
+        p = tmp_path / "ok.py"
+        from tools.file_operation import execute
+        r = execute("write", path=str(p), content="x = 42\n")
+        assert "✅ py_compile 通过" in r
+
+    def test_file_operation_broken_py_gets_check_fail(self, tmp_path):
+        p = tmp_path / "bad.py"
+        from tools.file_operation import execute
+        r = execute("write", path=str(p), content="else:\n    pass\n")
+        assert "❌ py_compile 失败" in r
+        assert "禁止交付" in r
+
+    def test_file_operation_non_py_skips_check(self, tmp_path):
+        p = tmp_path / "notes.txt"
+        from tools.file_operation import execute
+        r = execute("write", path=str(p), content="hello\n")
+        assert "py_compile" not in r
+
+
 class TestRefactorInterface:
     """Verify refactor's new changes-based interface works correctly."""
 
