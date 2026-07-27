@@ -59,7 +59,7 @@ class RoundTracker:
     def _pattern_tracker_path(self) -> str:
         try:
             from config import BOBO_DATA_DIR
-            return str(BOO_DATA_DIR / "pattern_tracker.json")
+            return str(BOBO_DATA_DIR / "pattern_tracker.json")
         except Exception:
             return ""
 
