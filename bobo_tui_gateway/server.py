@@ -754,7 +754,7 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /bobo-audit, /memory-consolidate"})
+        return _ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单"})
     elif command == "clear":
         _emit("session.cleared", sid, {"session_id": sid})
         return _ok(rid, {"output": ""})
@@ -983,6 +983,15 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             lines.append("切换: /provider <名称>")
             return _ok(rid, {"output": "\n".join(lines)})
     else:
+    elif command == "duo" or command.startswith("duo "):
+        # /duo 不是网关命令，是 skill 触发词：去掉斜杠透传给对话管线，
+        # 由 engine 的 skill 注入机制（data/skill-standards/duo）接管。
+        rest = command[3:].strip()
+        text = f"duo {rest}".strip()
+        return handle_prompt_submit(
+            {"session_id": sid, "text": text}, rid)
+
+    else:
         return _ok(rid, {"output": f"未知命令: /{command}"})
 
 
@@ -1077,6 +1086,7 @@ _COMMANDS = {
         "/settings": "/settings",
         "/exit": "/exit",
         "/sessions": "/sessions",
+        "/duo": "/duo",
         "/provider": "/provider",
     }
 }
