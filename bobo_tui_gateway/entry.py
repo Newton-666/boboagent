@@ -34,7 +34,7 @@ def resolve_skin() -> dict:
             "ui_primary": "#C88E8E",
             "ui_accent": "#8AAAA0",
             "ui_border": "#9BAF9E",
-            "ui_text": "#EDE8E0",
+            "ui_text": "#F8F2E8",
             "prompt": "#EEEEEE",
             "banner_title": "#C88E8E",
             "banner_accent": "#8AAAA0",
