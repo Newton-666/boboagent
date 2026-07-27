@@ -218,7 +218,7 @@ class TestToolRegistryP0:
         code_tools = [
             "code_execution", "file_operation",
             "write_obsidian", "append_obsidian",
-            "execute_terminal", "search_code", "grep_code",
+            "execute_terminal", "grep_code",
             "edit_file", "refactor", "git_status", "run_tests",
             "github_create_repo", "github_create_pr",
             "github_pr_diff", "github_pr_comment",

@@ -81,30 +81,6 @@ class TestFileOperationBackup:
         assert test_file.exists()
 
 
-# ── B4: search_code missing venv skip dirs ──────────────────────────────
-
-class TestSearchCodeSkipDirs:
-    """Verify search_code skips virtual environment directories."""
-
-    def test_venv_skipped(self):
-        from tools.search_code import SKIP_DIRS
-        for skip_dir in [".venv", "venv", "dist", "build", ".next", "coverage"]:
-            assert skip_dir in SKIP_DIRS, f"'{skip_dir}' should be in SKIP_DIRS"
-
-    def test_no_duplicate_dirs(self):
-        from tools.search_code import SKIP_DIRS
-        # SKIP_DIRS is a set — duplicates are impossible by definition
-        assert isinstance(SKIP_DIRS, set)
-
-    def test_skip_dirs_includes_virtual_env(self):
-        """search_code should skip searching inside virtual environments."""
-        from tools.search_code import _should_skip
-        # _should_skip checks both SKIP_DIRS membership AND hidden directory prefix
-        # After the fix, "venv" is in SKIP_DIRS, so _should_skip returns True
-        assert _should_skip("venv") is True   # matches SKIP_DIRS
-        assert _should_skip(".venv") is True   # starts with dot
-
-
 # ── B6: file_operation misleading variable name ─────────────────────────
 
 class TestFileOperationCache:
@@ -150,23 +126,6 @@ class TestFileOperationCache:
         # File deleted, cache cleared, reading should fail
         result = execute(action="read", path=str(test_file))
         assert "读取失败" in result
-
-
-# ── B5: search_code consistency with grep_code ──────────────────────────
-
-class TestSearchCodeVsGrepCode:
-    """Verify search_code and grep_code skip consistent directories."""
-
-    def test_common_skip_dirs_match(self):
-        """Both tools should skip the same critical directories."""
-        from tools.search_code import SKIP_DIRS as SEARCH_SKIP
-        from tools.grep_code import execute as grep_exec
-
-        # grep_code uses inline list, not a constant. Let's check at least
-        # that search_code now includes the important ones.
-        important = {"node_modules", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
-        missing = important - SEARCH_SKIP
-        assert not missing, f"search_code missing skip dirs: {missing}"
 
 
 # ── Phase 1-1: code_execution output + tempfile cleanup ─────────────────
