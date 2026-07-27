@@ -13,9 +13,6 @@ TOOL_NAME = "code_execution"
 from config import PROJECTS_DIR as _CONFIG_PROJECTS_DIR
 PROJECTS_DIR = Path(_CONFIG_PROJECTS_DIR)
 
-# 自修复最大尝试次数
-MAX_FIX_ATTEMPTS = 3
-
 
 def _ensure_projects_dir():
     """确保 projects 目录存在"""
@@ -57,26 +54,6 @@ def _save_run_log(task_name: str, output: str, version: str = "main"):
     with open(log_file, 'a', encoding='utf-8') as f:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"[{timestamp}] ({version})\n{output}\n\n")
-
-
-def _build_fix_prompt(code: str, error_output: str, language: str) -> list:
-    """构造修复代码的 prompt"""
-    prompt = f"""以下代码执行报错，请修复。
-
-语言: {language}
-
-代码:
-```{language}
-{code}
-```
-
-错误信息:
-```
-{error_output}
-```
-
-请只返回修复后的完整代码，不要任何解释。"""
-    return [{"role": "user", "content": prompt}]
 
 
 def _build_test_prompt(code: str, language: str) -> list:
@@ -143,29 +120,6 @@ def _check_syntax(code: str, language: str) -> str:
             return None
     
     return None
-
-
-def _call_llm_for_fix(llm_caller, code: str, error_output: str, language: str) -> str:
-    """调用 LLM 修复代码，返回修复后的代码"""
-    messages = _build_fix_prompt(code, error_output, language)
-    response = llm_caller(messages, use_tools=False)
-
-    if isinstance(response, dict) and "error" in response:
-        return None
-
-    try:
-        if isinstance(response, dict):
-            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-        else:
-            content = str(response)
-
-        import re
-        code_match = re.search(r'```(?:\w+)?\n(.*?)```', content, re.DOTALL)
-        if code_match:
-            return code_match.group(1).strip()
-        return content.strip()
-    except Exception:
-        return None
 
 
 def _call_llm_for_test(llm_caller, code: str, language: str) -> str:

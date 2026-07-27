@@ -181,4 +181,37 @@ def _clean_text(text: str, max_len: int = WEB_FETCH_MAX_CHARS) -> str:
 
 
 def register(reg):
-    pass
+    reg("web_fetch", web_fetch, {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": "获取网页的文本内容（清洗后的纯文本），适用于阅读文章、文档等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "要获取的网页 URL"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    })
+    reg("web_fetch_markdown", web_fetch_markdown, {
+        "type": "function",
+        "function": {
+            "name": "web_fetch_markdown",
+            "description": "获取网页并转为 Markdown 格式，保留标题层级。适用于需要结构化内容的场景。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "要获取的网页 URL"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    })
