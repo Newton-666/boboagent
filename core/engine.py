@@ -18,7 +18,6 @@ sys.path.insert(0, _project_root)
 from tools import TOOLS_SCHEMA, report_load_errors
 from core.tool_executor import execute_tool
 from core.skill_manager import get_skill_manager
-from core.skill_executor import get_skill_executor
 from core.context import ContextMixin
 from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
@@ -59,7 +58,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.current_skill_name = None
 
         self.skill_manager = get_skill_manager()
-        self.skill_executor = get_skill_executor()
+        self.skill_executor = get_skill_manager()
 
         self.state = self.STATE_IDLE
         self.current_user_input = None
