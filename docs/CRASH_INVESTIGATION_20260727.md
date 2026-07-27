@@ -111,3 +111,18 @@ TUI gateway 的 stdout 不接文件，线程异常走默认 excepthook 打印到
 1. 重启 bobo 时留意：是否又报 HTTP 400？（决定第二 bug 是否还活着）
 2. 下次崩溃**先别重启**，叫 Kimi 或 Cloud——进程活着才能抓堆栈
    （`kill -QUIT` 或 faulthandler 都能 dump）
+
+---
+
+## 补：活进程取证（22:41，用户未重启，进程仍在）
+
+- 两个候选后端（PID 11681 / 8351）主线程均阻塞在 `stdin readline`
+  = gateway 主循环正常空闲（stdio RPC 等 TUI 指令），**进程健康**
+- 关键缺失：进程只剩 2 线程（主线程 + 系统 workqueue），
+  **引擎 worker 线程已消失**——堆栈随死线程一起消失，py-spy 无法考古
+- 崩溃剧本坐实：引擎线程在 add_entry（22:33 落盘）与 _notify("complete")
+  之间带未捕获异常死去 → complete 永远没发 → Node TUI 卡在等待态、
+  后续用户消息不派发 → "bobo 不回复"，但进程和 TUI 都活着
+- 三次崩溃同一剧本：线程死、主进程活、TUI 干等
+- 结论强化：Step 1（threading.excepthook + 持久日志）是唯一能抓到
+  死线程临终堆栈的手段，优先级最高
