@@ -93,6 +93,18 @@ def _save(data):
     _atomic_save(data)
 
 
+def _entry_age_days(entry):
+    """计算条目自 last_matched（无则 timestamp）以来的墙钟天数。"""
+    ref_str = entry.get("last_matched") or entry.get("timestamp", "")
+    if not ref_str:
+        return 0
+    try:
+        ref_dt = datetime.strptime(ref_str[:16], "%Y-%m-%d %H:%M")
+        return (datetime.now() - ref_dt).days
+    except (ValueError, TypeError):
+        return 0
+
+
 def add_entry(text, entry_type="general", tags=None, folder=""):
     """添加记忆条目（带容量检查）"""
     if not text or not text.strip():
@@ -131,6 +143,9 @@ def add_entry(text, entry_type="general", tags=None, folder=""):
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "signal_score": 100,  # 信号分：初始 100，引用 +10，忽略 -5，< 20 不再注入
         "last_matched": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "last_time_decay": "",  # 上次时间衰减日期（YYYY-MM-DD），幂等控制
+        "archived": False,      # 归档后不再注入（不删除，可回溯）
+        "is_draft": False,      # 草稿条目，满足条件时自动归档
     }
     entries.append(entry)
     data['entries'] = entries
@@ -357,6 +372,8 @@ def get_top_memories(query: str = "", limit: int = 3) -> list:
     query_lower = query.lower() if query else ""
     scored = []
     for e in entries:
+        if e.get("archived", False):
+            continue  # 已归档：不再注入
         score = e.get("signal_score", 100)
         if score < 20:
             continue  # 自然下沉：低分的永不注入
@@ -377,6 +394,9 @@ def get_top_memories(query: str = "", limit: int = 3) -> list:
             continue
         scored.append((e, score * relevance))
     scored.sort(key=lambda x: x[1], reverse=True)
+    # 附加墙钟年龄元数据，供调用方（如 proactive）做时效标注
+    for e, _ in scored[:limit]:
+        e["_age_days"] = _entry_age_days(e)
     return [e for e, _ in scored[:limit]]
 
 
@@ -389,6 +409,51 @@ def decay_all(decay: int = -5):
             last = e.get("last_matched", e.get("timestamp", ""))
             if last < now[:16]:  # 本轮未被匹配到（last_matched 没更新）
                 e["signal_score"] = max(0, e.get("signal_score", 100) + decay)
+        _save(data)
+
+
+def time_decay():
+    """时间衰减：基于墙钟年龄扣分，与轮次衰减 decay_all 并存。
+
+    档位（理由见 commit message）：
+    - < 7 天：不衰减（一周内的知识视为新鲜）
+    - 7-29 天：-5/次（每天最多一次，温和下坡）
+    - ≥ 30 天：-10/次（加速遗忘，一个月未引用的知识大概率过时）
+
+    幂等：同日重复调用不重复扣分（last_time_decay 记录日期）。
+    下限保护：signal_score 不低于 0，且 < 20 的条目本就不注入（语义一致）。
+
+    副作用：自动归档满足条件的草稿（is_draft + ≥7 天未被 bump + 分 ≤30）。
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _write_lock:
+        data = _load()
+        for e in data.get("entries", []):
+            if e.get("archived", False):
+                continue
+
+            # ── 时间衰减 ──
+            lt = e.get("last_time_decay", "")
+            if lt == today:
+                continue  # 幂等：今天已处理过
+
+            age = _entry_age_days(e)
+            penalty = 0
+            if age >= 30:
+                penalty = -10
+            elif age >= 7:
+                penalty = -5
+
+            if penalty < 0:
+                e["signal_score"] = max(0, e.get("signal_score", 100) + penalty)
+                e["last_time_decay"] = today
+
+            # ── 草稿生命周期 ──
+            if e.get("is_draft", False):
+                draft_age = _entry_age_days(e)
+                if draft_age >= 7 and e.get("signal_score", 100) <= 30:
+                    e["archived"] = True
+
         _save(data)
 
 
