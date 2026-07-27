@@ -29,52 +29,77 @@ class SkillExecutor:
         self.skills_dir.mkdir(exist_ok=True)
 
     def save_from_recording(self, skill_name: str, messages: List[Dict], description: str = "") -> str:
-        """Save a skill from recorded conversation messages."""
+        """将录制的对话保存为 standard.md 格式的 skill（data/skill-standards/）。"""
         if not messages:
             return "没有记录到任何对话"
 
-        steps = []
+        # 提取工具调用序列
+        tool_seq = []
+        user_inputs = []
         for msg in messages:
             role = msg.get("role")
             if role == "user":
-                steps.append({"type": "user_input", "content": msg.get("content", "")})
-            elif role == "assistant":
-                steps.append({"type": "assistant_output", "content": msg.get("content", "")})
+                user_inputs.append(msg.get("content", "")[:80])
             elif role == "tool_call":
-                steps.append({
-                    "type": "tool_call",
-                    "tool": msg.get("name", ""),
-                    "args": msg.get("args", {}),
-                })
+                tool_seq.append(msg.get("name", ""))
 
-        skill = {
-            "name": skill_name,
-            "description": description or f"从教学录制，{len(steps)} 个步骤",
-            "triggers": _auto_triggers(skill_name, description),
-            "steps": steps,
-        }
+        # 生成触发词
+        triggers = _auto_triggers(skill_name, description)
+        trigger_str = ", ".join(triggers) if triggers else skill_name
 
-        filepath = self.skills_dir / f"{skill_name}.yaml"
+        # 生成 tool 序列描述
+        tool_flow = " → ".join(dict.fromkeys(tool_seq)) if tool_seq else "（未检测到工具调用）"
+        user_examples = "、".join([u[:40] for u in user_inputs[:3]]) if user_inputs else skill_name
+
+        # 写 standard.md
+        import os as _os
+        _project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        std_dir = _os.path.join(_project_root, "data", "skill-standards", skill_name)
+        _os.makedirs(std_dir, exist_ok=True)
+        filepath = _os.path.join(std_dir, "standard.md")
+
+        content = f"""# {skill_name} v1
+
+> keywords: {trigger_str}
+> status: draft
+
+## 工作流
+
+录制于 Bobo 教学模式。工具序列: {tool_flow}
+
+示例场景: {user_examples}
+
+## 描述
+
+{description or f'从 {len(messages)} 条录制消息中提取的工作流。'}
+
+## 步骤
+
+"""
+        for i, msg in enumerate(messages, 1):
+            role = msg.get("role", "")
+            if role == "user":
+                content += f"{i}. 用户: {msg.get('content', '')[:200]}\n"
+            elif role == "assistant":
+                c = msg.get("content", "")
+                if c:
+                    content += f"{i}. Bobo: {c[:200]}\n"
+            elif role == "tool_call":
+                tool = msg.get("name", "")
+                args = str(msg.get("args", {}))[:120]
+                content += f"{i}. 工具: {tool}({args})\n"
+
+        content += """
+## 验收
+
+- [ ] 在工作流触发时自动注入
+- [ ] 状态机步骤完整
+"""
+
         with open(filepath, "w", encoding="utf-8") as f:
-            yaml.dump(skill, f, allow_unicode=True, default_flow_style=False)
+            f.write(content)
 
-        # Also update index.json for keyword-triggered matching
-        idx_path = self.skills_dir / "index.json"
-        import json
-        if idx_path.exists():
-            with open(idx_path, encoding="utf-8") as f:
-                idx = json.load(f)
-        else:
-            idx = {"skills": []}
-        idx["skills"].append({
-            "name": skill_name,
-            "trigger": [skill_name],
-            "description": description or f"教学录制技能",
-        })
-        with open(idx_path, "w", encoding="utf-8") as f:
-            json.dump(idx, f, ensure_ascii=False, indent=2)
-
-        return f"Skill '{skill_name}' 已保存，{len(steps)} 个步骤"
+        return f"Skill '{skill_name}' 已保存到 data/skill-standards/{skill_name}/standard.md\n触发词: {trigger_str}\n工具流: {tool_flow}"
 
     def load_skill(self, skill_name: str) -> dict:
         filepath = self.skills_dir / f"{skill_name}.yaml"

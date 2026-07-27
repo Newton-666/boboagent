@@ -105,9 +105,16 @@ class TestTeachingMode:
         assert "已保存" in result
         assert engine.teaching_mode is False
 
-        # A YAML file should have been created
-        yaml_files = list(tmp_path.glob("*.yaml"))
-        assert len(yaml_files) > 0
+        # 2026-07-27: 录制保存到 data/skill-standards/ 而非 skills/*.yaml
+        import os as _os
+        std_path = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            "data", "skill-standards", "search_test", "standard.md"
+        )
+        assert _os.path.isfile(std_path), f"standard.md not found at {std_path}"
+        # 清理测试文件
+        _os.remove(std_path)
+        _os.rmdir(_os.path.dirname(std_path))
 
 
 class TestUndoCheckpoint:
