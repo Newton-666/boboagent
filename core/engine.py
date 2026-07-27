@@ -744,6 +744,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     self.proactive._last_memory_ids = []
                 # 自动草稿记忆：从本轮对话提取关键结论
                 if self.proactive.mode != "off":
+                    logger.debug("RESPONDING extract_takeaways start")
                     takeaways = self._extract_takeaways()
                     if takeaways:
                         try:
@@ -765,11 +766,16 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                                         _save(data)
                         except Exception:
                             pass
+                    logger.debug("RESPONDING extract_takeaways done: %d items", len(takeaways) if takeaways else 0)
                 # 自动 skill 发现：检查候选模式并主动提议
                 if self.proactive.mode != "off":
+                    logger.debug("RESPONDING maybe_propose_skill start")
                     self.tracker.maybe_propose_skill()
+                    logger.debug("RESPONDING maybe_propose_skill done")
                 content = self._format_final_output(self._pending_content)
+                logger.debug("RESPONDING emit complete start: len=%d", len(content))
                 self._notify("complete", {"content": content, "usage": self._last_usage})
+                logger.debug("RESPONDING emit complete done")
             else:
                 self._notify("complete", {"content": "（没有生成回复内容）"})
             self._pending_content = None

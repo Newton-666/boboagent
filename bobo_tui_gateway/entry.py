@@ -5,6 +5,10 @@ import logging
 import os
 import signal
 import sys
+import threading
+import atexit
+from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
@@ -12,6 +16,50 @@ if _project_root not in sys.path:
 
 from bobo_tui_gateway.server import dispatch
 from bobo_tui_gateway.transport import write_json
+
+# ── 持久运行日志（崩溃根因调查基础设施，2026-07-27）──────────────
+_LOG_DIR = os.path.join(_project_root, "data", "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+
+_handler = TimedRotatingFileHandler(
+    os.path.join(_LOG_DIR, "bobo.log"),
+    when="midnight", interval=1, backupCount=7, encoding="utf-8"
+)
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d %(threadName)s %(message)s"
+))
+_handler.setLevel(logging.DEBUG)
+
+_root_logger = logging.getLogger()
+_root_logger.addHandler(_handler)
+_root_logger.setLevel(logging.DEBUG)
+
+# 线程异常捕获：任何线程的未处理异常写日志
+_original_thread_excepthook = threading.excepthook
+
+def _log_thread_exception(args):
+    logger.critical("线程异常: %s", args.exc_type.__name__ if args.exc_type else "unknown",
+                     exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+    _original_thread_excepthook(args)
+
+threading.excepthook = _log_thread_exception
+
+# 系统异常捕获
+def _log_sys_exception(exc_type, exc_value, exc_traceback):
+    logger.critical("进程异常: %s", exc_type.__name__, exc_info=(exc_type, exc_value, exc_traceback))
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+sys.excepthook = _log_sys_exception
+
+# faulthandler：每 2 分钟 dump 所有线程堆栈（帮助诊断"假死"）
+try:
+    import faulthandler
+    _dump_path = os.path.join(_LOG_DIR, "stack_dump.log")
+    _dump_fd = open(_dump_path, "a")
+    faulthandler.dump_traceback_later(120, repeat=True, file=_dump_fd)
+    atexit.register(lambda: _dump_fd.close())
+except Exception:
+    pass
 
 logger = logging.getLogger(__name__)
 
