@@ -71,7 +71,8 @@ class PromptInjector:
 
         # ── 2. 推荐技能 ──
         try:
-            from tools import _skill_mgr
+            from core.skill_manager import get_skill_manager
+            _skill_mgr = get_skill_manager()
             skill_refs = _skill_mgr.get_skill_tools()
             if skill_refs:
                 user_text = (engine.current_user_input or "").lower()
