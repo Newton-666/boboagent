@@ -169,7 +169,8 @@ def _extract_tool_log(history: list) -> str:
     return "\n".join(lines)
 
 
-def execute(instruction: str = "", name: str = "", context: str = "", task: str = "") -> str:
+def execute(instruction: str = "", name: str = "", context: str = "",
+            task: str = "", allow_tools: bool = True, timeout: int = None) -> str:
     # task 是 instruction 的别名——LLM 常常猜 task 而不知道参数名是 instruction
     instruction = instruction or task
     """执行子任务并返回轻量标记，完整结果可通过 read_worker_result 获取。"""
@@ -188,6 +189,13 @@ def execute(instruction: str = "", name: str = "", context: str = "", task: str 
         from core.engine import Engine
         from core.tool_executor import execute_tool
 
+        # ── 工具桩：allow_tools=False 时替换 executor ──
+        _active_executor = execute_tool
+        if not allow_tools:
+            def _no_tools_stub(tool_name: str, tool_args: dict) -> str:
+                return "[工具已禁用] 这是纯思考任务，请直接输出文字结论。"
+            _active_executor = _no_tools_stub
+
         # ── 构建 Worker 的 system prompt ──
         worker_prompt = _build_worker_prompt(instruction, name)
 
@@ -201,7 +209,7 @@ def execute(instruction: str = "", name: str = "", context: str = "", task: str 
         # ── 创建 Worker Engine ──
         worker = Engine(
             llm_caller=llm_caller,
-            tool_executor=execute_tool,
+            tool_executor=_active_executor,
             test_mode=False,
             callback=_make_worker_callback(name or instruction[:20]),
         )
@@ -210,16 +218,26 @@ def execute(instruction: str = "", name: str = "", context: str = "", task: str 
         # ── 设置嵌套检测标志 ──
         _worker_depth.depth = getattr(_worker_depth, "depth", 0) + 1
 
-        # ── 在独立线程中运行 Worker，超时后自动重试一次 ──
-        result, timed_out = _run_worker_with_timeout(worker, worker_input, _WORKER_TIMEOUT)
+        # ── 超时（可配置，None 用现有逻辑）──
+        _timeout = timeout if timeout is not None else _WORKER_TIMEOUT
+        _retry_timeout = max(_timeout * 2, timeout) if timeout else _WORKER_RETRY_TIMEOUT if timeout is None else _WORKER_RETRY_TIMEOUT
+        if timeout:
+            _retry_timeout = _WORKER_RETRY_TIMEOUT  # 用户指定的 timeout 不触发重试逻辑
+
+        # ── 在独立线程中运行 Worker ──
+        result, timed_out = _run_worker_with_timeout(worker, worker_input, _timeout)
 
         if timed_out:
+            # 如果调用方传了明确的 timeout，不重试——超时即失败
+            if timeout is not None:
+                return f"[WORKER_TIMEOUT] Worker 执行超过 {timeout}s。"
+
             partial = _extract_worker_result(worker.history)
             if partial and partial != "(Worker 没有产生回复)":
                 # 有进度且超时 → 重试一次，给更长时间
                 worker2 = Engine(
                     llm_caller=llm_caller,
-                    tool_executor=execute_tool,
+                    tool_executor=_active_executor,
                     test_mode=False,
                 )
                 worker2.system_prompt = worker_prompt
@@ -311,6 +329,20 @@ TOOL_SCHEMA = {
                         "可选。Worker 的名称，用于跟踪、调试和获取完整结果。\n"
                         "提供 name 后返回轻量标记，完整摘要通过 read_worker_result 获取。\n"
                         "如 'researcher'、'big-picture-analyzer'、'bug-fixer'。"
+                    ),
+                },
+                "allow_tools": {
+                    "type": "boolean",
+                    "description": (
+                        "可选，默认 true。false 时 Worker 不能调用任何工具——"
+                        "适用于纯思考/分析任务，保证一轮内直接输出文字。"
+                    ),
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": (
+                        "可选。Worker 超时秒数。默认 110s。"
+                        "指定后超时不重试，直接返回超时错误。"
                     ),
                 },
                 "context": {
