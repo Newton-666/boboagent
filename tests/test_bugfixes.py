@@ -345,6 +345,64 @@ class TestEditFileContextAware:
 
 # ── Phase 1-6: refactor interface redesign ──────────────────────────────
 
+class TestSpawnWorkerAllowTools:
+    """allow_tools=False 时必须通过真实执行链（Engine → tool_runner → executor）。"""
+
+    def test_allow_tools_false_blocks_tool_calls(self, tmp_path):
+        """Worker with allow_tools=False: tool calls return stub text, not real result."""
+        from tests.mock_llm import MockLLMCaller, tool_response, text_response
+
+        # LLM: first calls a tool (proper JSON args), then replies
+        import json as _test_json
+        caller = MockLLMCaller([
+            {
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_current_time",
+                                "arguments": _test_json.dumps({})
+                            }
+                        }]
+                    }
+                }]
+            },
+            text_response("我认为方案是..."),
+        ])
+
+        from core.engine import Engine
+
+        # 工具桩
+        def _stub(tool_name, tool_args):
+            return "[工具已禁用] 这是纯思考任务，请直接输出文字结论。"
+
+        engine = Engine(
+            llm_caller=caller,
+            tool_executor=_stub,
+            test_mode=True,
+        )
+        engine._proactive_mode = "off"
+        engine.MAX_STEPS = 6
+        engine.run("就 x 提出方案")
+
+        # Check that tool results contain stub text, not real file content
+        for msg in engine.history:
+            if msg.get("role") == "tool":
+                assert "[工具已禁用]" in msg.get("content", ""), (
+                    f"Expected stub text in tool result, got: {msg['content'][:100]}"
+                )
+
+        # LLM should have received the stub and produced a response
+        assert any(
+            "我认为" in m.get("content", "")
+            for m in engine.history
+            if m.get("role") == "assistant" and m.get("content")
+        ), "LLM should have responded after seeing tool stub"
+
+
 class TestRefactorInterface:
     """Verify refactor's new changes-based interface works correctly."""
 

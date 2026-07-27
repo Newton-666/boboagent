@@ -101,7 +101,11 @@ class ToolRunnerMixin:
         return '\n'.join(unique_lines)
 
     def _execute_tool_loop(self, tool_calls: list) -> list:
-        from core.tool_executor import execute_tool as _execute_tool
+        # 使用 self.tool_executor 而非本地 import，让调用方（如 duo orchestrator）
+        # 可以注入工具桩（allow_tools=False → 返回禁工具提示）
+        _execute_tool = getattr(self, 'tool_executor', None)
+        if _execute_tool is None:
+            from core.tool_executor import execute_tool as _execute_tool
         from tools import TOOLS_SCHEMA
 
         # 工具失败时的替代建议：告诉 LLM 具体下一步做什么
