@@ -252,8 +252,6 @@ const ComposerPane = memo(function ComposerPane({
         <Box height={1} onMouseDown={captureInputDrag} onMouseDrag={dragFromSpacer} onMouseUp={endInputDrag} />
       )}
 
-      <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
-
       <StatusRulePane at="top" composer={composer} status={status} />
 
       <Box flexDirection="column" marginTop={ui.statusBar === 'top' ? 0 : 1} position="relative">
@@ -325,15 +323,13 @@ const ComposerPane = memo(function ComposerPane({
             </Box>
           </>
         )}
+
+        <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
       </Box>
 
       {!composer.empty && !ui.sid && <Text color={ui.theme.color.muted}>⚕ {ui.status}</Text>}
 
       <StatusRulePane at="bottom" composer={composer} status={status} />
-
-      {composer.cols >= 40 && (
-        <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
-      )}
     </NoSelect>
   )
 })
@@ -365,29 +361,33 @@ const StatusRulePane = memo(function StatusRulePane({
   }
 
   return (
-    <Box marginTop={at === 'top' ? 1 : 0}>
-      <StatusRule
-        bgCount={ui.bgTasks.size}
-        busy={ui.busy}
-        cols={composer.cols}
-        cwdLabel={status.cwdLabel}
-        indicatorStyle={ui.indicatorStyle}
-        liveSessionCount={ui.liveSessionCount}
-        model={ui.info?.model ?? ''}
-        modelFast={ui.info?.fast || ui.info?.service_tier === 'priority'}
-        modelReasoningEffort={ui.info?.reasoning_effort}
-        notice={ui.notice}
-        onSessionCountClick={() => patchOverlayState({ sessions: true })}
-        sessionStartedAt={status.sessionStartedAt}
-        showCost={ui.showCost}
-        status={ui.status}
-        statusColor={status.statusColor}
-        t={ui.theme}
-        turnStartedAt={status.turnStartedAt}
-        usage={ui.usage}
-        voiceLabel={status.voiceLabel}
-      />
-    </Box>
+    <>
+      <Box marginTop={at === 'top' ? 1 : 0}>
+        <StatusRule
+          bgCount={ui.bgTasks.size}
+          busy={ui.busy}
+          cols={composer.cols}
+          cwdLabel={status.cwdLabel}
+          indicatorStyle={ui.indicatorStyle}
+          liveSessionCount={ui.liveSessionCount}
+          model={ui.info?.model ?? ''}
+          modelFast={ui.info?.fast || ui.info?.service_tier === 'priority'}
+          modelReasoningEffort={ui.info?.reasoning_effort}
+          notice={ui.notice}
+          onSessionCountClick={() => patchOverlayState({ sessions: true })}
+          sessionStartedAt={status.sessionStartedAt}
+          showCost={ui.showCost}
+          status={ui.status}
+          statusColor={status.statusColor}
+          t={ui.theme}
+          turnStartedAt={status.turnStartedAt}
+          usage={ui.usage}
+          voiceLabel={status.voiceLabel}
+        />
+      </Box>
+
+      {at === 'top' && <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>}
+    </>
   )
 })
 
