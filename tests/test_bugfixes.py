@@ -345,6 +345,16 @@ class TestEditFileContextAware:
 
 # ── Phase 1-6: refactor interface redesign ──────────────────────────────
 
+class TestDuoBriefing:
+    """Phase 0 现状简报必须返回非空内容（在本仓库环境下）。"""
+
+    def test_briefing_returns_git_log(self):
+        from core.duo_orchestrator import _briefing
+        result = _briefing()
+        assert result, "简报不应该为空"
+        assert "最近提交" in result, f"简报应包含 git log, got: {result[:200]}"
+
+
 class TestSpawnWorkerAllowTools:
     """allow_tools=False 时必须通过真实执行链（Engine → tool_runner → executor）。"""
 
