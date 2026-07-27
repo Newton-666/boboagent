@@ -12,10 +12,29 @@
 """
 
 import os
+import sys
+import subprocess
 import time
 from pathlib import Path
 from core.file_safety import is_write_denied
 from config import BOBO_DATA_DIR
+
+
+def _py_compile_check(path: str) -> str:
+    """写 .py 文件后自动语法检查。失败不阻断，只附加醒目的 ❌ 信息。"""
+    if not path.endswith(".py"):
+        return ""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "py_compile", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            return f"\n✅ py_compile 通过: {path}"
+        stderr = r.stderr.strip().split("\n")[-10:]
+        return f"\n❌ py_compile 失败: {path}\n{chr(10).join(stderr)}\n（文件已写入，但语法检查未过——必须立即修复，禁止交付）"
+    except Exception as e:
+        return f"\n⚠️ py_compile 未执行: {e}"
 
 
 TRASH_DIR = BOBO_DATA_DIR / "trash"
@@ -191,7 +210,8 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
     return (
         f"已替换: {path}\n"
         f"  文件大小: {len(content)} → {len(new_content)} 字符\n"
-        f"  行数: {old_lines} → {new_lines} 行{backup_info}\n"
+        f"  行数: {old_lines} → {new_lines} 行{backup_info}"
+        f"{_py_compile_check(str(path))}\n"
         f"<<<INLINE_DIFF>>>\n"
         f"{diff_text}\n"
         f"<<<END_INLINE_DIFF>>>"
