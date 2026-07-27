@@ -1,7 +1,10 @@
-"""上下文管理 — 历史压缩、查询分类、工具过滤"""
+"""上下文管理 — 历史压缩、查询分类、工具过滤、孤儿 tool_calls 清洗"""
 
+import logging
 import re
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ── Token 估算（CJK 启发式，不引入 tiktoken 依赖）───────────────────
@@ -283,3 +286,103 @@ class ContextMixin:
             if name in allowed_names:
                 filtered.append(tool)
         return filtered if filtered else None
+
+
+# ── 孤儿 tool_calls 清洗（会话加载时调用）────────────────────────
+
+def clean_orphan_tool_calls(messages: list) -> list:
+    """扫描并修复 messages 中的孤儿 tool_calls / 游离 tool 消息。
+
+    崩溃时线程死在工具调用中途，会话存盘可能留下：
+    - assistant 发了 tool_calls 但 tool 结果丢失（孤儿调用）
+    - tool 消息存在但对应的 assistant tool_calls 丢失（游离工具结果）
+
+    修复策略：
+    a. 孤儿 assistant tool_calls → 补占位 tool 消息（content="[工具结果因中断丢失]"），
+       保留上下文语义，让 LLM 知道发生过中断。
+    b. 游离 tool 消息 → 删除（没有对应调用方，LLM 无法理解上下文）。
+    c. 返回清洗后的新列表（不修改原列表）。
+
+    返回:
+        (cleaned_messages, report_dict) — report 包含 inserted/removed 计数。
+    """
+    # 第一遍：收集索引
+    # tool 消息的 tool_call_id → 索引集合
+    tool_result_ids: dict[str, list[int]] = {}  # tool_call_id → [idx, ...]
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and m.get("role") == "tool":
+            tc_id = m.get("tool_call_id", "")
+            if tc_id:
+                tool_result_ids.setdefault(tc_id, []).append(i)
+
+    # assistant tool_calls 的 id → (assistant_msg_index, tc_entry)
+    assistant_tc_map: dict[str, tuple[int, dict]] = {}
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and m.get("role") == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                tc_id = tc.get("id", "")
+                if tc_id:
+                    assistant_tc_map[tc_id] = (i, tc)
+
+    # 第二遍：构建新列表 + 孤儿修复
+    inserted = 0
+    removed = 0
+    # 游离 tool 消息的索引集（tool_call_id 不在 assistant_tc_map 中）
+    orphan_tool_indices: set[int] = set()
+    for tc_id, idxs in tool_result_ids.items():
+        if tc_id not in assistant_tc_map:
+            orphan_tool_indices.update(idxs)
+
+    # 孤儿 assistant tool_calls（不在 tool_result_ids 中）
+    orphan_assistant_tc_ids: set[str] = set()
+    for tc_id in assistant_tc_map:
+        if tc_id not in tool_result_ids:
+            orphan_assistant_tc_ids.add(tc_id)
+
+    # 构建输出，按原序
+    cleaned = []
+    # 记录每个 assistant index 需要追加的占位消息，按原始 assistant index 分组
+    # 因为可能有多个 tc per assistant，可能需要在 assistant 后面插入多条 tool 消息
+    # 策略：遍历原 messages，遇到带孤儿 tc 的 assistant 时，先放 assistant，然后放占位 tool 消息
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict):
+            cleaned.append(m)
+            continue
+
+        if i in orphan_tool_indices and m.get("role") == "tool":
+            # 游离 tool 消息：跳过（删除）
+            removed += 1
+            continue
+
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            # 先放 assistant 消息本身
+            cleaned.append(m)
+            # 检查是否有孤儿 tool_calls
+            orphan_ids_for_this = [
+                tc.get("id", "") for tc in m["tool_calls"]
+                if tc.get("id", "") in orphan_assistant_tc_ids
+            ]
+            for tc_id in orphan_ids_for_this:
+                inserted += 1
+                # 找到对应的 tool_call 条目获取工具名
+                tc_entry = assistant_tc_map.get(tc_id, ([], {}))[1]
+                tool_name = ""
+                if isinstance(tc_entry, dict):
+                    tool_name = tc_entry.get("function", {}).get("name", "")
+                cleaned.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": tool_name,
+                    "content": "[工具结果因中断丢失]",
+                })
+        else:
+            cleaned.append(m)
+
+    # 报告
+    if inserted or removed:
+        logger.info(
+            "孤儿 tool_calls 清洗: 补 %d 个占位 tool 结果, 删 %d 个游离 tool 消息",
+            inserted, removed,
+        )
+
+    return cleaned, {"inserted": inserted, "removed": removed}

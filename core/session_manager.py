@@ -3,10 +3,14 @@ core/session_manager.py - 会话管理（支持多人协作）
 """
 
 import json
+import logging
 import os
 import getpass
+import shutil
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 SESSION_VERSION = 1
 
@@ -68,9 +72,34 @@ class SessionManager:
         session_path = self.session_dir / f"{session_id}.json"
         if not session_path.exists():
             return None
-        with open(session_path, 'r', encoding='utf-8') as f:
-            session = json.load(f)
+
+        # ── JSON 损坏保护 ──
+        try:
+            with open(session_path, 'r', encoding='utf-8') as f:
+                session = json.load(f)
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            logger.error("会话文件 %s 解析失败: %s", session_id, e)
+            # 保留原文件供回溯
+            corrupted_path = session_path.with_suffix(".json.corrupted")
+            try:
+                shutil.copy2(str(session_path), str(corrupted_path))
+                logger.info("已保留损坏副本: %s", corrupted_path)
+            except Exception:
+                pass
+            return None
+
         session = self._migrate_session(session)
+
+        # ── 孤儿 tool_calls 清洗 ──
+        try:
+            from core.context import clean_orphan_tool_calls
+            msgs = session.get("messages", [])
+            if msgs:
+                cleaned_msgs, report = clean_orphan_tool_calls(msgs)
+                session["messages"] = cleaned_msgs
+        except Exception:
+            logger.debug("孤儿清洗跳过", exc_info=True)
+
         self.current_session_id = session_id
         self.current_session = session
         return session
