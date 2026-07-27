@@ -90,7 +90,7 @@ class TestToolFiltering:
         if filtered is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered]
             # Check for tools that ARE in the code category per TOOL_CATEGORIES
-            code_tools = ["code_execution", "execute_terminal", "search_code",
+            code_tools = ["code_execution", "execute_terminal",
                          "refactor", "git_status", "github_create_repo",
                          "github_create_pr", "github_pr_diff", "github_pr_comment",
                          "restore_checkpoint"]
