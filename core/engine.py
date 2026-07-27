@@ -185,7 +185,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
 
 你也可以录制自定义技能：
 - 说"开始教学"来录制操作流程。
-- 完成后说"保存为 skill <名称>"，Bobo 会保存到 skills/ 目录。
+- 完成后说"保存为 skill <名称>"，Bobo 会保存到 data/skill-standards/ 目录。
 - 个人技能保存在本地，不会提交到 GitHub。
 
 ## 工具并行
