@@ -26,6 +26,8 @@ from core.emoji_cleaner import remove_emojis
 from core.command_safety import classify_command, is_high_risk_tool
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
+from core.skill_loader import SkillLoader
+from core.proactive import ProactiveManager
 
 
 class Engine(ContextMixin, ToolRunnerMixin):
@@ -85,10 +87,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_pending_cleanup: bool = False
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
-        # 主动模式：off / subtle / full
-        self._proactive_mode: str = "off"
-        self._proactive_stats: dict = {"offered": 0, "engaged": 0}
-        self._last_memory_ids: list = []  # 本轮注入的记忆 ID
+        # 主动模式管理器（含记忆连接 + 参与度追踪）
+        self.proactive = ProactiveManager()
+        # 技能标准加载器
+        self.skill_loader = SkillLoader(lambda: self.history)
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -296,7 +298,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         # 每轮新用户消息到来时重置压缩标记
         self._compressed_this_turn = False
         # 主动模式：追踪用户是否在回应上轮连接提议
-        self._track_engagement(user_input)
+        self.proactive.track_engagement(user_input)
         teaching_result = self._handle_teaching_mode(user_input)
         if teaching_result is not None:
             return teaching_result
@@ -411,286 +413,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
 
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
-
-
-    # ── 主动模式：连接发现（Layer 1 — 对话内注入）────────────────
-
-    def _load_proactive_config(self):
-        """从 config 或环境变量加载主动模式级别。engine_adapter 创建 Engine 后应调用此方法。"""
-        try:
-            from config import BOBO_PROACTIVE_MODE
-            self._proactive_mode = BOBO_PROACTIVE_MODE
-        except (ImportError, AssertionError):
-            self._proactive_mode = "off"
-
-    def _extract_topic(self, messages: list) -> str:
-        """从最近几条用户消息中提取对话主题（用于搜索相关连接）。"""
-        user_msgs = [m.get("content", "") for m in messages[-6:]
-                     if m.get("role") == "user" and m.get("content")]
-        if not user_msgs:
-            return ""
-        # 取最近 2 条用户消息拼接，不超过 200 字
-        topic = " ".join(user_msgs[-2:])
-        return topic[:200]
-
-    def _semantic_filter(self, topic: str, candidates: list) -> list:
-        """RAG-lite：LLM 批量判断每条记忆是否与当前话题语义相关。
-        返回通过过滤的记忆条目列表。无 embedding，无向量库——LLM 自己做判断。"""
-        if not candidates or len(candidates) <= 1:
-            return candidates  # 只有 1 条候选，不过滤
-        try:
-            items = "\n".join(f"[{i+1}] {e.get('text','')[:100]}"
-                             for i, e in enumerate(candidates))
-            prompt = [
-                {"role": "system", "content": (
-                    f"当前对话主题: {topic[:100]}\n\n"
-                    f"以下是从用户记忆库中检索到的条目。请判断每条是否与当前主题语义相关。\n"
-                    f"只回复相关条目的编号（如 1,3），不相关的不提。如果都不相关回复 0。\n\n"
-                    f"{items}"
-                )},
-            ]
-            response = self.llm_caller(prompt, use_tools=False)
-            if isinstance(response, dict) and "error" in response:
-                return candidates  # API 出错时不过滤，保持原样
-            content = (response.get("choices", [{}])[0]
-                       .get("message", {}).get("content", ""))
-            # 解析 "1,3" 或 "1 3" 或 "相关: 1,3"
-            import re
-            nums = re.findall(r'\d+', content)
-            ids = {int(n) - 1 for n in nums if 0 <= int(n) - 1 < len(candidates)}
-            if not ids or 0 in {int(n) for n in nums if int(n) == 0}:
-                return candidates[:1]  # LLM 说"都不相关" → 只保留第一条兜底
-            return [candidates[i] for i in sorted(ids)]
-        except Exception:
-            return candidates  # 异常时不过滤
-
-    def _find_connections(self, topic: str) -> list[str]:
-        """Top-N 记忆注入（信号分 + RAG-lite 语义过滤）+ Obsidian 笔记连接。"""
-        if not topic or len(topic) < 3:
-            return []
-        connections = []
-        try:
-            from tools.v5_memory import get_top_memories, bump_signal
-            candidates = get_top_memories(topic, limit=5)  # 先取 5 条候选
-            # RAG-lite: LLM 语义过滤，只保留真正相关的
-            filtered = self._semantic_filter(topic, candidates)
-            # 去重：两条文本重叠 > 80% 的只保留高分那条
-            top = []
-            seen_texts = []
-            for e in sorted(filtered, key=lambda x: x.get("signal_score", 100), reverse=True):
-                words = set(e.get("text", "").split())
-                is_dup = False
-                for seen in seen_texts:
-                    if words and seen:
-                        overlap = len(words & seen) / max(len(words), len(seen))
-                        if overlap > 0.8:
-                            is_dup = True
-                            break
-                if not is_dup:
-                    seen_texts.append(words)
-                    top.append(e)
-            top = top[:3]
-            self._last_memory_ids = []  # 记录本轮注入的记忆 ID，用于后续引用追踪
-            for e in top:
-                ts = e.get("timestamp", "")[:10]
-                score = e.get("signal_score", 100)
-                connections.append(f"[记忆 {ts}|分{score}] {e.get('text','')[:120]}")
-                self._last_memory_ids.append(e.get("id"))
-        except Exception as e:
-            logger.debug("主动模式搜索记忆失败: %s", e)
-        try:
-            from tools.obsidian_tools import search_obsidian_notes
-            obs_result = search_obsidian_notes(topic)
-            if obs_result and "没有找到" not in str(obs_result):
-                lines = str(obs_result).split("\n")
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith("- "):
-                        connections.append(f"[笔记] {line[2:]}")
-                        if len(connections) >= 5:
-                            break
-        except Exception as e:
-            logger.debug("主动模式搜索 Obsidian 失败: %s", e)
-        return connections
-
-    def _inject_connection_context(self, messages: list) -> list:
-        """主动模式 Layer 2：Top-N 信号分记忆注入 + 衰减非引用记忆。
-
-        off  — 零开销直接返回
-        subtle — 静默注入 Top 3 高信号记忆
-        full  — 注入 + 引导 LLM 自然引用
-        """
-        if self._proactive_mode == "off":
-            return messages
-
-        topic = self._extract_topic(messages)
-        if not topic:
-            return messages
-
-        connections = self._find_connections(topic)
-        if not connections:
-            return messages
-
-        # 本轮未被注入的旧记忆做衰减
-        try:
-            from tools.v5_memory import decay_all
-            decay_all(decay=-5)
-        except Exception:
-            pass
-
-        prefix = "[相关背景｜按相关性排序] 以下内容来自用户记忆，可能与当前话题相关。"
-        if self._proactive_mode == "full":
-            prefix += ("\n如果这些背景能补充你的回答或提供有用的上下文，"
-                       "可以自然地在回复中提到。如果无关，忽略即可。")
-        else:
-            prefix += ("\n如果这些背景对你的回复有帮助，自然引用它们。"
-                       "如果和当前问题无关，忽略即可，不要在回复中提及。")
-
-        context = prefix + "\n\n" + "\n".join(connections)
-        messages_copy = list(messages)
-        messages_copy.insert(1, {"role": "system", "content": context})
-        self._proactive_stats["offered"] += 1
-        return messages_copy
-
-    def _track_engagement(self, user_input: str):
-        """用户消息是否引用了上次提出的连接（用于自动降级判断）。"""
-        if self._proactive_stats["offered"] == 0:
-            return
-        engagement_keywords = ["展开", "看看", "打开那篇", "详细说", "那篇笔记",
-                               "那个分析", "你提到的", "read_obsidian", "load_result"]
-        if any(kw in user_input for kw in engagement_keywords):
-            self._proactive_stats["engaged"] += 1
-
-    def _maybe_downgrade(self) -> str | None:
-        """如果提出 ≥5 条连接但参与率 < 20%，自动降一级并告知用户。"""
-        s = self._proactive_stats
-        if s["offered"] >= 5 and s["offered"] > 0:
-            rate = s["engaged"] / s["offered"]
-            if rate < 0.2:
-                old = self._proactive_mode
-                if old == "full":
-                    self._proactive_mode = "subtle"
-                elif old == "subtle":
-                    self._proactive_mode = "off"
-                if self._proactive_mode != old:
-                    return (f"主动模式已从 {old} 降为 {self._proactive_mode}"
-                            f"（最近 {s['offered']} 条连接中只展开了 {s['engaged']} 条）")
-        return None
-
-    def _track_citation(self, assistant_response: str, memory_ids: list):
-        """LLM 回复中若引用了注入的记忆，自动 bump 信号分。"""
-        try:
-            from tools.v5_memory import bump_signal, get_all
-            data = get_all()
-            for mid in memory_ids:
-                for e in data.get("entries", []):
-                    if e.get("id") == mid:
-                        text = e.get("text", "")
-                        # 简单检查：回复中是否包含记忆的前 30 个字符
-                        if text[:30].lower() in assistant_response.lower():
-                            bump_signal(mid, delta=10)
-                        else:
-                            # 没有直接引用但被注入了 → 轻微衰减
-                            bump_signal(mid, delta=-3)
-                        break
-        except Exception:
-            pass
-
-    def _load_skill_standards(self) -> list[str]:
-        """扫描 data/skill-standards/*/standard.md，返回所有匹配的标准内容（按匹配度降序）。
-
-        自动发现：往 data/skill-standards/ 下新增一个文件夹、放入 standard.md 即生效。
-        不需要改任何代码、不需要注册、不需要更新索引。
-
-        每个 standard.md 通过元数据行声明自己的行为：
-        - keywords: 触发词（逗号分隔）
-        - excludes: 排除词（话题含这些词时跳过本 skill）
-        - requires: 依赖 skill 名（本 skill 注入时连带加载）
-        """
-        try:
-            import os as _os
-            std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
-                _os.path.abspath(__file__))), "data", "skill-standards")
-            if not _os.path.isdir(std_dir):
-                return []
-            import re as _sre
-            user_msgs = [m.get("content", "") for m in self.history[-4:]
-                         if m.get("role") == "user" and m.get("content")]
-            topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
-
-            # 第一遍：加载所有 skill 的元数据（不评分）
-            entries = {}  # entry_name -> {content, trigger_words, exclude_words, requires}
-            for entry in _os.listdir(std_dir):
-                path = _os.path.join(std_dir, entry, "standard.md")
-                if not _os.path.isfile(path):
-                    continue
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                # keywords
-                kw = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
-                trigger_words = [w.strip().lower() for w in (kw.group(1).split(",") if kw else [])]
-                if not trigger_words:
-                    trigger_words = (entry + " " + content.split("\n")[0]).lower().split()
-                # excludes（可选）
-                ex = _sre.search(r'excludes:\s*(.+)', content, _sre.IGNORECASE)
-                exclude_words = [w.strip().lower() for w in (ex.group(1).split(",") if ex else [])]
-                # requires（可选）
-                req = _sre.search(r'requires:\s*(.+)', content, _sre.IGNORECASE)
-                require_names = [w.strip() for w in (req.group(1).split(",") if req else [])]
-                entries[entry] = {
-                    "content": content,
-                    "trigger_words": trigger_words,
-                    "exclude_words": exclude_words,
-                    "require_names": require_names,
-                }
-
-            # 第二遍：评分 + 排除过滤
-            scored = []
-            for name, info in entries.items():
-                if info["exclude_words"] and any(ew in topic for ew in info["exclude_words"]):
-                    continue
-                score = sum(1 for tw in info["trigger_words"] if tw and tw in topic)
-                if score > 0:
-                    scored.append((score, name))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            top_names = [name for _, name in scored[:3]]
-            top_set = set(top_names)
-
-            # 解析 requires：连带加载依赖 skill（跳过 excludes 检查——被拉进来的不受排除影响）
-            for name in list(top_names):
-                for req_name in entries.get(name, {}).get("require_names", []):
-                    if req_name not in top_set and req_name in entries:
-                        top_set.add(req_name)
-                        top_names.append(req_name)
-
-            return [entries[name]["content"] for name in top_names]
-        except Exception:
-            return []
-
-    def _list_available_standards(self) -> str:
-        """扫描 data/skill-standards/，返回所有可用标准的名称和触发关键词。"""
-        try:
-            import os as _os
-            std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
-                _os.path.abspath(__file__))), "data", "skill-standards")
-            if not _os.path.isdir(std_dir):
-                return ""
-            import re as _sre
-            lines = []
-            for entry in sorted(_os.listdir(std_dir)):
-                path = _os.path.join(std_dir, entry, "standard.md")
-                if not _os.path.isfile(path):
-                    continue
-                with open(path, "r", encoding="utf-8") as fh:
-                    content = fh.read()
-                title = content.split("\n")[0].lstrip("#").strip()
-                kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
-                keywords = kw_match.group(1).strip()[:80] if kw_match else ""
-                lines.append(f"  - {title} | 触发词: {keywords}")
-            return "\n".join(lines) if lines else ""
-        except Exception:
-            return ""
 
     def _extract_takeaways(self) -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
@@ -943,12 +665,12 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             })
 
         # 主动模式 Layer 1：对话内连接发现注入（off 时零开销返回原 messages）
-        messages = self._inject_connection_context(messages)
+        messages = self.proactive.inject_context(messages)
 
         # 技能标准注入（data/skill-standards/*/standard.md）
         # 放在所有注入的最后，LLM 生成前最后看到的就是它。recency effect 使其权重最高。
         # 自动发现：新增文件夹 + standard.md 即生效，无需改代码。
-        skill_stds = self._load_skill_standards()
+        skill_stds = self.skill_loader.load_standards()
         if skill_stds:
             combined = "\n\n---\n\n".join(skill_stds)
             messages.append({
@@ -960,7 +682,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             })
         else:
             # 没有命中任何标准时，仍然告知可用标准列表（让 Bobo 知道自己的技能）
-            available = self._list_available_standards()
+            available = self.skill_loader.list_available()
             if available:
                 messages.append({
                     "role": "system",
@@ -1180,11 +902,11 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             if self._pending_content:
                 self._append_to_history("assistant", self._pending_content)
                 # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
-                if getattr(self, '_last_memory_ids', None):
-                    self._track_citation(self._pending_content, self._last_memory_ids)
-                    self._last_memory_ids = []
+                if getattr(self.proactive, '_last_memory_ids', None):
+                    self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
+                    self.proactive._last_memory_ids = []
                 # 自动草稿记忆：从本轮对话提取关键结论
-                if self._proactive_mode != "off":
+                if self.proactive.mode != "off":
                     takeaways = self._extract_takeaways()
                     if takeaways:
                         try:
@@ -1207,7 +929,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                         except Exception:
                             pass
                 # 自动 skill 发现：检查候选模式并主动提议
-                if self._proactive_mode != "off":
+                if self.proactive.mode != "off":
                     self.tracker.maybe_propose_skill()
                 content = self._format_final_output(self._pending_content)
                 self._notify("complete", {"content": content, "usage": self._last_usage})
