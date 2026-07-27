@@ -38,7 +38,7 @@ duo 的位置：验收和商讨，不是执行。主 bobo 强就用主 bobo。
 | L1 | 加测试、改文档、写 skill | 用户看 diff 拍板 | 已解锁 |
 | L2 | 小 bug 修复（几行、单文件） | duo B 验收 | L1 连续 3 次零打回 |
 | L3 | 中等 feature（多文件） | duo B + 用户终审 | L2 稳定后 |
-| L4 | 架构级（engine/worker/安全分级） | **不开放**，走 Cloud + Kimi 审查 | 长期观察 |
+| L4 | 架构级（engine/worker/安全分级） | **不开放自主执行**，bobo 可做但审查必须走 Cloud / Kimi / Kimi Code（2026-07-27 engine 解耦即 bobo 执行 + Kimi Code 审查） | 长期观察 |
 
 ## 自动生效的验证栈（无需提醒，已在位）
 
