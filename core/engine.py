@@ -1533,6 +1533,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self._pending_tool_calls = None
         self._step_count = 0
         self._all_confirmed = False
+        self._verification_attempted = False
 
         if self.history and not self._compressing:
             from core.context import _estimate_tokens, _get_context_budget
