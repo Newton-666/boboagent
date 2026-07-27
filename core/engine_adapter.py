@@ -98,8 +98,8 @@ def run_engine(
                     total = raw.get("total_tokens", 0)
                     with session_usage_lock:
                         acc = session_usage.setdefault(sid, {"input": 0, "output": 0})
-                        acc["input"] += input_tokens
-                        acc["output"] += output_tokens
+                        acc["input"] = input_tokens
+                        acc["output"] = output_tokens
                     context_used = acc["input"] + acc["output"]
                     last_usage[0] = {
                         "input": acc["input"],
