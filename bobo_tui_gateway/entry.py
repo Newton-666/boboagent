@@ -33,7 +33,7 @@ def resolve_skin() -> dict:
         "colors": {
             "ui_primary": "#A09CC2",
             "ui_accent": "#D4A9A0",
-            "ui_border": "#93AECC",
+            "ui_border": "#D4A9A0",
             "ui_text": "#FFFFFF",
             "banner_title": "#60A5FA",
             "banner_accent": "#818CF8",
