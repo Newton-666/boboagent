@@ -324,7 +324,7 @@ const ComposerPane = memo(function ComposerPane({
           </>
         )}
 
-        <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
+        <Text color={ui.theme.color.shellDollar}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
       </Box>
 
       {!composer.empty && !ui.sid && <Text color={ui.theme.color.muted}>⚕ {ui.status}</Text>}
@@ -386,7 +386,7 @@ const StatusRulePane = memo(function StatusRulePane({
         />
       </Box>
 
-      {at === 'top' && <Text color={ui.theme.color.border}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>}
+      {at === 'top' && <Text color={ui.theme.color.shellDollar}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>}
     </>
   )
 })

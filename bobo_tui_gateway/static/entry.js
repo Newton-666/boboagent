@@ -72501,7 +72501,7 @@ var init_appLayout = __esm({
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
             ] }),
             !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
               "\u2695 ",
@@ -72560,7 +72560,7 @@ var init_appLayout = __esm({
             voiceLabel: status.voiceLabel
           }
         ) }),
-        at === "top" && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+        at === "top" && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
       ] });
     });
     AppLayout = (0, import_react100.memo)(function AppLayout2({
