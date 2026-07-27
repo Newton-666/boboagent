@@ -787,42 +787,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         except Exception:
             return []
 
-    # ── Pattern Tracker：自动 skill 发现 ──────────────────────────────
-
-    def _pattern_tracker_path(self) -> str:
-        try:
-            from config import BOBO_DATA_DIR
-            return str(BOBO_DATA_DIR / "pattern_tracker.json")
-        except Exception:
-            return ""
-
-    def _load_patterns(self) -> dict:
-        path = self._pattern_tracker_path()
-        if not path or not os.path.exists(path):
-            return {"patterns": {}}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"patterns": {}}
-
-    def _save_patterns(self, data: dict):
-        path = self._pattern_tracker_path()
-        if not path:
-            return
-        import tempfile, shutil as _sh
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix='.tmp', prefix='.pt_')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            _sh.move(tmp, path)
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except Exception:
-                pass
-
     def _truncate_history(self):
         """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。"""
         user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
