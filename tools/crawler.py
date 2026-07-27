@@ -102,6 +102,12 @@ WEB_FETCH_MAX_CHARS = 8000
 
 def _fetch_page(url: str) -> tuple[str | None, str | None]:
     """内部：获取网页并清洗，返回 (title, clean_text)。失败时 (error_msg, None)。"""
+    # SSRF 防护：拒绝内网地址
+    from tools._url_safety import is_url_safe
+    safe, reason = is_url_safe(url)
+    if not safe:
+        return f"❌ 安全拦截 — {reason}", None
+
     cached = _cache_get(url)
     if cached:
         return cached[0], cached[1]

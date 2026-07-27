@@ -50,6 +50,12 @@ def execute(api: str, endpoint: str, params: str = "", body: str = "") -> str:
 
     url = base_url + url_path
 
+    # SSRF 防护：拒绝内网地址
+    from tools._url_safety import is_url_safe
+    safe, reason = is_url_safe(url)
+    if not safe:
+        return f"❌ 安全拦截 — {reason}"
+
     # Build headers
     headers = {"Content-Type": "application/json"}
     auth_type = config.get("auth_type", "")

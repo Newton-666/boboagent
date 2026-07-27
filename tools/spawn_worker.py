@@ -272,6 +272,13 @@ def execute(instruction: str = "", name: str = "", context: str = "",
             with _WORKER_RESULTS_LOCK:
                 _WORKER_RESULTS[name] = result
 
+            # 自动清理：5 分钟后删除，防止内存泄漏
+            import time as _time
+            def _cleanup(name=name):
+                _time.sleep(300)
+                _WORKER_RESULTS.pop(name, None)
+            threading.Thread(target=_cleanup, daemon=True).start()
+
         # 返回轻量标记：有 name 时只带状态摘要，无 name 时返回全文
         if name:
             tool_count = result.count("✓")

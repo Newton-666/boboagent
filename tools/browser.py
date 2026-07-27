@@ -9,6 +9,11 @@ TOOL_NAME_PREFIX = "browser_"
 
 def open_url(url: str) -> str:
     """在浏览器中打开 URL"""
+    from tools._url_safety import is_url_safe
+    safe, reason = is_url_safe(url)
+    if not safe:
+        return f"❌ 安全拦截 — {reason}"
+
     try:
         result = subprocess.run(["open", url], capture_output=True, timeout=15)
         if result.returncode != 0:

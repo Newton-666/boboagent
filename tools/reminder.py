@@ -62,6 +62,12 @@ def execute(message: str) -> str:
     
     def remind():
         time.sleep(seconds)
+        # 提醒触发后从活跃列表中清除
+        with _reminder_lock:
+            for i, r in enumerate(_active_reminders):
+                if r.get("message") == message:
+                    _active_reminders.pop(i)
+                    break
         print(f"\n🔔 提醒: {message}")
         try:
             import subprocess
