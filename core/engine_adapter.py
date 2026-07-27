@@ -181,7 +181,7 @@ def run_engine(
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))
-        engine._checkpoints = session.get("checkpoints", [])
+        engine.checkpoint_mgr.checkpoints[:] = session.get("checkpoints", [])
         engine._interrupt_event = interrupt_event
         engine.run(text)
 
@@ -189,7 +189,7 @@ def run_engine(
         if interrupt_event and interrupt_event.is_set():
             return
 
-        session["checkpoints"] = engine._checkpoints
+        session["checkpoints"] = engine.checkpoint_mgr.checkpoints
 
         if engine.history:
             session["messages"] = engine.history
