@@ -50,8 +50,7 @@ def _briefing() -> str:
     except Exception:
         pass
 
-    # 限制行数
-    if len([l for l in lines if not l.startswith("##") and not l.startswith("  ")]) == 0:
+    if not lines:
         return ""
 
     return "\n".join(lines[:15])
