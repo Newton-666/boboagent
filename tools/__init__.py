@@ -93,8 +93,4 @@ if gated_count > 0:
 else:
     print(f" 已加载 {len(TOOLS_SCHEMA)} 个有效工具（去重后）", file=sys.stderr)
 
-# ── 技能作为动态工具注册 ──
-from core.skill_manager import get_skill_manager
-_skill_mgr = get_skill_manager()
 TOOLS_SCHEMA[:] = gated_schemas
-print(f" 含技能工具: 共 {len(TOOLS_SCHEMA)} 个工具", file=sys.stderr)
