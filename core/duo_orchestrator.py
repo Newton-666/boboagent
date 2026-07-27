@@ -15,6 +15,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_SIGNALS = ("bobo", "代码", "架构", "仓库", "引擎", "engine",
+                    "worker", "skill", "tui", "代码库", "项目")
 
 
 # ── Phase 0: 现状简报（纯代码，零 LLM）──────────────────────────────
@@ -105,8 +107,11 @@ def _emit_assistant(emit, sid: str, content: str):
 def run_deliberation(question: str, emit, sid: str):
     """执行 /duo 商讨流程（后台线程）。"""
 
-    # Phase 0: 现状简报
-    briefing = _briefing()
+    # Phase 0: 现状简报（仅当话题涉及本项目时执行，理念讨论跳过）
+    if any(sig in question.lower() for sig in _PROJECT_SIGNALS):
+        briefing = _briefing()
+    else:
+        briefing = ""
     if briefing:
         _emit_assistant(emit, sid, f"▎现状简报\n{briefing}\n")
 
