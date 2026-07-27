@@ -983,9 +983,36 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             lines.append("切换: /provider <名称>")
             return _ok(rid, {"output": "\n".join(lines)})
     elif command == "duo" or command.startswith("duo "):
-        # /duo 不是网关命令，是 skill 触发词：去掉斜杠透传给对话管线，
-        # 由 engine 的 skill 注入机制（data/skill-standards/duo）接管。
         rest = command[3:].strip()
+        # 商讨/讨论 → 代码编排（确定性流程，防止模型自演双簧）
+        import re as _re
+        m = _re.match(r'^(商讨|讨论)[:：]\s*(.+)$', rest, _re.S)
+        if m:
+            question = m.group(2).strip()
+            # 前置检查复用 handle_prompt_submit
+            with _sessions_lock:
+                session = _sessions.get(sid)
+            if not session:
+                return _err(rid, -32000, "会话不存在")
+            from core.engine_adapter import is_running, cancel
+            if is_running(sid):
+                cancel(sid)
+                import time as _time
+                _time.sleep(0.3)
+                if is_running(sid):
+                    return _err(rid, -32000, "无法取消上一个请求，请稍后重试")
+
+            from core.duo_orchestrator import run_deliberation
+            t = threading.Thread(
+                target=run_deliberation,
+                args=(question, _emit, sid),
+                name=f"duo-deliberate-{sid}",
+                daemon=True,
+            )
+            t.start()
+            return _ok(rid, {"output": f"双员商讨已启动：{question}"})
+
+        # 其他 /duo 用法（实现验收等）→ 维持现状透传 prompt.submit
         text = f"duo {rest}".strip()
         result = handle_prompt_submit(
             {"session_id": sid, "text": text}, rid)
