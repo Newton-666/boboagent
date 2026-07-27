@@ -496,7 +496,7 @@ class TestReadFilesPerToolResult:
         engine.MAX_STEPS = 8
         engine.run("read a and b")
 
-        rf = getattr(engine, '_read_files', {})
+        rf = getattr(engine.tracker, '_read_files', {})
         assert str(a) in rf, f"Expected {a} in _read_files"
         assert str(b) in rf, f"Expected {b} in _read_files"
         assert "AAA" in rf[str(a)], f"File A should contain its own content, got: {rf[str(a)][:100]}"
