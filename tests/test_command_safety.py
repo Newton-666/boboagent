@@ -220,6 +220,16 @@ class TestEdgeCases:
         level, reason = classify_command("ls -la | sudo rm -rf /tmp/test")
         assert level == "dangerous"
 
+    def test_semicolon_with_all_safe_commands(self, engine):
+        """Semicolon chain where both segments are whitelist commands → safe."""
+        level, reason = classify_command("cd /tmp; ls")
+        assert level == "safe", f"Expected safe, got {level}: {reason}"
+
+    def test_redirect_to_dev_null_safe(self, engine):
+        """Writing to /dev/null is harmless → safe."""
+        level, reason = classify_command("echo x > /dev/null")
+        assert level == "safe", f"Expected safe, got {level}: {reason}"
+
 
 class TestHighRiskTool:
     """Tests for _is_high_risk_tool which wraps command classification."""
