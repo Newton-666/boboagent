@@ -183,6 +183,22 @@ EOF
 
 Bobo auto-discovers it. No code changes, no registration.
 
+### Single Runtime Rule（单一运行时规矩）
+
+> 本机开发只有一个运行时：**这个仓库**。
+>
+> - 终端 `bobo` 命令是 editable install，直接运行仓库代码。
+> - 数据目录是仓库内 `data/`（config.py 检测到仓库根有 `data/` 即启用开发模式）。
+> - **`~/.bobo` 里只放数据，不放代码。** 那里曾经躺着一份旧代码副本
+>   （桌面 app 打包时的安装产物），造成过 5 次"改了但没生效"的同步惊吓，
+>   已于 2026-07-27 清除。
+> - **交付/验收代码改动时，永远不需要"同步到 ~/.bobo"。** 看到有人
+>   （包括 AI 协作者）条件反射式地往 `~/.bobo` 复制代码，请制止。
+> - 桌面 Bobo.app 是个例外：打包版启动时会自动把自身捆绑的后端重新装入
+>   `~/.bobo`（见 `apps/desktop/electron/main.cjs` 的 `installBoboBackend`），
+>   它自给自足，也不需要手动同步。要更新桌面 app 的代码，正确姿势是在
+>   `apps/desktop/` 里重新 build，而不是手动复制文件。
+
 ---
 
 ## License
