@@ -348,7 +348,7 @@ class TestRetroactiveMarking:
                 "tool_call_id": f"call_{i}",
                 "content": "x" * 600,  # >500 chars
             })
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
 
         # First 5 (old) should be marked, last 10 (recent) should NOT
         for i in range(5):
@@ -369,7 +369,7 @@ class TestRetroactiveMarking:
                 "tool_call_id": f"call_{i}",
                 "content": "short",  # <500 chars
             })
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
 
         for i in range(15):
             assert not engine.history[i]["content"].startswith("[RESULT]"), (
@@ -386,7 +386,7 @@ class TestRetroactiveMarking:
                 "content": "[RESULT] already\n  → marked\n  → id: xxx, 600 chars",
             })
         # Should not crash or double-mark
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
         for i in range(15):
             content = engine.history[i]["content"]
             # Should still start with [RESULT] (only one)
@@ -401,9 +401,9 @@ class TestRetroactiveMarking:
                 "tool_call_id": f"call_{i}",
                 "content": "y" * 600,
             })
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
         first_pass = [m["content"] for m in engine.history]
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
         second_pass = [m["content"] for m in engine.history]
         assert first_pass == second_pass, "Retroactive marking is not idempotent"
 
@@ -416,7 +416,7 @@ class TestRetroactiveMarking:
                 "tool_call_id": f"call_{i}",
                 "content": "z" * 600,
             })
-        engine._retroactive_mark()
+        engine.tracker.retroactive_mark()
         for i in range(3):
             assert not engine.history[i]["content"].startswith("[RESULT]"), (
                 f"Result at {i} marked when <10 tools exist"

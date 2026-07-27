@@ -21,6 +21,7 @@ from core.skill_manager import get_skill_manager
 from core.skill_executor import get_skill_executor
 from core.context import ContextMixin
 from core.tool_runner import ToolRunnerMixin
+from core.round_tracker import RoundTracker
 
 
 class Engine(ContextMixin, ToolRunnerMixin):
@@ -69,6 +70,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._verification_attempted = False  # 防止验证死循环
         self._checkpoints: list[dict] = []   # 对话回退快照
         self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
+        self.tracker = RoundTracker(self)  # 回合后处理（change_log / read_files / pattern）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
@@ -310,17 +312,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         return None
 
     def _compress_changelog(self):
-        """超过 20 条时压缩最早的条目为摘要"""
-        if not hasattr(self, '_change_log') or len(self._change_log) <= 20:
-            return
-        keep = self._change_log[-10:]
-        old = self._change_log[:-10]
-        descs = '; '.join(m['desc'] for m in old if m.get('desc'))
-        if len(descs) > 300:
-            descs = descs[:200] + f"...（共 {len(old)} 次）"
-        self._change_log = [{"ts": 0, "desc": f"[历史改动]: {descs}"}] + keep
-        if len(self._change_log) > 50:
-            self._change_log = self._change_log[-20:]
+        self.tracker.compress_changelog()
 
     def _check_guards(self) -> bool:
         # 已移除 5 项不必要的护栏（2026-07-22 分析）：
@@ -395,9 +387,9 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self.history = new_history
 
         # 3. 清空缓存
-        self._read_files = {}
+        self.tracker._read_files = {}
         self._recent_tool_calls = []
-        self._change_log = []
+        self.tracker._change_log = []
 
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
@@ -831,59 +823,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             except Exception:
                 pass
 
-    def _record_tool_pattern(self, tool_names: list):
-        """记录本轮工具调用序列模式。≥2 个不同工具才算模式。"""
-        if not tool_names or len(tool_names) < 2:
-            return
-        # 去重但保持首次出现顺序
-        seen = set()
-        unique = []
-        for t in tool_names:
-            if t not in seen:
-                seen.add(t)
-                unique.append(t)
-        if len(unique) < 2:
-            return
-        sig = " → ".join(unique)
-        data = self._load_patterns()
-        entry = data.setdefault("patterns", {}).get(sig, {
-            "count": 0, "first_seen": None, "last_seen": None,
-            "example_topics": [], "proposed": False,
-        })
-        entry["count"] += 1
-        today = time.strftime("%Y-%m-%d")
-        entry["last_seen"] = today
-        if not entry.get("first_seen"):
-            entry["first_seen"] = today
-        if self.current_user_input and len(entry.get("example_topics", [])) < 5:
-            topic = self.current_user_input[:80]
-            if topic not in entry["example_topics"]:
-                entry.setdefault("example_topics", []).append(topic)
-        data["patterns"][sig] = entry
-        self._save_patterns(data)
-
-    def _maybe_propose_skill(self):
-        """检查是否有 >=3 次的未提议模式，注入提议到对话历史。一次只提议一个。"""
-        data = self._load_patterns()
-        for sig, entry in data.get("patterns", {}).items():
-            if entry.get("count", 0) >= 3 and not entry.get("proposed"):
-                count = entry["count"]
-                examples = "、".join(entry.get("example_topics", [])[:3] or ["相关任务"])
-                proposal = (
-                    f"[Bobo 注意到] 我观察到你最近 {count} 次对话中"
-                    + f"重复了相似的操作流程：\n"
-                    + f"  {sig}\n"
-                    + f"  例子：{examples}\n\n"
-                    + f"这看起来像一个可复用的工作流。要不要我把它保存为一个 skill？"
-                    + f"以后你说对应的触发词我就会自动按这个流程来执行。\n"
-                    + f"回复“好”来创建，或“不用”来跳过。"
-                )
-                self._append_to_history("system", proposal)
-                entry["proposed"] = True
-                data["patterns"][sig] = entry
-                self._save_patterns(data)
-                break
-
     def _truncate_history(self):
         """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。"""
         user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
@@ -898,47 +837,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                self.history[split].get("role") == "tool"):
             split += 1
         self.history = self.history[split:]
-
-    def _retroactive_mark(self):
-        """追溯标记：扫描 10 轮以前 >500 字符且未标记的工具结果，补做 [RESULT] 标记。
-
-        复用 _maybe_mark_result 的现有管线（原子写入 + 标记替换）。
-        已被标记过的短结果自然跳过——每轮扫描的实际工作量是递减的。
-        """
-        from core.tool_runner import _build_result_summary
-        import hashlib, json as _mj
-        round_num = self.current_tool_round
-        # 找到最近 10 轮的位置（从后数第 10 个 tool 消息之前）
-        tool_positions = [i for i, m in enumerate(self.history) if m.get("role") == "tool"]
-        if len(tool_positions) < 10:
-            return
-        cutoff = tool_positions[-10]  # 最近 10 个 tool 消息之前的才扫描
-        for idx in range(cutoff):
-            msg = self.history[idx]
-            if msg.get("role") != "tool":
-                continue
-            content = msg.get("content", "")
-            if not content or len(content) < 500 or content.startswith("[RESULT]"):
-                continue
-            # 构造假 tool_name 和 args 用于生成 marker
-            marker_id = f"retro_{idx}_{hashlib.sha256(content.encode()).hexdigest()[:8]}"
-            summary = _build_result_summary("tool", content)
-            os.makedirs(self.WORKSPACE_DIR, exist_ok=True)
-            import tempfile
-            fd, tmp = tempfile.mkstemp(dir=self.WORKSPACE_DIR, suffix='.json', prefix='.rs_')
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    _mj.dump({"tool": "tool", "args": "{}", "content": content}, f, ensure_ascii=False)
-                import shutil
-                shutil.move(tmp, os.path.join(self.WORKSPACE_DIR, f"{marker_id}.json"))
-                self.history[idx]["content"] = (
-                    f"[RESULT] tool\n  → {summary}\n  → id: {marker_id}, {len(content)} chars"
-                )
-            except Exception:
-                try:
-                    os.unlink(tmp)
-                except Exception:
-                    pass
 
     def _call_llm(self) -> Tuple[str, list]:
 
@@ -982,7 +880,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             budget = _get_context_budget()
             # 追溯标记：估算超预算 50% 时扫描历史，给老工具结果补 [RESULT] 标记
             if est_tokens > budget * 0.5:
-                self._retroactive_mark()
+                self.tracker.retroactive_mark()
             if est_tokens > budget:
                 self._notify("thinking", {"phase": "compressing", "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {budget}）"})
                 self._compress_history()
@@ -1118,16 +1016,16 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             logger.debug("注入 AGENTS.md 失败: %s", e)
 
         # 注入改动日志和已读文件摘要
-        if hasattr(self, '_change_log') and self._change_log:
-            items = self._change_log[-5:]
+        if self.tracker._change_log:
+            items = self.tracker._change_log[-5:]
             lines = ["[本会话的改动记录]:", ""]
             for it in items:
                 lines.append(f"  {it['desc']}")
-            if len(self._change_log) > 5:
-                lines.append(f"  ...（共 {len(self._change_log)} 次改动）")
+            if len(self.tracker._change_log) > 5:
+                lines.append(f"  ...（共 {len(self.tracker._change_log)} 次改动）")
             messages.insert(1, {"role": "system", "content": "\n".join(lines)})
-        if hasattr(self, '_read_files') and self._read_files:
-            items = list(self._read_files.items())[-3:]
+        if self.tracker._read_files:
+            items = list(self.tracker._read_files.items())[-3:]
             lines = ["[最近读过的文件]:", ""]
             for fpath, preview in items:
                 short = preview[:120].replace('\n', ' ').strip()
@@ -1542,54 +1440,43 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             # for 循环内，N3 修复取本条 tool_result 而非整轮聚合）
             if self._pending_tool_calls:
                 import json as _je
-                for tc_idx, tc in enumerate(self._pending_tool_calls):
+                for tc in self._pending_tool_calls:
                     name = tc.get("function", {}).get("name", "")
                     args_str = tc.get("function", {}).get("arguments", "{}")
                     # 边执行边扩张
                     for cat, tools in self.TOOL_CATEGORIES.items():
                         if name in tools:
                             self._used_categories.add(cat)
-                    # 记录改动日志
+                    # 改动日志 → tracker
                     if name in ("edit_file", "file_operation"):
                         try:
                             a = _je.loads(args_str) if isinstance(args_str, str) else args_str
-                            fpath = a.get('file_path', '') or a.get('filepath', '') or a.get('path', '')
+                            fpath = a.get('file_path', '') or a.get('path', '')
                             if fpath:
-                                if not hasattr(self, '_change_log'):
-                                    self._change_log = []
                                 if name == "edit_file":
                                     old = a.get("old_string", "")[:40]
                                     new = a.get("new_string", "")[:40]
-                                    desc = f"{fpath}: {old} → {new}"
+                                    self.tracker.log_change(f"{fpath}: {old} → {new}")
                                 else:
-                                    desc = f"{fpath}（{a.get('action','write')}）"
-                                self._change_log.append({"ts": time.time(), "desc": desc})
+                                    self.tracker.log_change(f"{fpath}（{a.get('action','write')}）")
                         except Exception:
                             pass
-                    # 记录已读文件，便于上下文压缩后恢复
+                    # 已读文件 → tracker（按 tool_call_id 匹配，并行执行时索引不可靠）
                     if name == "read_local_file":
                         try:
                             a = _je.loads(args_str) if isinstance(args_str, str) else args_str
                             fpath = a.get('file_path', '') or a.get('filepath', '') or a.get('path', '')
-                            # 从 tool_results 中取本条对应的结果（而非整轮聚合）
-                            this_result = tool_results[tc_idx] if tc_idx < len(tool_results) else ""
-                            if fpath and this_result and len(str(this_result)) > 40:
-                                if not hasattr(self, '_read_files'):
-                                    self._read_files = {}
-                                self._read_files[fpath] = str(this_result)[:200]
-                                if len(self._read_files) > 10:
-                                    self._read_files = dict(list(self._read_files.items())[-10:])
-                                if not hasattr(self, '_file_last_step'):
-                                    self._file_last_step = {}
-                                self._file_last_step[fpath] = self.current_depth
+                            tc_id = tc.get("id", "")
+                            match = next((r for r in tool_results if r.get("tool_call_id") == tc_id), None)
+                            self.tracker.record_read(fpath, str(match) if match else "")
                         except Exception:
                             pass
-            # 记录本轮工具调用模式（pattern tracker — 自动 skill 发现）
+            # 工具调用模式 → tracker
             if self._pending_tool_calls:
                 round_names = [tc.get("function", {}).get("name", "")
                               for tc in self._pending_tool_calls
                               if tc.get("function", {}).get("name")]
-                self._record_tool_pattern(round_names)
+                self.tracker.record_tool_pattern(round_names, self.current_user_input or "")
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
             self._pending_tool_calls = None
@@ -1628,7 +1515,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             pass
                 # 自动 skill 发现：检查候选模式并主动提议
                 if self._proactive_mode != "off":
-                    self._maybe_propose_skill()
+                    self.tracker.maybe_propose_skill()
                 content = self._format_final_output(self._pending_content)
                 self._notify("complete", {"content": content, "usage": self._last_usage})
             else:
