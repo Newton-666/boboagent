@@ -36,6 +36,7 @@ git 权限边界——以下四个动作**只有用户能做**，bobo 永远不�
 - **改工具前先确认注册名和调用链**：obsidian 写工具是 `write_obsidian.py` / `append_obsidian.py`，不是 file_writer.py
 - **TUI 改动需构建**：动 `ui-tui/src` 后必须 `npm run build` 且产物同步到运行路径
 - **editable install**：改动重启 bobo 才生效，汇报时必须提醒用户重启验证
+- **分析代码前先读实现**：声称某个方法的内部行为（如"逐条调LLM"、"调用次数"、算法复杂度）之前，必须用 `read_local_file` 实际阅读该方法的源码。禁止仅凭 `grep` 方法名/函数签名推断行为。这条对架构分析、性能评估、代码审查同样适用。
 - 测试底线：`pytest tests/ -q` 全绿（用仓库 `.venv/bin/python3`）；打回必留测试
 
 ## 汇报格式
