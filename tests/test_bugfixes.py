@@ -505,6 +505,49 @@ class TestReadFilesPerToolResult:
         assert "AAA" not in rf[str(b)], f"File B should NOT contain A content"
 
 
+class TestObsidianWriteDiff:
+    """write_obsidian / append_obsidian 工具层返回 inline diff。
+
+    diff 生成逻辑在工具模块本身（write_obsidian.py / append_obsidian.py），
+    不在底层委托 file_writer.py。工具层负责写前读旧内容 + make_inline_diff。
+
+    OBSIDIAN_VAULT 是 import-time 常量，散布在 config / obsidian_tools / file_writer
+    三个模块里——必须全 patch 到临时目录。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _patch_vault(self, monkeypatch, tmp_path):
+        """把三层 OBSIDIAN_VAULT 全指向本次测试的临时目录。"""
+        monkeypatch.setenv("OBSIDIAN_VAULT", str(tmp_path))
+        import tools.file_writer as _fw
+        import tools.obsidian_tools as _ot
+        import config as _cfg
+        monkeypatch.setattr(_fw, "OBSIDIAN_VAULT", str(tmp_path))
+        monkeypatch.setattr(_ot, "OBSIDIAN_VAULT", str(tmp_path))
+        monkeypatch.setattr(_cfg, "OBSIDIAN_VAULT", str(tmp_path))
+
+    def test_write_obsidian_overwrite_has_diff(self, tmp_path):
+        """write_obsidian 工具层：写前读旧 → make_inline_diff → +/- 行。"""
+        from tools.write_obsidian import execute
+        p = tmp_path / "note.md"
+        p.write_text("old alpha\nold beta\n", encoding="utf-8")
+        r = execute("note.md", "old alpha\nnew BRAVO\n")
+        assert "✅ 已写入" in r
+        assert "<<<INLINE_DIFF>>>" in r
+        assert "-old beta" in r
+        assert "+new BRAVO" in r
+
+    def test_append_obsidian_has_diff(self, tmp_path):
+        """append_obsidian 工具层：追加段全 + 行 diff。"""
+        from tools.append_obsidian import execute
+        p = tmp_path / "note.md"
+        p.write_text("existing\n", encoding="utf-8")
+        r = execute("note.md", "appended line\n")
+        assert "✅ 已追加" in r
+        assert "<<<INLINE_DIFF>>>" in r
+        assert "+appended line" in r
+
+
 class TestBlockedFoldersRead:
     """N2 fix: file_writer.read_file 现在拒绝 BLOCKED_FOLDERS 内的路径。
 
