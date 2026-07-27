@@ -987,8 +987,11 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
         # 由 engine 的 skill 注入机制（data/skill-standards/duo）接管。
         rest = command[3:].strip()
         text = f"duo {rest}".strip()
-        return handle_prompt_submit(
+        result = handle_prompt_submit(
             {"session_id": sid, "text": text}, rid)
+        if isinstance(result, dict) and result.get("result", {}).get("ok"):
+            return _ok(rid, {"output": f"双员模式已启动：{text}"})
+        return result
 
     else:
         return _ok(rid, {"output": f"未知命令: /{command}"})
