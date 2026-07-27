@@ -17,6 +17,8 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from bobo_tui_gateway.transport import write_json
+from bobo_tui_gateway.server_utils import write_atomic as _write_atomic, ok as _ok, err as _err, emit as _emit, get_context_length as _get_context_length
+from bobo_tui_gateway.handlers import sessions, configs
 from config import BOBO_DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -31,19 +33,6 @@ _engine_cache: dict[str, Any] = {}
 _pending_confirm: dict[str, threading.Event] = {}
 _pending_confirm_result: dict[str, bool] = {}
 _confirm_lock = threading.Lock()
-
-# 上下文窗口大小（从环境变量覆盖，否则从 provider 配置获取）
-_CONTEXT_LENGTH = int(os.environ.get("CONTEXT_LENGTH", "0"))
-
-def _get_context_length() -> int:
-    """返回当前 model 的上下文长度（先查 model_context，再 provider，最后 128k 兜底）。"""
-    if _CONTEXT_LENGTH:
-        return _CONTEXT_LENGTH
-    try:
-        from core.provider import get_context_length
-        return get_context_length()
-    except Exception:
-        return 128000
 
 # 累计 token 用量（跨轮次累加）
 _session_usage: dict[str, dict] = {}
@@ -63,6 +52,13 @@ def register_engine_thread(t: threading.Thread):
         _active_engine_threads.append(t)
 
 
+# ── 会话持久化包装器（委托给 handlers/sessions.py，用模块级全局构建 ctx）──
+
+def _save_session_to_disk(sid: str):
+    """将内存中的会话保存到磁盘（保持旧签名兼容 engine_adapter）。"""
+    sessions._save_session_to_disk(sid, _ctx)
+
+
 def shutdown_sessions():
     """保存所有活跃会话（在信号处理中调用）"""
     with _sessions_lock:
@@ -74,17 +70,6 @@ def shutdown_sessions():
     for t in threads:
         t.join(timeout=1.0)
 
-# 会话管理器（持久化到磁盘）
-_session_mgr = None
-
-def _get_session_mgr():
-    global _session_mgr
-    if _session_mgr is None:
-        from core.session_manager import SessionManager
-        from config import SESSION_DIR
-        _session_mgr = SessionManager(session_dir=SESSION_DIR)
-    return _session_mgr
-
 
 def method(name: str):
     def wrapper(fn):
@@ -93,34 +78,6 @@ def method(name: str):
     return wrapper
 
 
-def _ok(rid, result: dict) -> dict:
-    return {"jsonrpc": "2.0", "id": rid, "result": result}
-
-
-def _err(rid, code: int, msg: str) -> dict:
-    return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": msg}}
-
-
-def _emit(event: str, sid: str, payload: dict | None = None):
-    write_json({
-        "jsonrpc": "2.0", "method": "event",
-        "params": {"type": event, "payload": payload or {}, "session_id": sid}
-    })
-
-import tempfile, shutil as _sh
-
-def _write_atomic(path: str, content: str):
-    """原子写入：先写 tmp 再 rename，防止中途崩溃导致文件损坏。"""
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        _sh.move(tmp, path)
-    except Exception:
-        try: os.unlink(tmp)
-        except Exception: pass
-        raise
 
 
 def _get_llm_caller():
@@ -136,310 +93,19 @@ def _get_llm_caller():
     return _engine_cache["_llm"]
 
 
-def _save_session_to_disk(sid: str):
-    """将内存中的会话保存到磁盘（直接原子写入，不触碰 mgr.current_session 以避免跨会话竞态）。"""
-    with _sessions_lock:
-        session = _sessions.get(sid)
-    if not session:
-        return
-    mgr = _get_session_mgr()
-    session_path = mgr.session_dir / f"{sid}.json"
-    # 尝试加载已有会话以便保留元数据（created_at 等），否则新建
-    try:
-        if session_path.exists():
-            with open(session_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            data["messages"] = session.get("messages", [])
-            data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
-        else:
-            data = {
-                "id": sid,
-                "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
-                "title": session.get("title", f"会话_{sid}"),
-                "messages": session.get("messages", []),
-                "summary": None,
-            }
-    except Exception:
-        data = {
-            "id": sid,
-            "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
-            "title": session.get("title", f"会话_{sid}"),
-            "messages": session.get("messages", []),
-            "summary": None,
-        }
-    mgr._write_atomic(session_path, data)
-
-
-def _build_session_info(sid: str) -> dict:
-    from config import API_MODEL_NAME, ACTIVE_PROVIDER
-    from tools import TOOLS_SCHEMA
-    from core.context import ContextMixin
-    from core.skill_manager import get_skill_manager
-    _skill_mgr = get_skill_manager()
-
-    # 使用引擎本身的工具分类，而不是把所有工具塞进 "general"
-    tool_categories: dict[str, list[str]] = {}
-    for cat, names in ContextMixin.TOOL_CATEGORIES.items():
-        tool_categories[cat] = [n for n in names if any(
-            t.get("function", t).get("name") == n for t in TOOLS_SCHEMA
-        )]
-    # 处理不在任何分类中的工具
-    all_categorized = set()
-    for names in tool_categories.values():
-        all_categorized.update(names)
-    uncategorized = []
-    for t in TOOLS_SCHEMA:
-        name = t.get("function", t).get("name", "")
-        if name and name not in all_categorized:
-            uncategorized.append(name)
-    if uncategorized:
-        tool_categories["other"] = uncategorized
-    # 去掉空类别
-    tool_categories = {k: v for k, v in tool_categories.items() if v}
-
-    session = _sessions.get(sid, {})
-    messages = session.get("messages", [])
-
-    return {
-        "model": API_MODEL_NAME,
-        "provider": ACTIVE_PROVIDER,
-        "tools": tool_categories,
-        "skills": {"skills": _skill_mgr.list_skills()},
-        "version": "2.0",
-        "cwd": os.getcwd(),
-        "message_count": len(messages),
-        "context_max": _get_context_length(),
-    }
 
 
 # ── RPC 方法 ──────────────────────────────────────────────────────────
 
-@method("setup.status")
-def handle_setup_status(params: dict, rid: str) -> dict:
-    from config import API_KEY, ACTIVE_PROVIDER
-    return _ok(rid, {
-        "provider_configured": bool(API_KEY),
-        "provider": ACTIVE_PROVIDER,
-        "providers": ["deepseek", "openai", "anthropic", "openrouter", "google", "ollama", "custom"],
-    })
 
 
-@method("setup.submit")
-def handle_setup_submit(params: dict, rid: str) -> dict:
-    """保存用户通过 TUI 设置表单提交的 API Key。"""
-    provider = params.get("provider", "deepseek")
-    api_key = params.get("api_key", "")
-    if not api_key:
-        return _ok(rid, {"ok": False, "error": "API Key 不能为空"})
-    
-    env_path = str(BOBO_DATA_DIR / ".env")
-    os.makedirs(os.path.dirname(env_path), exist_ok=True)
-    
-    from core.provider import get_provider
-    provider_cfg = get_provider(provider)
-    if not provider_cfg:
-        return _ok(rid, {"ok": False, "error": f"不支持的提供商: {provider}"})
-    
-    env_key = provider_cfg["env_key"]
-    if not env_key:
-        return _ok(rid, {"ok": False, "error": f"{provider} 不需要 API Key（如 Ollama）"})
-    
-    # 写入 .env 文件
-    try:
-        key_eq = env_key + "="
-        if os.path.exists(env_path):
-            with open(env_path) as f:
-                content = f.read()
-            found = False
-            for line in content.split("\n"):
-                if line.startswith(key_eq):
-                    content = content.replace(line, key_eq + api_key)
-                    found = True
-                    break
-            if not found:
-                content += "\n" + key_eq + api_key
-        else:
-            content = key_eq + api_key + "\n"
-        if provider != "deepseek":
-            prov_line = "BOBO_PROVIDER="
-            found = False
-            for line in content.split("\n"):
-                if line.startswith(prov_line):
-                    content = content.replace(line, prov_line + provider)
-                    found = True
-                    break
-            if not found:
-                content += "\n" + prov_line + provider
-        _write_atomic(env_path, content)
-        return _ok(rid, {"ok": True, "message": f"{provider} 已配置", "provider_configured": True})
-    except Exception as e:
-        return _ok(rid, {"ok": False, "error": str(e)})
 
 
-@method("session.create")
-def handle_session_create(params: dict, rid: str) -> dict:
-    sid = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-    session = {
-        "id": sid,
-        "title": params.get("title", f"会话_{sid}"),
-        "created_at": time.time(),
-        "messages": [],
-    }
-    with _sessions_lock:
-        _sessions[sid] = session
-        global _current_sid
-        _current_sid = sid
-
-    # 保存到磁盘
-    _save_session_to_disk(sid)
-
-    return _ok(rid, {
-        "session_id": sid,
-        "info": _build_session_info(sid),
-    })
 
 
-@method("session.title")
-def handle_session_title(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    title = params.get("title", "")
-    with _sessions_lock:
-        session = _sessions.get(sid)
-    if session and title:
-        session["title"] = title
-        _save_session_to_disk(sid)
-    return _ok(rid, {"title": title, "pending": False})
 
 
-@method("session.list")
-def handle_session_list(params: dict, rid: str) -> dict:
-    mgr = _get_session_mgr()
-    sessions = mgr.list_sessions(limit=100)
-    items = []
-    for s in sessions:
-        # 解析 created_at 为 Unix 时间戳
-        ts = 0
-        raw = s.get("created_at", "")
-        if raw:
-            try:
-                dt = datetime.strptime(str(raw)[:19], "%Y%m%d_%H%M%S")
-                ts = dt.timestamp()
-            except ValueError:
-                try:
-                    dt = datetime.fromisoformat(str(raw))
-                    ts = dt.timestamp()
-                except Exception:
-                    ts = 0
-        items.append({
-            "id": s["id"],
-            "title": s["title"],
-            "message_count": s.get("message_count", 0),
-            "started_at": ts,
-            "preview": s.get("title", ""),
-        })
-    return _ok(rid, {"sessions": items})
 
-
-@method("session.resume")
-def handle_session_resume(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    mgr = _get_session_mgr()
-    session_data = mgr.load_session(sid)
-    if not session_data:
-        return _err(rid, -32000, f"会话不存在: {sid}")
-
-    messages = session_data.get("messages", [])
-    transcript = []
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "user":
-            transcript.append({"role": "user", "text": content})
-        elif role == "assistant":
-            transcript.append({"role": "assistant", "text": content})
-        elif role == "system":
-            transcript.append({"role": "system", "text": content})
-
-    # 恢复 created_at
-    created_at = 0
-    raw_ts = session_data.get("created_at", "")
-    if raw_ts:
-        try:
-            dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
-            created_at = dt.timestamp()
-        except Exception:
-            created_at = 0
-
-    with _sessions_lock:
-        _sessions[sid] = {
-            "id": sid,
-            "title": session_data.get("title", sid),
-            "created_at": created_at,
-            "messages": messages,
-        }
-        global _current_sid
-        _current_sid = sid
-
-    return _ok(rid, {
-        "session_id": sid,
-        "messages": transcript,
-        "message_count": len(transcript),
-        "info": _build_session_info(sid),
-        "status": "idle",
-        "resumed": sid,
-    })
-
-
-@method("session.close")
-def handle_session_close(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    _save_session_to_disk(sid)
-    with _sessions_lock:
-        _sessions.pop(sid, None)
-    return _ok(rid, {"closed": sid})
-
-
-@method("session.delete")
-def handle_session_delete(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    mgr = _get_session_mgr()
-    path = mgr.session_dir / f"{sid}.json"
-    if path.exists():
-        path.unlink()
-    bak = path.with_suffix(".json.bak")
-    if bak.exists():
-        bak.unlink()
-    with _sessions_lock:
-        _sessions.pop(sid, None)
-    return _ok(rid, {"deleted": sid})
-
-
-@method("session.rename")
-def handle_session_rename(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    title = params.get("title", "").strip() or "未命名"
-    with _sessions_lock:
-        session = _sessions.get(sid)
-    if session:
-        session["title"] = title[:50]
-        _save_session_to_disk(sid)
-    return _ok(rid, {"ok": True})
-
-
-@method("session.interrupt")
-def handle_session_interrupt(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    try:
-        from core.engine_adapter import cancel
-        cancel(sid)
-        return _ok(rid, {"interrupted": True})
-    except Exception:
-        return _ok(rid, {"interrupted": False})
-
-
-@method("session.steer")
-def handle_session_steer(params: dict, rid: str) -> dict:
-    return _ok(rid, {"steered": True})
 
 
 @method("approval.respond")
@@ -510,102 +176,7 @@ def handle_prompt_submit(params: dict, rid: str) -> dict:
     return _ok(rid, {"ok": True})
 
 
-@method("config.get")
-def handle_config_get(params: dict, rid: str) -> dict:
-    key = params.get("key", "")
-    from config import API_MODEL_NAME
-    values = {"model": API_MODEL_NAME}
-    return _ok(rid, {"value": values.get(key, "")})
 
-
-@method("config.set")
-def handle_config_set(params: dict, rid: str) -> dict:
-    key = params.get("key", "")
-    value = params.get("value", "")
-    if key == "model" and value:
-        # 解析 value: "deepseek-reasoner" 或 "deepseek-reasoner --provider deepseek #tui"
-        import re
-        model_name = value.split("--provider")[0].strip()
-        model_name = re.sub(r"\s+#tui\s*$", "", model_name).strip()
-        # 写入 .env
-        env_path = str(BOBO_DATA_DIR / ".env")
-        try:
-            lines = []
-            if os.path.exists(env_path):
-                with open(env_path) as f:
-                    lines = f.readlines()
-            found = False
-            for i, line in enumerate(lines):
-                if line.strip().startswith("API_MODEL_NAME="):
-                    lines[i] = f"API_MODEL_NAME={model_name}\n"
-                    found = True
-                    break
-            if not found:
-                lines.append(f"API_MODEL_NAME={model_name}\n")
-            # 如果 value 中包含 --provider，也更新 BOBO_PROVIDER
-            provider_match = re.search(r"--provider\s+(\S+)", value)
-            if provider_match:
-                prov = provider_match.group(1)
-                found_p = False
-                for i, line in enumerate(lines):
-                    if line.strip().startswith("BOBO_PROVIDER="):
-                        lines[i] = f"BOBO_PROVIDER={prov}\n"
-                        found_p = True
-                        break
-                if not found_p:
-                    lines.append(f"BOBO_PROVIDER={prov}\n")
-            # 同步 provider 特定的默认参数到 .env + os.environ。
-            # 新 provider 有默认值 → 写入；没有 → 移除旧值（防 sticky 温度/token 残留）。
-            from core.provider import get_provider as _get_prov
-            _active_prov = _get_prov(prov if provider_match else "deepseek")
-            for _pkey, _envkey in [("temperature", "BOBO_TEMPERATURE"), ("max_tokens", "BOBO_MAX_TOKENS")]:
-                _pval = _active_prov.get(_pkey) if _active_prov else None
-                if _pval:
-                    # 写入/更新
-                    _found = False
-                    for _i, _line in enumerate(lines):
-                        if _line.strip().startswith(f"{_envkey}="):
-                            lines[_i] = f"{_envkey}={_pval}\n"
-                            _found = True
-                            break
-                    if not _found:
-                        lines.append(f"{_envkey}={_pval}\n")
-                    os.environ[_envkey] = str(_pval)
-                else:
-                    # 新 provider 无此默认 → 移除旧行 + 清理 os.environ
-                    lines = [_l for _l in lines if not _l.strip().startswith(f"{_envkey}=")]
-                    os.environ.pop(_envkey, None)
-            _write_atomic(env_path, "".join(lines))
-            # 热生效：更新基础 env vars + 清缓存
-            os.environ["API_MODEL_NAME"] = model_name
-            if provider_match:
-                os.environ["BOBO_PROVIDER"] = prov
-            _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
-            # 清除 config.py 的 provider 缓存（必须设为 None，空 dict 不触发重新解析）
-            try:
-                import config as _cfg
-                _cfg._provider_cache = None
-            except Exception:
-                pass
-            return _ok(rid, {"value": model_name, "saved": True,
-                             "note": "已生效，下一回合将使用新模型"})
-        except Exception as e:
-            return _ok(rid, {"value": value, "error": str(e)})
-    return _ok(rid, {"value": value})
-
-
-@method("config.full")
-def handle_config_full(params: dict, rid: str) -> dict:
-    return _ok(rid, {
-        "config": {
-            "display": {
-                "streaming": True,
-                "show_reasoning": True,
-                "tui_compact": False,
-                "details_mode": "expanded",
-            }
-        }
-    })
 
 
 # ── Model Picker（TUI 交互式模型切换）──────────────────────────────
@@ -1058,44 +629,6 @@ def handle_terminal_resize(params: dict, rid: str) -> dict:
     return _ok(rid, {"resized": True})
 
 
-@method("session.active_list")
-def handle_session_active_list(params: dict, rid: str) -> dict:
-    items = []
-    with _sessions_lock:
-        for sid, session in _sessions.items():
-            items.append({
-            "id": sid,
-            "title": session.get("title", sid),
-            "status": "idle",
-            "message_count": len(session.get("messages", [])),
-        })
-    return _ok(rid, {"sessions": items})
-
-
-@method("session.activate")
-def handle_session_activate(params: dict, rid: str) -> dict:
-    sid = params.get("session_id", "")
-    session = _sessions.get(sid)
-    if not session:
-        return _err(rid, -32000, "会话不存在")
-    global _current_sid
-    _current_sid = sid
-    messages = session.get("messages", [])
-    transcript = []
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "user":
-            transcript.append({"role": "user", "text": content})
-        elif role == "assistant":
-            transcript.append({"role": "assistant", "text": content})
-    return _ok(rid, {
-        "session_id": sid,
-        "messages": transcript,
-        "message_count": len(transcript),
-        "info": _build_session_info(sid),
-        "status": "idle",
-    })
 
 
 @method("input.detect_drop")
@@ -1193,6 +726,30 @@ def handle_completion(params: dict, rid: str) -> dict:
 
 
 # ── 请求分发 ──────────────────────────────────────────────────────────
+
+class _ServerContext:
+    """上下文对象，封装 sessions 状态供 handlers 模块访问。"""
+    def __init__(self, sessions_dict, sessions_lock_obj, current_sid_getter, current_sid_setter):
+        self.sessions = sessions_dict
+        self.sessions_lock = sessions_lock_obj
+        self._get_current_sid = current_sid_getter
+        self._set_current_sid = current_sid_setter
+
+    def get_current_sid(self):
+        return self._get_current_sid()
+
+    def set_current_sid(self, sid):
+        self._set_current_sid(sid)
+
+
+_ctx = _ServerContext(
+    _sessions, _sessions_lock,
+    lambda: _current_sid,
+    lambda v: globals().update({'_current_sid': v}),
+)
+sessions.register(method, _ctx)
+configs.register(method, _engine_cache)
+
 
 def dispatch(req: dict) -> dict | None:
     rid = req.get("id")
