@@ -8,6 +8,7 @@ These tests verify that _classify_command correctly identifies:
 
 import pytest
 from core.engine import Engine
+from core.command_safety import classify_command, is_high_risk_tool
 from core.tool_executor import execute_tool
 
 
@@ -98,7 +99,7 @@ class TestSafeCommands:
 
     @pytest.mark.parametrize("command", SAFE_EXAMPLES)
     def test_safe_command(self, engine, command):
-        level, reason = engine._classify_command(command)
+        level, reason = classify_command(command)
         assert level == "safe", f"Expected 'safe' for: {command}, got '{level}' — reason: {reason}"
 
 
@@ -147,7 +148,7 @@ class TestDangerousCommands:
 
     @pytest.mark.parametrize("command,expected_reason_hint", DANGEROUS_EXAMPLES)
     def test_dangerous_command(self, engine, command, expected_reason_hint):
-        level, reason = engine._classify_command(command)
+        level, reason = classify_command(command)
         assert level == "dangerous", (
             f"Expected 'dangerous' for: {command}, got '{level}' — reason: {reason}"
         )
@@ -179,7 +180,7 @@ class TestGrayCommands:
 
     @pytest.mark.parametrize("command", GRAY_EXAMPLES)
     def test_gray_command(self, engine, command):
-        level, reason = engine._classify_command(command)
+        level, reason = classify_command(command)
         assert level == "gray", f"Expected 'gray' for: {command}, got '{level}' — reason: {reason}"
 
 
@@ -187,15 +188,15 @@ class TestEdgeCases:
     """Edge cases for command classification."""
 
     def test_empty_command(self, engine):
-        level, reason = engine._classify_command("")
+        level, reason = classify_command("")
         assert level == "safe"
 
     def test_whitespace_only(self, engine):
-        level, reason = engine._classify_command("   ")
+        level, reason = classify_command("   ")
         assert level == "safe"
 
     def test_pipe_with_all_safe_commands(self, engine):
-        level, reason = engine._classify_command("ls -la | grep test | wc -l")
+        level, reason = classify_command("ls -la | grep test | wc -l")
         assert level == "safe"
 
     def test_pipe_with_one_unknown_makes_gray(self, engine):
@@ -203,20 +204,20 @@ class TestEdgeCases:
         # whitelist. Previously "ls | unknown_cmd" was wrongly classified
         # as safe because "ls" hit the whitelist first.
         # 2026-07-25: launchctl 已加入 SAFE_COMMANDS，改用 truly unknown cmd
-        level, reason = engine._classify_command("ls -la | truly_unknown_cmd_xyz123")
+        level, reason = classify_command("ls -la | truly_unknown_cmd_xyz123")
         assert level == "gray", f"Expected gray, got {level}: {reason}"
 
     def test_pipe_whitelist_prefix_does_not_bypass_gray(self, engine):
         """Regression test: a whitelist command prefix should not hide
         a dangerous or unknown piped command."""
         # Unknown command after ls
-        level, _ = engine._classify_command("ls -la | unknown_cmd")
+        level, _ = classify_command("ls -la | unknown_cmd")
         assert level == "gray"
 
     def test_pipe_dangerous_after_safe_is_caught(self, engine):
         """A dangerous command in the pipe should be detected even when
         prefixed by a whitelist command."""
-        level, reason = engine._classify_command("ls -la | sudo rm -rf /tmp/test")
+        level, reason = classify_command("ls -la | sudo rm -rf /tmp/test")
         assert level == "dangerous"
 
 
@@ -224,23 +225,23 @@ class TestHighRiskTool:
     """Tests for _is_high_risk_tool which wraps command classification."""
 
     def test_safe_terminal_not_high_risk(self, engine):
-        is_risk, reason = engine._is_high_risk_tool("execute_terminal", {"command": "ls -la"})
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "ls -la"})
         assert is_risk is False
 
     def test_dangerous_terminal_is_high_risk(self, engine):
-        is_risk, reason = engine._is_high_risk_tool("execute_terminal", {"command": "rm -rf /"})
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "rm -rf /"})
         assert is_risk is True
         assert "危险操作" in reason
 
     def test_gray_terminal_is_high_risk(self, engine):
-        is_risk, reason = engine._is_high_risk_tool("execute_terminal", {"command": "brew install pkg"})
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "brew install pkg"})
         assert is_risk is True
 
     def test_file_operations_always_high_risk(self, engine):
         for tool_name in ["delete_note", "move_note", "rename_note", "delete_folder"]:
-            is_risk, reason = engine._is_high_risk_tool(tool_name, {})
+            is_risk, reason = is_high_risk_tool(tool_name, {})
             assert is_risk is True
 
     def test_shell_exec_is_always_high_risk(self, engine):
-        is_risk, reason = engine._is_high_risk_tool("shell.exec", {"command": "echo hello"})
+        is_risk, reason = is_high_risk_tool("shell.exec", {"command": "echo hello"})
         assert is_risk is True

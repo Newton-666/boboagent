@@ -8,6 +8,7 @@ import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.command_safety import is_high_risk_tool
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,7 @@ class ToolRunnerMixin:
                     self._record_message("tool_result", result="参数解析失败")
                     continue
             self._record_message("tool_call", tool_name=tool_name, args=tool_args)
-            is_high_risk, reason = self._is_high_risk_tool(tool_name, tool_args)
+            is_high_risk, reason = is_high_risk_tool(tool_name, tool_args)
             if is_high_risk:
                 self._notify("confirm_request", {"tool_name": tool_name, "tool_args": tool_args, "reason": reason})
                 confirmed = self._confirm(tool_name, tool_args, reason)
