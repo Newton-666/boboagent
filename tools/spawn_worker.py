@@ -129,14 +129,28 @@ def _run_worker_with_timeout(worker, worker_input: str, timeout: int) -> tuple[s
 
 
 def _extract_worker_result(history: list) -> str:
-    """从 Worker 的 history 中提取最终回复作为结果摘要。"""
-    for msg in reversed(history):
-        role = msg.get("role", "")
-        if role == "assistant":
-            content = msg.get("content", "")
-            if content and content.strip():
-                return content.strip()
-    return "(Worker 没有产生回复)"
+    """从 Worker 的 history 中提取全部纯文本回复，拼接为结果摘要。
+
+    拼接规则（commit message 中说明取舍依据）：
+    1. 跳过含 tool_calls 的 assistant 消息——那是工具调用轮，
+       其 content 是"让我查一下..."之类的过程性过渡语，不应污染结果摘要。
+    2. 拼接所有纯文本 assistant 消息（role=assistant 且无 tool_calls），
+       用 \\n\\n 分隔。多轮产出的正文分布在多条纯文本消息中，
+       全部拼接才能得到完整方案。
+    3. 什么都没有 → 返回兜底字符串。
+    """
+    parts = []
+    for msg in history:
+        if msg.get("role") != "assistant":
+            continue
+        if msg.get("tool_calls"):
+            continue
+        content = msg.get("content", "")
+        if content and content.strip():
+            parts.append(content.strip())
+    if not parts:
+        return "(Worker 没有产生回复)"
+    return "\n\n".join(parts)
 
 
 def _extract_tool_log(history: list) -> str:
