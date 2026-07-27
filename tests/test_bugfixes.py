@@ -378,13 +378,27 @@ class TestDuoReadWorkerResult:
 
 
 class TestDuoBriefing:
-    """Phase 0 现状简报必须返回非空内容（在本仓库环境下）。"""
+    """Phase 0 现状简报 + 话题闸门。"""
 
     def test_briefing_returns_git_log(self):
         from core.duo_orchestrator import _briefing
         result = _briefing()
         assert result, "简报不应该为空"
         assert "最近提交" in result, f"简报应包含 git log, got: {result[:200]}"
+
+    def test_philosophical_question_skips_briefing(self):
+        """理念问题不应触发简报（话题闸门）。"""
+        from core.duo_orchestrator import _PROJECT_SIGNALS, _briefing
+        phil_question = "AI 应该拥有权利吗"
+        hit = any(sig in phil_question.lower() for sig in _PROJECT_SIGNALS)
+        assert not hit, f"哲学问题不应命中项目信号词, got {[s for s in _PROJECT_SIGNALS if s in phil_question.lower()]}"
+
+    def test_project_question_hits_briefing(self):
+        """项目相关问题应触发简报。"""
+        from core.duo_orchestrator import _PROJECT_SIGNALS
+        proj_question = "bobo 未来架构提升方向"
+        hit = any(sig in proj_question.lower() for sig in _PROJECT_SIGNALS)
+        assert hit, f"项目问题应命中项目信号词"
 
 
 class TestSpawnWorkerAllowTools:
