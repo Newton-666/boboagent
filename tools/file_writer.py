@@ -90,11 +90,26 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
         if auto_backup:
             _create_backup(filepath)
         
+        # 读旧内容（用于 diff）
+        old_content = ""
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    old_content = f.read()
+            except Exception:
+                pass
+
         # 写入文件
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
-        
-        return f"✅ 已写入: {filename}"
+
+        result = f"✅ 已写入: {filename}"
+        # 附加 inline diff
+        from core.diff_utils import make_inline_diff
+        diff = make_inline_diff(old_content, content, filename)
+        if diff:
+            result += "\n" + diff
+        return result
         
     except Exception as e:
         return f"❌ 写入失败: {str(e)}"
@@ -159,7 +174,13 @@ def append_obsidian(filename: str, content: str, auto_backup: bool = True) -> st
                 f.write('\n')
             f.write(content)
 
-        return f"✅ 已追加到: {os.path.relpath(filepath, OBSIDIAN_VAULT)}"
+        result = f"✅ 已追加到: {os.path.relpath(filepath, OBSIDIAN_VAULT)}"
+        # append 模式：只显示新增段 diff（纯 + 行）
+        from core.diff_utils import make_inline_diff
+        diff = make_inline_diff("", content, filename, append_mode=False)
+        if diff:
+            result += "\n" + diff
+        return result
 
     except Exception as e:
         return f"❌ 追加失败: {str(e)}"
