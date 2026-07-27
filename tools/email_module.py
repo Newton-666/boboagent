@@ -337,7 +337,7 @@ def is_sensitive_email(email_info: dict) -> bool:
     return False
 
 
-def process_emails_with_privacy(emails):
+def process_emails_with_privacy(emails, user_choice: str = "n"):
     """处理邮件，自动处理订阅，敏感邮件询问用户"""
     auto = []
     need_confirm = []
@@ -356,15 +356,14 @@ def process_emails_with_privacy(emails):
         print(f"\n   [a] 全部处理")
         print(f"   [n] 全部跳过")
         print(f"   [1,2,3] 处理指定序号")
-        choice = input("   请选择: ").strip()
         
-        if choice.lower() == 'n':
+        if user_choice.lower() == 'n':
             return auto
-        elif choice.lower() == 'a':
+        elif user_choice.lower() == 'a':
             return auto + need_confirm
         else:
             try:
-                indices = [int(x.strip())-1 for x in choice.split(',')]
+                indices = [int(x.strip())-1 for x in user_choice.split(',')]
                 selected = [need_confirm[i] for i in indices if 0 <= i < len(need_confirm)]
                 return auto + selected
             except Exception:
@@ -374,4 +373,71 @@ def process_emails_with_privacy(emails):
 
 
 def register(reg):
-    pass
+    reg("read_email_recent", read_recent_tool, {
+        "type": "function",
+        "function": {
+            "name": "read_email_recent",
+            "description": "读取最近 N 封邮件，显示发件人、主题、时间等摘要信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "读取的最近邮件数量，默认 5"
+                    }
+                },
+                "required": []
+            }
+        }
+    })
+    reg("read_email_content", read_email_content_tool, {
+        "type": "function",
+        "function": {
+            "name": "read_email_content",
+            "description": "读取指定索引的邮件完整内容（文本部分）。先调用 read_email_recent 获取列表，再用此工具读取特定邮件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "邮件序号，从 1 开始（对应 read_email_recent 返回列表的序号）"
+                    }
+                },
+                "required": ["index"]
+            }
+        }
+    })
+    reg("search_emails", search_emails_tool, {
+        "type": "function",
+        "function": {
+            "name": "search_emails",
+            "description": "按关键词搜索邮件（支持中文）。搜索主题、发件人、正文摘要。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "搜索关键词"
+                    }
+                },
+                "required": ["keyword"]
+            }
+        }
+    })
+    reg("analyze_emails", analyze_emails_tool, {
+        "type": "function",
+        "function": {
+            "name": "analyze_emails",
+            "description": "分析最近 N 天的邮件，统计发件频率、主题关键词、邮件类型分布。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "分析最近多少天的邮件，默认 7"
+                    }
+                },
+                "required": []
+            }
+        }
+    })

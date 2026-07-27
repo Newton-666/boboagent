@@ -135,13 +135,11 @@ class TestConcurrentWrites:
 
 
 class TestDoubleRegistration:
-    def test_save_memory_register_is_pass(self):
-        from tools import save_memory
+    def test_save_memory_registered_by_v5(self):
         from tools import TOOL_FUNCTIONS
-        # save_memory 的 register 现在是 pass，唯一注册由 v5 完成
+        # save_memory/search_memory stubs 已删除，v5_memory.py 统一注册
         assert "save_memory" in TOOL_FUNCTIONS, "v5 未注册 save_memory"
 
-    def test_search_memory_register_is_pass(self):
-        from tools import search_memory
+    def test_search_memory_registered_by_v5(self):
         from tools import TOOL_FUNCTIONS
         assert "search_memory" in TOOL_FUNCTIONS, "v5 未注册 search_memory"
