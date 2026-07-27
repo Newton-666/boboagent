@@ -44,6 +44,8 @@ Bobo's preset workflow standards (`data/skill-standards/`) are hard constraints 
 | **Note Taking** | Save to Obsidian | Search-before-write, auto-folder matching, mandatory frontmatter, write-then-verify. |
 | **Git Workflow** | Git operations | Branch → commit → tag → merge → push. Rollback tags on every merge. |
 | **Research** | Searches, comparisons | Multi-source cross-verification (≥2 searches, ≥2 sources), contradiction reporting, source attribution. |
+| **Duo** | `/duo` commands | Dual-agent debate for architectural decisions. A/B opposing perspectives with decision checklist. |
+| **Self-Hosting** | bobo self-modification | Branch-based task system: feat/ branches, task tickets, graduated authority. Never touch main. |
 
 Add your own: create `data/skill-standards/<name>/standard.md` with a `keywords:` line and it auto-discovers. No code changes needed.
 
@@ -155,7 +157,7 @@ git clone https://github.com/Newton-666/boboagent.git
 cd boboagent
 pip install -e ".[dev]"
 
-# Run tests (no API key needed, 709 passed / 0 failed)
+# Run tests (no API key needed, 735 passed, 2 skipped)
 pytest tests/ -q
 ```
 
