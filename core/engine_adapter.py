@@ -177,7 +177,7 @@ def run_engine(
             current_engines[sid] = interrupt_event
 
         engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
-        engine._load_proactive_config()
+        engine.proactive.load_config()
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))
