@@ -60,27 +60,11 @@ def _get_file_hash(filepath: str) -> str:
         return None
 
 def _generate_diff(old_lines: list[str], new_lines: list[str], file_path: str) -> str:
-    """生成 inline diff（去掉 ---/+++ 行，>40 行截断，与 edit_file 共享格式）。"""
-    import difflib
-    diff_lines = list(difflib.unified_diff(
-        old_lines, new_lines,
-        fromfile=file_path, tofile=file_path,
-    ))
-    # 去掉 ---/+++ 路径行（前端渲染器会错误染色）
-    diff_lines = [l for l in diff_lines if not l.startswith("--- ") and not l.startswith("+++ ")]
-    diff_truncated = False
-    if len(diff_lines) > 40:
-        head = diff_lines[:20]
-        tail = diff_lines[-20:]
-        omitted = len(diff_lines) - 40
-        diff_lines = head + [f"... (省略 {omitted} 行)\n"] + tail
-        diff_truncated = True
-    added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
-    header = f"⎿  +{added} −{removed}"
-    if diff_truncated:
-        header += f" (截断)"
-    return f"<<<INLINE_DIFF>>>\n{header}\n{''.join(diff_lines)}<<<END_INLINE_DIFF>>>"
+    """生成 inline diff——委托给 core/diff_utils.make_inline_diff。"""
+    from core.diff_utils import make_inline_diff
+    old = "".join(old_lines) if old_lines else ""
+    new = "".join(new_lines) if new_lines else ""
+    return make_inline_diff(old, new, file_path)
 
 
 def _write_single_file(path: str, content: str) -> str:
