@@ -982,7 +982,6 @@ def handle_slash_exec(params: dict, rid: str) -> dict:
             lines.append("")
             lines.append("切换: /provider <名称>")
             return _ok(rid, {"output": "\n".join(lines)})
-    else:
     elif command == "duo" or command.startswith("duo "):
         # /duo 不是网关命令，是 skill 触发词：去掉斜杠透传给对话管线，
         # 由 engine 的 skill 注入机制（data/skill-standards/duo）接管。
