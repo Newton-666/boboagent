@@ -459,6 +459,76 @@ class TestSpawnWorkerAllowTools:
         ), "LLM should have responded after seeing tool stub"
 
 
+class TestReadFilesPerToolResult:
+    """N3 fix: _read_files stores individual tool result, not round aggregate."""
+
+    def test_read_files_stores_correct_per_tool_content(self, tmp_path):
+        """同一轮读两个文件，各存各的内容，不混合。"""
+        import json as _j
+        from tests.mock_llm import MockLLMCaller
+
+        a = tmp_path / "a.txt"
+        b = tmp_path / "b.txt"
+        a.write_text("AAA_CONTENT_ONLY\n" * 20, encoding="utf-8")
+        b.write_text("BBB_CONTENT_ONLY\n" * 20, encoding="utf-8")
+
+        # LLM calls read_local_file for both files, then replies
+        # read_local_file 参数名是 filepath 不是 file_path
+        caller = MockLLMCaller([
+            {
+                "choices": [{"message": {"content": "", "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {
+                        "name": "read_local_file",
+                        "arguments": _j.dumps({"filepath": str(a)})
+                    }},
+                    {"id": "c2", "type": "function", "function": {
+                        "name": "read_local_file",
+                        "arguments": _j.dumps({"filepath": str(b)})
+                    }}
+                ]}}]
+            },
+            {"choices": [{"message": {"content": "done"}}]},
+        ])
+
+        from core.engine import Engine
+        engine = Engine(llm_caller=caller, tool_executor=None, test_mode=True)
+        engine._proactive_mode = "off"
+        engine.MAX_STEPS = 8
+        engine.run("read a and b")
+
+        rf = getattr(engine, '_read_files', {})
+        assert str(a) in rf, f"Expected {a} in _read_files"
+        assert str(b) in rf, f"Expected {b} in _read_files"
+        assert "AAA" in rf[str(a)], f"File A should contain its own content, got: {rf[str(a)][:100]}"
+        assert "BBB" not in rf[str(a)], f"File A should NOT contain B content"
+        assert "BBB" in rf[str(b)], f"File B should contain its own content, got: {rf[str(b)][:100]}"
+        assert "AAA" not in rf[str(b)], f"File B should NOT contain A content"
+
+
+class TestBlockedFoldersRead:
+    """N2 fix: file_writer.read_file 现在拒绝 BLOCKED_FOLDERS 内的路径。
+
+    OBSIDIAN_VAULT 是模块级 import 常量，monkeypatch 不影响。
+    通过直接调用内部逻辑测试 BLOCKED_FOLDERS 检查。"""
+
+    def test_blocked_folder_check_exists_in_read_file(self):
+        """确认 read_file 源码包含 BLOCKED_FOLDERS 检查（N2 修复已落地）。"""
+        import inspect, tools.file_writer as fw
+        src = inspect.getsource(fw.read_file)
+        assert "BLOCKED_FOLDERS" in src, "read_file must check BLOCKED_FOLDERS"
+        assert "无权读取" in src, "read_file must return rejection message"
+
+    def test_blocked_folder_check_matches_write_pattern(self):
+        """read_file 的 BLOCKED_FOLDERS 检查与 append 共享同一模式。"""
+        import inspect, tools.file_writer as fw
+        # write_obsidian 已有 BLOCKED_FOLDERS 检查，read_file 应匹配
+        write_src = inspect.getsource(fw.write_obsidian)
+        read_src = inspect.getsource(fw.read_file)
+        assert "BLOCKED_FOLDERS" in read_src
+        assert "filepath.split" in read_src
+        assert "无权" in read_src
+
+
 class TestPyCompileAutoCheck:
     """写 .py 后自动 py_compile——edit_file 和 file_operation 各测一组。"""
 

@@ -1539,10 +1539,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             if self._pending_content and self._is_phase_complete(self._pending_content):
                 self._phase_pending_cleanup = True
             # 边执行边扩张 + 改动日志 + 已读文件（审计 #24：全部在同一个
-            # for 循环内，不再用泄漏变量只记录最后一个工具）
+            # for 循环内，N3 修复取本条 tool_result 而非整轮聚合）
             if self._pending_tool_calls:
                 import json as _je
-                for tc in self._pending_tool_calls:
+                for tc_idx, tc in enumerate(self._pending_tool_calls):
                     name = tc.get("function", {}).get("name", "")
                     args_str = tc.get("function", {}).get("arguments", "{}")
                     # 边执行边扩张
@@ -1553,7 +1553,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     if name in ("edit_file", "file_operation"):
                         try:
                             a = _je.loads(args_str) if isinstance(args_str, str) else args_str
-                            fpath = a.get('file_path', '') or a.get('path', '')
+                            fpath = a.get('file_path', '') or a.get('filepath', '') or a.get('path', '')
                             if fpath:
                                 if not hasattr(self, '_change_log'):
                                     self._change_log = []
@@ -1570,11 +1570,13 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     if name == "read_local_file":
                         try:
                             a = _je.loads(args_str) if isinstance(args_str, str) else args_str
-                            fpath = a.get('file_path', '') or a.get('path', '')
-                            if fpath and tool_results and len(str(tool_results)) > 40:
+                            fpath = a.get('file_path', '') or a.get('filepath', '') or a.get('path', '')
+                            # 从 tool_results 中取本条对应的结果（而非整轮聚合）
+                            this_result = tool_results[tc_idx] if tc_idx < len(tool_results) else ""
+                            if fpath and this_result and len(str(this_result)) > 40:
                                 if not hasattr(self, '_read_files'):
                                     self._read_files = {}
-                                self._read_files[fpath] = str(tool_results)[:200]
+                                self._read_files[fpath] = str(this_result)[:200]
                                 if len(self._read_files) > 10:
                                     self._read_files = dict(list(self._read_files.items())[-10:])
                                 if not hasattr(self, '_file_last_step'):

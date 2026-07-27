@@ -173,7 +173,13 @@ def read_file(filename: str) -> str:
         filepath = _normalize_path(filename)
         if not os.path.exists(filepath):
             return f"❌ 文件不存在: {filename}"
-        
+
+        # BLOCKED_FOLDERS 检查（与 write/append 一致）
+        for blocked in BLOCKED_FOLDERS:
+            blocked = blocked.strip()
+            if blocked and blocked in filepath.split(os.sep):
+                return f"❌ 无权读取该文件（隐私保护）"
+
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
