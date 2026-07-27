@@ -31,10 +31,10 @@ def resolve_skin() -> dict:
     """返回 TUI 皮肤配置（Bobo 品牌）"""
     return {
         "colors": {
-            "ui_primary": "#A09CC2",
-            "ui_accent": "#8FACCD",
-            "ui_border": "#B5A8C8",
-            "ui_text": "#E8E4F0",
+            "ui_primary": "#3B82F6",
+            "ui_accent": "#6366F1",
+            "ui_border": "#8B5CF6",
+            "ui_text": "#E0E7FF",
             "banner_title": "#3B82F6",
             "banner_accent": "#6366F1",
             "banner_dim": "#8B5CF6",
