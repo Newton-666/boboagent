@@ -345,6 +345,38 @@ class TestEditFileContextAware:
 
 # ── Phase 1-6: refactor interface redesign ──────────────────────────────
 
+class TestDuoReadWorkerResult:
+    """spawn(name=) 返回 100 字符标记，编排器必须用 read_worker_result 取全文。"""
+
+    def test_read_worker_result_returns_full_output(self):
+        """spawn with name returns truncated; read_worker_result returns full."""
+        from tools.spawn_worker import execute as spawn, execute_read_worker_result
+        from tests.mock_llm import MockLLMCaller, text_response
+
+        # Generate a long response (>100 chars)
+        long_resp = "A" * 500
+        caller = MockLLMCaller([text_response(long_resp)])
+
+        # Temporarily replace _get_llm_caller to use our mock
+        import tools.spawn_worker as sw
+        orig_get_caller = sw._get_llm_caller
+        sw._get_llm_caller = lambda: caller
+        try:
+            truncated = spawn(
+                instruction="输出 500 个 A",
+                name="test-read-worker-result",
+                allow_tools=False,
+                timeout=30,
+            )
+            # spawn with name returns a summary marker, not the full result
+            assert len(truncated) < 500, f"spawn with name should return truncated marker, got {len(truncated)} chars"
+
+            full = execute_read_worker_result("test-read-worker-result")
+            assert full == long_resp, f"read_worker_result should return full output ({len(long_resp)} chars), got {len(full)} chars"
+        finally:
+            sw._get_llm_caller = orig_get_caller
+
+
 class TestDuoBriefing:
     """Phase 0 现状简报必须返回非空内容（在本仓库环境下）。"""
 

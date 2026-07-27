@@ -127,12 +127,15 @@ def run_deliberation(question: str, emit, sid: str):
     if a_result.startswith("[WORKER_TIMEOUT]") or a_result.startswith("[WORKER_ERROR]"):
         _emit_assistant(emit, sid, f"❌ A 失败: {a_result}")
         return
-    _emit_assistant(emit, sid, f"▶ A 的方案原文\n\n{a_result}")
+    # spawn 传了 name 只返回 100 字符标记，完整结果用 read_worker_result 取
+    from tools.spawn_worker import execute_read_worker_result
+    a_full = execute_read_worker_result("duo-A-propose") or a_result
+    _emit_assistant(emit, sid, f"▶ A 的方案原文\n\n{a_full}")
 
     # Phase 2: B
     _emit_assistant(emit, sid, "▸ 正在派 B 挑刺 …")
     b_instruction = (
-        f"有人提出以下方案：\n---\n{a_result}\n---\n"
+        f"有人提出以下方案：\n---\n{a_full}\n---\n"
         f"你的任务是挑刺：找出假设漏洞、遗漏场景、更优替代。"
         f"只输出问题清单，不需要重述方案。"
     )
@@ -150,9 +153,10 @@ def run_deliberation(question: str, emit, sid: str):
     if b_result.startswith("[WORKER_TIMEOUT]") or b_result.startswith("[WORKER_ERROR]"):
         _emit_assistant(emit, sid, f"❌ B 失败: {b_result}")
         return
-    _emit_assistant(emit, sid, f"▶ B 的挑刺原文\n\n{b_result}")
+    b_full = execute_read_worker_result("duo-B-critique") or b_result
+    _emit_assistant(emit, sid, f"▶ B 的挑刺原文\n\n{b_full}")
 
     # Phase 3: 汇总
     _emit_assistant(emit, sid, "▸ 正在生成决策清单 …")
-    summary = _summarize(question, a_result, b_result)
+    summary = _summarize(question, a_full, b_full)
     _emit_assistant(emit, sid, f"## /duo 商讨结论：{question}\n\n{summary}")
