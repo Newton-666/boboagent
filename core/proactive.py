@@ -90,7 +90,9 @@ class ProactiveManager:
             if candidates:
                 filtered = self._semantic_filter(topic, candidates)
                 for mem in filtered[:3]:
-                    conn = f"[记忆] {mem.get('content', '')}"
+                    age = mem.get("_age_days", 0)
+                    stale_hint = f"（{age} 天前，可能过时）" if age >= 14 else ""
+                    conn = f"[记忆] {mem.get('text', mem.get('content', ''))}{stale_hint}"
                     if mem.get("id"):
                         conn += f" (id:{mem['id']})"
                     connections.append(conn)
@@ -152,8 +154,9 @@ class ProactiveManager:
         # --- 降级检查 ---
         self.stats["offered"] += 1
         try:
-            from tools.v5_memory import decay_all
+            from tools.v5_memory import decay_all, time_decay
             decay_all()
+            time_decay()
         except Exception:
             pass
         self._maybe_downgrade()
