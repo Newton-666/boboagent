@@ -1,30 +1,12 @@
 """文件操作工具 - 带读取缓存 + 自动备份 + 安全防护，支持批量写入"""
 
 import os
-import sys
-import subprocess
 import hashlib
 import shutil
 import time
 from pathlib import Path
 from core.file_safety import is_write_denied, safe_read_check
-
-
-def _py_compile_check(path: str) -> str:
-    """写 .py 文件后自动语法检查。失败不阻断，只附加醒目的 ❌ 信息。"""
-    if not path.endswith(".py"):
-        return ""
-    try:
-        r = subprocess.run(
-            [sys.executable, "-m", "py_compile", path],
-            capture_output=True, text=True, timeout=10,
-        )
-        if r.returncode == 0:
-            return f"\n✅ py_compile 通过: {path}"
-        stderr = r.stderr.strip().split("\n")[-10:]
-        return f"\n❌ py_compile 失败: {path}\n{chr(10).join(stderr)}\n（文件已写入，但语法检查未过——必须立即修复，禁止交付）"
-    except Exception as e:
-        return f"\n⚠️ py_compile 未执行: {e}"
+from core.code_checks import py_compile_check
 
 TOOL_NAME = "file_operation"
 import threading as _ft
@@ -84,7 +66,7 @@ def _write_single_file(path: str, content: str) -> str:
         with _read_cache_lock:
             _read_cache.pop(full_path, None)
 
-        result = f"已写入: {path}{_py_compile_check(full_path)}"
+        result = f"已写入: {path}{py_compile_check(full_path)}"
         # 生成 inline diff（覆盖/新建都支持）
         try:
             old_lines = old_content.splitlines(keepends=True) if old_content else []
