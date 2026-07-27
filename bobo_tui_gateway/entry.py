@@ -31,14 +31,14 @@ def resolve_skin() -> dict:
     """返回 TUI 皮肤配置（Bobo 品牌）"""
     return {
         "colors": {
-            "ui_primary": "#C4B8AE",
-            "ui_accent": "#D4A9A0",
-            "ui_border": "#D4A9A0",
-            "ui_text": "#FFFFFF",
-            "banner_title": "#60A5FA",
-            "banner_accent": "#818CF8",
-            "banner_dim": "#A78BFA",
-            "banner_border": "#C4B5FD",
+            "ui_primary": "#D4A9A0",
+            "ui_accent": "#9BAF9E",
+            "ui_border": "#C4B8AE",
+            "ui_text": "#EDE8E0",
+            "banner_title": "#D4A9A0",
+            "banner_accent": "#9BAF9E",
+            "banner_dim": "#C4B8AE",
+            "banner_border": "#C4B8AE",
         },
         "branding": {
             "agent_name": "Bobo Agent",
@@ -48,7 +48,7 @@ def resolve_skin() -> dict:
             "goodbye": "再见！",
             "help_header": "Bobo 命令帮助",
         },
-        "banner_logo": "[#3B82F6]██████╗  ██████╗ ██████╗  ██████╗ [/]\n[#3B82F6]██╔══██╗██╔═══██╗██╔══██╗██╔═══██╗[/]\n[#6366F1]██████╔╝██║   ██║██████╔╝██║   ██║[/]\n[#8B5CF6]██╔══██╗██║   ██║██╔══██╗██║   ██║[/]\n[#8B5CF6]██████╔╝╚██████╔╝██████╔╝╚██████╔╝[/]\n[#A78BFA]╚═════╝  ╚═════╝ ╚═════╝  ╚═════╝ [/]",
+        "banner_logo": "",
         "banner_hero": "",
         "tool_prefix": "|",
     }
