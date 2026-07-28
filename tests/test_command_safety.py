@@ -442,3 +442,135 @@ class TestSelfHostingGitMainCommitGate:
         """git -C /tmp commit → 非自身仓库，放行。"""
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -C /tmp commit -m 'x'"})
         assert "自身仓库" not in reason
+
+
+# ── self-hosting：硬拒绝通道回归测试 ──
+
+
+class TestSelfRepoHardBlock:
+    """验证 v2/v3 闸命中时跳过 _confirm，直接返回 tool_result 硬拒绝文案。
+
+    核心断言：_confirm 被 mock 为 raise AssertionError，如果 _confirm 被调用则测试爆炸。
+    通用高风险命令（dangerous/gray）不受影响，仍走确认流程。
+    """
+
+    # ---------- 夹具 ----------
+
+    @staticmethod
+    def _make_runner(confirm_side_effect=None):
+        """创建一个最小 ToolRunnerMixin 子类实例，mock _confirm/_notify/_record_message。"""
+        from core.tool_runner import ToolRunnerMixin
+
+        class _Harness(ToolRunnerMixin):
+            def __init__(self):
+                self.tool_executor = None  # 硬拒绝路径不执行工具，不需要真实 executor
+                self._tool_failures = {}
+                self._recent_tool_calls = []
+                self._confirm_calls = []
+                self._notify_calls = []
+                self._recorded = []
+
+            def _confirm(self, tool_name, tool_args, reason):
+                self._confirm_calls.append((tool_name, reason))
+                if confirm_side_effect:
+                    raise confirm_side_effect
+                return True
+
+            def _notify(self, event_type, data):
+                self._notify_calls.append((event_type, data))
+
+            def _record_message(self, role, **kwargs):
+                self._recorded.append((role, kwargs))
+
+        return _Harness()
+
+    @staticmethod
+    def _tc(command: str, call_id: str = "c1") -> dict:
+        return {
+            "id": call_id,
+            "function": {
+                "name": "execute_terminal",
+                "arguments": f'{{"command": "{command}"}}',
+            },
+        }
+
+    # ---------- 硬拒绝：v2 闸 ─────────-
+
+    def test_v2_git_push_hard_blocked(self):
+        """git push on self-repo → 硬拒绝，不调 _confirm。"""
+        runner = self._make_runner(confirm_side_effect=AssertionError("_confirm 不应被调用"))
+        results = runner._execute_tool_loop([self._tc("git push")])
+        assert len(results) == 1
+        assert "此操作仅限用户在终端亲自执行" in results[0]["content"]
+        assert runner._confirm_calls == []
+
+    def test_v2_git_reset_hard_hard_blocked(self):
+        """git reset --hard → 硬拒绝，不调 _confirm。"""
+        runner = self._make_runner(confirm_side_effect=AssertionError("_confirm 不应被调用"))
+        results = runner._execute_tool_loop([self._tc("git reset --hard HEAD~1")])
+        assert len(results) == 1
+        assert "此操作仅限用户在终端亲自执行" in results[0]["content"]
+        assert runner._confirm_calls == []
+
+    # ---------- 硬拒绝：v3 闸 ─────────-
+
+    def test_v3_main_commit_hard_blocked(self, monkeypatch):
+        """自身仓库 main 分支 git commit → 硬拒绝。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        runner = self._make_runner(confirm_side_effect=AssertionError("_confirm 不应被调用"))
+        results = runner._execute_tool_loop([self._tc("git commit -m 'x'")])
+        assert len(results) == 1
+        assert "此操作仅限用户在终端亲自执行" in results[0]["content"]
+        assert runner._confirm_calls == []
+
+    # ---------- 通用高风险命令仍走确认流程 ─────────-
+
+    # ---------- helper：返回 False 的 confirm mock，保留 _confirm_calls 记录 ----------
+    @staticmethod
+    def _mock_confirm_false(runner):
+        """替换 runner._confirm 为返回 False 的桩，但保留 _confirm_calls 追加逻辑。"""
+        def _fn(tool_name, tool_args, reason):
+            runner._confirm_calls.append((tool_name, reason))
+            return False
+        runner._confirm = _fn
+
+    def test_dangerous_command_still_confirms(self):
+        """rm -rf（非 self-repo 闸）→ 仍走 _confirm 确认流程。"""
+        runner = self._make_runner()
+        # _confirm 返回 False → 取消执行，不进 executor
+        self._mock_confirm_false(runner)
+        results = runner._execute_tool_loop([self._tc("rm -rf /tmp/test")])
+        assert len(runner._confirm_calls) == 1
+        assert "操作已取消" in results[0]["content"]
+
+    def test_gray_command_still_confirms(self):
+        """未知命令（gray）→ 仍走 _confirm 确认流程。"""
+        runner = self._make_runner()
+        self._mock_confirm_false(runner)
+        results = runner._execute_tool_loop([self._tc("unknown_cmd")])
+        assert len(runner._confirm_calls) == 1
+        assert "操作已取消" in results[0]["content"]
+
+    # ---------- 放行：非 execute_terminal / 非 gate 命令 ─────────-
+
+    def test_non_terminal_tool_not_affected(self):
+        """delete_note 等非 execute_terminal 工具不受硬拒绝影响，仍走确认。"""
+        runner = self._make_runner()
+        self._mock_confirm_false(runner)
+        results = runner._execute_tool_loop([{
+            "id": "c1",
+            "function": {"name": "delete_note", "arguments": '{"path": "/tmp/test.md"}'},
+        }])
+        assert len(runner._confirm_calls) == 1
+        assert any("操作已取消" in r["content"] for r in results)
+
+    def test_non_gate_git_unaffected(self):
+        """git status（非 commit/push/reset/clean）→ 不触发任何闸，不进 confirm。"""
+        runner = self._make_runner(confirm_side_effect=AssertionError("_confirm 不应被调用"))
+        # git status 是 safe，is_high_risk_tool 返回 False，不进 confirm
+        # 但会进执行路径，需要 _tool_executor → 用 str 桩替代真实 executor
+        runner.tool_executor = lambda tool_name, tool_args: "ok"
+        results = runner._execute_tool_loop([self._tc("git status")])
+        assert runner._confirm_calls == []
+        assert len(results) >= 1
