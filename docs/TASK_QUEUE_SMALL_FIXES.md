@@ -56,7 +56,32 @@ AttributeError: 'str' object has no attribute 'get'
 
 ---
 
-## 票 D：main 直提物理闸（self-repo commit 拦截）
+## 票 F：v3 闸过度拦截字符串内容
+
+`echo "git commit ..."` 等字符串内容含 "git commit" 时会被 v3 闸误拦（过度拦截方向，影响小）。优化方向：命令分段解析（&&/;/| 分段后只对真实命令段判闸）。优先级低。
+
+---
+
+## 票 G：self-repo 闸改硬拒绝通道（闸语义修正）
+
+**背景**（2026-07-28 实证）：v2/v3 闸（push/reset --hard/clean -f + main commit）判定逻辑正确，但执行语义接进了 `tool_runner.py` 通用"高风险 → 确认框 → 用户同意即放行"管道。闸装上后一分钟内，bobo 在 main 上直提两个 commit（32bbec9、1763b04）——确认框被同意即穿闸。设计本意是"self-repo 这些操作**只有用户在终端能做**，bobo 做了应直接拒绝"，当前退化为"请示"。确认疲劳使软闸必然失效。
+
+**任务**：
+1. `core/command_safety.py` 的 self-repo 闸判定结果需区分类别：新增返回/标记（如 `_is_self_repo_gated(command)` 统一入口），与"高风险需确认"区分开
+2. `core/tool_runner.py`：self-repo 闸命中时**不进入确认流程**，直接生成 tool_result 错误返回给 LLM："🚫 此操作仅限用户在终端亲自执行（self-repo 保护），请通知用户手动操作后重试"——bobo 收到错误后应向用户说明，而不是等待确认
+3. 通用高风险确认流程（其他危险命令）不受影响
+4. 回归测试：mock 场景验证 self-repo 闸命中时 _confirm 不被调用、tool_result 为拒绝文案；通用危险命令仍走确认
+
+**验收**：
+1. 新增测试：self-repo main commit → _confirm 未被调用 + 拒绝文案；self-repo push → 同上；普通 dangerous 命令 → 仍走 _confirm
+2. 真撞验证（Kimi 终审）：main + 闸代码落位，模拟 tool_runner 调用链确认无确认弹窗、直接拒绝
+3. pytest 全绿 + 五查汇报 + feat 分支（feat/gate-hard-block）
+
+**注意**：此票改的是"闸的执行语义"，判定逻辑（v2/v3 正则与条件）不许动。
+
+---
+
+## 票 D：main 直提物理闸（self-repo commit 拦截）✅ 已完成（merge f12a3eb，2026-07-28；穿闸修复 1194932）
 
 **背景**（纪律档案第 6 种违规）：2026-07-28 duo B 二审打回后，bobo 直接在 main 上 commit `6393deb`（原地修复原地提交，未走 feat 分支）。与 TICKET-012 同病型："打回修复"场景下条件反射续命，merge 后原分支没了就直接长在 main 上。文字标准约束此类条件反射场景已被证明滞后，需物理闸。
 
