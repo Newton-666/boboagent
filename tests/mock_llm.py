@@ -19,8 +19,8 @@ class MockLLMCaller:
         self.call_count = 0
 
     def __call__(self, messages, use_tools=True, stream_callback=None,
-                 retry_callback=None, tools_override=None):
-        """Matches the real llm_caller interface."""
+                 retry_callback=None, tools_override=None, **kwargs):
+        """Matches the real llm_caller interface. Accepts **kwargs for forward compat."""
         idx = self.call_count
         self.call_count += 1
 
