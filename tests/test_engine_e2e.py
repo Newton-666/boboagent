@@ -23,7 +23,7 @@ class FakeLLMCaller:
         self.calls: list[dict] = []
         self.call_count = 0
 
-    def __call__(self, messages, stream_callback=None, retry_callback=None, tools_override=None):
+    def __call__(self, messages, stream_callback=None, retry_callback=None, tools_override=None, **kwargs):
         self.call_count += 1
         self.calls.append({
             "messages": list(messages),

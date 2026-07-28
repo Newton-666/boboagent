@@ -2,9 +2,40 @@
 core/llm_caller.py - 修复版
 """
 
+import os as _os
 import requests
 import json
 import time
+import logging as _logging
+
+_logger = _logging.getLogger(__name__)
+
+
+def _get_sse_read_timeout() -> int:
+    """获取 SSE 流式读超时（秒），默认 120s，可被环境变量 BOBO_SSE_READ_TIMEOUT 覆盖。
+
+    120s 依据：DeepSeek 实测块间隔秒级；reasoning 模型（K3）思考期可能 30-90s 无块，
+    120s 留足余量又保证假死 2 分钟内必被发现。
+    """
+    try:
+        return int(_os.environ.get("BOBO_SSE_READ_TIMEOUT", "120"))
+    except (ValueError, TypeError):
+        return 120
+
+
+def _emit_stream_stall(event_bus, session_id: str, received_chunks: int, elapsed_ms: int, action: str):
+    """向事件总线写入 llm.stream_stall 事件。"""
+    if event_bus is None:
+        return
+    try:
+        event_bus.write("llm.stream_stall", {
+            "session_id": session_id,
+            "received_chunks": received_chunks,
+            "elapsed_ms": elapsed_ms,
+            "action": action,  # "retry" | "fail"
+        })
+    except Exception:
+        _logger.warning("llm.stream_stall event write failed", exc_info=True)
 
 
 def _classify_error(exception: Exception = None, status_code: int = None) -> tuple:
@@ -70,7 +101,7 @@ def _classify_error(exception: Exception = None, status_code: int = None) -> tup
 
 # 超时配置（秒）
 CONNECT_TIMEOUT = 10   # 建立连接的超时时间
-READ_TIMEOUT = 50      # 接收响应的超时时间
+READ_TIMEOUT = 120     # 接收响应的超时时间（SSE 流式按块间算，默认 120s，环境变量 BOBO_SSE_READ_TIMEOUT 可覆盖）
 
 # 重试配置
 MAX_RETRIES = 2        # 最大重试次数（初始请求 + 2 次重试 = 共 3 次尝试）
@@ -78,7 +109,7 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None):
         # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
         import os as _os
         _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
@@ -113,7 +144,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     api_url,
                     json=payload,
                     headers=headers,
-                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+                    timeout=(CONNECT_TIMEOUT, _get_sse_read_timeout()),
                     stream=bool(stream_callback),
                 )
 
@@ -139,39 +170,101 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
 
                 # ── 流式模式 ──
                 if stream_callback:
-                    full_content = ""
-                    tool_calls_buffer = []
-                    usage = {}
-                    for line in response.iter_lines():
-                        if not line:
-                            continue
-                        line = line.decode("utf-8")
-                        if not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
+                    from core.event_bus import event_bus as _event_bus
+                    _stream_start = time.time()
+                    _received_chunks = 0
+                    _stream_retried = False
+
+                    while True:
                         try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-                        # 捕获 usage（部分 API 在流结束前返回）
-                        if "usage" in chunk:
-                            usage = chunk["usage"]
-                        choices = chunk.get("choices", [])
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta", {})
-                        # reasoning_content 不存入对话历史，也不通过 stream_callback 推 TUI
-                        # （否则会作为回复正文显示在对话中，造成"思考过程泄漏"）。
-                        # reasoning 模型的思考阶段 TUI 通过流式保活心跳感知，不在此处理。
-                        content = delta.get("content", "")
-                        if content:
-                            full_content += content
-                            stream_callback(content)
-                        tc = delta.get("tool_calls")
-                        if tc:
-                            tool_calls_buffer.extend(tc)
+                            full_content = ""
+                            tool_calls_buffer = []
+                            usage = {}
+                            for line in response.iter_lines():
+                                if not line:
+                                    continue
+                                line = line.decode("utf-8")
+                                if not line.startswith("data: "):
+                                    continue
+                                data_str = line[6:]
+                                if data_str.strip() == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    continue
+                                # 捕获 usage（部分 API 在流结束前返回）
+                                if "usage" in chunk:
+                                    usage = chunk["usage"]
+                                choices = chunk.get("choices", [])
+                                if not choices:
+                                    continue
+                                delta = choices[0].get("delta", {})
+                                # reasoning_content 不存入对话历史，也不通过 stream_callback 推 TUI
+                                # （否则会作为回复正文显示在对话中，造成"思考过程泄漏"）。
+                                # reasoning 模型的思考阶段 TUI 通过流式保活心跳感知，不在此处理。
+                                content = delta.get("content", "")
+                                if content:
+                                    full_content += content
+                                    stream_callback(content)
+                                    _received_chunks += 1
+                                tc = delta.get("tool_calls")
+                                if tc:
+                                    tool_calls_buffer.extend(tc)
+                            break  # 正常读完，退出 while
+
+                        except (
+                            requests.exceptions.ReadTimeout,
+                            requests.exceptions.ChunkedEncodingError,
+                            requests.exceptions.ConnectionError,
+                        ) as _stall_err:
+                            _elapsed_ms = int((time.time() - _stream_start) * 1000)
+                            _logger.warning(
+                                "SSE 流断流: type=%s, received=%d, elapsed=%dms, session=%s",
+                                type(_stall_err).__name__,
+                                _received_chunks, _elapsed_ms, session_id or "?",
+                            )
+
+                            if _stream_retried:
+                                # 已重试过，不再重试
+                                _emit_stream_stall(
+                                    _event_bus, session_id,
+                                    _received_chunks, _elapsed_ms, "fail",
+                                )
+                                return {
+                                    "error": f"SSE 流断流（已重试仍失败）: {_stall_err}",
+                                    "error_type": "stream_stall",
+                                    "retryable": False,
+                                }
+
+                            # 首次断流 → 重试 1 次（丢弃半残流，全新请求）
+                            _stream_retried = True
+                            _emit_stream_stall(
+                                _event_bus, session_id,
+                                _received_chunks, _elapsed_ms, "retry",
+                            )
+                            if retry_callback:
+                                retry_callback(
+                                    f"SSE 流断流({type(_stall_err).__name__})，已收 {_received_chunks} 块—重试",
+                                    0,
+                                )
+                            # 重置计数，重新发起请求
+                            _received_chunks = 0
+                            response = requests.post(
+                                api_url,
+                                json=payload,
+                                headers=headers,
+                                timeout=(CONNECT_TIMEOUT, _get_sse_read_timeout()),
+                                stream=True,
+                            )
+                            if response.status_code != 200:
+                                return {
+                                    "error": f"SSE 断流重试 HTTP {response.status_code}",
+                                    "error_type": "stream_stall",
+                                    "retryable": False,
+                                    "detail": response.text[:500],
+                                }
+                            continue  # 回到 while 循环，用新 response 重新读流
 
                     # 从流中重建完整响应
                     choice = {"message": {"role": "assistant", "content": full_content}}

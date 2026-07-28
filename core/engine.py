@@ -599,6 +599,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             stream_callback=_on_token,
             retry_callback=_on_retry,
             tools_override=filtered_tools,
+            session_id=self.sid,
         )
         if isinstance(response, dict) and "error" in response:
             # ── 票 H 运行时孤儿防线 Layer 2：配对类 400 → 清洗重试一次 ──
@@ -621,6 +622,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     stream_callback=_on_token,
                     retry_callback=_on_retry,
                     tools_override=filtered_tools,
+                    session_id=self.sid,
                 )
                 if not isinstance(retry_response, dict) or "error" not in retry_response:
                     # 重试成功
