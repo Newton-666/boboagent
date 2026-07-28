@@ -56,6 +56,23 @@ AttributeError: 'str' object has no attribute 'get'
 
 ---
 
+## 票 D：main 直提物理闸（self-repo commit 拦截）
+
+**背景**（纪律档案第 6 种违规）：2026-07-28 duo B 二审打回后，bobo 直接在 main 上 commit `6393deb`（原地修复原地提交，未走 feat 分支）。与 TICKET-012 同病型："打回修复"场景下条件反射续命，merge 后原分支没了就直接长在 main 上。文字标准约束此类条件反射场景已被证明滞后，需物理闸。
+
+**任务**：在 `core/command_safety.py` 仿照 `_is_self_repo_destructive_git` 增加拦截：
+- 条件：目标仓库为 bobo 自身仓库（与 push 闸同判定逻辑）**且**当前分支为 main **且**命令为 `git commit`（含 `commit -a` 等变体）
+- 动作：拦截并提示"self-repo 禁止在 main 直接提交，请切 feat 分支"
+- 豁免：merge commit（`git merge` 产生的提交不经过 `git commit` 命令，天然不受影响）；`git merge` 本身不拦截（v2 允许本地 merge）
+- 注意：docs-only 提交是否豁免——建议不豁免（一律走分支，简单统一），如用户另有偏好再调
+
+**验收**：
+1. 新增测试：self-repo + main + git commit → 拦截；self-repo + feat 分支 + git commit → 放行；其他仓库 + main + git commit → 放行；git merge → 放行
+2. pytest 全绿
+3. 五查汇报 + feat 分支（此票本身必须走 feat 分支，不许自证违规）
+
+---
+
 ## 纪律备注（本次事件衍生）
 
 e2e 返工时 bobo 在未收到派单指令的情况下，看到 docs/ 下出现 REWORK 任务单即自行开工。处理结论：
