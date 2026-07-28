@@ -78,3 +78,26 @@ AttributeError: 'str' object has no attribute 'get'
 e2e 返工时 bobo 在未收到派单指令的情况下，看到 docs/ 下出现 REWORK 任务单即自行开工。处理结论：
 - 任务单文件 ≠ 开工令（默认模式须确认后动手）——已写入 self-hosting 标准
 - 未来 auto 模式下此行为为预期能力，届时由显式开关启用
+
+---
+
+## 票 E：smoke_boot PEND 在页脚被误报为 FAIL
+
+**背景**：`scripts/smoke_boot.py` 第 656 行：
+```python
+EXIT_CODE=" + ("0" if results.all_pass() else "1")
+```
+`all_pass()` 只在所有条目为 PASS 时返回 True。PEND 状态（shutdown 挂账）导致 `all_pass() → False`，进而 EXIT_CODE=1，与 FAIL 无法区分。页脚 `sys.exit(main())` 同理（第 669 行），退出码 1 让 CI/CD/脚本误判冒烟"失败"。
+
+**实测**：完整模式 5/6 PASS + 1 PEND → EXIT_CODE=1 → exit code 1。
+
+**任务**：
+1. `Results` 新增 `exit_code` 属性或方法，三态映射：PASS=0, PEND=2（或其他非零区分码）, FAIL=1
+2. `all_pass()` 改为 `all_pass_or_pend()`（PEND 不算 failed），或页脚逻辑改为 `if any FAIL → 1, elif any PEND → 2, else → 0`
+3. 页脚消息区分"全部通过" vs "全部通过（含挂账项）" vs "有失败项"
+
+**验收**：
+1. 干跑：5/5 PASS → exit 0
+2. 模拟 PEND：5/6 PASS + 1 PEND → exit 2（非 1）
+3. 模拟 FAIL：包含 FAIL → exit 1
+4. pytest 全绿
