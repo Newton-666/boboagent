@@ -350,6 +350,22 @@ def _is_bobo_repo_dir(path: str) -> bool:
     return False
 
 
+def is_self_repo_hard_block(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
+    """v2/v3 self-repo 闸命中 → 硬拒绝，不进确认流程。
+
+    复用 _is_self_repo_destructive_git 与 _is_self_repo_main_commit，
+    判定逻辑与 is_high_risk_tool 中的 v2/v3 检查完全一致，不加不减。
+    """
+    if tool_name != "execute_terminal":
+        return False, ""
+    command = tool_args.get("command", "")
+    if _is_self_repo_destructive_git(command):
+        return True, "此操作仅限用户在终端亲自执行，请通知用户手动操作后重试"
+    if _is_self_repo_main_commit(command):
+        return True, "此操作仅限用户在终端亲自执行，请通知用户手动操作后重试"
+    return False, ""
+
+
 def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
     if tool_name == "execute_terminal":
         command = tool_args.get("command", "")

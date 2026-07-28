@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from core.command_safety import is_high_risk_tool
+from core.command_safety import is_high_risk_tool, is_self_repo_hard_block
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +209,19 @@ class ToolRunnerMixin:
                     self._record_message("tool_result", result="参数解析失败")
                     continue
             self._record_message("tool_call", tool_name=tool_name, args=tool_args)
+
+            # ── self-repo 硬拒绝通道（v2/v3 闸）：不进确认流程，直接拒绝 ──
+            is_hard_block, block_reason = is_self_repo_hard_block(tool_name, tool_args)
+            if is_hard_block:
+                self._notify("tool_cancelled", {"name": tool_name, "args": tool_args, "reason": block_reason})
+                tool_results.append({
+                    "tool_call_id": tc.get("id", ""),
+                    "role": "tool",
+                    "content": block_reason
+                })
+                self._record_message("tool_result", result="self-repo-hard-block")
+                continue
+
             is_high_risk, reason = is_high_risk_tool(tool_name, tool_args)
             if is_high_risk:
                 self._notify("confirm_request", {"tool_name": tool_name, "tool_args": tool_args, "reason": reason})
