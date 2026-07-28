@@ -101,3 +101,20 @@ EXIT_CODE=" + ("0" if results.all_pass() else "1")
 2. 模拟 PEND：5/6 PASS + 1 PEND → exit 2（非 1）
 3. 模拟 FAIL：包含 FAIL → exit 1
 4. pytest 全绿
+
+---
+
+## 票 F：v3 main commit 闸过度拦截 — echo 等字符串内容误触
+
+**背景**：`_is_self_repo_main_commit` 对命令全字符串做 `\bgit\b` + `_find_git_subcommand` 判定，不区分命令段和字符串内容。例如：
+```bash
+echo "please run git commit -m fix"    # 被误拦
+git log --grep="git commit"            # 被误拦
+```
+这些命令的真实意图不是执行 `git commit`，但正则触发闸门。
+
+**影响**：低。在 bobo 自身仓库 main 分支上执行 echo/grep 等命令且字符串内含 "git commit" 才会触发，场景极少。且这些命令属于白名单（echo/grep），原本静默执行变为弹窗确认。
+
+**优化方向**：命令分段解析——先用 `split_shell_segments`（已有）按 `&&`/`;`/`|` 分段，只对包含真实 git 命令的段做 `_find_git_subcommand` 判定，字符串/引号内的"git commit"不触发。
+
+**优先级**：低。影响面极小，不紧急。
