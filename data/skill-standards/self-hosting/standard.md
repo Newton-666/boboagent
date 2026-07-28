@@ -54,6 +54,7 @@
 3    真实运行      pytest tests/ -q: N passed, M skipped
 4    环境一致性    确认分支名、工作区路径、无第二副本
 5    证据式自报    git log --oneline -2 + git branch 输出
+6    是否需重启加载新代码  改 core/ 必填"是"；仅改 data/、docs/ 等目录填"否"
 ```
 
 每项必须有具体结果（数字、路径、输出），禁止"通过了""没问题"等无证据表述。

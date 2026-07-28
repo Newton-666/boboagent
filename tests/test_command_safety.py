@@ -469,6 +469,7 @@ class TestSelfRepoHardBlock:
                 self._confirm_calls = []
                 self._notify_calls = []
                 self._recorded = []
+                self.sid = "test-session"  # 事件总线需要会话标识
 
             def _confirm(self, tool_name, tool_args, reason):
                 self._confirm_calls.append((tool_name, reason))

@@ -9,8 +9,16 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.command_safety import is_high_risk_tool, is_self_repo_hard_block
+from core.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
+
+
+def _trunc_str(text: str, max_chars: int) -> str:
+    """截断文本到 max_chars，末尾加 …。"""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "…"
 
 
 
@@ -61,6 +69,26 @@ class ToolRunnerMixin:
     MAX_TOOL_RESULT_LENGTH = 40000
     # path -> content before write；实例属性，由 Engine.__init__ 初始化（避免类属性在实例间共享）
     _file_checkpoints: dict[str, str]
+
+    @staticmethod
+    def _emit_tool_event(tc: dict, tool_name: str, tool_args: dict,
+                         result: str, elapsed_ms: int, hard_blocked: bool = False,
+                         cancelled: bool = False, side_path: str = "",
+                         session_id: str = ""):
+        """事件总线：tool.exec。只读——不修改任何变量。"""
+        args_summary = _trunc_str(json.dumps(tool_args, ensure_ascii=False, default=str), 200)
+        result_summary = _trunc_str(result, 200)
+        event_bus.write("tool.exec", {
+            "session_id": session_id,
+            "tool_call_id": tc.get("id", ""),
+            "name": tool_name,
+            "args_summary": args_summary,
+            "result_summary": result_summary,
+            "duration_ms": elapsed_ms,
+            "hard_blocked": hard_blocked,
+            "cancelled": cancelled,
+            "side_path": side_path,
+        })
 
     SECRET_PATTERNS = [
         re.compile(r'(sk-|sk-ant-)[a-zA-Z0-9_\-]{20,}'),
@@ -207,6 +235,10 @@ class ToolRunnerMixin:
                         )
                     })
                     self._record_message("tool_result", result="参数解析失败")
+                    # 事件总线
+                    self._emit_tool_event(tc, tool_name, tool_args,
+                                          result="参数解析失败", elapsed_ms=0,
+                                          session_id=self.sid)
                     continue
             self._record_message("tool_call", tool_name=tool_name, args=tool_args)
 
@@ -220,6 +252,10 @@ class ToolRunnerMixin:
                     "content": block_reason
                 })
                 self._record_message("tool_result", result="self-repo-hard-block")
+                # 事件总线：硬拒绝
+                self._emit_tool_event(tc, tool_name, tool_args,
+                                      result=block_reason, elapsed_ms=0, hard_blocked=True,
+                                      session_id=self.sid)
                 continue
 
             is_high_risk, reason = is_high_risk_tool(tool_name, tool_args)
@@ -229,6 +265,10 @@ class ToolRunnerMixin:
                 if not confirmed:
                     self._notify("tool_cancelled", {"name": tool_name, "args": tool_args, "reason": "用户取消"})
                     tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": f"操作已取消: {reason}"})
+                    # 事件总线：用户取消
+                    self._emit_tool_event(tc, tool_name, tool_args,
+                                          result=f"cancelled: {reason}", elapsed_ms=0, cancelled=True,
+                                          session_id=self.sid)
                     continue
             prepared.append((tc, tool_name, tool_args))
 
@@ -270,8 +310,9 @@ class ToolRunnerMixin:
                     except Exception:
                         pass
             self._notify("tool_call", {"name": tool_name, "args": tool_args, "context": context, "status": "start"})
+            _tool_t0 = time.time()
             future = executor.submit(_execute_tool, tool_name, tool_args)
-            future_map[future] = (tc, tool_name, tool_args)
+            future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)
 
         # 文件检查点已填充完毕，此时存快照才能正确覆盖本轮即将被修改的文件
@@ -290,15 +331,19 @@ class ToolRunnerMixin:
             # 用户发送了新消息 → cancel 设置中断信号 → 停止等待剩余结果
             if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
                 for remaining in future_map:
-                    tc_r, name_r, args_r = future_map[remaining]
+                    tc_r, name_r, args_r, _t0_r = future_map[remaining]
                     if remaining.done():
                         continue
                     tool_results.append({
                         "tool_call_id": tc_r.get("id", ""), "role": "tool",
                         "content": "操作已取消（用户发送了新消息）",
                     })
+                    # 事件总线：中断取消
+                    self._emit_tool_event(tc_r, name_r, args_r,
+                                          result="cancelled (interrupt)", elapsed_ms=0, cancelled=True,
+                                          session_id=self.sid)
                 return tool_results
-            tc, tool_name, tool_args = future_map[future]
+            tc, tool_name, tool_args, _tool_t0 = future_map[future]
             start_time = time.time()
             try:
                 # P1.1: 对齐 tool_executor 的每工具超时表
@@ -436,6 +481,11 @@ class ToolRunnerMixin:
                 "content": displayed,
             })
             self._record_message("tool_result", result=result[:200])
+            # 事件总线：tool.exec
+            self._emit_tool_event(tc, tool_name, tool_args,
+                                  result=result,
+                                  elapsed_ms=int(duration * 1000),
+                                  side_path=tool_args.get("path", tool_args.get("filepath", "")))
 
         # ── Loop detection: warn LLM if same tool+args called 3+ times ──
         for tc, tool_name, tool_args in prepared:
@@ -536,6 +586,9 @@ class ToolRunnerMixin:
         self._notify("restore_checkpoint", {"name": "restore_checkpoint", "args": tool_args, "result": result[:200], "duration": 0, "success": True})
         tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
         self._record_message("tool_result", result=result[:200])
+        # 事件总线
+        self._emit_tool_event(tc, "restore_checkpoint", tool_args,
+                              result=result, elapsed_ms=0, side_path=tool_args.get("path", ""))
 
     def _handle_cross_search(self, tc: dict, tool_results: list):
         """Search Obsidian + Notion + email, return unified time-sorted timeline."""
@@ -549,6 +602,8 @@ class ToolRunnerMixin:
             result = "请输入搜索关键词"
             self._notify("tool_result", {"name": "cross_search", "args": tool_args, "result": result, "duration": 0, "success": False})
             tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result})
+            # 事件总线
+            self._emit_tool_event(tc, "cross_search", tool_args, result=result, elapsed_ms=0)
             return
 
         self._notify("thinking", {"phase": "cross_search", "message": f"搜索 '{query}' 跨平台..."})
@@ -723,6 +778,8 @@ class ToolRunnerMixin:
         self._notify("tool_result", {"name": "cross_search", "args": tool_args, "result": result[:200], "duration": 0, "success": True})
         tool_results.append({"tool_call_id": tc.get("id", ""), "role": "tool", "content": result[:self.MAX_TOOL_RESULT_LENGTH]})
         self._record_message("tool_result", result=result[:200])
+        # 事件总线
+        self._emit_tool_event(tc, "cross_search", tool_args, result=result, elapsed_ms=0)
 
     # ── Context Engineering: Result Marking ───────────────────────────
     MARKING_TOOLS = frozenset({
