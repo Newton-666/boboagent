@@ -19,6 +19,7 @@ from tools import TOOLS_SCHEMA, report_load_errors
 from core.tool_executor import execute_tool
 from core.skill_manager import get_skill_manager
 from core.context import ContextMixin, clean_orphan_tool_calls
+from core.event_bus import event_bus
 from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
@@ -72,6 +73,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.confirm_callback = confirm_callback
         self.test_mode = test_mode or ('pytest' in sys.modules)
         self.history = []
+        # 会话标识：gateway 在 open_session 中设 self.sid；无会话时走时间戳兜底
+        _now = time.time()
+        self.sid = f"boot-{int(_now)}-{os.urandom(2).hex()}"
         self.skills_dir = Path(__file__).parent.parent / "skills"
         self.system_prompt = self._build_system_prompt()
 
@@ -127,6 +131,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def _notify(self, event_type: str, data: dict):
         if self.callback:
             self.callback(event_type, data)
+
+    def _emit_state_change(self, to_state: str, reason: str = ""):
+        """事件总线：状态变更。在 state 实际变更前调用。"""
+        event_bus.write("state.change", {
+            "session_id": getattr(self, "sid", ""),
+            "from": self.state,
+            "to": to_state,
+            "reason": reason,
+        })
+        self.state = to_state
 
     def _confirm(self, tool_name: str, tool_args: dict, reason: str) -> bool:
         if self.test_mode:
@@ -568,6 +582,14 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             names = [t.get("function", {}).get("name", "") for t in filtered_tools]
             self._notify("thinking", {"phase": "tool_filter", "message": f"加载 {len(filtered_tools)} 个工具 ({', '.join(names)})"})
 
+        # 事件总线：计算 caller 传的实际 messages 条数和含 tool_calls 情况
+        _llm_msg_count = len(messages)
+        _llm_has_tool_calls = any(
+            m.get("role") == "assistant" and m.get("tool_calls")
+            for m in messages
+        )
+        _llm_t0 = time.time()
+
         response = self.llm_caller(
             messages,
             stream_callback=_on_token,
@@ -605,6 +627,25 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     self._last_usage = retry_response.get("usage", {})
                     content, tool_calls = self._extract_response(retry_response)
                     content = remove_emojis(content or "")
+
+                    # 事件总线：llm.call 重试成功
+                    _retry_elapsed = int((time.time() - _llm_t0) * 1000)
+                    _retry_usage = retry_response.get("usage", {}) if isinstance(retry_response, dict) else {}
+                    event_bus.write("llm.call", {
+                        "session_id": getattr(self, "sid", ""),
+                        "msg_count": _llm_msg_count,
+                        "has_tool_calls": _llm_has_tool_calls,
+                        "duration_ms": _retry_elapsed,
+                        "prompt_tokens": _retry_usage.get("prompt_tokens", 0),
+                        "completion_tokens": _retry_usage.get("completion_tokens", 0),
+                        "total_tokens": _retry_usage.get("total_tokens", 0),
+                        "orphan": {
+                            "inserted": _retry_report["inserted"],
+                            "removed": _retry_report["removed"],
+                        } if (_retry_report["inserted"] or _retry_report["removed"]) else None,
+                        "retry": True,
+                    })
+
                     return content or "", tool_calls
                 # 重试仍失败 → 若仍是配对 400 则不再递归，直接走下方错误处理
                 logger.warning(
@@ -622,11 +663,44 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             self._notify("error", {"content": full_msg, "error_type": error_type})
             # Non-retryable errors (400, 401, etc) — stop the session
             if not retryable:
-                self.state = self.STATE_ERROR
+                self._emit_state_change(self.STATE_ERROR, "LLM non-retryable error")
+
+            # 事件总线：llm.call 出错
+            _llm_elapsed = int((time.time() - _llm_t0) * 1000)
+            event_bus.write("llm.call", {
+                "session_id": getattr(self, "sid", ""),
+                "msg_count": _llm_msg_count,
+                "has_tool_calls": _llm_has_tool_calls,
+                "duration_ms": _llm_elapsed,
+                "error_type": error_type,
+                "orphan": {
+                    "inserted": _orphan_report["inserted"],
+                    "removed": _orphan_report["removed"],
+                } if (_orphan_report["inserted"] or _orphan_report["removed"]) else None,
+            })
+
             return error_msg, []
         self._last_usage = response.get("usage", {})
         content, tool_calls = self._extract_response(response)
         content = remove_emojis(content or "")
+
+        # 事件总线：llm.call 正常返回
+        _llm_elapsed = int((time.time() - _llm_t0) * 1000)
+        _llm_usage = response.get("usage", {}) if isinstance(response, dict) else {}
+        event_bus.write("llm.call", {
+            "session_id": getattr(self, "sid", ""),
+            "msg_count": _llm_msg_count,
+            "has_tool_calls": _llm_has_tool_calls,
+            "duration_ms": _llm_elapsed,
+            "prompt_tokens": _llm_usage.get("prompt_tokens", 0),
+            "completion_tokens": _llm_usage.get("completion_tokens", 0),
+            "total_tokens": _llm_usage.get("total_tokens", 0),
+            "orphan": {
+                "inserted": _orphan_report["inserted"],
+                "removed": _orphan_report["removed"],
+            } if (_orphan_report["inserted"] or _orphan_report["removed"]) else None,
+        })
+
         return content or "", tool_calls
 
     def _append_to_history(self, role: str, content: str = None,
@@ -671,22 +745,22 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
     def _step(self):
         # 用户中断：收到新消息时 cancel 设置了中断信号，立刻退出
         if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
-            self.state = self.STATE_ERROR
+            self._emit_state_change(self.STATE_ERROR, "interrupted")
             return
         # _check_guards 移到最外层，每个 step 都检查，防止无限循环
         if self._check_guards():
-            self.state = self.STATE_ERROR
+            self._emit_state_change(self.STATE_ERROR, "guards triggered")
             return
 
         if self.state == self.STATE_IDLE:
             result = self._handle_pre_input(self.current_user_input)
             if result is not None:
                 self._notify("complete", {"content": result})
-                self.state = self.STATE_DONE
+                self._emit_state_change(self.STATE_DONE, "response complete")
                 return
             if self.current_user_input:
                 self._append_to_history("user", self.current_user_input)
-            self.state = self.STATE_THINKING
+            self._emit_state_change(self.STATE_THINKING, "user input")
         elif self.state == self.STATE_THINKING:
             content, tool_calls = self._call_llm()
             self._pending_content = content
@@ -694,7 +768,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             if tool_calls:
                 # 快照由 tool_runner._execute_tool_loop 在 _file_checkpoints
                 # 填充之后保存，确保首个修改轮次的文件也能回退（审计 #17）
-                self.state = self.STATE_EXECUTING
+                self._emit_state_change(self.STATE_EXECUTING, "executing tools")
             else:
                 # 空响应处理：flash model / reasoning 模型 token 耗尽 → 重试一次
                 if not content and not self._pending_tool_calls:
@@ -702,7 +776,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                         self._pending_content = None
                         self._pending_tool_calls = None
                         self.current_depth += 1
-                        self.state = self.STATE_THINKING  # retry
+                        self._emit_state_change(self.STATE_THINKING, "retry")
                     else:
                         # 重试后仍然空 → 明确报错，不静默结束
                         err_msg = (
@@ -712,15 +786,15 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             "  - API 暂时异常"
                         )
                         self._pending_content = err_msg
-                        self.state = self.STATE_RESPONDING
+                        self._emit_state_change(self.STATE_RESPONDING, "response error")
                 # 检查是否需要验证：LLM 声称完成但没有使用任何工具
                 elif self.verifier.check_and_inject(self.history, content):
                     self._pending_content = None
                     self._pending_tool_calls = None
                     self.current_depth += 1
-                    self.state = self.STATE_THINKING
+                    self._emit_state_change(self.STATE_THINKING, "tool calls pending")
                 else:
-                    self.state = self.STATE_RESPONDING
+                    self._emit_state_change(self.STATE_RESPONDING, "responding")
         elif self.state == self.STATE_EXECUTING:
             # 冲突检测：检查多个编辑操作是否要改同一文件的同一段
             if self._pending_tool_calls and len(self._pending_tool_calls) > 1:
@@ -748,7 +822,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     self._pending_content = None
                     self._pending_tool_calls = None
                     self.current_depth += 1
-                    self.state = self.STATE_THINKING
+                    self._emit_state_change(self.STATE_THINKING, "retry after verification")
                     return
 
             tool_results = self._execute_tool_loop(self._pending_tool_calls)
@@ -805,7 +879,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             self._pending_tool_calls = None
             self.current_depth += 1
             self.current_tool_round += 1
-            self.state = self.STATE_THINKING
+            self._emit_state_change(self.STATE_THINKING, "next tool round")
         elif self.state == self.STATE_RESPONDING:
             if self._pending_content:
                 self._append_to_history("assistant", self._pending_content)
@@ -850,10 +924,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             else:
                 self._notify("complete", {"content": "（没有生成回复内容）"})
             self._pending_content = None
-            self.state = self.STATE_DONE
+            self._emit_state_change(self.STATE_DONE, "done")
 
     def run(self, user_input: str = None, stream: bool = True, depth: int = 0, tool_round: int = 0):
-        self.state = self.STATE_IDLE
+        self._emit_state_change(self.STATE_IDLE, "session start")
         self.current_user_input = user_input
         self.current_depth = depth
         self.current_tool_round = tool_round
@@ -873,7 +947,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             self._step_count += 1
             if self._step_count > self.MAX_STEPS:
                 self._notify("thinking", {"phase": "continuing", "message": "步骤已用完，正在生成最终回复..."})
-                self.state = self.STATE_RESPONDING
+                self._emit_state_change(self.STATE_RESPONDING, "continuing")
                 break
             if self._step_count >= 50 and self._step_count % 5 == 0:
                 self._notify("thinking", {"phase": "continuing",
@@ -881,7 +955,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             # 检查中断信号
             if getattr(self, '_interrupt_event', None) and self._interrupt_event.is_set():
                 self._notify("error", {"content": "用户中断了操作"})
-                self.state = self.STATE_ERROR
+                self._emit_state_change(self.STATE_ERROR, "user interrupted")
                 break
             self._step()
 
@@ -891,7 +965,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         clear_cache()
         self.teaching_mode = False
         self.recorded_messages = []
-        self.state = self.STATE_IDLE
+        self._emit_state_change(self.STATE_IDLE, "cleanup")
         self.current_user_input = None
         self.current_depth = 0
         self.current_tool_round = 0
