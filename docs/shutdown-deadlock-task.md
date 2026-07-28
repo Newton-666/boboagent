@@ -31,11 +31,11 @@ smoke_boot.stop() 关闭子进程 stdin
 
 ### 证据 1: 孤儿进程实证 — shutdown 链条断裂导致进程残留
 
-当前系统上残留 3 个 `bobo_tui_gateway.entry` 进程（PID 1160, 6600, 83337），分别来自 3 次 bobo 会话，存活数小时未退出。这些进程的父进程 `bobo` 已消失或处于半死状态，entry 子进程被 init (PID 1) 收养但从未收到退出信号——因为信号处理路径上的 `thread.join()` 把整个 `shutdown_sessions` 卡死，连信号 handler 都无法正常返回。
+2026-07-28 12:50 系统清理中确认：119 个残留 `bobo_tui_gateway.entry` 进程对 SIGTERM 无响应——`pkill -15` 发出后无一退出，最终只能 `pkill -9` 强清。这些进程的 shutdown_sessions 从未执行到线程回收阶段，因为 `thread.join()` 阻塞在 requests/SSE 流上，信号 handler 注册了但永远不会被主线程交付。
 
-同时，之前的完整模式冒烟测试中，4 个 `smoke_boot.py` 实例（PID 70563, 70788, 71860, 72119）同时卡死在等待子进程退出，无 result 文件落盘。
+注：PID 1160/6600/83337 为当前活跃 bobo 会话后端（清理时特意保留），非孤儿。
 
-**结论**: 不是偶发超时，是系统性 shutdown 断裂。每一次无法正常退出的会话都会留下一个孤儿子进程。
+**结论**: 不是偶发超时，是系统性 shutdown 断裂。119 个残留进程 = 119 次 SIGTERM 无效的实证。
 
 ### 证据 2: SIGTERM 无效
 
