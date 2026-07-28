@@ -164,3 +164,23 @@ git log --grep="git commit"            # 被误拦
 **背景**：当前测试 `test_pairing_400_retry_fails` 只断言 `"错误:" in content`，未验证错误文本来自原始 `response` 而非 `retry_response`。
 
 **任务**：增强该测试断言为 `assert response['error'] in content`（确认用的原始 response 错误文本），并补充 `assert tool_calls == []`。
+
+---
+
+## 票 I：事件总线截断断 JSON（2026-07-28 解剖课发现）
+
+**症状**：`data/logs/events.jsonl` 中 114 行是断掉的 JSON（`JSONDecodeError: Invalid control character` / 缺右括号），时间 15:30–15:53。
+
+**根因**：EventBus 的 500 字符截断作用在 `json.dumps` 序列化**之后**的整行字符串上——从中间剪断的 JSON 永远无法解析。坏行样本均为 `tool.exec` 的 `args_summary` 含长路径的事件。
+
+**任务**：把截断移到**字段值**层面——`args_summary` / `result_summary` 等字段在序列化前截断到 500 字符，再 `json.dumps`。修后跑一遍：写一条含超长参数的事件，重新读回必须能被 `json.loads` 解析。
+
+**验证**：`python3 -c` 逐行 `json.loads` 现有 events.jsonl，新写入的事件零坏行。
+
+## 票 J：测试/冒烟污染生产事件日志（2026-07-28 解剖课发现）
+
+**症状**：`events.jsonl` 中 2224 条 `session_id=""` 事件（pytest 跑 Engine 无 gateway 注入 sid）+ 多个 `boot-*` 冒烟会话混在生产日志里，时间贯穿全天测试。日后做会话分析会被测试数据淹没。
+
+**任务**：EventBus 路径参数化已存在，让测试环境指向临时文件——在 `tests/conftest.py`（或等效处）将 `BOBO_DATA_DIR` / EventBus 路径重定向到 `tmp_path`，保证 `pytest` 运行零写入 `data/logs/events.jsonl`。
+
+**验证**：跑全量 pytest 前后 `wc -l data/logs/events.jsonl` 差值为 0。
