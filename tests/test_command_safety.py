@@ -415,3 +415,28 @@ class TestSelfHostingGitMainCommitGate:
     def test_git_add_not_blocked(self):
         is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git add ."})
         assert is_risk is False
+
+    # ── 穿闸修复：git 全局选项后的 commit 子命令正确识别 ──
+
+    def test_git_C_self_commit_blocked(self, monkeypatch):
+        """git -C <self-repo> commit → 跳过 -C 选项后识别 commit 子命令并拦截。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        import os as _ostest
+        repo = _ostest.path.dirname(_ostest.path.dirname(_ostest.path.abspath(__file__)))
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": f"git -C {repo} commit -m 'x'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
+    def test_git_c_setting_commit_blocked(self, monkeypatch):
+        """git -c user.name=x commit → 跳过 -c 选项后识别 commit 子命令并拦截。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -c user.name=bot commit -m 'x'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
+    def test_git_C_tmp_commit_not_blocked(self):
+        """git -C /tmp commit → 非自身仓库，放行。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -C /tmp commit -m 'x'"})
+        assert "自身仓库" not in reason
