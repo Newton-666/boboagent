@@ -143,3 +143,24 @@ git log --grep="git commit"            # 被误拦
 **优化方向**：命令分段解析——先用 `split_shell_segments`（已有）按 `&&`/`;`/`|` 分段，只对包含真实 git 命令的段做 `_find_git_subcommand` 判定，字符串/引号内的"git commit"不触发。
 
 **优先级**：低。影响面极小，不紧急。
+
+
+---
+
+## 票 A 追加（2026-07-28 票 H duo B 验收遗留）
+
+> 来源：lh-review-orphan-guard Worker 审查 9398c1f（票 H 运行时孤儿防线）
+
+### A-1：Layer 1 浅拷贝注释
+
+**背景**：`_call_llm` 中 Layer 1 清洗的注释写"清洗作用在发送副本上"，但在 dict 层面是浅拷贝——`messages` 的新 list 元素仍与 `engine.history` 共享 dict 引用。当前代码路径（`llm_caller` -> `requests.post(json=payload)`）不 mutate 共享 dict，安全；但这是隐性契约，未来在 `messages` 上做 `m['content'] = ...` 类操作会污染 history。
+
+**任务**：在 `core/engine.py` Layer 1 清洗注释块中加一句说明：
+
+    # 注意: messages 是新 list，但内层 dict 与 engine.history 共享引用。不可 mutate 元素内容。
+
+### A-2：test_pairing_400_retry_fails 断言增强
+
+**背景**：当前测试 `test_pairing_400_retry_fails` 只断言 `"错误:" in content`，未验证错误文本来自原始 `response` 而非 `retry_response`。
+
+**任务**：增强该测试断言为 `assert response['error'] in content`（确认用的原始 response 错误文本），并补充 `assert tool_calls == []`。

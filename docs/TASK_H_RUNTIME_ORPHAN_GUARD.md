@@ -1,7 +1,7 @@
-# 票 H：运行时孤儿防线（HTTP 400 完全体修复）
+# 票 H：运行时孤儿防线（HTTP 400 完全体修复） ✅ 已完成（merge 05f6d01，2026-07-28）
 
-> 级别：L3（duo B 验收 + Kimi 终审）
-> 分支：feat/runtime-orphan-guard（从 main 新建）
+> 级别：L3（duo B 验收 + Kimi 终审）— 均已通过
+> 分支：feat/runtime-orphan-guard（已合并 main → 已删除本地分支）
 > 关联案：HTTP 400 崩溃案（2026-07-27 磁盘中毒版已打疫苗；2026-07-28 13:43 内存中毒版实锤复发）
 
 ## 背景
