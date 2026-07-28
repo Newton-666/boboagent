@@ -1,14 +1,19 @@
 """
-core/llm_caller.py — 票 N2：应用层流式看门狗 + 断流重试
+core/llm_caller.py — 票 N2 + R：应用层 headers 看门狗 + 流式看门狗 + 断流重试
 
-requests 的 timeout=(connect, read) 只对单次 read() 系统调用生效，
+票 N2：requests 的 timeout=(connect, read) 只对单次 read() 系统调用生效，
 对 iter_lines() 块间间隙无效。服务端挂起不发数据时，iter_lines()
 永远阻塞，requests 超时不会触发。
-
 修复：读者线程 + 队列架构。daemon 线程在 socket 上裸阻塞读，
 主循环 q.get(timeout=1.0) 轮询；距上一内容块超过
 BOBO_SSE_READ_TIMEOUT (默认 120s) 无数据时，主动抛
 ConnectionError → 按断流重试。
+
+票 R：READ_TIMEOUT=30 只保护"初始响应首字节前的单次 read"，服务器/网关
+每 <30s 滴漏一个字节即可重置 read 计时器，状态行永远等不齐。SSE 看门狗
+只在响应头到达后上岗，管不到 headers 阶段。
+修复：requests.post 放进 worker 线程，主线程 join(timeout=headers_timeout)；
+超时则关闭底层 socket 打断阻塞，按断流重试通道处理（硬上限 1 次）。
 
 铁律（探针实证 /tmp/sse_probe.py）：socket 上设 1s 轮询超时是死路——
 第一次 read 超时会污染 httplib 状态机，后续所有 read 立即返回 b''（EOF 假象），
@@ -23,6 +28,7 @@ import time
 import logging as _logging
 import requests
 import threading as _threading
+import urllib3.connection as _urllib3_connection
 
 _logger = _logging.getLogger(__name__)
 
@@ -43,6 +49,143 @@ def _force_close(response: requests.Response):
         response.close()
     except Exception:
         pass
+
+
+# ── 票 R：headers 阶段总预算看门狗 ──
+
+_HEADERS_TIMEOUT_DEFAULT = 90  # 秒
+
+
+class HeadersStallError(requests.exceptions.ConnectionError):
+    """headers 阶段在总预算内未收到响应头。"""
+
+
+def _get_headers_timeout() -> int:
+    """获取 headers 阶段总预算（秒），默认 90s，可被 BOBO_HEADERS_TIMEOUT 覆盖。"""
+    try:
+        return int(_os.environ.get("BOBO_HEADERS_TIMEOUT", str(_HEADERS_TIMEOUT_DEFAULT)))
+    except (ValueError, TypeError):
+        return _HEADERS_TIMEOUT_DEFAULT
+
+
+def _emit_headers_stall(event_bus, session_id: str, elapsed_ms: int, action: str):
+    """向事件总线写入 llm.headers_stall 事件。"""
+    if event_bus is None:
+        return
+    try:
+        event_bus.write("llm.headers_stall", {
+            "session_id": session_id,
+            "elapsed_ms": elapsed_ms,
+            "action": action,  # "retry" | "fail"
+        })
+    except Exception:
+        _logger.warning("llm.headers_stall event write failed", exc_info=True)
+
+
+def _close_socket(sock):
+    """票 R：强行打断 headers 阶段阻塞的 socket（_force_close 同款铁律 2）。
+
+    必须先 shutdown(SHUT_RDWR) 打断阻塞读，再 best-effort close。
+    """
+    try:
+        sock.shutdown(_socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
+def _post_with_headers_watchdog(
+    url,
+    json=None,
+    headers=None,
+    timeout=None,
+    stream=False,
+    headers_timeout=None,
+    event_bus=None,
+    session_id=None,
+):
+    """在 headers 阶段总预算保护下执行 requests.post。
+
+    实现：把 requests.post 放进 worker 线程，主线程 join(timeout=headers_timeout)。
+    超时则通过 monkeypatch urllib3.connection.HTTPConnection._new_conn 捕获的
+    socket 执行 shutdown(SHUT_RDWR) 打断阻塞，然后按断流重试通道处理（硬上限 1 次）。
+
+    返回 response（正常）或抛出 HeadersStallError（headers 阶段超时且已重试失败）。
+    其他异常直接抛出，交给外层重试逻辑处理。
+    """
+    if headers_timeout is None:
+        headers_timeout = _get_headers_timeout()
+
+    _original_new_conn = _urllib3_connection.HTTPConnection._new_conn
+
+    for _headers_attempt in range(2):  # 初始 1 次 + 硬上限 1 次重试
+        _start = time.time()
+        _q = _queue.Queue(maxsize=1)
+        _sock_holder = {"sock": None}
+        _retried = _headers_attempt > 0
+
+        def _patched_new_conn(conn):
+            sock = _original_new_conn(conn)
+            _sock_holder["sock"] = sock
+            return sock
+
+        def _worker():
+            try:
+                _urllib3_connection.HTTPConnection._new_conn = _patched_new_conn
+                _resp = requests.post(
+                    url,
+                    json=json,
+                    headers=headers,
+                    timeout=timeout,
+                    stream=stream,
+                )
+                _q.put(("ok", _resp))
+            except Exception as _exc:  # noqa: BLE001
+                _q.put(("err", _exc))
+            finally:
+                _urllib3_connection.HTTPConnection._new_conn = _original_new_conn
+
+        _t = _threading.Thread(target=_worker)
+        _t.start()
+        _t.join(timeout=headers_timeout)
+
+        if not _t.is_alive():
+            # 正常完成（或 worker 自己先抛异常）
+            try:
+                _kind, _payload = _q.get(timeout=0.0)
+            except _queue.Empty:
+                continue
+            _urllib3_connection.HTTPConnection._new_conn = _original_new_conn
+            if _kind == "ok":
+                return _payload
+            raise _payload
+
+        # headers 阶段总预算耗尽：打断 socket
+        _elapsed_ms = int((time.time() - _start) * 1000)
+        _sock = _sock_holder["sock"]
+        if _sock is not None:
+            _close_socket(_sock)
+        _t.join(timeout=2.0)
+        _emit_headers_stall(event_bus, session_id, _elapsed_ms, "retry" if not _retried else "fail")
+
+        if _retried:
+            _urllib3_connection.HTTPConnection._new_conn = _original_new_conn
+            raise HeadersStallError(
+                f"headers 阶段总预算 {headers_timeout}s 耗尽，已重试仍失败"
+            )
+
+        # 首次 headers stall → 重试 1 次（继续下一轮循环）
+        _logger.warning(
+            "headers 阶段超时: elapsed=%dms, session=%s, 准备重试",
+            _elapsed_ms, session_id or "?",
+        )
+
+    # 理论上不会到达这里
+    _urllib3_connection.HTTPConnection._new_conn = _original_new_conn
+    raise HeadersStallError("headers 阶段看门狗异常退出")
 
 
 def _get_sse_read_timeout() -> int:
@@ -175,10 +318,13 @@ def _classify_error(exception: Exception = None, status_code: int = None) -> tup
     # ── 基于异常分类 ──
     if exception is not None:
         exc_class = exception.__class__.__name__
-        
+
+        if isinstance(exception, HeadersStallError):
+            return ("headers_stall", False, str(exception))
+
         if isinstance(exception, requests.exceptions.Timeout):
             return ("timeout", True, "请求超时，服务器未在预期时间内响应")
-        
+
         if isinstance(exception, requests.exceptions.ConnectionError):
             return ("network_error", True, "网络连接失败，请检查网络")
         
@@ -249,19 +395,26 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
             "Authorization": f"Bearer {api_key}"
         }
 
+        # 事件总线用于 headers stall / stream stall / reasoning 事件
+        from core.event_bus import event_bus as _event_bus
+
         last_error = None
         response = None  # 防止 except 块中 UnboundLocalError（P0.2）
 
         for attempt in range(MAX_RETRIES + 1):
             try:
-                # 注意：timeout 的 read 部分只用于接收初始 POST 响应首字节。
-                # SSE 流块间间隙由 _SseWatchdog 管理，不依赖 requests 超时。
-                response = requests.post(
+                # 票 R：headers 阶段总预算看门狗。timeout 的 read 部分只保护
+                # 单次 read 调用，可被滴漏字节绕过；应用层用 worker 线程 + join
+                # 给整个 headers 阶段加总预算，超时用 shutdown 打断 socket。
+                response = _post_with_headers_watchdog(
                     api_url,
                     json=payload,
                     headers=headers,
                     timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                     stream=bool(stream_callback),
+                    headers_timeout=_get_headers_timeout(),
+                    event_bus=_event_bus,
+                    session_id=session_id,
                 )
 
                 # ── HTTP 状态码检查 ──
@@ -286,7 +439,6 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
 
                 # ── 流式模式 ──
                 if stream_callback:
-                    from core.event_bus import event_bus as _event_bus
                     _stream_start = time.time()
                     _received_chunks = 0
                     _stream_retried = False
@@ -415,14 +567,17 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     f"SSE 流断流({type(_stall_err).__name__})，已收 {_received_chunks} 块—重试",
                                     0,
                                 )
-                            # 重置计数，重新发起请求
+                            # 重置计数，重新发起请求（断流重试仍受 headers 看门狗保护）
                             _received_chunks = 0
-                            response = requests.post(
+                            response = _post_with_headers_watchdog(
                                 api_url,
                                 json=payload,
                                 headers=headers,
                                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                                 stream=True,
+                                headers_timeout=_get_headers_timeout(),
+                                event_bus=_event_bus,
+                                session_id=session_id,
                             )
                             if response.status_code != 200:
                                 return {
