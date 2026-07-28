@@ -127,3 +127,47 @@ class TestFormatFinalOutputCodeBlock:
         # 围栏外：3 次 -> 1 次；围栏内：2 次保留
         assert result.count("配置说明") == 1
         assert result.count("key: value") == 2
+
+
+class TestSmokeBootExitCode:
+    """票 E：smoke_boot PEND 页脚误报 FAIL — exit_code 三态映射。"""
+
+    def test_all_pass_returns_0(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        r.add("t1", True)
+        r.add("t2", True)
+        assert r.exit_code == 0
+
+    def test_any_fail_returns_1(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        r.add("t1", True)
+        r.add("t2", False)
+        assert r.exit_code == 1
+
+    def test_only_pend_returns_2(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        r.add("t1", True)
+        r.add("t2", None)
+        assert r.exit_code == 2
+
+    def test_fail_overrides_pend(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        r.add("t1", False)
+        r.add("t2", None)
+        assert r.exit_code == 1  # FAIL 优先于 PEND
+
+    def test_all_pend_returns_2(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        r.add("t1", None)
+        r.add("t2", None)
+        assert r.exit_code == 2
+
+    def test_empty_returns_0(self):
+        from scripts.smoke_boot import Results
+        r = Results()
+        assert r.exit_code == 0

@@ -169,6 +169,7 @@ class TestLayer2400Retry:
         engine = _make_engine(caller, _orphan_history())
         content, tool_calls = engine._call_llm()
 
+        assert "tool_call_id mismatch" in content, "错误文本应来自原始 response 而非 retry_response"
         assert "错误:" in content
         assert tool_calls == []
 

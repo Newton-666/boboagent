@@ -443,6 +443,31 @@ class TestSelfHostingGitMainCommitGate:
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -C /tmp commit -m 'x'"})
         assert "自身仓库" not in reason
 
+    # ── 票 F v3 闸过度拦截：echo/grep 字符串内容不误触 ──
+
+    def test_echo_git_commit_string_not_blocked(self):
+        """echo \"run git commit -m fix\" 含字符串内容但不触发 commit 闸。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "echo \"please run git commit -m fix\""})
+        assert is_risk is False, f"echo 字符串不应触发 main commit 闸, reason={reason}"
+
+    def test_grep_git_commit_string_not_blocked(self):
+        """grep 命令含 \"git commit\" 字符串内容不触发 commit 闸。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git log --grep=\"git commit\""})
+        assert not ("禁止在 main 直接提交" in reason), f"grep 中字符串不应误触, reason={reason}"
+
+    def test_cat_git_commit_string_not_blocked(self):
+        """cat file | grep \"git commit\" 不触发 commit 闸。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "cat file | grep \"git commit\""})
+        assert is_risk is False, f"管道中 grep 字符串不应触发, reason={reason}"
+
+    def test_real_git_commit_still_blocked(self, monkeypatch):
+        """真实 git commit -m 'fix' 仍应被拦截（回归基线）。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit -m 'fix'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
 
 # ── self-hosting：硬拒绝通道回归测试 ──
 

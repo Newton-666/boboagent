@@ -351,6 +351,15 @@ class Results:
     def all_pass(self):
         return all(s == "PASS" for _, s, _ in self.items)
 
+    @property
+    def exit_code(self):
+        """三态退出码: 0=全PASS, 1=有FAIL, 2=全PASS/无FAIL但有PEND"""
+        if any(s == "FAIL" for _, s, _ in self.items):
+            return 1
+        if any(s == "PEND" for _, s, _ in self.items):
+            return 2
+        return 0
+
     def report(self):
         lines = ["=" * 60, "  活体冒烟测试结果", "=" * 60, ""]
         for name, status, detail in self.items:
@@ -653,16 +662,18 @@ def main():
             with open(args.result_file, "w") as f:
                 f.write(report)
                 f.write("\n")
-                f.write("EXIT_CODE=" + ("0" if results.all_pass() else "1"))
+                f.write(f"EXIT_CODE={results.exit_code}")
         except OSError:
             pass
 
-    if results.all_pass():
+    ec = results.exit_code
+    if ec == 0:
         print("\n全部通过。")
-        return 0
+    elif ec == 2:
+        print("\n全部通过（含 PEND 挂账项）。")
     else:
         print("\n存在 FAIL 项，请检查上方详情。")
-        return 1
+    return ec
 
 
 if __name__ == "__main__":
