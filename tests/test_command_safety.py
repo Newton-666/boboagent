@@ -383,8 +383,10 @@ class TestSelfHostingGitMainCommitGate:
 
     # ── 放行：feat 分支 ──
 
-    def test_feat_branch_commit_not_blocked(self):
-        """当前在 feat 分支上 git commit → 放行（不触发 main 闸）。"""
+    def test_feat_branch_commit_not_blocked(self, monkeypatch):
+        """当前在 feat 分支上 git commit → 放行（显式模拟非 main 分支，不依赖环境）。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: False)
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit -m 'fix'"})
         assert is_risk is False
 
