@@ -197,12 +197,14 @@ class ProactiveManager:
         if not memory_ids or not assistant_response:
             return
         try:
-            from tools.v5_memory import bump_signal, get_all
-            all_memories = get_all()
+            from tools.v5_memory import bump_signal, get_entries
+            all_memories = get_entries()
             cited = False
             for mem_id in memory_ids:
                 # 在 LLM 回复中查找记忆内容片段
                 for mem in all_memories:
+                    if not isinstance(mem, dict):
+                        continue
                     if str(mem.get("id", "")) == str(mem_id):
                         snippet = mem.get("content", "")[:50]
                         if snippet and snippet in assistant_response:

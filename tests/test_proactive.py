@@ -34,7 +34,7 @@ class TestLoadConfig:
 
 class TestTrackEngagement:
     def test_track_engagement_increments(self, pm):
-        pm.stats["offered"] = 1  # 必须在 offered>0 时才会计数
+        pm.stats["offered"] = 1
         pm.track_engagement("yes, that's helpful")
         assert pm.stats["engaged"] == 1
 
@@ -47,7 +47,7 @@ class TestInjectContext:
     def test_inject_context_off_returns_original(self, pm):
         msgs = [{"role": "user", "content": "hello"}]
         result = pm.inject_context(msgs)
-        assert result is msgs  # 原对象返回
+        assert result is msgs
         assert len(result) == 1
 
     def test_inject_context_off_offered_not_incremented(self, pm):
@@ -55,10 +55,48 @@ class TestInjectContext:
         assert pm.stats["offered"] == 0
 
 
+class TestTrackCitation:
+    """track_citation 类型混淆回归测试（票 C）。"""
+
+    def test_track_citation_with_mixed_types(self, pm, monkeypatch):
+        """记忆列表中混入 str 时不 crash"""
+        from unittest.mock import MagicMock
+        monkeypatch.setattr(
+            "tools.v5_memory.get_entries",
+            lambda: [
+                {"id": "1", "content": "重要发现"},
+                "this is a raw string that should be skipped",
+                {"id": "2", "content": "另一条记忆"},
+            ],
+        )
+        monkeypatch.setattr("tools.v5_memory.bump_signal", MagicMock())
+
+        pm._last_memory_ids = ["1"]
+        pm.track_citation("根据重要发现，我们需要改进", ["1"])
+        pm.track_citation("测试", ["999"])
+
+    def test_track_citation_skips_str_memories(self, pm, monkeypatch):
+        """str 被跳过，不影响 dict 记忆的匹配"""
+        from unittest.mock import MagicMock
+        bump = MagicMock()
+        monkeypatch.setattr(
+            "tools.v5_memory.get_entries",
+            lambda: [
+                {"id": "1", "content": "关键结论"},
+                "raw string noise",
+            ],
+        )
+        monkeypatch.setattr("tools.v5_memory.bump_signal", bump)
+
+        pm._last_memory_ids = ["1"]
+        pm.track_citation("关键结论是确定的", ["1"])
+        bump.assert_called_once_with("1")
+
+
 class TestMaybeDowngrade:
     def test_downgrade_full_to_subtle(self, pm):
         pm.mode = "full"
-        pm.stats = {"offered": 10, "engaged": 1}  # 参与率 10% < 20%
+        pm.stats = {"offered": 10, "engaged": 1}
         result = pm._maybe_downgrade()
         assert pm.mode == "subtle"
         assert result is not None
@@ -66,14 +104,14 @@ class TestMaybeDowngrade:
 
     def test_no_downgrade_when_engaged_enough(self, pm):
         pm.mode = "full"
-        pm.stats = {"offered": 10, "engaged": 5}  # 参与率 50% ≥ 20%
+        pm.stats = {"offered": 10, "engaged": 5}
         result = pm._maybe_downgrade()
         assert pm.mode == "full"
         assert result is None
 
     def test_no_downgrade_below_threshold(self, pm):
         pm.mode = "full"
-        pm.stats = {"offered": 3, "engaged": 0}  # offered<5 不触发
+        pm.stats = {"offered": 3, "engaged": 0}
         result = pm._maybe_downgrade()
         assert pm.mode == "full"
         assert result is None

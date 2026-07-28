@@ -559,6 +559,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self._notify("thinking", {"phase": "calling_llm", "message": "正在思考..."})
 
         # ── 票 H 运行时孤儿防线 Layer 1：发送前清洗（作用在发送副本上，不动 history） ──
+        # 注意: messages 是新 list，但内层 dict 与 engine.history 共享引用。不可 mutate 元素内容。
         cleaned_messages, _orphan_report = clean_orphan_tool_calls(messages)
         if _orphan_report["inserted"] > 0 or _orphan_report["removed"] > 0:
             logger.warning(

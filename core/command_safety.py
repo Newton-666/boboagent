@@ -233,6 +233,22 @@ def _find_git_subcommand(command: str) -> str | None:
     return None
 
 
+def _has_real_git_command(command: str) -> bool:
+    """判断命令中是否含有真实的 git 子命令（而非字符串内容中的 "git"）。
+
+    先按 shell 控制操作符（&& ; |）分段，检查每段是否以 git 为首个命令。
+    避免 `echo "git commit -m fix"` 或 `git log --grep="git commit"` 误触。
+    """
+    segments = split_shell_segments(command)
+    if segments is None:
+        # 解析失败（引号不配对等），回退到原始字符串判定
+        return bool(_re.search(r'\bgit\b', command))
+    for tokens in segments:
+        if tokens and tokens[0] == "git":
+            return True
+    return False
+
+
 def _is_self_repo_main_commit(command: str) -> bool:
     """判定命令是否为在 bobo 自身仓库 main 分支上执行 git commit。
 
@@ -245,8 +261,8 @@ def _is_self_repo_main_commit(command: str) -> bool:
     docs-only 提交不豁免——一律走 feat 分支。
     """
     cmd = command.strip()
-    # 快速排除：不是 git 命令
-    if not _re.search(r'\bgit\b', cmd):
+    # 快速排除：不是真实的 git 命令（避免 echo/grep 字符串内容误触）
+    if not _has_real_git_command(cmd):
         return False
     # 提取子命令（跳过全局选项如 -C/-c）
     subcommand = _find_git_subcommand(cmd)
@@ -278,8 +294,8 @@ def _is_self_repo_destructive_git(command: str) -> bool:
     漏拦还有 prompt 层和 reflog，误伤会让 bobo 在别的项目残废。
     """
     cmd = command.strip()
-    # 快速排除：不是 git 命令、或不含目标子命令
-    if not _re.search(r'\bgit\b', cmd):
+    # 快速排除：不是真实的 git 命令（避免 echo/grep 字符串内容误触）
+    if not _has_real_git_command(cmd):
         return False
     if not _re.search(r'\b(push|reset\s+--hard|clean\s+-f(?:d)?)\b', cmd):
         return False
