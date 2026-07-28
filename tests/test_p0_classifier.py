@@ -60,7 +60,7 @@ class TestRedirectTargets:
 
 class TestCommandChaining:
     def test_and_chain_unknown_second_gray(self, engine):
-        level, reason = classify_command("git status && crontab -r")
+        level, reason = classify_command("ls && crontab -r")
         assert level == "gray"
         assert "crontab" in reason
 
@@ -73,7 +73,7 @@ class TestCommandChaining:
         assert level == "gray"
 
     def test_all_safe_chain_safe(self, engine):
-        level, _ = classify_command("git status && echo done && ls -la")
+        level, _ = classify_command("ls && echo done && cat file")
         assert level == "safe"
 
     def test_pipe_still_checked(self, engine):
@@ -111,5 +111,5 @@ class TestBlacklistIntact:
         assert level == "dangerous"
 
     def test_single_safe_command_still_safe(self, engine):
-        level, _ = classify_command("git log --oneline -5")
+        level, _ = classify_command("ls -la /tmp")
         assert level == "safe"
