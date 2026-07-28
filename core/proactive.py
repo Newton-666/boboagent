@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 class ProactiveManager:
     """管理主动知识注入：发现相关记忆 → 注入上下文 → 追踪用户参与度。"""
 
-    def __init__(self):
+    def __init__(self, llm_caller=None):
         self.mode: str = "off"
         self.stats: dict = {"offered": 0, "engaged": 0}
         self._last_memory_ids: list = []
+        self._llm_caller = llm_caller  # Engine 传入，_semantic_filter 用它做语义过滤
 
     # ── 配置加载 ──
 
@@ -51,7 +52,8 @@ class ProactiveManager:
         if len(candidates) <= 1:
             return candidates
         try:
-            from core.llm_caller import call_llm
+            if self._llm_caller is None:
+                return candidates[:3]
             candidate_text = "\n".join(
                 f"[{i}] {c.get('content', '')[:120]}"
                 for i, c in enumerate(candidates)
@@ -63,8 +65,10 @@ class ProactiveManager:
                 "仅返回相关条目的编号，用逗号分隔（例如: 0,2,5）。"
                 "如果都不相关，返回 0。只返回数字和逗号。"
             )
-            result = call_llm([{"role": "user", "content": prompt}], max_tokens=50)
-            content = result.get("content", "") if isinstance(result, dict) else str(result)
+            raw = self._llm_caller([{"role": "user", "content": prompt}], use_tools=False)
+            content = ""
+            if isinstance(raw, dict) and "choices" in raw:
+                content = raw["choices"][0]["message"]["content"] or ""
             nums = re.findall(r'\d+', content)
             ids = [int(n) for n in nums]
             # 如果 LLM 说 0（都不相关），只保留第一条作为兜底
