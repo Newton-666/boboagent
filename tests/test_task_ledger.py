@@ -161,18 +161,24 @@ class TestEngineLedgerReinjection:
         monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
                             lambda self: "You are a helpful assistant.")
 
+        engine = engine_mod.Engine(
+            llm_caller=llm_caller,
+            tool_executor=None,
+            test_mode=True,
+        )
+
         class FakeExecutor:
             def __call__(self, name, args):
                 if name == "task_ledger":
-                    from tools.task_ledger import execute
-                    return execute(**args)
+                    from tools.task_ledger import execute, current_engine_var
+                    _token = current_engine_var.set(engine)
+                    try:
+                        return execute(**args)
+                    finally:
+                        current_engine_var.reset(_token)
                 return f"[fake:{name}]"
 
-        engine = engine_mod.Engine(
-            llm_caller=llm_caller,
-            tool_executor=FakeExecutor(),
-            test_mode=True,
-        )
+        engine.tool_executor = FakeExecutor()
 
         def _fake_build_messages(system_prompt, user_input, tools_schema, extra_categories, session_id=""):
             msgs = [{"role": "system", "content": system_prompt}]
@@ -354,3 +360,109 @@ class TestLedgerImports:
         e = Engine(llm_caller=MagicMock(), tool_executor=MagicMock(), test_mode=True)
         assert hasattr(e, "task_ledger")
         assert hasattr(e, "_ledger_reinject_count")
+
+
+class TestLedgerPerEngineIsolation:
+    """票 L：task_ledger 必须路由到调用方 Engine 的台账，禁止跨 Engine 串味。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_module_ledger(self):
+        from tools.task_ledger import _set_ledger
+        _set_ledger([])
+        yield
+        _set_ledger([])
+
+    def _run_with_engine(self, engine, action, **kwargs):
+        """在指定 Engine 上下文中执行 task_ledger 工具。"""
+        from tools.task_ledger import execute, current_engine_var
+        token = current_engine_var.set(engine)
+        try:
+            return execute(action=action, **kwargs)
+        finally:
+            current_engine_var.reset(token)
+
+    def test_two_engines_create_isolated_ledgers(self, monkeypatch):
+        """两个 Engine 各自 create，台账互不可见。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine_a = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+        engine_b = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine_a, "create", items=[
+            {"id": "a-1", "title": "任务 A1"},
+        ])
+        self._run_with_engine(engine_b, "create", items=[
+            {"id": "b-1", "title": "任务 B1"},
+        ])
+
+        assert len(engine_a.task_ledger) == 1
+        assert engine_a.task_ledger[0]["id"] == "a-1"
+        assert engine_a.task_ledger[0]["title"] == "任务 A1"
+
+        assert len(engine_b.task_ledger) == 1
+        assert engine_b.task_ledger[0]["id"] == "b-1"
+        assert engine_b.task_ledger[0]["title"] == "任务 B1"
+
+    def test_engine_update_does_not_affect_other_engine(self, monkeypatch):
+        """A 更新自己的台账不应影响 B。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine_a = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+        engine_b = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine_a, "create", items=[
+            {"id": "a-1", "title": "任务 A1"},
+        ])
+        self._run_with_engine(engine_b, "create", items=[
+            {"id": "b-1", "title": "任务 B1"},
+        ])
+
+        self._run_with_engine(engine_a, "update", items=[
+            {"id": "a-1", "status": "done"},
+        ])
+
+        assert engine_a.task_ledger[0]["status"] == "done"
+        assert engine_b.task_ledger[0]["status"] == "pending"
+
+    def test_module_ledger_untouched_by_engine_routing(self, monkeypatch):
+        """Engine 上下文路由不应污染模块级全局台账。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+        from tools.task_ledger import _get_ledger
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine, "create", items=[
+            {"id": "eng-1", "title": "引擎任务"},
+        ])
+
+        # 模块级全局台账应保持为空（测试 reset 已置空）
+        assert _get_ledger() == []
+        # Engine 自己的台账有内容
+        assert len(engine.task_ledger) == 1

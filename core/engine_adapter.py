@@ -204,13 +204,10 @@ def run_engine(
         if engine.history:
             session["messages"] = engine.history
 
-        # ── 票 K v2：台账回写会话 ──
-        try:
-            from tools.task_ledger import _get_ledger
-            engine.task_ledger = _get_ledger()
-        except Exception:
-            pass
-        session["task_ledger"] = engine.task_ledger
+        # ── 票 K v2 + L：台账回写会话 ──
+        # task_ledger 工具在 Engine 上下文中已直接修改 engine.task_ledger，
+        # 持久化直接取 Engine 实例字段，不再依赖模块级 _get_ledger。
+        session["task_ledger"] = list(engine.task_ledger)
 
         save_session_to_disk(sid)
 

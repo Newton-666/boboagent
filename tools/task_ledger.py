@@ -9,6 +9,7 @@ LLM 的手：创建/更新/查看任务台账。
   task_ledger(action="list")
 """
 
+import contextvars
 import json
 import logging
 import time
@@ -23,8 +24,33 @@ TOOL_NAME = "task_ledger"
 _MAX_ITEMS = 20
 _VALID_STATUSES = {"pending", "in_progress", "done"}
 
-# ── 模块级状态（Engine 在每轮工具执行后同步到 self.task_ledger） ──
+# ── 模块级全局台账（向后兼容：无 Engine 上下文时回退到此处） ──
 _TASK_LEDGER: list[dict] = []
+
+# ── 票 L：per-engine 上下文变量 ──
+# ToolRunnerMixin._execute_tool_loop 在调用 task_ledger 前 set(self)，
+# tool_executor 通过 copy_context() 把上下文传播到工具执行线程。
+current_engine_var: contextvars.ContextVar = contextvars.ContextVar(
+    "task_ledger_engine", default=None
+)
+
+
+def _current_ledger() -> list[dict]:
+    """返回当前 Engine 的台账；无 Engine 上下文时回退模块级全局台账。"""
+    engine = current_engine_var.get()
+    if engine is not None:
+        return engine.task_ledger
+    return _TASK_LEDGER
+
+
+def _set_current_ledger(ledger: list[dict]):
+    """设置当前 Engine 的台账；无 Engine 上下文时回退模块级全局台账。"""
+    engine = current_engine_var.get()
+    if engine is not None:
+        engine.task_ledger = ledger
+    else:
+        global _TASK_LEDGER
+        _TASK_LEDGER = ledger
 
 
 def _validate_item(item: dict) -> str | None:
@@ -54,14 +80,13 @@ def _write_event(action: str, item_id: str, title: str, status: str):
 
 
 def _get_ledger() -> list[dict]:
-    """返回当前台账（供 Engine 同步用）。"""
-    return _TASK_LEDGER
+    """返回当前台账（向后兼容：优先 Engine 上下文，否则模块全局）。"""
+    return _current_ledger()
 
 
 def _set_ledger(ledger: list[dict]):
-    """设置模块级台账（供 Engine 恢复用）。"""
-    global _TASK_LEDGER
-    _TASK_LEDGER = ledger
+    """设置当前台账（向后兼容：优先 Engine 上下文，否则模块全局）。"""
+    _set_current_ledger(ledger)
 
 
 def execute(action: str = "list", items: list = None) -> str:
@@ -72,8 +97,6 @@ def execute(action: str = "list", items: list = None) -> str:
         items: 台账项列表，每项格式 {"id": str, "title": str, "status": "pending"|"in_progress"|"done"}
                create 时必填；update 时传要更新的项（至少含 id + status）；list 时忽略。
     """
-    global _TASK_LEDGER
-
     if action == "create":
         if not items:
             return "❌ create 操作需要提供 items 参数"
@@ -94,18 +117,19 @@ def execute(action: str = "list", items: list = None) -> str:
             return "❌ 台账项 id 必须唯一"
 
         # 建账
-        _TASK_LEDGER = []
+        _set_current_ledger([])
+        _ledger = _current_ledger()
         for item in items:
             entry = {
                 "id": item["id"],
                 "title": item["title"],
                 "status": item.get("status", "pending"),
             }
-            _TASK_LEDGER.append(entry)
+            _ledger.append(entry)
             _write_event("create", entry["id"], entry["title"], entry["status"])
 
-        summary = ", ".join(f'{e["title"][:20]}({e["status"]})' for e in _TASK_LEDGER)
-        return f"✅ 台账已创建（{len(_TASK_LEDGER)} 项）: {summary}"
+        summary = ", ".join(f'{e["title"][:20]}({e["status"]})' for e in _ledger)
+        return f"✅ 台账已创建（{len(_ledger)} 项）: {summary}"
 
     elif action == "update":
         if not items:
@@ -113,7 +137,8 @@ def execute(action: str = "list", items: list = None) -> str:
         if not isinstance(items, list):
             return "❌ items 必须是列表"
 
-        if not _TASK_LEDGER:
+        _ledger = _current_ledger()
+        if not _ledger:
             return "❌ 台账为空，无法更新。请先创建台账。"
 
         updated = []
@@ -127,7 +152,7 @@ def execute(action: str = "list", items: list = None) -> str:
                 return f"❌ status 必须是以下之一: {', '.join(sorted(_VALID_STATUSES))}（收到: {new_status}）"
 
             found = False
-            for entry in _TASK_LEDGER:
+            for entry in _ledger:
                 if entry["id"] == item_id:
                     old_status = entry["status"]
                     entry["status"] = new_status
@@ -145,7 +170,7 @@ def execute(action: str = "list", items: list = None) -> str:
             parts.append(f"⚠️ 未找到: {', '.join(not_found)}")
 
         # 全 done 提示
-        pending = [e for e in _TASK_LEDGER if e["status"] != "done"]
+        pending = [e for e in _ledger if e["status"] != "done"]
         if not pending:
             parts.append("🎉 所有任务已完成！")
         else:
@@ -154,16 +179,17 @@ def execute(action: str = "list", items: list = None) -> str:
         return "\n".join(parts)
 
     elif action == "list":
-        if not _TASK_LEDGER:
+        _ledger = _current_ledger()
+        if not _ledger:
             return "📋 台账为空"
 
         lines = ["📋 任务台账:"]
-        for i, entry in enumerate(_TASK_LEDGER, 1):
+        for i, entry in enumerate(_ledger, 1):
             icon = {"pending": "⬜", "in_progress": "🔄", "done": "✅"}.get(entry["status"], "⬜")
             lines.append(f"  {i}. {icon} [{entry['id']}] {entry['title'][:40]} ({entry['status']})")
 
-        done_count = sum(1 for e in _TASK_LEDGER if e["status"] == "done")
-        lines.append(f"--- {done_count}/{len(_TASK_LEDGER)} done ---")
+        done_count = sum(1 for e in _ledger if e["status"] == "done")
+        lines.append(f"--- {done_count}/{len(_ledger)} done ---")
         return "\n".join(lines)
 
     else:

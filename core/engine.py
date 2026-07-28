@@ -841,10 +841,14 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     return
 
             tool_results = self._execute_tool_loop(self._pending_tool_calls)
-            # ── 票 K v2：工具执行后同步台账 ──
+            # ── 票 K v2 + L：工具执行后同步台账 ──
+            # task_ledger 工具在 ToolRunnerMixin 提供的 Engine 上下文中
+            # 已经直接修改了 self.task_ledger；若当前线程仍存在上下文（旧测试/直接调用），
+            # 则回退同步模块级变量。
             try:
-                from tools.task_ledger import _get_ledger
-                self.task_ledger = _get_ledger()
+                from tools.task_ledger import current_engine_var, _current_ledger
+                if current_engine_var.get() is not None:
+                    self.task_ledger = list(_current_ledger())
             except Exception:
                 pass
             self._append_to_history("assistant", self._pending_content,

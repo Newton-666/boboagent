@@ -2,6 +2,7 @@
 core/tool_executor.py - 工具执行器（带超时保护 + 错误分类 + 参数校验 + 执行统计）
 """
 
+import contextvars
 import json
 from config import BOBO_DATA_DIR
 import os
@@ -82,7 +83,10 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
         # 每个工具独立 executor——一个卡死不占全局槽，不影响其他工具（脆弱链 2）
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(func, **arguments)
+            # 票 L：把调用线程的 contextvars 上下文（含 task_ledger 的 Engine 引用）
+            # 复制到工具执行线程，使 task_ledger 能路由到调用方 Engine 的台账。
+            _ctx = contextvars.copy_context()
+            future = executor.submit(_ctx.run, func, **arguments)
             # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之
             _timeout_map = {"spawn_worker": 310, "execute_terminal": 120}
             timeout = _timeout_map.get(tool_name, TOOL_TIMEOUT)
