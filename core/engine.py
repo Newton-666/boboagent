@@ -110,6 +110,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # ── 票 K v2：任务台账（收工闸核心） ──
         self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]
         self._ledger_reinject_count: int = 0  # 连续回注计数（硬熔断 2 次）
+        self._last_reasoning: str = ""  # 票 P：上一轮 reasoning 思考过程（展示用，不进历史）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
@@ -574,6 +575,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         def _on_token(token: str):
             self._notify("thinking.delta", {"text": token})
 
+        def _on_reasoning(token: str):
+            # 票 P：reasoning 模型思考过程流（独立通道，不与正文混）
+            self._notify("reasoning.delta", {"text": token})
+
         def _on_retry(message: str, delay: float):
             self._notify("status.update", {
                 "kind": "rate_limit",
@@ -600,6 +605,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             retry_callback=_on_retry,
             tools_override=filtered_tools,
             session_id=self.sid,
+            reasoning_callback=_on_reasoning,
         )
         if isinstance(response, dict) and "error" in response:
             # ── 票 H 运行时孤儿防线 Layer 2：配对类 400 → 清洗重试一次 ──
@@ -687,6 +693,9 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
 
             return error_msg, []
         self._last_usage = response.get("usage", {})
+        # 票 P：捕获 reasoning（思考过程，独立展示，不进正文/历史）
+        if isinstance(response, dict) and response.get("reasoning"):
+            self._last_reasoning = response["reasoning"]
         content, tool_calls = self._extract_response(response)
         content = remove_emojis(content or "")
 
@@ -975,6 +984,12 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     total = len(self.task_ledger)
                     self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
                 content = self._format_final_output(self._pending_content)
+                # ── 票 P 降级展示：reasoning 思考块（仅展示层，历史在上方已落账，零污染） ──
+                if self._last_reasoning:
+                    _r = self._last_reasoning
+                    _r_show = _r if len(_r) <= 2000 else _r[:2000] + f"\n…（思考全文 {len(_r)} 字，已截断展示）"
+                    content += f"\n\n── 💭 思考过程 ──\n{_r_show}\n── 思考结束 ──"
+                    self._last_reasoning = ""  # 消费即清，防串回合
                 logger.debug("RESPONDING emit complete start: len=%d", len(content))
                 self._notify("complete", {"content": content, "usage": self._last_usage})
                 logger.debug("RESPONDING emit complete done")

@@ -1,14 +1,48 @@
 """
-core/llm_caller.py - 修复版
+core/llm_caller.py — 票 N2：应用层流式看门狗 + 断流重试
+
+requests 的 timeout=(connect, read) 只对单次 read() 系统调用生效，
+对 iter_lines() 块间间隙无效。服务端挂起不发数据时，iter_lines()
+永远阻塞，requests 超时不会触发。
+
+修复：读者线程 + 队列架构。daemon 线程在 socket 上裸阻塞读，
+主循环 q.get(timeout=1.0) 轮询；距上一内容块超过
+BOBO_SSE_READ_TIMEOUT (默认 120s) 无数据时，主动抛
+ConnectionError → 按断流重试。
+
+铁律（探针实证 /tmp/sse_probe.py）：socket 上设 1s 轮询超时是死路——
+第一次 read 超时会污染 httplib 状态机，后续所有 read 立即返回 b''（EOF 假象），
+僵尸流被误判为"干净读完返回空内容"。socket 上绝不设超时，隔离只能靠线程。
 """
 
 import os as _os
-import requests
 import json
+import queue as _queue
+import socket as _socket
 import time
 import logging as _logging
+import requests
+import threading as _threading
 
 _logger = _logging.getLogger(__name__)
+
+
+def _force_close(response: requests.Response):
+    """强行打断流式响应的阻塞读并关闭连接。
+
+    铁律 2（探针实证 /tmp/n2_debug.py）：直接 response.close() 会与读者线程
+    死锁——reader 持 SocketIO 锁阻塞在 readinto，close() 抢同一把锁，双双卡死。
+    必须先 sock.shutdown(SHUT_RDWR) 打断阻塞读，再 best-effort close。
+    """
+    try:
+        _sock = response.raw._fp.fp.raw._sock  # urllib3 → httplib → 真 socket
+        _sock.shutdown(_socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        response.close()
+    except Exception:
+        pass
 
 
 def _get_sse_read_timeout() -> int:
@@ -21,6 +55,85 @@ def _get_sse_read_timeout() -> int:
         return int(_os.environ.get("BOBO_SSE_READ_TIMEOUT", "120"))
     except (ValueError, TypeError):
         return 120
+
+
+def _read_stream_lines(response: requests.Response, read_timeout: int, vitals: dict):
+    """读者线程 + 队列方式产出 SSE 原始字节行。
+
+    daemon 线程在 response.raw.read(4096) 上裸阻塞（socket 无超时），
+    往队列放 ("data", chunk) / ("eof", None) / ("err", exc)。
+    主循环 q.get(timeout=1.0) 轮询，用 vitals["last_chunk"] 判定看门狗。
+
+    vitals["last_chunk"] 由调用方在收到内容行（content / reasoning_content /
+    tool_calls）时刷新——裸字节、注释行不刷新，防僵尸流滴 keep-alive 骗过看门狗。
+
+    Yields:
+        bytes: 一行原始字节（不含换行）。
+
+    Raises:
+        requests.exceptions.ConnectionError: 看门狗引爆（内容块静默超 read_timeout）
+            或底层读异常（重试通道统一处理）。
+    """
+    q: _queue.Queue = _queue.Queue()
+
+    def _reader():
+        # 用 read1 而非 read：read(4096) 会攒满 4096 字节才返回（_fp_read 循环），
+        # 服务器发小块后静默时数据永远卡在线程里；read1 单次 socket 读即返回。
+        # decode_content=True：requests 流模式下 raw 默认不解压，裸读拿到的是
+        # brotli/gzip 压缩字节（moonshot SSE 回 Content-Encoding: br），必须开解压。
+        response.raw.decode_content = True
+        _read_once = getattr(response.raw, "read1", None) or response.raw.read
+        try:
+            while True:
+                chunk = _read_once(4096)
+                if not chunk:
+                    q.put(("eof", None))
+                    return
+                q.put(("data", chunk))
+        except Exception as exc:  # noqa: BLE001 — 任何读异常都上报主循环
+            q.put(("err", exc))
+
+    _t = _threading.Thread(target=_reader, daemon=True)
+    _t.start()
+
+    def _kill_and_raise(msg: str):
+        # 看门狗引爆/读异常：先 shutdown 打断读者线程，再走断流重试
+        _force_close(response)
+        raise requests.exceptions.ConnectionError(msg)
+
+    _sse_buf = b""
+    while True:
+        if time.time() - vitals["last_chunk"] > read_timeout:
+            _kill_and_raise("SSE流看门狗: 服务端停止发送数据")
+        try:
+            kind, payload = q.get(timeout=1.0)
+        except _queue.Empty:
+            continue
+        if kind == "eof":
+            # 残留半行也吐出来（非 SSE 兜底需要完整字节）
+            if _sse_buf:
+                yield _sse_buf
+            return
+        if kind == "err":
+            exc = payload
+            if isinstance(
+                exc,
+                (
+                    requests.exceptions.ReadTimeout,
+                    requests.exceptions.ChunkedEncodingError,
+                    requests.exceptions.ConnectionError,
+                ),
+            ):
+                _force_close(response)
+                raise exc
+            _kill_and_raise(f"SSE 读取异常: {exc}")
+        # data
+        _sse_buf += payload
+        if "raw" in vitals:
+            vitals["raw"] += payload  # 票 P：累积原始字节，非 SSE 兜底用
+        while b"\n" in _sse_buf:
+            line, _sse_buf = _sse_buf.split(b"\n", 1)
+            yield line
 
 
 def _emit_stream_stall(event_bus, session_id: str, received_chunks: int, elapsed_ms: int, action: str):
@@ -101,7 +214,8 @@ def _classify_error(exception: Exception = None, status_code: int = None) -> tup
 
 # 超时配置（秒）
 CONNECT_TIMEOUT = 10   # 建立连接的超时时间
-READ_TIMEOUT = 120     # 接收响应的超时时间（SSE 流式按块间算，默认 120s，环境变量 BOBO_SSE_READ_TIMEOUT 可覆盖）
+READ_TIMEOUT = 30      # 初始 POST 读超时（接收首字节够用，不再用于 SSE 流块间间隙）
+# SSE 流块间间隙看门狗由 _SseWatchdog + BOBO_SSE_READ_TIMEOUT 管理
 
 # 重试配置
 MAX_RETRIES = 2        # 最大重试次数（初始请求 + 2 次重试 = 共 3 次尝试）
@@ -109,7 +223,7 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None):
         # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
         import os as _os
         _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
@@ -140,11 +254,13 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
 
         for attempt in range(MAX_RETRIES + 1):
             try:
+                # 注意：timeout 的 read 部分只用于接收初始 POST 响应首字节。
+                # SSE 流块间间隙由 _SseWatchdog 管理，不依赖 requests 超时。
                 response = requests.post(
                     api_url,
                     json=payload,
                     headers=headers,
-                    timeout=(CONNECT_TIMEOUT, _get_sse_read_timeout()),
+                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                     stream=bool(stream_callback),
                 )
 
@@ -178,39 +294,90 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     while True:
                         try:
                             full_content = ""
+                            reasoning_buf = ""   # 票 P：reasoning_content 独立缓冲，绝不混入正文
                             tool_calls_buffer = []
                             usage = {}
-                            for line in response.iter_lines():
-                                if not line:
+                            _parsed_any = False  # 票 P：是否成功解析过任何 SSE 数据行
+                            _got_done = False    # 是否收到 [DONE]（防半截 EOF 冒充完整流）
+                            # 票 N2：读者线程 + 队列；看门狗只看"内容行"时间
+                            _vitals = {"last_chunk": time.time(), "raw": bytearray()}
+
+                            for _lbytes in _read_stream_lines(
+                                response, _get_sse_read_timeout(), _vitals
+                            ):
+                                _lstr = _lbytes.decode("utf-8", "replace")
+                                if not _lstr.startswith("data: "):
                                     continue
-                                line = line.decode("utf-8")
-                                if not line.startswith("data: "):
-                                    continue
-                                data_str = line[6:]
-                                if data_str.strip() == "[DONE]":
+                                _d = _lstr[6:]
+                                if _d.strip() == "[DONE]":
+                                    _got_done = True
                                     break
                                 try:
-                                    chunk = json.loads(data_str)
+                                    _parsed = json.loads(_d)
                                 except json.JSONDecodeError:
                                     continue
+                                _parsed_any = True
                                 # 捕获 usage（部分 API 在流结束前返回）
-                                if "usage" in chunk:
-                                    usage = chunk["usage"]
-                                choices = chunk.get("choices", [])
-                                if not choices:
+                                if "usage" in _parsed:
+                                    usage = _parsed["usage"]
+                                _c = _parsed.get("choices", [])
+                                if not _c:
                                     continue
-                                delta = choices[0].get("delta", {})
-                                # reasoning_content 不存入对话历史，也不通过 stream_callback 推 TUI
-                                # （否则会作为回复正文显示在对话中，造成"思考过程泄漏"）。
-                                # reasoning 模型的思考阶段 TUI 通过流式保活心跳感知，不在此处理。
-                                content = delta.get("content", "")
-                                if content:
-                                    full_content += content
-                                    stream_callback(content)
+                                _dl = _c[0].get("delta", {})
+                                # 票 P：reasoning_content 独立收集（reasoning 模型思考过程）
+                                # 不混入正文；也是生命体征，收到即刷新看门狗
+                                _rc = _dl.get("reasoning_content") or ""
+                                if _rc:
+                                    reasoning_buf += _rc
+                                    if reasoning_callback:
+                                        reasoning_callback(_rc)
+                                    _vitals["last_chunk"] = time.time()
+                                _co = _dl.get("content", "")
+                                if _co:
+                                    full_content += _co
+                                    stream_callback(_co)
                                     _received_chunks += 1
-                                tc = delta.get("tool_calls")
-                                if tc:
-                                    tool_calls_buffer.extend(tc)
+                                    # 票 N2：收到内容块 → 刷新看门狗
+                                    _vitals["last_chunk"] = time.time()
+                                _tc = _dl.get("tool_calls")
+                                if _tc:
+                                    tool_calls_buffer.extend(_tc)
+                                    _vitals["last_chunk"] = time.time()
+
+                            # ── 半截 EOF 防线 ──
+                            # 解析过 SSE 数据却没等到 [DONE] 就 EOF = 服务器中途死亡，
+                            # 半截流绝不能冒充完整响应 → 走断流重试
+                            if _parsed_any and not _got_done:
+                                raise requests.exceptions.ConnectionError(
+                                    "SSE 流被截断: 未收到 [DONE] 连接已终止"
+                                )
+
+                            # ── 票 P：非 SSE 兜底解析 ──
+                            # 服务端（如 moonshot 部分模型）对 stream=True 可能直接回普通 JSON，
+                            # SSE 解析一行 data: 都找不到 → 整个响应体按非流式 JSON 重解析
+                            _all_raw = bytes(_vitals["raw"])
+                            if not _parsed_any and _all_raw.strip():
+                                try:
+                                    _body = json.loads(_all_raw.decode("utf-8", "replace"))
+                                    _msg = _body.get("choices", [{}])[0].get("message", {})
+                                    full_content = _msg.get("content") or ""
+                                    reasoning_buf = (_msg.get("reasoning_content") or "") or reasoning_buf
+                                    if _msg.get("tool_calls"):
+                                        tool_calls_buffer.extend(_msg["tool_calls"])
+                                    if "usage" in _body:
+                                        usage = _body["usage"]
+                                    _logger.warning(
+                                        "非 SSE 响应兜底命中: content=%d chars, reasoning=%d chars, session=%s",
+                                        len(full_content), len(reasoning_buf), session_id or "?",
+                                    )
+                                    _emit_stream_stall(
+                                        _event_bus, session_id,
+                                        len(_all_raw), int((time.time() - _stream_start) * 1000),
+                                        "non_sse_fallback",
+                                    )
+                                except (json.JSONDecodeError, ValueError, AttributeError):
+                                    pass  # 真空响应，走原有空响应通道
+
                             break  # 正常读完，退出 while
 
                         except (
@@ -254,7 +421,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                 api_url,
                                 json=payload,
                                 headers=headers,
-                                timeout=(CONNECT_TIMEOUT, _get_sse_read_timeout()),
+                                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
                                 stream=True,
                             )
                             if response.status_code != 200:
@@ -284,6 +451,18 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     result = {"choices": [choice]}
                     if usage:
                         result["usage"] = usage
+                    # 票 P：reasoning 独立返回（不混入 content），并留事件
+                    if reasoning_buf:
+                        result["reasoning"] = reasoning_buf
+                        try:
+                            _event_bus.write("llm.reasoning", {
+                                "session_id": session_id or "",
+                                "reasoning_chars": len(reasoning_buf),
+                                "content_chars": len(full_content),
+                                "duration_ms": int((time.time() - _stream_start) * 1000),
+                            })
+                        except Exception:
+                            pass
                     return result
 
                 # ── 非流式模式 ──
