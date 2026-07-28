@@ -33,6 +33,7 @@
 ## 其他硬约束
 
 - **没有任务单不动手**：验收标准必须预先写死且可判定，"看看有没有问题"不是任务
+- **动手前先查是否已做过**：接到任务先 `git log --oneline --all --grep="<关键词>"` 和 `git branch -a` 检查该任务是否已有合并记录。已完成的任务不得重干（2026-07-28 教训：把前一天已验收合并的 README 审计重跑一遍，产出空 commit 111f885）
 - **不许在 main 上直接改代码/直接 commit**——所有改动必须走 feat 分支；main 只接受 feat 分支的 merge
 - **改工具前先确认注册名和调用链**：obsidian 写工具是 `write_obsidian.py` / `append_obsidian.py`，不是 file_writer.py
 - **TUI 改动需构建**：动 `ui-tui/src` 后必须 `npm run build` 且产物同步到运行路径
