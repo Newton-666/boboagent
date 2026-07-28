@@ -177,6 +177,9 @@ def run_engine(
             current_engines[sid] = interrupt_event
 
         engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
+        # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
+        # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
+        engine.sid = sid
         engine.proactive.load_config()
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
