@@ -4,6 +4,7 @@ server.py 通过此模块调用 engine，不直接 import Engine 类。
 """
 
 import threading
+import time as _time
 
 # 运行中引擎的注册表（sid → interrupt_event）
 _running: dict[str, threading.Event] = {}
@@ -16,6 +17,12 @@ def cancel(sid: str):
         event = _running.get(sid)
     if event:
         event.set()
+        # 票 W：cancel 通道必须留痕（无声死亡案的头号嫌疑通道）
+        try:
+            from core.event_bus import event_bus as _ebus
+            _ebus.write("engine.cancel.requested", {"session_id": sid})
+        except Exception:
+            pass
 
 
 def is_running(sid: str) -> bool:
@@ -193,7 +200,31 @@ def run_engine(
         except Exception:
             pass
         engine._interrupt_event = interrupt_event
-        engine.run(text)
+        # ── 票 W：引擎线程生死登记（无声死亡案的摄像头） ──
+        # exit 事件必达（finally），reason 穷举：completed / interrupted /
+        # exception:<type>。再发生线程蒸发，这里一定有遗言。
+        from core.event_bus import event_bus as _ebus
+        _thread_t0 = _time.time()
+        try:
+            _ebus.write("engine.thread.start", {"session_id": sid})
+        except Exception:
+            pass
+        _exit_reason = "unknown"
+        try:
+            engine.run(text)
+            _exit_reason = "interrupted" if (interrupt_event and interrupt_event.is_set()) else "completed"
+        except Exception as _run_exc:
+            _exit_reason = f"exception:{type(_run_exc).__name__}"
+            raise
+        finally:
+            try:
+                _ebus.write("engine.thread.exit", {
+                    "session_id": sid,
+                    "reason": _exit_reason,
+                    "duration_ms": int((_time.time() - _thread_t0) * 1000),
+                })
+            except Exception:
+                pass
 
         # 中断后直接退出，不写 stdout、不存 session
         if interrupt_event and interrupt_event.is_set():
