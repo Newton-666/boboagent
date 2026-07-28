@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### 任务台账 per-engine 隔离（票 L）
+- `task_ledger` 从模块级全局台账改为 per-engine 隔离：通过 `contextvars.ContextVar` 将台账绑定到调用方 Engine 实例，消除多会话/直连模式串味风险
+- `core/tool_runner.py`：提交 `task_ledger` 前 `current_engine_var.set(self)`，使工具知道调用方 Engine（改 `core/` 下 .py 需重启生效）
+- `core/tool_executor.py`：工具执行线程通过 `copy_context()` 继承调用线程上下文
+- `core/engine.py`：收工闸自动同步 `self.task_ledger`
+- `tests/test_task_ledger.py`：新增 `TestLedgerPerEngineIsolation` 验证两个 Engine 台账互不可见、模块级台账不被污染
+
 ## 0.5.0 — 2026-06-20
 
 ### 工程化基础设施
