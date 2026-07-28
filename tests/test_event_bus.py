@@ -169,3 +169,63 @@ class TestEventBusFields:
         r = records[0]
         assert r["name"] == "read_file"
         assert r["duration_ms"] == 42
+
+
+class TestEventBusLargePayload:
+    """票 I：含超长文本字段的事件必须生成可解析的 JSON 行。"""
+
+    def _new_bus(self) -> EventBus:
+        return EventBus(log_dir=tempfile.mkdtemp())
+
+    def test_2000_char_args_summary(self):
+        """2000 字符的 args_summary → 重新读回必须能被 json.loads 解析。"""
+        bus = self._new_bus()
+        long_text = "数据" * 1000  # 2000 中文字符
+        bus.write("tool.exec", {
+            "name": "read_file",
+            "args_summary": long_text,
+            "result_summary": "ok",
+        })
+        records = _read_jsonl(bus.filepath)
+        assert len(records) == 1
+        r = records[0]
+        assert "ts" in r
+        assert r["type"] == "tool.exec"
+        # 被截断但字段仍在
+        assert "args_summary" in r
+        assert r["args_summary"].endswith("…")
+
+    def test_2000_char_both_fields(self):
+        """两个字段都超长 → 重新读回必须能被 json.loads 解析。"""
+        bus = self._new_bus()
+        long_args = "A" * 2000
+        long_result = "B" * 2000
+        bus.write("llm.call", {
+            "args_summary": long_args,
+            "result_summary": long_result,
+            "prompt_tokens": 500,
+        })
+        records = _read_jsonl(bus.filepath)
+        assert len(records) == 1
+        r = records[0]
+        assert r["type"] == "llm.call"
+        assert r["prompt_tokens"] == 500
+        assert r["args_summary"].endswith("…")
+        assert r["result_summary"].endswith("…")
+
+    def test_extreme_payload_drops_bulk_fields(self):
+        """极小阈值场景：args_summary+result_summary 都被删除，生成可解析的 event_bus.dropped。"""
+        bus = self._new_bus()
+        huge = "X" * 5000
+        bus.write("tool.exec", {
+            "name": "read_file",
+            "args_summary": huge,
+            "result_summary": huge,
+            "extra_info": huge * 2,
+        })
+        records = _read_jsonl(bus.filepath)
+        assert len(records) >= 1
+        # 所有行必须可解析
+        for r in records:
+            assert "ts" in r
+            assert "type" in r

@@ -67,21 +67,26 @@ class EventBus:
         """写入一条事件。
 
         捕所有异常，绝不影响主流程（静默降级铁律）。
+        所有截断在序列化前完成，保证 JSON 行 100% 可解析。
         """
         try:
             event = self._build_event(event_type, data)
+            # 序列化前截断长文本字段（修复票 I：第 114 行断 JSON）
+            self._truncate_fields(event)
             payload = json.dumps(event, ensure_ascii=False, default=str, separators=(",", ":"))
-            # 体积控制：单条 ≤ 500 字符
+            # 仍超长 → 删除 bulk 字段，而不是切 JSON 字符串
             if len(payload) > _SINGLE_EVENT_MAX_CHARS:
                 event["_truncated"] = True
-                # 截断 data 中的超长字段值，而不是切 JSON 本身
-                for k, v in event.items():
-                    if isinstance(v, str) and len(v) > 120:
-                        event[k] = v[:120] + "…"
+                for drop_key in ["args_summary", "result_summary", "error_detail"]:
+                    event.pop(drop_key, None)
                 payload = json.dumps(event, ensure_ascii=False, default=str, separators=(",", ":"))
-                # 仍超长 → 硬截断（此时 JSON 可能不全，reader 会跳过）
+                # 丢字段后还超长？放弃本条（但写一条标记替代，不写坏行）
                 if len(payload) > _SINGLE_EVENT_MAX_CHARS:
-                    payload = payload[:_SINGLE_EVENT_MAX_CHARS]
+                    payload = json.dumps({
+                        "ts": time.time(), "type": "event_bus.dropped",
+                        "session_id": event.get("session_id", ""),
+                        "reason": "payload_too_large",
+                    }, ensure_ascii=False, separators=(",", ":"))
             line = payload + "\n"
             with self._lock:
                 self._rotate_if_needed()
@@ -90,6 +95,30 @@ class EventBus:
                     f.write(line)
         except Exception:
             logger.debug("event_bus write failed (silent)", exc_info=True)
+
+    def _truncate_fields(self, event: dict):
+        """序列化前截断超长字符串字段到 120 字符。"""
+        for k, v in list(event.items()):
+            if isinstance(v, str) and len(v) > 120:
+                event[k] = v[:120] + "…"
+
+    @classmethod
+    def reset(cls, log_dir: str = ""):
+        """重置单例指向，用于测试隔离。传入 log_dir 重定向输出路径。"""
+        inst = cls._instance
+        if inst is None:
+            inst = cls.__new__(cls, log_dir)
+            cls._instance = inst
+            inst.__init__(log_dir)
+        else:
+            if log_dir:
+                inst._log_dir = Path(log_dir)
+            else:
+                inst._log_dir = Path(BOBO_DATA_DIR) / "logs"
+            inst._log_path = inst._log_dir / "events.jsonl"
+            inst.filepath = str(inst._log_path)
+            inst._ensure_dir()
+        return inst
 
     # ── 内部 ──
 

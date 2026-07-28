@@ -15,6 +15,17 @@ if _project_root not in sys.path:
 os.environ["BOBO_TEST_MODE"] = "1"
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _redirect_event_bus():
+    """重定向 EventBus 单例到临时目录，防止测试污染生产 events.jsonl（票 J）。"""
+    import tempfile
+    from pathlib import Path
+    from core.event_bus import EventBus
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="bobo_test_events_"))
+    EventBus.reset(log_dir=str(tmpdir))
+
+
 @pytest.fixture
 def project_root():
     """Return the absolute project root path."""
