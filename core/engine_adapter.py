@@ -185,6 +185,13 @@ def run_engine(
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))
         engine.checkpoint_mgr.checkpoints[:] = session.get("checkpoints", [])
+        # ── 票 K v2：从会话恢复台账 ──
+        engine.task_ledger = list(session.get("task_ledger", []))
+        try:
+            from tools.task_ledger import _set_ledger
+            _set_ledger(engine.task_ledger)
+        except Exception:
+            pass
         engine._interrupt_event = interrupt_event
         engine.run(text)
 
@@ -196,6 +203,14 @@ def run_engine(
 
         if engine.history:
             session["messages"] = engine.history
+
+        # ── 票 K v2：台账回写会话 ──
+        try:
+            from tools.task_ledger import _get_ledger
+            engine.task_ledger = _get_ledger()
+        except Exception:
+            pass
+        session["task_ledger"] = engine.task_ledger
 
         save_session_to_disk(sid)
 

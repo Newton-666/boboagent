@@ -107,6 +107,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         )
         self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
         self.tracker = RoundTracker(self)  # 回合后处理（change_log / read_files / pattern）
+        # ── 票 K v2：任务台账（收工闸核心） ──
+        self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]
+        self._ledger_reinject_count: int = 0  # 连续回注计数（硬熔断 2 次）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
@@ -826,6 +829,12 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     return
 
             tool_results = self._execute_tool_loop(self._pending_tool_calls)
+            # ── 票 K v2：工具执行后同步台账 ──
+            try:
+                from tools.task_ledger import _get_ledger
+                self.task_ledger = _get_ledger()
+            except Exception:
+                pass
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls)
             self._append_to_history("tool", tool_results=tool_results)
@@ -917,6 +926,51 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     logger.debug("RESPONDING maybe_propose_skill start")
                     self.tracker.maybe_propose_skill()
                     logger.debug("RESPONDING maybe_propose_skill done")
+                # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
+                pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
+                if pending_items:
+                    if self._ledger_reinject_count < 2:
+                        # 回注次数 < 2 → 回注一条 user 消息，回到 THINKING
+                        self._ledger_reinject_count += 1
+                        titles = ", ".join(f'"{e["title"][:30]}"' for e in pending_items)
+                        rej_msg = (
+                            f"任务台账还有 {len(pending_items)} 项未完成：{titles}。"
+                            "请继续执行，不要说明、不要道歉，直接继续。"
+                        )
+                        self._append_to_history("user", rej_msg)
+                        self._pending_content = None
+                        self._pending_tool_calls = None
+                        self.current_depth += 1
+                        logger.debug("RESPONDING ledger re-injection #%d: %d items pending",
+                                     self._ledger_reinject_count, len(pending_items))
+                        self._emit_state_change(self.STATE_THINKING, "ledger re-injection")
+                        return
+                    else:
+                        # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言
+                        pending_titles = ", ".join(
+                            f'"{e["title"][:30]}"' for e in pending_items
+                        )
+                        warning = (
+                            f"\n\n⚠️ 台账 {len(pending_items)} 项未销账，引擎放行：{pending_titles}"
+                        )
+                        self._pending_content = (self._pending_content or "") + warning
+                        logger.debug("RESPONDING ledger force-release: %d items still pending",
+                                     len(pending_items))
+                elif not self.task_ledger:
+                    # 台账为空：直接放行，写统计事件
+                    from core.event_bus import event_bus
+                    event_bus.write("task.no_ledger", {
+                        "session_id": getattr(self, "sid", ""),
+                        "reason": "no ledger created",
+                    })
+                    logger.debug("RESPONDING no ledger — direct done")
+                # else: 台账全 done → 正常放行（clean done，无操作）
+                self._ledger_reinject_count = 0  # 干净收工时重置计数
+                # ── 票 K v2 §4 降级方案：终稿尾部附台账摘要行（面板替代） ──
+                if self.task_ledger:
+                    done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
+                    total = len(self.task_ledger)
+                    self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
                 content = self._format_final_output(self._pending_content)
                 logger.debug("RESPONDING emit complete start: len=%d", len(content))
                 self._notify("complete", {"content": content, "usage": self._last_usage})
