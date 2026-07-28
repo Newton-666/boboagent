@@ -394,14 +394,30 @@ class TestFeatGitExempt:
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
         assert is_risk is False, f"{command!r} 应在 feat 分支放行，reason={reason}"
 
-    @pytest.mark.parametrize("command", NON_DESTRUCTIVE_GIT_COMMANDS)
-    def test_main_branch_non_destructive_git_not_exempt(self, monkeypatch, command):
-        """main 分支上的非破坏性 git 命令：不享受豁免，至少进 gray 确认。"""
+    @pytest.mark.parametrize("command", [
+        c for c in NON_DESTRUCTIVE_GIT_COMMANDS if not c.startswith("git commit")
+    ])
+    def test_main_branch_non_commit_non_destructive_git_exempt(self, monkeypatch, command):
+        """v3.5.1：main 分支上的非破坏性非 commit 命令同样豁免（status/log/diff/add 等）。
+
+        原 v3.5 要求非 main 分支才豁免，导致测试随 cwd 分支状态翻转（合体 bug）。
+        main 的 commit 由 v3 硬闸单独拦截，无需豁免函数重复检查分支。
+        """
         import core.command_safety as _cs
         monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
-        # 注意：git commit 在 main 分支会被 v3 硬闸拦截，其他命令进 gray
-        assert is_risk is True, f"{command!r} 在 main 分支不应豁免, reason={reason}"
+        assert is_risk is False, f"{command!r} 在 main 分支应豁免（非破坏性）, reason={reason}"
+
+    @pytest.mark.parametrize("command", [
+        c for c in NON_DESTRUCTIVE_GIT_COMMANDS if c.startswith("git commit")
+    ])
+    def test_main_branch_commit_still_hard_blocked(self, monkeypatch, command):
+        """main 分支上的 git commit：v3 硬闸拦截，绝不豁免。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
+        assert is_risk is True, f"{command!r} 在 main 分支必须被 v3 硬闸拦截"
+        assert "main" in reason or "自身仓库" in reason
 
     @pytest.mark.parametrize("command", DESTRUCTIVE_GIT_COMMANDS)
     def test_feat_branch_destructive_git_still_blocked(self, monkeypatch, command):

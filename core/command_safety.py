@@ -301,11 +301,16 @@ _GIT_DESTRUCTIVE_OPTION_PATTERNS = [
 
 
 def _is_self_repo_non_destructive_git_on_non_main(command: str) -> bool:
-    """判定是否为在 bobo 自身仓库非 main 分支上执行的允许 git 命令。
+    """判定是否为在 bobo 自身仓库执行的非破坏性 git 命令（v3.5 豁免）。
 
     放行范围严格限定为：status / log / diff / add / commit / branch /
     checkout -b / stash / config / remote / fetch 等非破坏性操作。
-    main 分支、push、reset、clean、rebase、merge 等一概不放行。
+    push/reset/clean/rebase/merge 等破坏性命令一概不放行。
+
+    分支策略（v3.5.1 修正）：豁免不限于 feat 分支——main 上的
+    status/log/diff 等只读命令同样放行；main 上的 git commit 由调用链上游的
+    v3 硬闸（_is_self_repo_main_commit）先行拦截，本函数无需重复检查分支。
+    （原实现要求非 main 分支，导致测试随 cwd 分支状态翻转——合体 bug。）
     """
     if not _has_real_git_command(command):
         return False
@@ -330,8 +335,8 @@ def _is_self_repo_non_destructive_git_on_non_main(command: str) -> bool:
     if not _is_bobo_repo_dir(target_dir):
         return False
 
-    # 关键：main 分支不享受豁免
-    return not _is_on_main_branch(target_dir)
+    # 分支不检查：main 上只读命令同样放行；main commit 由上游 v3 硬闸拦截
+    return True
 
 
 def _is_self_repo_destructive_git(command: str) -> bool:
