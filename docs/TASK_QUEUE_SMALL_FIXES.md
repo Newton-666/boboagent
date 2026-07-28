@@ -147,7 +147,7 @@ git log --grep="git commit"            # 被误拦
 
 ---
 
-## 票 A 追加（2026-07-28 票 H duo B 验收遗留）
+## 票 A 追加 ✅ 已完成（feat/small-fixes-batch，merge 9974525）
 
 > 来源：lh-review-orphan-guard Worker 审查 9398c1f（票 H 运行时孤儿防线）
 
@@ -167,7 +167,7 @@ git log --grep="git commit"            # 被误拦
 
 ---
 
-## 票 I：事件总线截断断 JSON（2026-07-28 解剖课发现）
+## 票 I ✅ 已完成（feat/event-bus-fixes，merge f8f959a）：事件总线截断断 JSON
 
 **症状**：`data/logs/events.jsonl` 中 114 行是断掉的 JSON（`JSONDecodeError: Invalid control character` / 缺右括号），时间 15:30–15:53。
 
@@ -177,7 +177,7 @@ git log --grep="git commit"            # 被误拦
 
 **验证**：`python3 -c` 逐行 `json.loads` 现有 events.jsonl，新写入的事件零坏行。
 
-## 票 J：测试/冒烟污染生产事件日志（2026-07-28 解剖课发现）
+## 票 J ✅ 已完成（feat/event-bus-fixes，merge f8f959a）：测试/冒烟污染生产事件日志
 
 **症状**：`events.jsonl` 中 2224 条 `session_id=""` 事件（pytest 跑 Engine 无 gateway 注入 sid）+ 多个 `boot-*` 冒烟会话混在生产日志里，时间贯穿全天测试。日后做会话分析会被测试数据淹没。
 
