@@ -114,7 +114,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
         # 主动模式管理器（含记忆连接 + 参与度追踪）
-        self.proactive = ProactiveManager()
+        self.proactive = ProactiveManager(llm_caller=self.llm_caller)
         # 技能标准加载器
         self.skill_loader = SkillLoader(lambda: self.history)
         # Prompt 注入管道
