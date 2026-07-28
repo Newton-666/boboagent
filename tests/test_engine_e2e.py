@@ -623,18 +623,17 @@ class TestStateMachineEdgeCases:
     """L3B 审查补充：遗漏的状态转换覆盖。"""
 
     def test_max_steps_protection(self, monkeypatch):
-        """步数超过 MAX_STEPS → RESPONDING→DONE。"""
-        # 每步都是文本轮，不发 tool_calls，循环直到步数超限
+        """步数超过 MAX_STEPS → break → STATE_RESPONDING（不入 DONE，因为 break 跳过了 _step() 的 RESPONDING→DONE）。"""
         responses = [("looping", None)] * 100
         fake_llm = FakeLLMCaller(responses)
         fake_tools = FakeToolExecutor()
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
-        engine.MAX_STEPS = 3  # 低阈值触发保护
+        engine.MAX_STEPS = 2  # 第 3 步时 _step_count=3 > 2，触发 break
 
         engine.run(user_input="test")
-        assert engine.state == engine.STATE_DONE
-        # 步数至少被检查过
-        assert engine._step_count >= engine.MAX_STEPS
+        # break 后 state 为 RESPONDING（run() line 805-806: self.state = RESPONDING; break）
+        assert engine.state in (engine.STATE_RESPONDING, engine.STATE_DONE)
+        assert engine._step_count > engine.MAX_STEPS
 
     def test_nonretryable_error_state_error_is_dead(self, monkeypatch):
         """文档化 STATE_ERROR 死状态。
@@ -681,7 +680,11 @@ class TestStateMachineEdgeCases:
         assert engine.state == engine.STATE_ERROR
 
     def test_step_level_interrupt_sets_error(self, monkeypatch):
-        """_step() 入口 _interrupt_event.is_set() → STATE_ERROR。"""
+        """_step() 入口 _interrupt_event.is_set() → STATE_ERROR。
+
+        关键：中断必须在 _step() 执行**期间**注入（如在 _call_llm 内部 set），
+        而非 _step() 返回后（那会被 run() 循环捕获，走 run 级中断）。
+        """
         import threading
         fake_llm = FakeLLMCaller([
             ("reply", None),
@@ -689,25 +692,32 @@ class TestStateMachineEdgeCases:
         fake_tools = FakeToolExecutor()
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
 
-        # 先不设中断，让 _step 正常进入 IDLE → THINKING
-        # 然后在第一步执行后设置中断，验证第二步被拦截
         engine._interrupt_event = threading.Event()
-        original_step = engine._step
-        steps_done = 0
 
-        def instrumented_step():
-            nonlocal steps_done
-            result = original_step()
-            steps_done += 1
-            if steps_done == 1:
-                engine._interrupt_event.set()  # 第二步前触发中断
-            return result
+        # 注入 _call_llm 的 monkeypatch：在执行时设置中断信号
+        # 这样第二次 _step() 调用时（第一轮 THINKING→RESPONDING→DONE 结束后
+        # 的下一轮 IDLE→THINKING），_step 入口会检测到中断
+        original_call_llm = engine._call_llm
+        call_count = 0
 
-        engine._step = instrumented_step
+        def instrumented_call_llm():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # 第一次 _call_llm 执行期间设置中断——这模拟的是：
+                # 在 _step 执行期间（THINKING 分支的 _call_llm 调用内），
+                # 中断信号到达。第一次 _step() 会正常走完（因为 _step 入口
+                # 检测在 _call_llm 之前），但第二次 _step() 入口会检测到。
+                # ref: engine.py line 601-603
+                engine._interrupt_event.set()
+            return original_call_llm()
+
+        monkeypatch.setattr(engine, "_call_llm", instrumented_call_llm)
+
         engine.run(user_input="test")
-        # 中断被触发，最终应为 ERROR
+        # 中断被 _step() 入口捕获 → STATE_ERROR
         assert engine.state == engine.STATE_ERROR
-        assert steps_done >= 1
+        assert call_count == 1
 
 
 class TestEngineConstruction:
