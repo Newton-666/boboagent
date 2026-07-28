@@ -20,16 +20,42 @@ def register_engine_thread(t: threading.Thread, active_engine_threads, engine_th
 
 
 def shutdown_sessions(ctx):
-    """保存所有活跃会话（在信号处理中调用）"""
+    """保存所有活跃会话并强制退出（在信号处理或 stdin EOF 时调用）。
+
+    不等待引擎线程 join：daemon=True 的线程在进程退出时 OS 自动终止。
+    原 thread.join() 导致 engine 阻塞在 requests/SSE 流不返回——
+    main thread 永久卡死 → 超时 SIGKILL（退出码 -9）。
+    119 个孤儿子进程 = 119 次 join 死锁实证。
+    """
+    import os as _os
+    import logging as _logging
+
     from bobo_tui_gateway.handlers import sessions as _sess
+
+    _logged = _logging.getLogger(__name__)
+
+    # 1. 保存所有活跃会话到磁盘
     with ctx.sessions_lock:
-        for sid in list(ctx.sessions.keys()):
-            _sess._save_session_to_disk(sid, ctx)
-    # 等待引擎线程完成（最多 3 秒）
-    with ctx.engine_threads_lock:
-        threads = list(ctx.active_engine_threads)
-    for t in threads:
-        t.join(timeout=1.0)
+        sids = list(ctx.sessions.keys())
+    for sid in sids:
+        _sess._save_session_to_disk(sid, ctx)
+
+    # 2. 验证落盘（崩溃案的教训：存盘半截比不存更危险）
+    mgr = _sess._get_session_mgr()
+    for sid in sids:
+        session_path = mgr.session_dir / f"{sid}.json"
+        if not session_path.exists() or session_path.stat().st_size == 0:
+            _logged.error("shutdown: 会话 %s 落盘验证失败", sid)
+
+    # 3. 刷新缓冲区
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+    # 4. 跳过 engine 线程 join，直接 os._exit 兜底
+    _os._exit(0)
 
 
 def _get_llm_caller(engine_cache):
