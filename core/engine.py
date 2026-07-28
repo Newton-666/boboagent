@@ -18,7 +18,7 @@ sys.path.insert(0, _project_root)
 from tools import TOOLS_SCHEMA, report_load_errors
 from core.tool_executor import execute_tool
 from core.skill_manager import get_skill_manager
-from core.context import ContextMixin
+from core.context import ContextMixin, clean_orphan_tool_calls
 from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
@@ -28,6 +28,28 @@ from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.proactive import ProactiveManager
 from core.injector import PromptInjector
+
+
+# ── 票 H：运行时孤儿防线工具函数 ──
+
+def _is_tool_pairing_400(response: dict) -> bool:
+    """判断 HTTP 400 错误是否由 tool_calls 配对断裂引起。
+
+    只检查错误文本中的关键词，不解析 JSON body。
+    非配对类 400（参数错误等）不匹配，不触发重试。
+    """
+    if response.get("error_type") != "bad_request":
+        return False
+    detail = response.get("detail", "")
+    error_msg = response.get("error", "")
+    combined = (detail + " " + error_msg).lower()
+    pairing_keywords = [
+        "tool_call_id",
+        "messages with role 'tool' must be a response to a preceding message",
+        "tool message must be preceded by",
+        "requires a corresponding tool call",
+    ]
+    return any(kw.lower() in combined for kw in pairing_keywords)
 
 
 class Engine(ContextMixin, ToolRunnerMixin):
@@ -519,6 +541,18 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
 
         self._notify("thinking", {"phase": "calling_llm", "message": "正在思考..."})
 
+        # ── 票 H 运行时孤儿防线 Layer 1：发送前清洗（作用在发送副本上，不动 history） ──
+        cleaned_messages, _orphan_report = clean_orphan_tool_calls(messages)
+        if _orphan_report["inserted"] > 0 or _orphan_report["removed"] > 0:
+            logger.warning(
+                "运行时孤儿 tool_calls 清洗（发送前）: 补 %d 个占位, 删 %d 个游离, "
+                "orphan_tc_ids=%s, orphan_tool_msg_ids=%s",
+                _orphan_report["inserted"], _orphan_report["removed"],
+                _orphan_report.get("orphan_tc_ids", []),
+                _orphan_report.get("orphan_tool_msg_ids", []),
+            )
+            messages = cleaned_messages
+
         def _on_token(token: str):
             self._notify("thinking.delta", {"text": token})
 
@@ -541,6 +575,43 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             tools_override=filtered_tools,
         )
         if isinstance(response, dict) and "error" in response:
+            # ── 票 H 运行时孤儿防线 Layer 2：配对类 400 → 清洗重试一次 ──
+            if _is_tool_pairing_400(response):
+                logger.warning(
+                    "运行时孤儿防线: HTTP 400 配对断裂，清洗后重试一次。"
+                    "原始错误: %s", response.get("error", "")
+                )
+                retry_messages, _retry_report = clean_orphan_tool_calls(messages)
+                if _retry_report["inserted"] > 0 or _retry_report["removed"] > 0:
+                    logger.warning(
+                        "重试前清洗: 补 %d 个占位, 删 %d 个游离, "
+                        "orphan_tc_ids=%s, orphan_tool_msg_ids=%s",
+                        _retry_report["inserted"], _retry_report["removed"],
+                        _retry_report.get("orphan_tc_ids", []),
+                        _retry_report.get("orphan_tool_msg_ids", []),
+                    )
+                retry_response = self.llm_caller(
+                    retry_messages,
+                    stream_callback=_on_token,
+                    retry_callback=_on_retry,
+                    tools_override=filtered_tools,
+                )
+                if not isinstance(retry_response, dict) or "error" not in retry_response:
+                    # 重试成功
+                    logger.warning(
+                        "运行时孤儿防线: 清洗后重试成功。orphan_tc_ids=%s",
+                        _retry_report.get("orphan_tc_ids", []),
+                    )
+                    self._last_usage = retry_response.get("usage", {})
+                    content, tool_calls = self._extract_response(retry_response)
+                    content = remove_emojis(content or "")
+                    return content or "", tool_calls
+                # 重试仍失败 → 若仍是配对 400 则不再递归，直接走下方错误处理
+                logger.warning(
+                    "运行时孤儿防线: 清洗后重试仍失败。错误: %s",
+                    retry_response.get("error", ""),
+                )
+
             error_msg = f"错误: {response['error']}"
             error_type = response.get("error_type", "unknown")
             retryable = response.get("retryable", False)

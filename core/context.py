@@ -378,6 +378,13 @@ def clean_orphan_tool_calls(messages: list) -> list:
         else:
             cleaned.append(m)
 
+    # 收集孤儿 tool_call_id（供 WARNING 日志）
+    orphan_tc_ids = sorted(orphan_assistant_tc_ids)
+    orphan_tool_msg_ids = sorted(
+        tc_id for tc_id, idxs in tool_result_ids.items()
+        if tc_id not in assistant_tc_map
+    )
+
     # 报告
     if inserted or removed:
         logger.info(
@@ -385,4 +392,9 @@ def clean_orphan_tool_calls(messages: list) -> list:
             inserted, removed,
         )
 
-    return cleaned, {"inserted": inserted, "removed": removed}
+    return cleaned, {
+        "inserted": inserted,
+        "removed": removed,
+        "orphan_tc_ids": orphan_tc_ids,
+        "orphan_tool_msg_ids": orphan_tool_msg_ids,
+    }
