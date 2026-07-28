@@ -166,6 +166,103 @@ def classify_command(command: str) -> tuple[str, str]:
 # ── self-hosting v2：自身仓库 git 操作物理闸 ──
 
 
+def _is_on_main_branch(repo_dir: str) -> bool:
+    """检查 git 仓库当前是否在 main 分支上。
+
+    通过 git rev-parse 查询当前分支名。任何异常（超时/权限/非 git 目录）
+    均返回 False——宁可漏拦一次 commit，也不误伤合法操作。
+    """
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ["git", "-C", repo_dir, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=2,
+        )
+        return r.stdout.strip() == "main"
+    except Exception:
+        return False
+
+
+def _find_git_subcommand(command: str) -> str | None:
+    """从 git 命令字符串中提取子命令（跳过全局选项如 -C/-c/--git-dir 等）。
+
+    git 全局选项（-C <path>, -c <key=val>, --git-dir=<path>,
+    --work-tree=<path>, --no-pager 等）出现在子命令之前，
+    必须跳过这些选项才能正确识别 commit vs merge vs status 等。
+    """
+    import shlex as _shlex_mod
+
+    m = _re.search(r'\bgit\b\s+(.*)', command)
+    if not m:
+        return None
+    rest = m.group(1).strip()
+    try:
+        tokens = _shlex_mod.split(rest)
+    except ValueError:
+        tokens = rest.split()
+    if not tokens:
+        return None
+
+    # 带一个参数的全局选项
+    _EAT_ONE = frozenset({'-C', '-c', '--git-dir', '--work-tree', '--exec-path'})
+    # 无参数的全局选项
+    _SKIP = frozenset({
+        '-P', '--no-pager', '-p', '--paginate', '--bare',
+        '--no-replace-objects', '--literal-pathspecs',
+        '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
+    })
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in _SKIP:
+            i += 1
+            continue
+        if tok in _EAT_ONE:
+            i += 2
+            continue
+        # --key=value 形式（如 --git-dir=/tmp）
+        if any(tok.startswith(p + '=') for p in ('--git-dir', '--work-tree', '--exec-path')):
+            i += 1
+            continue
+        # -c key=value 紧凑形式（无空格，如 -cuser.name=x，极少见但合法）
+        if tok.startswith('-c') and len(tok) > 2 and tok[2] != ' ':
+            i += 1
+            continue
+        return tok
+    return None
+
+
+def _is_self_repo_main_commit(command: str) -> bool:
+    """判定命令是否为在 bobo 自身仓库 main 分支上执行 git commit。
+
+    三条件缺一即放行：
+    1. 命令的子命令必须是 commit（跳过 git 全局选项 -C/-c/--git-dir 等后判定）
+    2. 目标目录必须是 bobo 自身仓库（_BOBO_REPO_ROOT）
+    3. 当前分支必须是 main
+
+    git merge 不经过 git commit 命令，天然不受影响。
+    docs-only 提交不豁免——一律走 feat 分支。
+    """
+    cmd = command.strip()
+    # 快速排除：不是 git 命令
+    if not _re.search(r'\bgit\b', cmd):
+        return False
+    # 提取子命令（跳过全局选项如 -C/-c）
+    subcommand = _find_git_subcommand(cmd)
+    if subcommand != "commit":
+        return False
+
+    target_dir = _resolve_git_target_dir(cmd)
+    if target_dir is None:
+        target_dir = _os.getcwd()
+
+    if not _is_bobo_repo_dir(target_dir):
+        return False
+
+    return _is_on_main_branch(target_dir)
+
+
 def _is_self_repo_destructive_git(command: str) -> bool:
     """判定命令是否对 bobo 自身仓库执行 push/毁灭性 git 操作。
 
@@ -260,6 +357,10 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         # ── self-hosting v2 物理闸：自身仓库的 push/毁灭性 git 操作 ──
         if _is_self_repo_destructive_git(command):
             return True, f"🚫 bobo 自身仓库：push/毁灭性操作仅限用户（self-hosting v2）: {command[:60]}"
+
+        # ── self-hosting v3 物理闸：自身仓库 main 分支 git commit ──
+        if _is_self_repo_main_commit(command):
+            return True, f"🚫 bobo 自身仓库：禁止在 main 直接提交，请切 feat 分支: {command[:60]}"
 
         level, reason = classify_command(command)
         if level == "dangerous":
