@@ -344,3 +344,74 @@ class TestSelfRepoGitGate:
     def test_git_checkout_b_safe(self):
         is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git checkout -b feat/test-branch"})
         assert is_risk is False
+
+
+# ── self-hosting v3：main 分支 git commit 物理闸 ──
+
+
+class TestSelfHostingGitMainCommitGate:
+    """self-hosting v3：bobo 自身仓库 main 分支 git commit 物理闸。
+
+    三条件缺一即放行：非 git commit / 非自身仓库 / 非 main 分支。
+    """
+
+    # ── 拦截：自身仓库 + main 分支 + git commit ──
+
+    def test_main_commit_blocked(self, monkeypatch):
+        """模拟在 main 分支上 git commit → 拦截。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit -m 'fix'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
+    def test_main_commit_a_blocked(self, monkeypatch):
+        """git commit -a 也应被拦截。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit -a -m 'fix'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
+    def test_main_commit_amend_blocked(self, monkeypatch):
+        """git commit --amend 也应被拦截。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit --amend -m 'fix'"})
+        assert is_risk is True
+        assert "禁止在 main 直接提交" in reason
+
+    # ── 放行：feat 分支 ──
+
+    def test_feat_branch_commit_not_blocked(self):
+        """当前在 feat 分支上 git commit → 放行（不触发 main 闸）。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git commit -m 'fix'"})
+        assert is_risk is False
+
+    # ── 放行：其他仓库 ──
+
+    def test_other_repo_commit_not_blocked(self):
+        """git -C /tmp commit → 放行（非自身仓库）。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git -C /tmp commit -m 'fix'"})
+        assert "自身仓库" not in reason
+
+    # ── 放行：git merge（不经过 git commit 命令，天然不受影响）──
+
+    def test_git_merge_not_blocked(self):
+        """git merge --no-ff feat/test → 放行。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git merge --no-ff feat/test"})
+        assert is_risk is False
+
+    # ── 放行：非 commit 的 git 命令零误伤 ──
+
+    def test_git_status_not_blocked(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git status"})
+        assert is_risk is False
+
+    def test_git_diff_not_blocked(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git diff"})
+        assert is_risk is False
+
+    def test_git_add_not_blocked(self):
+        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git add ."})
+        assert is_risk is False
