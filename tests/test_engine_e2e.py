@@ -39,7 +39,7 @@ class FakeLLMCaller:
             content, tool_calls = resp
             return {
                 "choices": [{"message": {"content": content, "tool_calls": tool_calls}}],
-                "usage": {"total_tokens": 10},
+                "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
             }
         return resp
 
@@ -145,6 +145,49 @@ def _collect_states(engine):
 # ══════════════════════════════════════════════════════════════════════
 
 
+class TestEmptyResponse:
+    """场景 f：THINKING 内部重试 — 空响应重试 1 次 / 2 次兜底。"""
+
+    def test_empty_response_retry_once(self, monkeypatch):
+        """THINKING→THINKING 重试：空 content 无 tool_calls → 重试 1 次后正常。"""
+        fake_llm = FakeLLMCaller([
+            ("", None),        # 空响应，触发重试
+            ("ok after retry", None),
+        ])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        states = _collect_states(engine)
+        engine.run(user_input="test")
+
+        assert engine.state == engine.STATE_DONE
+
+        # THINKING 出现两次（第一次空→重试，第二次正常）
+        seq = [s for s in states if s != engine.STATE_IDLE]
+        ti = [s for s in seq if s == engine.STATE_THINKING]
+        assert len(ti) == 2, f"expected 2 THINKING (retry), got: {seq}"
+
+    def test_empty_response_twice_gives_fallback(self, monkeypatch):
+        """两次空响应 → RESPONDING 兜底错误消息。"""
+        # 3 个响应：两次空触发重试到 current_depth=2，
+        # 第三次 _call_llm 被调用（因 current_depth=2 不满足 <2
+        # 条件但在此之前已调用了 _call_llm）
+        fake_llm = FakeLLMCaller([
+            ("", None),   # 空 1 → depth: 0, retry
+            ("", None),   # 空 2 → depth: 1, retry
+            ("", None),   # 空 3 → 此时 depth=2, 不满足 <2, 但 _call_llm 已在 depth check 前被调用
+        ])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+        engine.run(user_input="test")
+
+        assert engine.state == engine.STATE_DONE
+        asst = [m for m in engine.history if m.get("role") == "assistant"]
+        assert len(asst) >= 1
+        # 兜底错误消息包含"空响应"
+        assert "空响应" in asst[-1].get("content", "")
+
+
 class TestSimpleQA:
     """场景 a：简单问答 — 单轮文本进 → STATE_DONE，history 结构正确。"""
 
@@ -161,10 +204,14 @@ class TestSimpleQA:
         assert engine.state == engine.STATE_DONE
         assert fake_llm.call_count == 1
 
-        # 状态序列：IDLE → THINKING → RESPONDING → DONE
-        assert engine.STATE_THINKING in states
-        assert engine.STATE_RESPONDING in states
-        assert states[-1] == engine.STATE_DONE
+        # 状态序列精确断言：IDLE → THINKING → RESPONDING → DONE
+        # 除 IDLE 外的序列必须严格固定（纯文本轮不会有 EXECUTING）
+        seq = [s for s in states if s != engine.STATE_IDLE]
+        assert seq == [
+            engine.STATE_THINKING,
+            engine.STATE_RESPONDING,
+            engine.STATE_DONE,
+        ], f"unexpected state sequence: {seq}"
 
         # history 结构：user + assistant
         roles = [m["role"] for m in engine.history]
@@ -425,6 +472,69 @@ class TestKillSimulation:
         for tc_id in asst_tc_ids:
             assert tc_id in tool_ids_in_cleaned, f"孤儿 tool_call: {tc_id}"
 
+    def test_real_interrupt_in_executing_phase(self, monkeypatch):
+        """真实 EXECUTING 中断模拟：拦截 _append_to_history("tool", ...)
+        模拟"助理 tool_calls 已持久化但 tool 结果写入前崩溃"。
+
+        与手动注入版本不同：本测试在 engine._step 内 EXECUTING 分支
+        的真实执行路径中触发中断，验证中断后的完整恢复链路。
+        """
+        from core.context import clean_orphan_tool_calls
+
+        fake_llm = FakeLLMCaller([
+            (None, [_make_tool_call("c_int", "echo", {"msg": "ping"})]),
+            ("恢复后的最终回复", None),
+        ])
+        fake_tools = FakeToolExecutor({"echo": "pong"})
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        # Monkeypatch _append_to_history：拦截 "tool" 角色写入，
+        # 模拟崩溃——assistant 已入 history，tool 结果丢失
+        original_append = engine._append_to_history
+        tool_blocked = []
+
+        def crash_append(role, content=None, tool_calls=None, tool_results=None):
+            if role == "tool":
+                tool_blocked.append({"results": tool_results})
+                return  # 模拟崩溃：tool 结果丢弃
+            return original_append(role, content=content, tool_calls=tool_calls, tool_results=tool_results)
+
+        monkeypatch.setattr(engine, "_append_to_history", crash_append)
+
+        engine.run(user_input="ping")
+
+        # 确认 tool executor 确实执行了
+        assert len(fake_tools.calls) == 1
+        assert fake_tools.calls[0] == ("echo", {"msg": "ping"})
+
+        # 确认孤儿存在：assistant tool_calls 入 history，tool 结果未入
+        asst_with_tc = [m for m in engine.history if m.get("role") == "assistant" and m.get("tool_calls")]
+        tool_msgs = [m for m in engine.history if m.get("role") == "tool"]
+        assert len(asst_with_tc) >= 1
+        assert len(tool_msgs) == 0, "tool 结果应该被拦截为 0 条"
+
+        # 恢复链路：清洗 history
+        cleaned, report = clean_orphan_tool_calls(engine.history)
+        assert report["inserted"] >= 1  # c_int 占位
+        assert report["removed"] == 0   # 无游离 tool
+
+        # 清洗后 history 结构合法
+        cleaned_tool_ids = {m["tool_call_id"] for m in cleaned if m.get("role") == "tool"}
+        for m in cleaned:
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                for tc in m["tool_calls"]:
+                    assert tc["id"] in cleaned_tool_ids, f"tool_call {tc['id']} 清洗后仍无配对"
+
+        placeholder = [m for m in cleaned if m.get("tool_call_id") == "c_int"]
+        assert len(placeholder) == 1
+        assert placeholder[0]["content"] == "[工具结果因中断丢失]"
+
+        # 关键验证：engine 状态一致，无残留
+        assert engine.state == engine.STATE_DONE
+        # _pending_tool_calls 在 EXECUTING 完成后被清空为 None 或 []
+        assert not engine._pending_tool_calls, f"expected empty, got {engine._pending_tool_calls}"
+        assert engine._pending_content is None
+
 
 class TestMultiTurn:
     """场景 e：多轮连续 — 3 轮对话后 history 长度与结构正确。"""
@@ -507,6 +617,97 @@ class TestMultiTurn:
         # reset 后清空
         engine.reset()
         assert engine.history == []
+
+
+class TestStateMachineEdgeCases:
+    """L3B 审查补充：遗漏的状态转换覆盖。"""
+
+    def test_max_steps_protection(self, monkeypatch):
+        """步数超过 MAX_STEPS → RESPONDING→DONE。"""
+        # 每步都是文本轮，不发 tool_calls，循环直到步数超限
+        responses = [("looping", None)] * 100
+        fake_llm = FakeLLMCaller(responses)
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+        engine.MAX_STEPS = 3  # 低阈值触发保护
+
+        engine.run(user_input="test")
+        assert engine.state == engine.STATE_DONE
+        # 步数至少被检查过
+        assert engine._step_count >= engine.MAX_STEPS
+
+    def test_nonretryable_error_state_error_is_dead(self, monkeypatch):
+        """文档化 STATE_ERROR 死状态。
+
+        _call_llm 设置 self.state = STATE_ERROR → 返回 (error_msg, [])。
+        THINKING 分支因 error_msg 非空走到 else 分支，执行
+        self.state = STATE_RESPONDING，覆盖了 STATE_ERROR。
+
+        run() 循环终止条件 while state not in (DONE, ERROR) 中的
+        ERROR 分支不会被非重试错误触发。
+        """
+        fake_llm = FakeLLMCaller([
+            {"error": "auth failed", "error_type": "auth", "retryable": False},
+        ])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        states = _collect_states(engine)
+        engine.run(user_input="should not crash")
+
+        # STATE_ERROR 从未出现在状态序列中（被覆盖了）
+        assert engine.STATE_ERROR not in states, (
+            f"STATE_ERROR should be dead（被 RESPONDING 覆盖），实际 states={states}"
+        )
+        assert engine.state == engine.STATE_DONE
+        # 错误以文本形式进入 assistant history
+        asst = [m for m in engine.history if m.get("role") == "assistant"]
+        assert any("auth failed" in m.get("content", "") for m in asst)
+
+    def test_run_level_interrupt_sets_error(self, monkeypatch):
+        """run() 主循环中 _interrupt_event.is_set() → STATE_ERROR。"""
+        import threading
+        fake_llm = FakeLLMCaller([
+            ("reply", None),
+        ])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        # 在 _step 执行前设置中断信号
+        engine._interrupt_event = threading.Event()
+        engine._interrupt_event.set()
+
+        engine.run(user_input="test")
+        assert engine.state == engine.STATE_ERROR
+
+    def test_step_level_interrupt_sets_error(self, monkeypatch):
+        """_step() 入口 _interrupt_event.is_set() → STATE_ERROR。"""
+        import threading
+        fake_llm = FakeLLMCaller([
+            ("reply", None),
+        ])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        # 先不设中断，让 _step 正常进入 IDLE → THINKING
+        # 然后在第一步执行后设置中断，验证第二步被拦截
+        engine._interrupt_event = threading.Event()
+        original_step = engine._step
+        steps_done = 0
+
+        def instrumented_step():
+            nonlocal steps_done
+            result = original_step()
+            steps_done += 1
+            if steps_done == 1:
+                engine._interrupt_event.set()  # 第二步前触发中断
+            return result
+
+        engine._step = instrumented_step
+        engine.run(user_input="test")
+        # 中断被触发，最终应为 ERROR
+        assert engine.state == engine.STATE_ERROR
+        assert steps_done >= 1
 
 
 class TestEngineConstruction:
