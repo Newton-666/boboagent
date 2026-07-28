@@ -17,7 +17,7 @@ _BOBO_REPO_ROOT = _os.path.abspath(
 
 # 白名单：日常安全命令，静默执行
 SAFE_COMMANDS = {
-    "git", "ls", "cat", "echo", "python", "python3", "node", "npm", "npx",
+    "ls", "cat", "echo", "python", "python3", "node", "npm", "npx",
     "pip", "pip3", "cd", "pwd", "mkdir", "cp", "mv", "grep", "find", "head",
     "tail", "wc", "curl", "wget", "du", "df", "whoami", "date", "env",
     "which", "man", "diff", "sort", "uniq", "touch", "file", "stat",
@@ -279,6 +279,61 @@ def _is_self_repo_main_commit(command: str) -> bool:
     return _is_on_main_branch(target_dir)
 
 
+# ── self-hosting v3.5：feat 分支非破坏性 git 命令豁免 ──
+
+_NON_DESTRUCTIVE_GIT_SUBCOMMANDS = frozenset({
+    "status", "log", "diff", "show", "blame", "ls-files", "ls-tree",
+    "add", "commit", "branch", "checkout", "stash", "config", "remote", "fetch",
+})
+
+# 即使子命令在白名单，命令行里出现这些模式仍视为有破坏性
+_GIT_DESTRUCTIVE_OPTION_PATTERNS = [
+    (r'\bpush\b', "push"),
+    (r'\breset\b', "reset"),
+    (r'\bclean\b', "clean"),
+    (r'\brebase\b', "rebase"),
+    (r'\bmerge\b', "merge"),
+    (r'\bcherry-pick\b', "cherry-pick"),
+    (r'\brevert\b', "revert"),
+    (r'\bcheckout\s+-f', "checkout -f"),
+    (r'\bcheckout\s+.*--\s*\.', "checkout -- ."),
+]
+
+
+def _is_self_repo_non_destructive_git_on_non_main(command: str) -> bool:
+    """判定是否为在 bobo 自身仓库非 main 分支上执行的允许 git 命令。
+
+    放行范围严格限定为：status / log / diff / add / commit / branch /
+    checkout -b / stash / config / remote / fetch 等非破坏性操作。
+    main 分支、push、reset、clean、rebase、merge 等一概不放行。
+    """
+    if not _has_real_git_command(command):
+        return False
+
+    subcommand = _find_git_subcommand(command)
+    if subcommand not in _NON_DESTRUCTIVE_GIT_SUBCOMMANDS:
+        return False
+
+    for pattern, _name in _GIT_DESTRUCTIVE_OPTION_PATTERNS:
+        if _re.search(pattern, command):
+            return False
+
+    # checkout 只允许 checkout -b（创建新分支），其他 checkout 放行风险大
+    if subcommand == "checkout":
+        m = _re.search(r'\bcheckout\s+(-b\s+\S+|\s*)', command)
+        if not m or not m.group(1).strip().startswith("-b"):
+            return False
+
+    target_dir = _resolve_git_target_dir(command)
+    if target_dir is None:
+        target_dir = _os.getcwd()
+    if not _is_bobo_repo_dir(target_dir):
+        return False
+
+    # 关键：main 分支不享受豁免
+    return not _is_on_main_branch(target_dir)
+
+
 def _is_self_repo_destructive_git(command: str) -> bool:
     """判定命令是否对 bobo 自身仓库执行 push/毁灭性 git 操作。
 
@@ -393,6 +448,10 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         # ── self-hosting v3 物理闸：自身仓库 main 分支 git commit ──
         if _is_self_repo_main_commit(command):
             return True, f"🚫 bobo 自身仓库：禁止在 main 直接提交，请切 feat 分支: {command[:60]}"
+
+        # ── self-hosting v3.5：feat 分支非破坏性 git 命令免确认放行 ──
+        if _is_self_repo_non_destructive_git_on_non_main(command):
+            return False, ""
 
         level, reason = classify_command(command)
         if level == "dangerous":

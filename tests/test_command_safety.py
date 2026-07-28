@@ -24,12 +24,8 @@ class TestSafeCommands:
     """Commands that should be classified as 'safe' — run silently."""
 
     SAFE_EXAMPLES = [
-        # Git operations
-        "git status",
-        "git log --oneline",
-        "git diff",
-        "git add README.md",
-        "git commit -m 'test'",
+        # Git 命令已从全局白名单移除：默认进入 gray 通道，
+        # 但在 bobo 自身仓库的 feat 分支上享受 v3.5 豁免（见 TestFeatGitExempt）。
         # File listing
         "ls",
         "ls -la",
@@ -336,14 +332,103 @@ class TestSelfRepoGitGate:
         is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git log --oneline -5"})
         assert is_risk is False
 
-    def test_git_merge_safe(self):
-        """git merge 不在拦截列表 → 走正常分类（有 --no-edit 时为 safe）。"""
-        is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git merge main --no-edit"})
-        assert is_risk is False
+    def test_git_merge_confirms(self):
+        """git merge 已不在全局白名单，且不属于 feat 分支豁免范围 → 需要确认。"""
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git merge main --no-edit"})
+        assert is_risk is True, f"git merge 应需要确认, reason={reason}"
 
     def test_git_checkout_b_safe(self):
         is_risk, _ = is_high_risk_tool("execute_terminal", {"command": "git checkout -b feat/test-branch"})
         assert is_risk is False
+
+
+# ── self-hosting v3.5：feat 分支非破坏性 git 命令免确认放行 ──
+
+
+class TestFeatGitExempt:
+    """self-hosting v3.5：在自身仓库非 main 分支上，非破坏性 git 命令直接放行。
+
+    放行范围：status / log / diff / add / commit / branch / checkout -b / stash 等。
+    main 分支、push / reset / clean / rebase / merge / checkout -f 等仍维持闸门。
+    """
+
+    NON_DESTRUCTIVE_GIT_COMMANDS = [
+        "git status",
+        "git log --oneline",
+        "git diff",
+        "git diff --cached",
+        "git add README.md",
+        "git add .",
+        "git commit -m 'test'",
+        "git commit -am 'test'",
+        "git branch",
+        "git checkout -b feat/test-branch",
+        "git stash",
+        "git stash list",
+        "git remote -v",
+        "git fetch origin",
+    ]
+
+    DESTRUCTIVE_GIT_COMMANDS = [
+        "git push",
+        "git push --force",
+        "git push origin main",
+        "git reset --hard",
+        "git reset --soft HEAD~1",
+        "git clean -fd",
+        "git clean -f",
+        "git rebase -i HEAD~3",
+        "git merge main --no-edit",
+        "git cherry-pick abc1234",
+        "git revert abc1234",
+        "git checkout -f",
+        "git checkout main -- .",
+        "git checkout main",  # 切换分支：不属于放行范围
+    ]
+
+    @pytest.mark.parametrize("command", NON_DESTRUCTIVE_GIT_COMMANDS)
+    def test_feat_branch_non_destructive_git_exempt(self, monkeypatch, command):
+        """feat 分支上的非破坏性 git 命令：直接放行，不进确认流程。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: False)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
+        assert is_risk is False, f"{command!r} 应在 feat 分支放行，reason={reason}"
+
+    @pytest.mark.parametrize("command", NON_DESTRUCTIVE_GIT_COMMANDS)
+    def test_main_branch_non_destructive_git_not_exempt(self, monkeypatch, command):
+        """main 分支上的非破坏性 git 命令：不享受豁免，至少进 gray 确认。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: True)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
+        # 注意：git commit 在 main 分支会被 v3 硬闸拦截，其他命令进 gray
+        assert is_risk is True, f"{command!r} 在 main 分支不应豁免, reason={reason}"
+
+    @pytest.mark.parametrize("command", DESTRUCTIVE_GIT_COMMANDS)
+    def test_feat_branch_destructive_git_still_blocked(self, monkeypatch, command):
+        """feat 分支上的破坏性 git 命令：照样拦截或确认，零误伤。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: False)
+        is_risk, reason = is_high_risk_tool("execute_terminal", {"command": command})
+        assert is_risk is True, f"{command!r} 在 feat 分支仍应被拦, reason={reason}"
+
+    def test_non_bobo_repo_git_not_exempt(self, monkeypatch):
+        """非 bobo 自身仓库的 git 命令：不享受 feat 豁免。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_bobo_repo_dir", lambda _dir: False)
+        is_risk, reason = is_high_risk_tool(
+            "execute_terminal", {"command": "git status"}
+        )
+        assert is_risk is True, f"非 bobo 仓库 git status 应进确认, reason={reason}"
+
+    def test_echo_git_commit_string_not_exempt(self, monkeypatch):
+        """echo 字符串里的 git commit 不应误触 feat 豁免（echo 本身 safe，不会命中 git 闸）。"""
+        import core.command_safety as _cs
+        monkeypatch.setattr(_cs, "_is_on_main_branch", lambda _dir: False)
+        is_risk, reason = is_high_risk_tool(
+            "execute_terminal",
+            {"command": "echo 'git commit -m test'"},
+        )
+        assert is_risk is False, f"echo 字符串不应被 git 闸误触, reason={reason}"
 
 
 # ── self-hosting v3：main 分支 git commit 物理闸 ──
@@ -400,9 +485,10 @@ class TestSelfHostingGitMainCommitGate:
     # ── 放行：git merge（不经过 git commit 命令，天然不受影响）──
 
     def test_git_merge_not_blocked(self):
-        """git merge --no-ff feat/test → 放行。"""
+        """git merge 不经过 git commit 命令，因此不受 v3 main-commit 闸影响；
+        但 git 已移出全局白名单，merge 也不在 feat 豁免范围，故仍需确认。"""
         is_risk, reason = is_high_risk_tool("execute_terminal", {"command": "git merge --no-ff feat/test"})
-        assert is_risk is False
+        assert is_risk is True, f"git merge 应需要确认, reason={reason}"
 
     # ── 放行：非 commit 的 git 命令零误伤 ──
 
