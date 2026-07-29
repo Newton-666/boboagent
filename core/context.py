@@ -214,14 +214,14 @@ class ContextMixin:
         if total_msg_count <= budget:
             return
 
-        # 找到末尾 keep_count 条 user 消息对应的起始索引
-        user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
-        keep_user_count = min(len(user_indices), max(1, keep_count))
-        if keep_user_count <= 0:
-            return
-
-        # 找到分割点：保留最近 keep_user_count 个用户轮次
-        split_idx = user_indices[-keep_user_count]
+        # 找到分割点：保留最近 keep_count 条【消息】（破案 2026-07-29：
+        # 此前 keep_count 被当"用户轮次"用，工具密集型会话中 30 轮 ≈ 全部
+        # 历史 → 压缩永久空转、零归档零事件。单位必须也是消息条数）
+        split_idx = max(0, total_msg_count - keep_count)
+        # 切割点对齐到 user 消息边界（向前找，保证切在回合开头）
+        while (split_idx > 0 and
+               self.history[split_idx].get("role") != "user"):
+            split_idx -= 1
         # 安全边界：split 点不能切在 tool_calls/tool_result 配对中间。
         while (split_idx < len(self.history) and
                self.history[split_idx].get("role") == "tool"):
@@ -271,6 +271,30 @@ class ContextMixin:
                 else:
                     text_parts.append(f"{label}: {content[:200]}")
         if not text_parts:
+            # 纯工具记录段（无 user/assistant 文本）：即便无法生成摘要，
+            # 也必须归档 + 发事件——否则压缩静默空转（2026-07-29 破案）
+            session_id = getattr(self, 'sid', '')
+            _archive_compressed(
+                session_id=session_id,
+                old_msgs=old_msgs,
+                summary="(纯工具记录段，无文本摘要)",
+                pre_count=pre_msg_count,
+                post_count=len(self.history),
+                pre_tokens=pre_tokens,
+                post_tokens=_estimate_tokens(self.history),
+            )
+            try:
+                bus.write("context.compressed", {
+                    "session_id": session_id,
+                    "pre_msg_count": pre_msg_count,
+                    "post_msg_count": len(self.history),
+                    "pre_tokens": pre_tokens,
+                    "post_tokens": _estimate_tokens(self.history),
+                    "summary_length": 0,
+                    "archived_count": len(old_msgs),
+                })
+            except Exception:
+                logger.warning("context.compressed 事件写入失败（静默降级）", exc_info=True)
             return
         old_text = "\n".join(text_parts)
 
