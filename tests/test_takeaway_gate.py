@@ -162,3 +162,43 @@ class TestTakeawayGate:
         # 短内容但带价值关键词 → 放行
         assert Engine._takeaway_worthy("密码是 123", "收到") is True, "含密码应放行"
         assert Engine._takeaway_worthy("部署到服务器", "好的") is True, "含部署应放行"
+
+    def test_tool_round_releases_gate(self, monkeypatch):
+        """工具回合无条件放行（终审补漏 2026-07-29）：工作回合即便收尾文字
+        很短（'改完了'），也必须打 takeaway 调用——宁可多打不可漏记。"""
+        fake_llm = FakeLLMCaller([("改完了", None)])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+        _enable_proactive(engine)
+
+        # 模拟刚经历工具回合的工作现场
+        engine.current_tool_round = 2
+        engine.history = [
+            {"role": "user", "content": "把配置改一下"},
+            {"role": "assistant", "content": "改完了"},
+        ]
+
+        engine._extract_takeaways()
+
+        assert fake_llm.call_count >= 1, (
+            "工具回合应放行 takeaway 调用，实际 LLM 未被调用"
+        )
+
+    def test_no_tool_round_short_text_still_skipped(self, monkeypatch):
+        """对照组：无工具回合 + 同样的短文字 → 仍然跳过。"""
+        fake_llm = FakeLLMCaller([("改完了", None)])
+        fake_tools = FakeToolExecutor()
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+        _enable_proactive(engine)
+
+        engine.current_tool_round = 0
+        engine.history = [
+            {"role": "user", "content": "帮忙弄一下"},
+            {"role": "assistant", "content": "弄好了"},
+        ]
+
+        engine._extract_takeaways()
+
+        assert fake_llm.call_count == 0, (
+            f"无工具回合的短文字应跳过，实际调了 {fake_llm.call_count} 次"
+        )

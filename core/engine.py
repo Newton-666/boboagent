@@ -526,7 +526,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             user_msg = user_msgs[-1]
             asst_msg = asst_msgs[-1]
             # ── 预筛闸门：不值得则零成本跳过 ──
-            if not self._takeaway_worthy(user_msg, asst_msg):
+            # 终审补漏（2026-07-29）：工具回合无条件放行——工作回合默认有
+            # 沉淀价值（任务单原则：宁可多打不可漏记），即便收尾文字很短。
+            _has_tool_round = getattr(self, 'current_tool_round', 0) > 0
+            if not _has_tool_round and not self._takeaway_worthy(user_msg, asst_msg):
                 event_bus.write("takeaway.skipped", {
                     "reason": "local_gate",
                     "user_len": len(user_msg),
