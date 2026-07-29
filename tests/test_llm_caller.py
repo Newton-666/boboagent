@@ -130,6 +130,34 @@ class TestHTTPStatusCodeClassification:
         assert error_type == "bad_request"
         assert retryable is False
 
+    def test_429_insufficient_quota_is_fatal_not_retryable(self):
+        """票 U：balance error 含 insufficient_quota → fatal，不重试."""
+        error_type, retryable, message = _classify_error(
+            status_code=429,
+            response_body='{"error": {"message": "Insufficient quota", "type": "insufficient_quota"}}'
+        )
+        assert error_type == "fatal_insufficient_quota"
+        assert retryable is False
+        assert "余额" in message or "quota" in message.lower()
+
+    def test_429_deepseek_insufficient_balance_is_fatal(self):
+        """票 U：DeepSeek 格式 429 + Insufficient Balance → fatal，不重试."""
+        error_type, retryable, message = _classify_error(
+            status_code=429,
+            response_body='{"error": {"message": "Insufficient Balance"}}'
+        )
+        assert error_type == "fatal_insufficient_quota"
+        assert retryable is False
+
+    def test_429_without_insufficient_quota_still_retryable(self):
+        """票 U：纯限流 429 不含 insufficient_quota → 仍然是 rate_limit 可重试."""
+        error_type, retryable, message = _classify_error(
+            status_code=429,
+            response_body='{"error": {"message": "Rate limit exceeded", "type": "requests"}}'
+        )
+        assert error_type == "rate_limit"
+        assert retryable is True
+
 
 class TestExceptionClassification:
     """Classification based on Python exception objects."""
