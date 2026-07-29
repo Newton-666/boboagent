@@ -1014,7 +1014,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             if not self._ledger_reminded and self.current_tool_round >= 2 and not self.task_ledger:
                 self.history.insert(0, {
                     "role": "system",
-                    "content": "注意：检测到多步任务但未建台账，请立即用 task_ledger 建账再继续。"
+                    "content": "注意：检测到多步任务但未建台账，task_ledger 就在你的可用工具列表中，请直接调用它建账再继续。"
                 })
                 self._ledger_reminded = True
                 logger.debug("EXECUTING no-ledger reminder injected")
@@ -1134,7 +1134,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                         })
                         if self._ledger_reinject_count < 2:
                             self._ledger_reinject_count += 1
-                            rej_msg = "本回合调用了工具但没有建立任务台账。请立即用 task_ledger 建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
+                            rej_msg = "本回合调用了工具但没有建立任务台账。task_ledger 就在你的可用工具列表中，请直接调用它建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
                             self._append_to_history("user", rej_msg)
                             self._pending_content = None
                             self._pending_tool_calls = None
