@@ -9,7 +9,6 @@ LLM 的手：创建/更新/查看任务台账。
   task_ledger(action="list")
 """
 
-import contextvars
 import json
 import logging
 import time
@@ -27,25 +26,18 @@ _VALID_STATUSES = {"pending", "in_progress", "done"}
 # ── 模块级全局台账（向后兼容：无 Engine 上下文时回退到此处） ──
 _TASK_LEDGER: list[dict] = []
 
-# ── 票 L：per-engine 上下文变量 ──
-# ToolRunnerMixin._execute_tool_loop 在调用 task_ledger 前 set(self)，
-# tool_executor 通过 copy_context() 把上下文传播到工具执行线程。
-current_engine_var: contextvars.ContextVar = contextvars.ContextVar(
-    "task_ledger_engine", default=None
-)
+# ── 票 L：per-engine 隔离通过显式传参实现，详见 tool_executor.execute_tool ──
 
 
-def _current_ledger() -> list[dict]:
-    """返回当前 Engine 的台账；无 Engine 上下文时回退模块级全局台账。"""
-    engine = current_engine_var.get()
+def _current_ledger(engine=None) -> list[dict]:
+    """返回当前 Engine 的台账；无 engine 时回退模块级全局台账。"""
     if engine is not None:
         return engine.task_ledger
     return _TASK_LEDGER
 
 
-def _set_current_ledger(ledger: list[dict]):
-    """设置当前 Engine 的台账；无 Engine 上下文时回退模块级全局台账。"""
-    engine = current_engine_var.get()
+def _set_current_ledger(ledger: list[dict], engine=None):
+    """设置当前 Engine 的台账；无 engine 时回退模块级全局台账。"""
     if engine is not None:
         engine.task_ledger = ledger
     else:
@@ -89,13 +81,14 @@ def _set_ledger(ledger: list[dict]):
     _set_current_ledger(ledger)
 
 
-def execute(action: str = "list", items: list = None) -> str:
+def execute(action: str = "list", items: list = None, _engine=None) -> str:
     """管理任务台账。
 
     Args:
         action: "create"（整本替换建账）, "update"（按 id 改 status）, "list"（查账）
         items: 台账项列表，每项格式 {"id": str, "title": str, "status": "pending"|"in_progress"|"done"}
                create 时必填；update 时传要更新的项（至少含 id + status）；list 时忽略。
+        _engine: 内部注入的 Engine 实例，schema 不暴露。优先读写 engine.task_ledger。
     """
     if action == "create":
         if not items:
@@ -117,8 +110,8 @@ def execute(action: str = "list", items: list = None) -> str:
             return "❌ 台账项 id 必须唯一"
 
         # 建账
-        _set_current_ledger([])
-        _ledger = _current_ledger()
+        _set_current_ledger([], _engine)
+        _ledger = _current_ledger(_engine)
         for item in items:
             entry = {
                 "id": item["id"],
@@ -137,7 +130,7 @@ def execute(action: str = "list", items: list = None) -> str:
         if not isinstance(items, list):
             return "❌ items 必须是列表"
 
-        _ledger = _current_ledger()
+        _ledger = _current_ledger(_engine)
         if not _ledger:
             return "❌ 台账为空，无法更新。请先创建台账。"
 
@@ -179,7 +172,7 @@ def execute(action: str = "list", items: list = None) -> str:
         return "\n".join(parts)
 
     elif action == "list":
-        _ledger = _current_ledger()
+        _ledger = _current_ledger(_engine)
         if not _ledger:
             return "📋 台账为空"
 

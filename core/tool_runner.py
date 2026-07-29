@@ -1,6 +1,5 @@
 """工具执行 — 并行调度、错误分析、密钥脱敏、自动 diff、自动运行、文件回滚"""
 
-import contextvars
 import json
 from config import BOBO_DATA_DIR
 import logging
@@ -312,17 +311,10 @@ class ToolRunnerMixin:
                         pass
             self._notify("tool_call", {"name": tool_name, "args": tool_args, "context": context, "status": "start"})
             _tool_t0 = time.time()
-            # ── 票 L：task_ledger 需要路由到调用方 Engine 的台账 ──
-            _ledger_token = None
+            # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
             if tool_name == "task_ledger":
-                from tools.task_ledger import current_engine_var as _ledger_engine_var
-                _ledger_token = _ledger_engine_var.set(self)
-            try:
-                future = executor.submit(_execute_tool, tool_name, tool_args)
-            finally:
-                if _ledger_token is not None:
-                    from tools.task_ledger import current_engine_var as _ledger_engine_var
-                    _ledger_engine_var.reset(_ledger_token)
+                tool_args["_engine"] = self
+            future = executor.submit(_execute_tool, tool_name, tool_args)
             future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)
 
