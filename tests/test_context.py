@@ -190,3 +190,83 @@ class TestHistoryCompression:
         engine._compress_history()
         # Last exchange should still be present
         assert engine.history[-2:] == last_before
+
+
+from core.context import ContextMixin
+
+
+class _TestMixin(ContextMixin):
+    """最小化 ContextMixin 子类，用于测试 _get_filtered_tools。"""
+    current_user_input = ""
+    _compressed = False
+
+
+class TestLedgerVisibility:
+    """票 Z3.1：对每个分类路径验证 _get_filtered_tools 结果包含 task_ledger。"""
+
+    @staticmethod
+    def _filtered(query: str):
+        obj = _TestMixin()
+        obj.current_user_input = query
+        return obj._get_filtered_tools()
+
+    def test_code_category(self):
+        """code 分类代表性输入 → 过滤列表含 task_ledger"""
+        for q in ["写代码实现", "write a function", "implement feature", "debug the bug", "create a file"]:
+            result = self._filtered(q)
+            assert result is not None, f"code 分类应返回过滤列表，输入: {q}"
+            names = [t.get("function", {}).get("name", "") for t in result]
+            assert "task_ledger" in names, f"code 分类缺 task_ledger，输入: {q}"
+
+    def test_file_category(self):
+        """file 分类代表性输入 → 过滤列表含 task_ledger"""
+        for q in ["读文件", "read file", "list file", "文件夹", "directory listing"]:
+            result = self._filtered(q)
+            assert result is not None, f"file 分类应返回过滤列表，输入: {q}"
+            names = [t.get("function", {}).get("name", "") for t in result]
+            assert "task_ledger" in names, f"file 分类缺 task_ledger，输入: {q}"
+
+    def test_macos_category(self):
+        """macos 分类代表性输入 → 过滤列表含 task_ledger"""
+        for q in ["帮我提醒", "notification", "clipboard copy", "remind me"]:
+            result = self._filtered(q)
+            assert result is not None, f"macos 分类应返回过滤列表，输入: {q}"
+            names = [t.get("function", {}).get("name", "") for t in result]
+            assert "task_ledger" in names, f"macos 分类缺 task_ledger，输入: {q}"
+
+    def test_web_category(self):
+        """web 分类代表性输入 → 过滤列表含 task_ledger"""
+        for q in ["search google", "google it", "look up python", "browse the web", "what is python"]:
+            result = self._filtered(q)
+            assert result is not None, f"web 分类应返回过滤列表，输入: {q}"
+            names = [t.get("function", {}).get("name", "") for t in result]
+            assert "task_ledger" in names, f"web 分类缺 task_ledger，输入: {q}"
+
+    def test_obsidian_no_filter(self):
+        """obsidian 分类（无过滤）→ 返回 None（全量），task_ledger 隐含可见"""
+        for q in ["笔记", "obsidian note", "vault search", "日记"]:
+            result = self._filtered(q)
+            assert result is None, f"obsidian 应返回 None（无过滤），输入: {q}"
+
+    def test_notion_no_filter(self):
+        """notion 分类（无过滤）→ 返回 None（全量）"""
+        for q in ["notion页面", "notion database"]:
+            result = self._filtered(q)
+            assert result is None, f"notion 应返回 None，输入: {q}"
+
+    def test_email_no_filter(self):
+        """email 分类（无过滤）→ 返回 None（全量）"""
+        for q in ["邮件", "check mail", "inbox"]:
+            result = self._filtered(q)
+            assert result is None, f"email 应返回 None，输入: {q}"
+
+    def test_unclassified_no_filter(self):
+        """无分类输入 → 返回 None（全量），行为不变"""
+        for q in ["你好", "今天天气不错", "what do you think", "random chat"]:
+            result = self._filtered(q)
+            assert result is None, f"无分类应返回 None，输入: {q}"
+
+    def test_empty_input_no_filter(self):
+        """空输入 → 返回 None"""
+        result = self._filtered("")
+        assert result is None
