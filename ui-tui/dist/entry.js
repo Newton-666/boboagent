@@ -58823,6 +58823,10 @@ function createGatewayEventHandler(ctx) {
           sys(p.text);
           return;
         }
+        if (p.kind === "turn_summary" || p.kind === "turn_exit") {
+          sys(p.text);
+          return;
+        }
         if (!p.kind || p.kind === "status") {
           return;
         }
