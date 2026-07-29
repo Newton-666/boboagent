@@ -488,6 +488,14 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           return
         }
 
+        // 票 M 补丁：回合小结/退出标记必须留在消息流（用户需求 2026-07-29：
+        // "像运行结束以后汇报那样的形式"），不能只在状态栏 4 秒快闪。
+        if (p.kind === 'turn_summary' || p.kind === 'turn_exit') {
+          sys(p.text)
+          // 状态栏文本保留至下一回合（不走 restoreStatusAfter 快闪重置）
+          return
+        }
+
         if (!p.kind || p.kind === 'status') {
           return
         }
