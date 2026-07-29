@@ -71,7 +71,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
     STATE_DONE = "done"
     STATE_ERROR = "error"
 
-    MAX_STEPS = 70
+    MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 70))
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
                  confirm_callback: Callable = None, test_mode: bool = False):
@@ -101,6 +101,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._pending_content = None
         self._pending_tool_calls = None
         self._step_count = 0
+        self._exit_reason = "completed"
         self._all_confirmed = False
         self._compressing = False
         self._compressed_this_turn = False  # 本轮已压缩过——不再触发
@@ -1197,6 +1198,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self._pending_content = None
         self._pending_tool_calls = None
         self._step_count = 0
+        self._exit_reason = "completed"
         self._all_confirmed = False
         self.verifier.attempted = False
 
@@ -1209,8 +1211,28 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         while self.state not in (self.STATE_DONE, self.STATE_ERROR):
             self._step_count += 1
             if self._step_count > self.MAX_STEPS:
-                self._notify("thinking", {"phase": "continuing", "message": "步骤已用完，正在生成最终回复..."})
-                self._emit_state_change(self.STATE_RESPONDING, "continuing")
+                # ── 票 W：步数熔断 — 保险丝不许伪装成正常收工 ──
+                self._exit_reason = "max_steps"
+                # 合成收尾消息（不调 LLM，直接模板化）
+                pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
+                if pending_items:
+                    pending_titles = "、".join(f'「{e["title"][:30]}」' for e in pending_items)
+                    ledger_line = f"台账 {len(pending_items)} 项未完成：{pending_titles}"
+                else:
+                    ledger_line = ""
+                fuse_msg = (
+                    '⚠️ 步数保险丝触发（已用 {self._step_count}/{self.MAX_STEPS} 步），回合强制收尾。\n'
+                    '{ledger_line}\n'
+                    '发送「继续」即可接着干，进度在台账里。'
+                ).format(self=self, ledger_line=ledger_line)
+                self._notify("complete", {"content": fuse_msg})
+                event_bus.write("engine.step_fuse", {
+                    "session_id": getattr(self, "sid", ""),
+                    "step_count": self._step_count,
+                    "pending_items": len(pending_items) if pending_items else 0,
+                    "tool_round": self.current_tool_round,
+                })
+                self._emit_state_change(self.STATE_DONE, "max_steps fuse")
                 break
             if self._step_count >= 50 and self._step_count % 5 == 0:
                 self._notify("thinking", {"phase": "continuing",
