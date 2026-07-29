@@ -294,19 +294,22 @@ def _emit_stream_stall(event_bus, session_id: str, received_chunks: int, elapsed
         _logger.warning("llm.stream_stall event write failed", exc_info=True)
 
 
-def _classify_error(exception: Exception = None, status_code: int = None) -> tuple:
+def _classify_error(exception: Exception = None, status_code: int = None,
+                    response_body: str = None) -> tuple:
     """
     对 API 调用错误进行分类，判断是否可重试。
     
     Args:
         exception:  请求抛出的异常对象，如 ConnectionError、Timeout 等
         status_code: HTTP 响应状态码，如 401、429、500 等
+        response_body: 响应体文本（用于区分同状态码不同错误，如 429 余额不足 vs 限流）
         
     Returns:
         tuple: (error_type: str, retryable: bool, message: str)
             - error_type: 错误类型标识
                 "timeout"       — 连接超时或读取超时
                 "rate_limit"    — 限流 (429)
+                "fatal_insufficient_quota" — 余额不足 (429 + insufficient_quota)
                 "server_error"  — 服务器错误 (5xx)
                 "auth_error"    — 认证失败 (401/403)
                 "bad_request"   — 请求错误 (400/其他4xx)
@@ -338,13 +341,24 @@ def _classify_error(exception: Exception = None, status_code: int = None) -> tup
     
     # ── 基于状态码分类 ──
     if status_code is not None:
+        # 余额不足关键词（小写匹配，同覆盖 401/403/429）
+        _body_lower = response_body.lower() if response_body else ""
+        _has_insufficient = any(kw in _body_lower for kw in
+                                ["insufficient balance", "insufficient_quota", "余额不足", "balance insufficient"])
+        
         if status_code == 401:
+            if _has_insufficient:
+                return ("fatal_insufficient_quota", False, "API 余额不足，请检查账户余额或充值")
             return ("auth_error", False, "认证失败，请检查 API Key 是否正确")
         
         if status_code == 403:
+            if _has_insufficient:
+                return ("fatal_insufficient_quota", False, "API 余额不足，请检查账户余额或充值")
             return ("auth_error", False, "权限不足，API Key 无权限访问此资源")
         
         if status_code == 429:
+            if _has_insufficient:
+                return ("fatal_insufficient_quota", False, "API 余额不足，请检查账户余额或充值")
             return ("rate_limit", True, "请求过于频繁，已被限流")
         
         if 500 <= status_code < 600:
@@ -420,7 +434,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                 # ── HTTP 状态码检查 ──
                 if response.status_code != 200:
                     error_type, retryable, message = _classify_error(
-                        status_code=response.status_code
+                        status_code=response.status_code,
+                        response_body=response.text[:500]
                     )
                     if retryable and attempt < MAX_RETRIES:
                         delay = RETRY_DELAY_BASE * (2 ** attempt)
