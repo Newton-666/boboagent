@@ -265,7 +265,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
     turnController.clearStatusTimer()
     turnController.statusTimer = setTimeout(() => {
       turnController.statusTimer = null
-      patchUiState({ status: statusFromBusy() })
+      patchUiState({ status: statusFromBusy(), statusKind: '' })
     }, ms)
   }
 
@@ -473,12 +473,14 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
                 : 'ready'
 
           setStatus(brief)
+          patchUiState({ statusKind: 'goal' })
           restoreStatusAfter(6000)
 
           return
         }
 
         setStatus(p.text)
+        patchUiState({ statusKind: p.kind || '' })
 
         if (p.kind === 'compressing') {
           sys(p.text)
@@ -885,6 +887,8 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         }
 
         setStatus('ready')
+
+        patchUiState({ statusKind: '' })
 
         if (ev.payload?.usage) {
           patchUiState(state => ({ ...state, usage: { ...state.usage, ...ev.payload!.usage } }))

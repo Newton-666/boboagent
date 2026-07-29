@@ -520,10 +520,13 @@ export function StatusRule({
         <Box flexDirection="row" flexShrink={0}>
           <Text color={t.color.border}>{'─ '}</Text>
           {busy ? (
-            <FaceTicker color={statusColor} startedAt={turnStartedAt} style={indicatorStyle} />
+            <>
+              <Text color={statusColor}>● </Text>
+              <FaceTicker color={statusColor} startedAt={turnStartedAt} style={indicatorStyle} />
+            </>
           ) : showNotice ? null : (
             <Text color={statusColor} wrap="truncate-end">
-              {status}
+              ● {status}
             </Text>
           )}
         </Box>
