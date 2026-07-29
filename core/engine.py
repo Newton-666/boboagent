@@ -125,6 +125,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_pending_cleanup: bool = False
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
+        self._ledger_reminded: bool = False  # 票Z 缝1：无账提醒标记
         # 主动模式管理器（含记忆连接 + 参与度追踪）
         self.proactive = ProactiveManager(llm_caller=self.llm_caller)
         # 技能标准加载器
@@ -507,11 +508,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
 
         return False
 
-    def _extract_takeaways(self) -> list[str]:
+    def _extract_takeaways(self, fallback_content: str = "") -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。
 
-        入口有预筛闸门 _takeaway_worthy，不值得的回合跳过 LLM 调用。
-        总开关：环境变量 BOBO_TAKEAWAYS=off 可彻底禁用。
+        fallback_content: 当 history 中 assistant 消息未落账时，以此为源。
         """
         import os as _os
         if _os.environ.get("BOBO_TAKEAWAYS", "").lower() == "off":
@@ -522,9 +522,18 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             asst_msgs = [m.get("content", "") for m in self.history[-4:]
                           if m.get("role") == "assistant" and m.get("content")]
             if not user_msgs or not asst_msgs:
+                # 收工闸推迟落账时，用 fallback_content 替代
+                if asst_msgs:
+                    pass  # 有历史消息正常用
+                elif fallback_content:
+                    asst_msg = fallback_content
+                else:
+                    return []
+            else:
+                asst_msg = asst_msgs[-1]
+            user_msg = user_msgs[-1] if user_msgs else ""
+            if not user_msg:
                 return []
-            user_msg = user_msgs[-1]
-            asst_msg = asst_msgs[-1]
             # ── 预筛闸门：不值得则零成本跳过 ──
             # 终审补漏（2026-07-29）：工具回合无条件放行——工作回合默认有
             # 沉淀价值（任务单原则：宁可多打不可漏记），即便收尾文字很短。
@@ -1001,18 +1010,22 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             self._pending_tool_calls = None
             self.current_depth += 1
             self.current_tool_round += 1
+            # ── 票Z 缝1：无账工作回合强制建账 ──
+            if not self._ledger_reminded and self.current_tool_round >= 2 and not self.task_ledger:
+                self.history.insert(0, {
+                    "role": "system",
+                    "content": "注意：检测到多步任务但未建台账，请立即用 task_ledger 建账再继续。"
+                })
+                self._ledger_reminded = True
+                logger.debug("EXECUTING no-ledger reminder injected")
             self._emit_state_change(self.STATE_THINKING, "next tool round")
         elif self.state == self.STATE_RESPONDING:
             if self._pending_content:
-                self._append_to_history("assistant", self._pending_content)
-                # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
-                if getattr(self.proactive, '_last_memory_ids', None):
-                    self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
-                    self.proactive._last_memory_ids = []
+                # ── 票K/Z 收工闸在前，内容推迟落 history（闸可能回注/修改） ──
                 # 自动草稿记忆：从本轮对话提取关键结论
                 if self.proactive.mode != "off":
                     logger.debug("RESPONDING extract_takeaways start")
-                    takeaways = self._extract_takeaways()
+                    takeaways = self._extract_takeaways(fallback_content=self._pending_content)
                     if takeaways:
                         try:
                             from tools.v5_memory import add_entry, bump_signal
@@ -1039,6 +1052,40 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     logger.debug("RESPONDING maybe_propose_skill start")
                     self.tracker.maybe_propose_skill()
                     logger.debug("RESPONDING maybe_propose_skill done")
+                # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
+                if self._pending_content:
+                    _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}
+                    if not any(w in self._pending_content for w in _COMPLETION_WORDS):
+                        _PROMISE_RE = re.compile(
+                            r'(我将|我会|让我|接下来|下一步|稍后|一会|待会).{0,10}(继续|执行|运行|跑|处理|完成|修复|修改|测试)'
+                            r'|(现在|马上|这就).{0,6}(跑|执行|运行|开始)'
+                        )
+                        if _PROMISE_RE.search(self._pending_content):
+                            _has_pending = any(e.get("status") != "done" for e in self.task_ledger)
+                            if _has_pending or not self.task_ledger:
+                                event_bus.write("goal_gate.promise_detected", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "content_snippet": self._pending_content[:100],
+                                })
+                                if self._ledger_reinject_count < 2:
+                                    self._ledger_reinject_count += 1
+                                    rej_msg = "检测到未完成的承诺。请继续执行，不要说明、不要道歉，直接继续。"
+                                    self._append_to_history("user", rej_msg)
+                                    self._pending_content = None
+                                    self._pending_tool_calls = None
+                                    self.current_depth += 1
+                                    logger.debug("RESPONDING promise re-injection #%d",
+                                                 self._ledger_reinject_count)
+                                    self._emit_state_change(self.STATE_THINKING, "promise re-injection")
+                                    return
+                                else:
+                                    event_bus.write("goal_gate.released", {
+                                        "session_id": getattr(self, "sid", ""),
+                                        "reason": "promise_exhausted",
+                                        "reinject_count": self._ledger_reinject_count,
+                                    })
+                                    warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
+                                    self._pending_content = (self._pending_content or "") + warning
                 # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
                 pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
                 if pending_items:
@@ -1059,7 +1106,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                         self._emit_state_change(self.STATE_THINKING, "ledger re-injection")
                         return
                     else:
-                        # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言
+                        # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言 + 事件
                         pending_titles = ", ".join(
                             f'"{e["title"][:30]}"' for e in pending_items
                         )
@@ -1067,11 +1114,16 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             f"\n\n⚠️ 台账 {len(pending_items)} 项未销账，引擎放行：{pending_titles}"
                         )
                         self._pending_content = (self._pending_content or "") + warning
+                        event_bus.write("goal_gate.released", {
+                            "session_id": getattr(self, "sid", ""),
+                            "reason": "ledger_exhausted",
+                            "reinject_count": self._ledger_reinject_count,
+                            "pending_items": len(pending_items),
+                        })
                         logger.debug("RESPONDING ledger force-release: %d items still pending",
                                      len(pending_items))
                 elif not self.task_ledger:
                     # 台账为空：直接放行，写统计事件
-                    from core.event_bus import event_bus
                     event_bus.write("task.no_ledger", {
                         "session_id": getattr(self, "sid", ""),
                         "reason": "no ledger created",
@@ -1079,6 +1131,13 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     logger.debug("RESPONDING no ledger — direct done")
                 # else: 台账全 done → 正常放行（clean done，无操作）
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
+                self._ledger_reminded = False  # 票Z：同步重置
+                # ── 所有闸通过，内容落 history ──
+                self._append_to_history("assistant", self._pending_content)
+                # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
+                if getattr(self.proactive, '_last_memory_ids', None):
+                    self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
+                    self.proactive._last_memory_ids = []
                 # ── 票 K v2 §4 降级方案：终稿尾部附台账摘要行（面板替代） ──
                 if self.task_ledger:
                     done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
