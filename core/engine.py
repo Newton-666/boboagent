@@ -532,22 +532,37 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         if len(self.history) > self.MAX_HISTORY_MESSAGES:
             self._truncate_history()
 
-        # Token 预算检查（动态：从 provider context_length 推导）
+        # ── 票 T：msg_count 超阈值自动压缩归档 ──
         # 只在空闲态压缩——工具执行中途修改 history 会导致
         # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃。
-        # 每轮最多压缩一次——压缩无效不再重试（防无限循环）。
+        # 每轮最多压缩一次，压缩后幂等检查（msg_count 降到预算内）。
         if (not self._compressing and not self._compressed_this_turn
                 and self.state != self.STATE_EXECUTING):
-            from core.context import _estimate_tokens, _get_context_budget
-            est_tokens = _estimate_tokens(self.history)
-            budget = _get_context_budget()
-            # 追溯标记：估算超预算 50% 时扫描历史，给老工具结果补 [RESULT] 标记
-            if est_tokens > budget * 0.5:
-                self.tracker.retroactive_mark()
-            if est_tokens > budget:
-                self._notify("thinking", {"phase": "compressing", "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {budget}）"})
+            from core.context import _get_msg_count_budget, _estimate_tokens, _get_context_budget
+
+            msg_count = len(self.history)
+            msg_budget = _get_msg_count_budget()
+
+            if msg_count > msg_budget:
+                self._notify("thinking", {
+                    "phase": "compressing",
+                    "message": f"正在压缩历史上下文...（{msg_count} 条消息, 预算 {msg_budget} 条）"
+                })
                 self._compress_history()
                 self._compressed_this_turn = True
+            else:
+                # 仅当 msg_count 未超限时，降级做 token 预算检查（保留存量行为）
+                est_tokens = _estimate_tokens(self.history)
+                token_budget = _get_context_budget()
+                if est_tokens > token_budget * 0.5:
+                    self.tracker.retroactive_mark()
+                if est_tokens > token_budget:
+                    self._notify("thinking", {
+                        "phase": "compressing",
+                        "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {token_budget}）"
+                    })
+                    self._compress_history()
+                    self._compressed_this_turn = True
 
         messages = self.injector.build_messages(
             system_prompt=self.system_prompt,

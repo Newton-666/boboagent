@@ -163,17 +163,20 @@ class TestHistoryCompression:
         # History should be unchanged since it's tiny
         assert len(engine.history) == 2
 
-    def test_compression_flag_is_set_during_compression(self, engine):
+    def test_compression_flag_is_set_during_compression(self, engine, monkeypatch):
         engine.KEEP_EXCHANGES = 5  # 显式设回旧值兼容本测试
         engine.MAX_HISTORY_CHARS = 100
-        # Create enough history to trigger compression
-        for i in range(10):
+        # 票 T：设低 msg_count 预算触发压缩
+        import os as _os
+        _os.environ["BOBO_CONTEXT_BUDGET"] = "10"
+        # Create enough history to trigger compression (20 exchanges > keep_count)
+        for i in range(20):
             engine.history.append({"role": "user", "content": "x" * 100})
             engine.history.append({"role": "assistant", "content": "y" * 100})
         # This test just verifies no crash — actual compression requires a real LLM
         engine._compress_history()
         # After compression, we should have fewer messages
-        assert len(engine.history) < 20  # 20 messages before
+        assert len(engine.history) < 40  # 40 messages before
 
     def test_keep_exchanges_preserved(self, engine):
         engine.KEEP_EXCHANGES = 1
