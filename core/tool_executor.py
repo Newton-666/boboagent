@@ -83,7 +83,9 @@ def execute_tool(tool_name: str, arguments: dict, engine=None) -> str:
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
+            # 热修：注入前复制，禁止污染调用方字典本体（Engine 泄漏进 JSON 序列化会炸）
             if tool_name == "task_ledger" and "_engine" not in arguments:
+                arguments = dict(arguments)
                 arguments["_engine"] = engine
             future = executor.submit(func, **arguments)
             # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之

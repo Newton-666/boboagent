@@ -312,9 +312,13 @@ class ToolRunnerMixin:
             self._notify("tool_call", {"name": tool_name, "args": tool_args, "context": context, "status": "start"})
             _tool_t0 = time.time()
             # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
+            # 热修：必须注入到副本——tool_args 本体被后续 tool_result 通知引用，
+            # Engine 对象泄漏进 emit → json.dumps 会炸（Object of type Engine...）
+            exec_args = tool_args
             if tool_name == "task_ledger":
-                tool_args["_engine"] = self
-            future = executor.submit(_execute_tool, tool_name, tool_args)
+                exec_args = dict(tool_args)
+                exec_args["_engine"] = self
+            future = executor.submit(_execute_tool, tool_name, exec_args)
             future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)
 
