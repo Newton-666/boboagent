@@ -40,7 +40,7 @@ def _search_python(search_dir: Path, pattern: str, file_types: list[str],
         if file_path.name.startswith("."):
             continue
         if any(p in ("node_modules", "__pycache__", ".git", ".venv", "venv",
-                     "dist", "build", ".next", "coverage") for p in parts):
+                     "dist", "build", ".next", "coverage") for p in file_path.parts):
             continue
 
         try:
