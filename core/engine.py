@@ -544,10 +544,14 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             msg_budget = _get_msg_count_budget()
 
             if msg_count > msg_budget:
-                self._notify("thinking", {
-                    "phase": "compressing",
-                    "message": f"正在压缩历史上下文...（{msg_count} 条消息, 预算 {msg_budget} 条）"
-                })
+                # 静默压缩（用户 2026-07-29 要求）：压缩在后台完成，不占 TUI 状态栏。
+                # 调试时设 BOBO_SHOW_COMPRESS=1 恢复提示。可观测性走事件总线
+                # context.compressed，不打扰用户。
+                if os.environ.get("BOBO_SHOW_COMPRESS") == "1":
+                    self._notify("thinking", {
+                        "phase": "compressing",
+                        "message": f"正在压缩历史上下文...（{msg_count} 条消息, 预算 {msg_budget} 条）"
+                    })
                 self._compress_history()
                 self._compressed_this_turn = True
             else:
@@ -557,10 +561,11 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 if est_tokens > token_budget * 0.5:
                     self.tracker.retroactive_mark()
                 if est_tokens > token_budget:
-                    self._notify("thinking", {
-                        "phase": "compressing",
-                        "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {token_budget}）"
-                    })
+                    if os.environ.get("BOBO_SHOW_COMPRESS") == "1":
+                        self._notify("thinking", {
+                            "phase": "compressing",
+                            "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {token_budget}）"
+                        })
                     self._compress_history()
                     self._compressed_this_turn = True
 
