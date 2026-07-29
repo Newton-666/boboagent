@@ -311,6 +311,9 @@ class ToolRunnerMixin:
                         pass
             self._notify("tool_call", {"name": tool_name, "args": tool_args, "context": context, "status": "start"})
             _tool_t0 = time.time()
+            # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
+            if tool_name == "task_ledger":
+                tool_args["_engine"] = self
             future = executor.submit(_execute_tool, tool_name, tool_args)
             future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)

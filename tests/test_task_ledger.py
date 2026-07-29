@@ -161,6 +161,12 @@ class TestEngineLedgerReinjection:
         monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
                             lambda self: "You are a helpful assistant.")
 
+        engine = engine_mod.Engine(
+            llm_caller=llm_caller,
+            tool_executor=None,
+            test_mode=True,
+        )
+
         class FakeExecutor:
             def __call__(self, name, args):
                 if name == "task_ledger":
@@ -168,11 +174,7 @@ class TestEngineLedgerReinjection:
                     return execute(**args)
                 return f"[fake:{name}]"
 
-        engine = engine_mod.Engine(
-            llm_caller=llm_caller,
-            tool_executor=FakeExecutor(),
-            test_mode=True,
-        )
+        engine.tool_executor = FakeExecutor()
 
         def _fake_build_messages(system_prompt, user_input, tools_schema, extra_categories, session_id=""):
             msgs = [{"role": "system", "content": system_prompt}]
@@ -354,3 +356,161 @@ class TestLedgerImports:
         e = Engine(llm_caller=MagicMock(), tool_executor=MagicMock(), test_mode=True)
         assert hasattr(e, "task_ledger")
         assert hasattr(e, "_ledger_reinject_count")
+
+
+class TestLedgerPerEngineIsolation:
+    """票 L：task_ledger 必须路由到调用方 Engine 的台账，禁止跨 Engine 串味。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_module_ledger(self):
+        from tools.task_ledger import _set_ledger
+        _set_ledger([])
+        yield
+        _set_ledger([])
+
+    def _run_with_engine(self, engine, action, **kwargs):
+        """在指定 Engine 上下文中执行 task_ledger 工具。"""
+        from tools.task_ledger import execute
+        return execute(action=action, _engine=engine, **kwargs)
+
+    def test_two_engines_create_isolated_ledgers(self, monkeypatch):
+        """两个 Engine 各自 create，台账互不可见。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine_a = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+        engine_b = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine_a, "create", items=[
+            {"id": "a-1", "title": "任务 A1"},
+        ])
+        self._run_with_engine(engine_b, "create", items=[
+            {"id": "b-1", "title": "任务 B1"},
+        ])
+
+        assert len(engine_a.task_ledger) == 1
+        assert engine_a.task_ledger[0]["id"] == "a-1"
+        assert engine_a.task_ledger[0]["title"] == "任务 A1"
+
+        assert len(engine_b.task_ledger) == 1
+        assert engine_b.task_ledger[0]["id"] == "b-1"
+        assert engine_b.task_ledger[0]["title"] == "任务 B1"
+
+    def test_engine_update_does_not_affect_other_engine(self, monkeypatch):
+        """A 更新自己的台账不应影响 B。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine_a = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+        engine_b = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine_a, "create", items=[
+            {"id": "a-1", "title": "任务 A1"},
+        ])
+        self._run_with_engine(engine_b, "create", items=[
+            {"id": "b-1", "title": "任务 B1"},
+        ])
+
+        self._run_with_engine(engine_a, "update", items=[
+            {"id": "a-1", "status": "done"},
+        ])
+
+        assert engine_a.task_ledger[0]["status"] == "done"
+        assert engine_b.task_ledger[0]["status"] == "pending"
+
+    def test_module_ledger_untouched_by_engine_routing(self, monkeypatch):
+        """Engine 上下文路由不应污染模块级全局台账。"""
+        import core.engine as engine_mod
+        from tests.test_engine_e2e import FakeLLMCaller
+        from tools.task_ledger import _get_ledger
+
+        monkeypatch.setattr(engine_mod.Engine, "_build_system_prompt",
+                            lambda self: "You are a helpful assistant.")
+
+        engine = engine_mod.Engine(
+            llm_caller=FakeLLMCaller([]),
+            test_mode=True,
+        )
+
+        self._run_with_engine(engine, "create", items=[
+            {"id": "eng-1", "title": "引擎任务"},
+        ])
+
+        # 模块级全局台账应保持为空（测试 reset 已置空）
+        assert _get_ledger() == []
+        # Engine 自己的台账有内容
+        assert len(engine.task_ledger) == 1
+
+# ── 票 L 回归：真 ThreadPoolExecutor 路径 ──
+
+class TestLedgerRealThreadPool:
+    """真 ThreadPoolExecutor 路径回归测试（禁止 FakeExecutor 手动 set context）。"""
+
+    def test_real_executor_routes_to_engine_not_module(self, monkeypatch):
+        """execute_tool 带 engine 参数时，task_ledger 必须写入 Engine 而非模块级。"""
+        from core.tool_executor import execute_tool
+        from tools.task_ledger import _get_ledger, _set_ledger
+
+        _set_ledger([])  # 确保模块级干净
+
+        # 伪造一个带 task_ledger 属性的 "Engine"
+        class FakeEng:
+            def __init__(self):
+                self.task_ledger = []
+
+        fake_engine = FakeEng()
+
+        result = execute_tool(
+            "task_ledger",
+            {"action": "create", "items": [{"id": "real-1", "title": "真线程测试", "status": "pending"}]},
+            engine=fake_engine,
+        )
+
+        assert "✅ 台账已创建" in result
+        assert len(fake_engine.task_ledger) == 1
+        assert fake_engine.task_ledger[0]["id"] == "real-1"
+        # 模块级台账必须保持为空
+        assert _get_ledger() == []
+
+    def test_real_executor_without_engine_falls_back_to_module(self):
+        """execute_tool 不带 engine 参数时，回退模块级全局台账。
+        注意：ThreadPoolExecutor worker 线程中 global 赋值有跨线程可见性
+        限制，本条通过返回结果 + 直接 execute() 双验证。
+        """
+        from core.tool_executor import execute_tool
+        from tools.task_ledger import execute, _set_ledger
+
+        _set_ledger([])
+
+        # ThreadPoolExecutor 路径：不传 engine → 匿名台账（只能验证创建成功）
+        result = execute_tool(
+            "task_ledger",
+            {"action": "create", "items": [{"id": "mod-1", "title": "模块级测试", "status": "pending"}]},
+        )
+
+        assert "✅ 台账已创建" in result
+
+        # 直接 execute 验证模块级回退（同线程，无跨线程问题）
+        _set_ledger([])
+        result2 = execute(action="create", items=[{"id": "mod-2", "title": "直接调用", "status": "pending"}])
+        assert "✅ 台账已创建" in result2
+        result3 = execute(action="list")
+        assert "直接调用" in result3

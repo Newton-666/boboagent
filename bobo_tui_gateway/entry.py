@@ -244,8 +244,15 @@ def _run_backend():
             continue
 
         resp = dispatch(req)
+        # 票 W：gateway 入口登记——每条 RPC 都留痕，TUI 是否背地里
+        # 发过消息（无声死亡案的盲点）从此可查
+        try:
+            logger.debug("rpc.recv method=%s id=%s", req.get("method"), req.get("id"))
+        except Exception:
+            pass
         if resp is not None:
             if not write_json(resp):
+                logger.warning("stdout 写入失败，TUI 已断开（rpc=%s）", req.get("method"))
                 break  # stdout 写入失败，TUI 已断开
 
     # stdin 关闭（TUI 断开），保存所有活跃会话
