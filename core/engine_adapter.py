@@ -241,7 +241,7 @@ def run_engine(
         _exit_reason = "unknown"
         try:
             engine.run(text)
-            _exit_reason = "interrupted" if (interrupt_event and interrupt_event.is_set()) else "completed"
+            _exit_reason = "interrupted" if (interrupt_event and interrupt_event.is_set()) else getattr(engine, '_exit_reason', 'completed')
         except Exception as _run_exc:
             _exit_reason = f"exception:{type(_run_exc).__name__}"
             raise
