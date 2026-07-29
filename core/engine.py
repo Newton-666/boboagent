@@ -1123,12 +1123,43 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                         logger.debug("RESPONDING ledger force-release: %d items still pending",
                                      len(pending_items))
                 elif not self.task_ledger:
-                    # 台账为空：直接放行，写统计事件
-                    event_bus.write("task.no_ledger", {
-                        "session_id": getattr(self, "sid", ""),
-                        "reason": "no ledger created",
-                    })
-                    logger.debug("RESPONDING no ledger — direct done")
+                    # ── 票Z v3：无账硬闸 ──
+                    # 不设收束词豁免：收工汇报文化导致几乎所有收尾都会含完成词，
+                    # 豁免等于废掉闸。无台账就是无台账，谁说都不行。
+                    if self.current_tool_round > 0:
+                        # 工作回合无账 → 视同未完成，强制回注
+                        event_bus.write("goal_gate.no_ledger_detected", {
+                            "session_id": getattr(self, "sid", ""),
+                            "tool_round": self.current_tool_round,
+                        })
+                        if self._ledger_reinject_count < 2:
+                            self._ledger_reinject_count += 1
+                            rej_msg = "本回合调用了工具但没有建立任务台账。请立即用 task_ledger 建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
+                            self._append_to_history("user", rej_msg)
+                            self._pending_content = None
+                            self._pending_tool_calls = None
+                            self.current_depth += 1
+                            logger.debug("RESPONDING no-ledger re-injection #%d",
+                                         self._ledger_reinject_count)
+                            self._emit_state_change(self.STATE_THINKING, "no-ledger re-injection")
+                            return
+                        else:
+                            # 已达 2 次熔断上限 → 放行
+                            event_bus.write("goal_gate.released", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "no_ledger_exhausted",
+                                "reinject_count": self._ledger_reinject_count,
+                                "tool_round": self.current_tool_round,
+                            })
+                            warning = "\n\n⚠️ 工作回合未建台账，引擎放行"
+                            self._pending_content = (self._pending_content or "") + warning
+                    else:
+                        # 纯聊天回合，tool_round == 0 → 直接放行，行为不变
+                        event_bus.write("task.no_ledger", {
+                            "session_id": getattr(self, "sid", ""),
+                            "reason": "no ledger created",
+                        })
+                        logger.debug("RESPONDING no ledger (chat round) — direct done")
                 # else: 台账全 done → 正常放行（clean done，无操作）
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
                 self._ledger_reminded = False  # 票Z：同步重置

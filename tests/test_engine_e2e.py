@@ -580,6 +580,8 @@ class TestMultiTurn:
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
 
         engine.run(user_input="hi")
+        # 设台账避免无账闸误拦（本轮有工具调用但无台账）
+        engine.task_ledger = [{"id": "1", "title": "multi-turn", "status": "done"}]
         engine.run(user_input="echo x")
         engine.run(user_input="bye")
 

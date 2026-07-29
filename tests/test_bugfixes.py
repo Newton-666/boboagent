@@ -401,6 +401,8 @@ class TestSpawnWorkerAllowTools:
         )
         engine._proactive_mode = "off"
         engine.MAX_STEPS = 6
+        # spawn worker 的台账由父任务管理，设一个 done 避免无账闸误拦
+        engine.task_ledger = [{"id": "1", "title": "spawn think", "status": "done"}]
         engine.run("就 x 提出方案")
 
         # Check that tool results contain stub text, not real file content
