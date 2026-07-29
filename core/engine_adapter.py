@@ -307,19 +307,22 @@ def run_engine(
                 "text": f"引擎退出: {_exit_label}",
                 "session_id": sid,
             })
-        elif _summary_text:
-            emit("status.update", sid, {
-                "kind": "turn_summary",
-                "text": f"回合完成 · {_summary_text}",
-                "session_id": sid,
-            })
-        else:
-            # 纯闲聊回合：简洁收尾
-            emit("status.update", sid, {
-                "kind": "turn_summary",
-                "text": f"回合完成 · 耗时 {_elapsed:.0f}s",
-                "session_id": sid,
-            })
+        elif not result_text[0].strip():
+            # 用户 2026-07-29：收工汇报由 LLM 自己用自然语言交底（系统提示
+            # "收工汇报"节），机械统计行降级为兜底——只在回合没有任何收尾
+            # 话语（异常中断、空回复）时才出现。
+            if _summary_text:
+                emit("status.update", sid, {
+                    "kind": "turn_summary",
+                    "text": f"回合完成 · {_summary_text}",
+                    "session_id": sid,
+                })
+            else:
+                emit("status.update", sid, {
+                    "kind": "turn_summary",
+                    "text": f"回合完成 · 耗时 {_elapsed:.0f}s",
+                    "session_id": sid,
+                })
 
     except Exception as e:
         import logging
