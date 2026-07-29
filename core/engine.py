@@ -30,6 +30,14 @@ from core.skill_loader import SkillLoader
 from core.proactive import ProactiveManager
 from core.injector import PromptInjector
 
+# ── 票 S：takeaway 预筛正则 ──
+_TAKEAWAY_VALUE_KEYWORDS = re.compile(
+    r'决定|以后|记住|偏好|喜欢|习惯|以后都|改成|不要再用|规则|流程|'
+    r'选型|方案定|上线|部署|密码|密钥|配置'
+)
+_TAKEAWAY_CONFIRM_PATTERN = re.compile(
+    r'^(好的|好|嗯|行|ok|OK|谢谢|继续|收到|对|是的?|可以的?)[。！!~\s]*$'
+)
 
 # ── 票 H：运行时孤儿防线工具函数 ──
 
@@ -213,6 +221,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
 - 跟踪用户的原始目标。用户中途问别的问题时，回答完后回到原任务。
 - 每次工具返回结果后，检查是否回答了用户的问题。如果没有，继续。
 - 如果你需要更多信息才能继续，直接问用户。
+
+## 收工汇报（重要）
+
+每个任务回合结束时，你的最后一条回复必须是简短的收工汇报，用自然的语言交底：
+- **做完了什么**（一两句话，别罗列每个工具调用）
+- **还剩什么 / 下一步等什么**（如果有未完成事项；有任务台账时对照台账说明）
+- 全部完成就明确说"全部完成"，别含糊。
+
+禁止以工具调用框或半截过程话收尾。纯闲聊回合（问候、确认、问答）不受此限，自然回复即可。
 
 ## 记住指令
 
@@ -456,8 +473,49 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
 
+    @staticmethod
+    def _takeaway_worthy(user_msg: str, asst_msg: str) -> bool:
+        """纯本地预筛：判断本轮对话是否值得调用 LLM 提取 takeaways。
+
+        优先级：放行信号 > 跳过条件。放行信号命中任一即放行，
+        跳过条件命中任一即跳过。
+
+        Returns:
+            True → 放行（值得调 LLM）；False → 跳过（零 API 成本）。
+        """
+        user_stripped = user_msg.strip()
+        asst_stripped = asst_msg.strip()
+
+        # ── 放行信号（命中任一即放行，宁可多打不可漏记） ──
+        # 1. 价值关键词命中
+        if _TAKEAWAY_VALUE_KEYWORDS.search(user_stripped + asst_stripped):
+            return True
+        # 2. 内容足够长
+        if len(user_stripped) > 100 or len(asst_stripped) > 300:
+            return True
+
+        # ── 跳过条件（命中任一即跳过） ──
+        # 1. 短闲聊：双方均 < 40 字，且无价值关键词（已检查过）
+        if len(user_stripped) < 40 and len(asst_stripped) < 40:
+            return False
+        # 2. 纯确认/过渡词
+        if _TAKEAWAY_CONFIRM_PATTERN.match(user_stripped):
+            return False
+        # 3. 纯问答无沉淀：asst < 60 字且双方均无价值关键词
+        if len(asst_stripped) < 60:
+            return False
+
+        return False
+
     def _extract_takeaways(self) -> list[str]:
-        """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。"""
+        """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。
+
+        入口有预筛闸门 _takeaway_worthy，不值得的回合跳过 LLM 调用。
+        总开关：环境变量 BOBO_TAKEAWAYS=off 可彻底禁用。
+        """
+        import os as _os
+        if _os.environ.get("BOBO_TAKEAWAYS", "").lower() == "off":
+            return []
         try:
             user_msgs = [m.get("content", "") for m in self.history[-4:]
                          if m.get("role") == "user" and m.get("content")]
@@ -465,7 +523,17 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                           if m.get("role") == "assistant" and m.get("content")]
             if not user_msgs or not asst_msgs:
                 return []
-            context = f"用户: {user_msgs[-1][:300]}\nBobo: {asst_msgs[-1][:300]}"
+            user_msg = user_msgs[-1]
+            asst_msg = asst_msgs[-1]
+            # ── 预筛闸门：不值得则零成本跳过 ──
+            if not self._takeaway_worthy(user_msg, asst_msg):
+                event_bus.write("takeaway.skipped", {
+                    "reason": "local_gate",
+                    "user_len": len(user_msg),
+                    "asst_len": len(asst_msg),
+                })
+                return []
+            context = f"用户: {user_msg[:300]}\nBobo: {asst_msg[:300]}"
             prompt = [
                 {"role": "system", "content": (
                     "你是一个对话总结器。从以下对话中提取 1-2 条值得记住的关键结论。"
@@ -482,7 +550,13 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                        .get("message", {}).get("content", ""))
             takeaways = [t.strip() for t in content.split("\n")
                          if t.strip() and t.strip() != "无" and len(t.strip()) > 5]
-            return takeaways[:2]
+            results = takeaways[:2]
+            if results:
+                event_bus.write("takeaway.extracted", {
+                    "count": len(results),
+                    "items": results,
+                })
+            return results
         except Exception:
             return []
 
