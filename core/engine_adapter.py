@@ -3,6 +3,7 @@
 server.py 通过此模块调用 engine，不直接 import Engine 类。
 """
 
+import os
 import threading
 import time as _time
 
@@ -58,7 +59,18 @@ def run_engine(
         result_text = [""]
         last_usage = [{}]
 
+        # ── 票 M：回合边界追踪 / 心跳 / 回合小结 ──
+        _turn_start = [0.0]         # 首事件时间戳，0=未启动
+        _tool_calls = [0]           # 本轮工具调用计数
+        _unique_tools = set()       # 本轮去重工具名
+        _last_event_ts = [_time.time()]  # 末次事件时间戳
+        _hb_sec = int(os.environ.get("BOBO_TUI_HEARTBEAT_SEC", "15"))
+        _hb_stop = threading.Event()
+
         def on_event(event_type, data):
+            _last_event_ts[0] = _time.time()
+            if _turn_start[0] == 0.0:
+                _turn_start[0] = _time.time()
             if event_type == "thinking":
                 msg = data.get("message", "")
                 if msg:
@@ -68,6 +80,8 @@ def run_engine(
                         "session_id": sid,
                     })
             elif event_type == "tool_call":
+                _tool_calls[0] += 1
+                _unique_tools.add(data.get("name", ""))
                 emit("tool.start", sid, {
                     "tool_id": data.get("name", ""),
                     "name": data.get("name", ""),
@@ -209,6 +223,21 @@ def run_engine(
             _ebus.write("engine.thread.start", {"session_id": sid})
         except Exception:
             pass
+
+        # ── 票 M：心跳 daemon（引擎存活时每 N 秒推送"仍在工作"）──
+        def _hb_loop():
+            while not _hb_stop.wait(_hb_sec):
+                _idle = _time.time() - _last_event_ts[0]
+                if _idle >= _hb_sec and _turn_start[0] > 0:
+                    _elapsed = _time.time() - _turn_start[0]
+                    emit("status.update", sid, {
+                        "kind": "heartbeat",
+                        "text": f"仍在工作 · 已运行 {_elapsed:.0f}s",
+                        "session_id": sid,
+                    })
+        _hb_thread = threading.Thread(target=_hb_loop, daemon=True)
+        _hb_thread.start()
+
         _exit_reason = "unknown"
         try:
             engine.run(text)
@@ -253,6 +282,45 @@ def run_engine(
             "usage": last_usage[0],
         })
 
+        # ── 票 M：回合小结 + 退出标记（覆盖 message.complete 的 "ready"）──
+        _hb_stop.set()  # 停止心跳 daemon
+        _elapsed = _time.time() - _turn_start[0] if _turn_start[0] > 0 else 0
+
+        # 构建回合小结文案
+        _summary_parts = []
+        if _tool_calls[0] > 0:
+            _summary_parts.append(f"工具调用 {_tool_calls[0]} 次")
+            if _unique_tools:
+                _summary_parts.append(f"工具: {', '.join(sorted(_unique_tools))}")
+        if engine.task_ledger:
+            _done = sum(1 for t in engine.task_ledger if t.get("status") == "done")
+            _total = len(engine.task_ledger)
+            _summary_parts.append(f"台账 {_done}/{_total} done")
+
+        _summary_text = None
+        if _summary_parts:
+            _summary_text = f"耗时 {_elapsed:.0f}s · " + " · ".join(_summary_parts)
+        if _exit_reason != "completed":
+            _exit_label = _exit_reason.replace("exception:", "⚠️ 异常:")
+            emit("status.update", sid, {
+                "kind": "turn_exit",
+                "text": f"引擎退出: {_exit_label}",
+                "session_id": sid,
+            })
+        elif _summary_text:
+            emit("status.update", sid, {
+                "kind": "turn_summary",
+                "text": f"回合完成 · {_summary_text}",
+                "session_id": sid,
+            })
+        else:
+            # 纯闲聊回合：简洁收尾
+            emit("status.update", sid, {
+                "kind": "turn_summary",
+                "text": f"回合完成 · 耗时 {_elapsed:.0f}s",
+                "session_id": sid,
+            })
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -260,7 +328,23 @@ def run_engine(
             return  # 用户中断：不 emit error
         logger.exception("prompt.submit 后台线程执行失败")
         emit("error", sid, {"message": str(e), "session_id": sid})
+        # ── 票 M：异常路径回合小结 ──
+        try:
+            _hb_stop.set()
+            _elapsed = _time.time() - _turn_start[0] if _turn_start[0] > 0 else 0
+            emit("status.update", sid, {
+                "kind": "turn_summary",
+                "text": f"回合异常 · 耗时 {_elapsed:.0f}s · {str(e)[:120]}",
+                "session_id": sid,
+            })
+        except Exception:
+            pass
     finally:
+        # 兜底：确保心跳 daemon 停止（票 M）
+        try:
+            _hb_stop.set()
+        except Exception:
+            pass
         # 确保 _running 和 current_engines 注册表一定被清理，防止 is_running 永久卡 True
         with _running_lock:
             _running.pop(sid, None)

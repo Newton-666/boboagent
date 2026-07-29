@@ -55735,6 +55735,7 @@ var init_uiStore = __esm({
       showReasoning: false,
       sid: null,
       status: "summoning hermes\u2026",
+      statusKind: "",
       statusBar: "top",
       streaming: true,
       theme: DEFAULT_THEME,
@@ -58674,7 +58675,7 @@ function createGatewayEventHandler(ctx) {
     turnController.clearStatusTimer();
     turnController.statusTimer = setTimeout(() => {
       turnController.statusTimer = null;
-      patchUiState2({ status: statusFromBusy() });
+      patchUiState2({ status: statusFromBusy(), statusKind: "" });
     }, ms);
   };
   const scheduleStartupPrompt = () => {
@@ -58812,10 +58813,12 @@ function createGatewayEventHandler(ctx) {
           sys(p.text);
           const brief = p.text.startsWith("\u2713") ? "\u2713 goal complete" : p.text.startsWith("\u21BB") ? "\u21BB goal continuing" : p.text.startsWith("\u23F8") ? "\u23F8 goal paused" : "ready";
           setStatus(brief);
+          patchUiState2({ statusKind: "goal" });
           restoreStatusAfter(6e3);
           return;
         }
         setStatus(p.text);
+        patchUiState2({ statusKind: p.kind || "" });
         if (p.kind === "compressing") {
           sys(p.text);
           return;
@@ -59087,6 +59090,7 @@ function createGatewayEventHandler(ctx) {
           }
         }
         setStatus("ready");
+        patchUiState2({ statusKind: "" });
         if (ev.payload?.usage) {
           patchUiState2((state) => ({ ...state, usage: { ...state.usage, ...ev.payload.usage } }));
         }
@@ -63857,7 +63861,7 @@ function useMainApp(gw2) {
       goodVibesTick,
       sessionStartedAt: ui.sid ? sessionStartedAt : null,
       showStickyPrompt: !!stickyPrompt,
-      statusColor: statusColorOf(ui.status, ui.theme.color),
+      statusColor: statusColorOf(ui.statusKind, ui.busy, ui.theme.color),
       stickyPrompt,
       turnStartedAt: ui.sid ? turnStartedAt : null,
       // CLI parity: the classic prompt_toolkit status bar shows a red dot
@@ -63931,17 +63935,13 @@ var init_useMainApp = __esm({
       }
       return items[0]?.kind === "intro" ? [items[0], ...items.slice(-(MAX_HISTORY - 1))] : items.slice(-MAX_HISTORY);
     };
-    statusColorOf = (status, t) => {
-      if (status === "ready") {
-        return t.ok;
+    statusColorOf = (statusKind, busy, t) => {
+      if (busy) {
+        return t.statusWarn;
       }
-      if (status.startsWith("error")) {
-        return t.error;
-      }
-      if (status === "interrupted") {
-        return t.warn;
-      }
-      return t.muted;
+      if (statusKind === "error" || statusKind === "turn_exit") return t.error;
+      if (statusKind === "rate_limit") return t.warn;
+      return t.ok;
     };
   }
 });
@@ -65528,7 +65528,13 @@ function StatusRule({
     /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Box_default, { flexDirection: "row", flexShrink: 1, overflow: "hidden", width: leftWidth, children: [
       /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Box_default, { flexDirection: "row", flexShrink: 0, children: [
         /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Text, { color: t.color.border, children: "\u2500 " }),
-        busy ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(FaceTicker, { color: statusColor, startedAt: turnStartedAt, style: indicatorStyle }) : showNotice ? null : /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Text, { color: statusColor, wrap: "truncate-end", children: status })
+        busy ? /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(import_jsx_runtime19.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Text, { color: statusColor, children: "\u25CF " }),
+          /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(FaceTicker, { color: statusColor, startedAt: turnStartedAt, style: indicatorStyle })
+        ] }) : showNotice ? null : /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Text, { color: statusColor, wrap: "truncate-end", children: [
+          "\u25CF ",
+          status
+        ] })
       ] }),
       showNotice ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Box_default, { flexDirection: "row", flexShrink: 1, overflow: "hidden", children: /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Text, { color: noticeColor(notice.level, t), wrap: "truncate-end", children: notice.text }) }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Box_default, { flexDirection: "row", flexShrink: 0, children: [

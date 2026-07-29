@@ -59,20 +59,16 @@ const capHistory = (items: Msg[]): Msg[] => {
   return items[0]?.kind === 'intro' ? [items[0]!, ...items.slice(-(MAX_HISTORY - 1))] : items.slice(-MAX_HISTORY)
 }
 
-const statusColorOf = (status: string, t: { error: string; muted: string; ok: string; warn: string }) => {
-  if (status === 'ready') {
-    return t.ok
+const statusColorOf = (statusKind: string, busy: boolean, t: { error: string; muted: string; ok: string; warn: string; statusWarn: string }) => {
+  // 方案 A 状态灯：绿 idle/ready / 黄 busy+心跳 / 橙 rate_limit / 红 error
+  if (busy) {
+    // busy 时用黄色，heartbeat 同属工作态
+    return t.statusWarn
   }
-
-  if (status.startsWith('error')) {
-    return t.error
-  }
-
-  if (status === 'interrupted') {
-    return t.warn
-  }
-
-  return t.muted
+  // idle 态按最后 kind 着色
+  if (statusKind === 'error' || statusKind === 'turn_exit') return t.error
+  if (statusKind === 'rate_limit') return t.warn
+  return t.ok
 }
 
 export interface PromptLiveSessionOptions {
@@ -1092,7 +1088,7 @@ export function useMainApp(gw: GatewayClient) {
       goodVibesTick,
       sessionStartedAt: ui.sid ? sessionStartedAt : null,
       showStickyPrompt: !!stickyPrompt,
-      statusColor: statusColorOf(ui.status, ui.theme.color),
+      statusColor: statusColorOf(ui.statusKind, ui.busy, ui.theme.color),
       stickyPrompt,
       turnStartedAt: ui.sid ? turnStartedAt : null,
       // CLI parity: the classic prompt_toolkit status bar shows a red dot

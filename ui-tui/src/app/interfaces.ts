@@ -134,6 +134,7 @@ export interface UiState {
   indicatorStyle: IndicatorStyle
   sid: null | string
   status: string
+  statusKind: string
   statusBar: StatusBarMode
   streaming: boolean
   theme: Theme
