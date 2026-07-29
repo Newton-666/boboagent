@@ -421,3 +421,326 @@ class TestRetroactiveMarking:
             assert not engine.history[i]["content"].startswith("[RESULT]"), (
                 f"Result at {i} marked when <10 tools exist"
             )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 5. Ticket T: msg_count 自动压缩归档
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestMsgCountCompression:
+    """C5: _get_msg_count_budget(), 80-msg trigger, archive, event, idempotent."""
+
+    def test_msg_count_budget_default(self, monkeypatch):
+        """BOBO_CONTEXT_BUDGET default = 60."""
+        from core.context import _get_msg_count_budget
+        monkeypatch.delenv("BOBO_CONTEXT_BUDGET", raising=False)
+        assert _get_msg_count_budget() == 60
+
+    def test_msg_count_budget_env_override(self, monkeypatch):
+        """BOBO_CONTEXT_BUDGET env var overrides default."""
+        from core.context import _get_msg_count_budget
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        assert _get_msg_count_budget() == 30
+
+    @pytest.mark.parametrize("bad_val,fallback", [
+        ("abc", 60),
+        ("-5", 10),
+        ("0", 10),
+        ("", 60),
+    ])
+    def test_msg_count_budget_bad_values(self, monkeypatch, bad_val, fallback):
+        """Invalid env values fall back to default/min."""
+        from core.context import _get_msg_count_budget
+        if bad_val:
+            monkeypatch.setenv("BOBO_CONTEXT_BUDGET", bad_val)
+        else:
+            monkeypatch.delenv("BOBO_CONTEXT_BUDGET", raising=False)
+        assert _get_msg_count_budget() == fallback
+
+    def test_compress_reduces_msg_count(self, engine, monkeypatch, tmp_path):
+        """80 messages → compression drops history below budget."""
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        from core.context import _get_msg_count_budget, _archive_compressed
+        budget = _get_msg_count_budget()
+
+        # Populate history with 80 messages
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户消息 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        assert len(engine.history) == 80, f"Expected 80, got {len(engine.history)}"
+
+        # Force compression
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+
+        # After compression: total msg_count should be < budget (30)
+        # Summary insertion adds ~1 msg, keep ~15 exchanges ≈ 30 msgs
+        assert len(engine.history) < budget + 10, (
+            f"History len {len(engine.history)} should be < {budget + 10} after compression"
+        )
+        # Summary should exist
+        summaries = [m for m in engine.history
+                     if m.get("role") == "system"
+                     and m.get("content", "").startswith("[对话历史摘要]")]
+        assert len(summaries) == 1, f"Expected 1 summary, got {len(summaries)}"
+
+    def test_archive_file_exists(self, engine, monkeypatch):
+        """Compressed content is archived to session file."""
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        from core.context import _get_msg_count_budget
+
+        engine.sid = "test-session-001"
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户消息 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+
+        # Check archive file exists
+        from core.context import _get_archive_dir
+        archive_path = _get_archive_dir(engine.sid) / f"{engine.sid}.jsonl"
+        assert archive_path.exists(), f"Archive file not found: {archive_path}"
+
+        # Verify it contains valid JSON
+        import json
+        with open(archive_path, "r") as f:
+            lines = f.readlines()
+        assert len(lines) >= 1, "Archive should have at least 1 record"
+        record = json.loads(lines[0])
+        assert record["type"] == "context.compressed"
+        assert record["session_id"] == "test-session-001"
+        assert record["pre_msg_count"] == 80
+        assert "archived_messages" in record
+
+    def test_event_emitted(self, engine, monkeypatch):
+        """context.compressed event is written via event_bus."""
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+
+        engine.sid = "test-session-events"
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户消息 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+
+        # Check event bus file
+        from core.event_bus import event_bus
+        import json
+        events_path = event_bus.filepath
+        with open(events_path, "r") as f:
+            events = [json.loads(l) for l in f if l.strip()]
+
+        compressed_events = [e for e in events if e.get("type") == "context.compressed"]
+        assert len(compressed_events) >= 1, "No context.compressed event found"
+        ev = compressed_events[-1]
+        assert ev["pre_msg_count"] == 80
+        assert ev["post_msg_count"] < 80
+        assert ev["session_id"] == "test-session-events"
+
+    def test_summary_contains_key_info(self, engine, monkeypatch):
+        """Summary should preserve key decisions, active task, etc."""
+        # Replace mock responses: first call (compression) returns structured summary
+        from tests.mock_llm import text_response
+        engine.llm_caller.responses[0] = text_response(
+            "## Active Task\n分析用户数据\n\n"
+            "## Completed\n- 加载数据集\n\n"
+            "## Pending User Asks\n- 确认分析范围\n\n"
+            "## Remaining Work\n- 生成报告\n\n"
+            "## Key Decisions\n- 使用 Python 进行分析\n\n"
+            "## Relevant Files\n- data.csv\n\n"
+            "## Work State\n- 进度 50%"
+        )
+
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户消息 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+
+        summaries = [m for m in engine.history
+                     if m.get("role") == "system"
+                     and m.get("content", "").startswith("[对话历史摘要]")]
+        assert len(summaries) == 1
+        summary = summaries[0]["content"]
+        # Should contain the key sections from the structured summary
+        assert "Active Task" in summary
+        assert "Key Decisions" in summary
+        assert "Work State" in summary
+
+    def test_conversation_continues(self, engine, monkeypatch):
+        """After compression, the engine can still process new user input."""
+        from tests.mock_llm import text_response
+
+        # Replace mock: response[0]=compression summary, response[1]=actual reply
+        engine.llm_caller.responses = [
+            text_response(
+                "## Active Task\n任务进行中\n## Completed\n- 部分完成\n"
+                "## Pending User Asks\n- 无\n## Remaining Work\n- 继续\n"
+                "## Key Decisions\n- 已决定\n## Relevant Files\n- main.py\n"
+                "## Work State\n- 进行中"
+            ),
+            text_response("我继续工作了，进度正常。"),
+        ]
+
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # Ensure we skip the worker reminder and other early-step interventions
+        engine._worker_reminded = True
+
+        # Build 80 messages
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户输入 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        engine.current_user_input = "继续工作"
+        engine.state = engine.STATE_IDLE
+
+        # Step 1: IDLE → THINKING
+        engine._step()
+        assert engine.state == engine.STATE_THINKING
+
+        # Step 2: THINKING → compression + LLM call → RESPONDING
+        engine._step()
+        assert engine.state == engine.STATE_RESPONDING, (
+            f"After compression + call, state should be RESPONDING, got {engine.state}"
+        )
+        # The response should contain the expected text
+        assert engine._pending_content is not None
+        assert "继续工作" in engine._pending_content or "正常" in engine._pending_content
+
+    def test_idempotent_second_compression(self, engine, monkeypatch):
+        """After first compression, if msg_count exceeds budget again, compress again."""
+        from tests.mock_llm import text_response
+
+        # Replace mock with two summary responses (for first + second compression)
+        engine.llm_caller.responses = [
+            text_response(
+                "## Active Task\n任务1\n## Completed\n- 完成1\n## Pending User Asks\n- 无\n"
+                "## Remaining Work\n- 继续1\n## Key Decisions\n- 决定1\n## Relevant Files\n- f1.py\n## Work State\n- 50%"
+            ),
+            text_response(
+                "## Active Task\n任务2\n## Completed\n- 完成2\n## Pending User Asks\n- 无\n"
+                "## Remaining Work\n- 继续2\n## Key Decisions\n- 决定2\n## Relevant Files\n- f2.py\n## Work State\n- 75%"
+            ),
+        ]
+
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        engine.sid = "test-idempotent"
+
+        # Build 80 messages
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户输入 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        # First compression
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+        after_first = len(engine.history)
+        assert after_first < 50, f"After first compression: {after_first} msgs, expected <50"
+
+        # Add 60 more messages to exceed budget again
+        for i in range(30):
+            engine.history.append({"role": "user", "content": f"新用户输入 {i}"})
+            engine.history.append({"role": "assistant", "content": f"新Bobo回复 {i}"})
+
+        assert len(engine.history) > 60, f"Should exceed budget: {len(engine.history)} msgs"
+
+        # Second compression (idempotent)
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+        after_second = len(engine.history)
+        assert after_second < after_first + 10, (
+            f"After second compression: {after_second} msgs, "
+            f"should be similar to first: {after_first}"
+        )
+        # Should now have 2 summaries
+        summaries = [m for m in engine.history
+                     if m.get("role") == "system"
+                     and m.get("content", "").startswith("[对话历史摘要]")]
+        assert len(summaries) == 2, f"Expected 2 summaries after 2 compressions, got {len(summaries)}"
+
+    def test_no_compression_when_within_budget(self, engine, monkeypatch):
+        """Compression is skipped when msg_count is within budget."""
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "100")
+
+        engine.history = []
+        for i in range(20):
+            engine.history.append({"role": "user", "content": f"msg {i}"})
+            engine.history.append({"role": "assistant", "content": f"reply {i}"})
+
+        # 40 messages < budget 100 → no compression
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+        assert len(engine.history) == 40, (
+            f"History was modified when within budget: {len(engine.history)} != 40"
+        )
+
+    def test_power_off_orchestrate_80_messages_via_step(self, engine, monkeypatch):
+        """Full flow: 80 messages → step → compression → response works."""
+        from tests.mock_llm import text_response
+
+        # response[0]=compression summary, response[1]=actual reply
+        engine.llm_caller.responses = [
+            text_response(
+                "## Active Task\n数据分析中\n## Completed\n- 数据加载\n## Pending User Asks\n- 确认参数\n"
+                "## Remaining Work\n- 模型训练\n## Key Decisions\n- 使用随机森林\n## Relevant Files\n- data.csv\n"
+                "## Work State\n- 数据准备完成"
+            ),
+            text_response("分析正在进行中，数据已加载完毕。"),
+        ]
+
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        engine._worker_reminded = True
+
+        # Populate 80 messages
+        engine.history = []
+        for i in range(40):
+            engine.history.append({"role": "user", "content": f"用户输入 {i}"})
+            engine.history.append({"role": "assistant", "content": f"Bobo 回复 {i}"})
+
+        engine.current_user_input = "分析数据"
+        engine.state = engine.STATE_IDLE
+
+        # IDLE → THINKING
+        engine._step()
+        assert engine.state == engine.STATE_THINKING
+
+        # THINKING → compression + response → RESPONDING  
+        engine._step()
+        assert engine.state == engine.STATE_RESPONDING
+
+        # History should contain summary
+        summaries = [m for m in engine.history
+                     if m.get("role") == "system"
+                     and m.get("content", "").startswith("[对话历史摘要]")]
+        assert len(summaries) == 1, f"Summary missing after full flow"
+
+        # Archive should exist
+        from core.context import _get_archive_dir
+        archive_path = _get_archive_dir(engine.sid) / f"{engine.sid}.jsonl"
+        assert archive_path.exists(), f"Archive file missing: {archive_path}"
+
+        # Event bus should have context.compressed
+        from core.event_bus import event_bus
+        import json
+        with open(event_bus.filepath, "r") as f:
+            events = [json.loads(l) for l in f if l.strip()]
+        found = any(e.get("type") == "context.compressed" for e in events)
+        assert found, "context.compressed event not found in event bus"

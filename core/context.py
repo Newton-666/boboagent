@@ -1,7 +1,11 @@
 """上下文管理 — 历史压缩、查询分类、工具过滤、孤儿 tool_calls 清洗"""
 
+import json
 import logging
+import os
 import re
+import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -34,6 +38,62 @@ def _estimate_tokens(messages: list) -> int:
     total_chars += cjk_chars
     # CJK: ~1.5 chars/token, non-CJK: ~4 chars/token
     return int(cjk_chars / 1.5 + (total_chars - cjk_chars) / 4)
+
+
+# ── 消息数预算（票 T：BOBO_CONTEXT_BUDGET 环境变量）───────────────
+
+def _get_msg_count_budget() -> int:
+    """返回消息数阈值，从 BOBO_CONTEXT_BUDGET 环境变量读取，默认 60。
+
+    用于触发上下文压缩：当 self.history 的 msg_count 超过此值时，
+    _call_llm 入口将执行压缩。最小值为 10（防配置错误）。
+    """
+    raw = os.environ.get("BOBO_CONTEXT_BUDGET", "60")
+    try:
+        return max(10, int(raw))
+    except (ValueError, TypeError):
+        return 60
+
+
+# ── 上下文归档目录 ─────────────────────────────────────────────────
+
+def _get_archive_dir(session_id: str = "") -> Path:
+    """返回会话上下文归档目录。"""
+    base = Path(os.environ.get("BOBO_DATA_DIR", str(Path.home() / ".bobo_v2")))
+    archive_dir = base / "archives"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    return archive_dir
+
+
+def _archive_compressed(session_id: str, old_msgs: list, summary: str,
+                        pre_count: int, post_count: int, pre_tokens: int, post_tokens: int):
+    """将被压缩的原文追加写入会话归档文件。
+
+    归档文件路径: ~/.bobo_v2/archives/{session_id}.jsonl
+    每行一条 JSON 记录，包含时间戳、原文消息列表、摘要文本、统计信息。
+    此文件只追加不修改，保证可回溯审计。
+    """
+    try:
+        archive_dir = _get_archive_dir(session_id)
+        archive_path = archive_dir / f"{session_id}.jsonl"
+        record = {
+            "ts": time.time(),
+            "type": "context.compressed",
+            "session_id": session_id,
+            "pre_msg_count": pre_count,
+            "post_msg_count": post_count,
+            "pre_tokens": pre_tokens,
+            "post_tokens": post_tokens,
+            "summary": summary,
+            "archived_messages": [
+                {k: v for k, v in m.items() if k in ("role", "content", "tool_calls", "tool_call_id", "name")}
+                for m in old_msgs
+            ],
+        }
+        with open(archive_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        logger.warning("上下文归档失败（静默降级）", exc_info=True)
 
 
 def _get_context_budget(_engine=None) -> int:
@@ -117,8 +177,24 @@ class ContextMixin:
     # 笔记/邮件类查询不限制工具 — 让 LLM 根据已配置的平台自由选择
     _NO_FILTER_CATEGORIES = {"obsidian", "notion", "email"}
 
-    def _compress_history(self):
-        """将早期对话压缩为摘要，保留最近 KEEP_EXCHANGES 轮完整对话。"""
+    def _compress_history(self, *, _event_bus=None):
+        """将早期对话压缩为结构化摘要（票 T 增强版）。
+
+        触发条件：self.history 的 msg_count > _get_msg_count_budget()。
+        压缩策略：
+          - 保留 system prompt（已有摘要标记的 system 消息）
+          - 保留最近 N 条完整对话（N = 预算 * 0.5，至少 10）
+          - 其余对话压缩为结构化摘要，插入 history 头部
+          - 被压缩的原文追加写入会话归档文件
+
+        幂等：压缩后历史条数降至预算内；若后续对话又超限，可再次压缩。
+        """
+        from core.event_bus import event_bus as _default_event_bus
+
+        bus = _event_bus or _default_event_bus
+        budget = _get_msg_count_budget()
+        keep_count = max(10, int(budget * 0.5))
+
         # 审计 #22：tool 消息的 key 是 "content" 而非 "tool_results"（此前键名不匹配导致
         # 30K 截断永不生效）；kind/phase/text 也不存在于 history 消息中（死代码已移除）
         tool_msgs = [(i, m) for i, m in enumerate(self.history) if m.get("role") == "tool"]
@@ -130,44 +206,66 @@ class ContextMixin:
                 if len(str(tr)) > per_tool:
                     m["content"] = str(tr)[:per_tool] + f"\n...(截断，原{len(str(tr))}字符)"
 
-        user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
-        if len(user_indices) <= self.KEEP_EXCHANGES:
+        # 收集旧摘要（system 消息），这些始终保留
+        existing_summaries = [m for m in self.history
+                              if m.get("role") == "system"
+                              and m.get("content", "").startswith("[对话历史摘要]")]
+        total_msg_count = len(self.history)
+        if total_msg_count <= budget:
             return
 
-        split_idx = user_indices[-self.KEEP_EXCHANGES]
+        # 找到末尾 keep_count 条 user 消息对应的起始索引
+        user_indices = [i for i, m in enumerate(self.history) if m.get("role") == "user"]
+        keep_user_count = min(len(user_indices), max(1, keep_count))
+        if keep_user_count <= 0:
+            return
+
+        # 找到分割点：保留最近 keep_user_count 个用户轮次
+        split_idx = user_indices[-keep_user_count]
         # 安全边界：split 点不能切在 tool_calls/tool_result 配对中间。
-        # 如果 split 后的第一条是 tool 结果，向前移动直到遇到非 tool 消息，
-        # 确保 LLM 不会收到孤立 tool 结果（审计崩溃根因）。
         while (split_idx < len(self.history) and
                self.history[split_idx].get("role") == "tool"):
             split_idx += 1
-        # 如果 old_msgs 的最后一条 assistant 有 tool_calls，
-        # 检查其 tool_call_id 对应的 tool 结果是否全在 old_msgs 中。
-        # 如果有孤立的 → 向前移 split 直到包含所有结果。
+
+        # 如果 old_msgs 的最后一条 assistant 有 tool_calls，检查其 tool_call_id
+        # 对应的 tool 结果是否全在 old_msgs 中。如果有孤立的 → 向前移 split。
         for m in reversed(self.history[:split_idx]):
             if m.get("role") == "assistant" and m.get("tool_calls"):
                 tc_ids = {tc.get("id", "") for tc in m["tool_calls"]}
                 for r in self.history[split_idx:]:
                     if r.get("role") == "tool" and r.get("tool_call_id", "") in tc_ids:
-                        # 孤儿 tool 结果在 keep 部分 → 必须整个回卷
                         tc_ids.discard(r.get("tool_call_id", ""))
                     if not tc_ids:
                         break
                 if tc_ids:
-                    # 还有没配对的 → 把这轮完整保留
                     idx = self.history.index(m)
                     split_idx = idx
                 break
+
+        # ── 预统计（用于事件） ──
+        pre_msg_count = len(self.history)
+        pre_tokens = _estimate_tokens(self.history)
+
         old_msgs = self.history[:split_idx]
         self.history = self.history[split_idx:]
 
+        # ── 保留已有摘要（幂等：跨压缩轮次不丢旧摘要） ──
+        existing_summaries = [m for m in old_msgs
+                              if m.get("role") == "system"
+                              and m.get("content", "").startswith("[对话历史摘要]")]
+        # 从 old_msgs 中排除已有摘要，只压缩纯对话
+        old_msgs_no_summary = [m for m in old_msgs if m not in existing_summaries]
+        # 把已有摘要重新插回 history 头部
+        for sm in reversed(existing_summaries):
+            self.history.insert(0, sm)
+
+        # ── 构造压缩摘要 ──
         text_parts = []
-        for m in old_msgs:
+        for m in old_msgs_no_summary:
             role = m.get("role", "")
             content = m.get("content", "")
             if role in ("user", "assistant") and content:
                 label = "用户" if role == "user" else "Bobo"
-                # [RESULT] 标记已经是压缩态，保留完整 ID（审计 #4 压缩集成）
                 if "[RESULT]" in content:
                     text_parts.append(f"{label}: {content[:400]}")
                 else:
@@ -178,11 +276,10 @@ class ContextMixin:
 
         self._compressing = True
         try:
-            # Build structured compression request
             extra_lines = []
             if hasattr(self, '_read_files') and self._read_files:
                 mentioned = set()
-                for m in old_msgs:
+                for m in old_msgs_no_summary:
                     c = str(m.get("content", "") or "")
                     for fp in self._read_files:
                         if fp in c:
@@ -193,7 +290,7 @@ class ContextMixin:
                         s = str(self._read_files[fp])[:100]
                         extra_lines.append("  - {}: {}".format(fp, s))
             tool_lines = []
-            for m in old_msgs:
+            for m in old_msgs_no_summary:
                 if m.get("role") == "tool":
                     tc = str(m.get("content", "") or "")[:120]
                     if tc.strip():
@@ -214,7 +311,9 @@ class ContextMixin:
                 "## Completed\n- 已经完成的事项\n\n"
                 "## Pending User Asks\n- 等待用户确认或回答的问题\n\n"
                 "## Remaining Work\n- 下一步要做的事\n\n"
+                "## Key Decisions\n- 关键决定和用户偏好\n\n"
                 "## Relevant Files\n- 涉及的文件名\n\n"
+                "## Work State\n- 当前工作状态描述\n\n"
                 "只输出结构化摘要，不要额外说明。"
             ).format(old_text, extra)
 
@@ -231,11 +330,42 @@ class ContextMixin:
         finally:
             self._compressing = False
 
+        # ── 后统计 ──
+        post_msg_count = len(self.history)
+        post_tokens = _estimate_tokens(self.history)
+
         if summary:
             self.history.insert(0, {
                 "role": "system",
                 "content": f"[对话历史摘要]:\n{summary}"
             })
+            # 重新计算后统计（插入摘要后）
+            post_msg_count = len(self.history)
+            post_tokens = _estimate_tokens(self.history)
+
+        # ── 归档 + 事件 ──
+        session_id = getattr(self, 'sid', '')
+        _archive_compressed(
+            session_id=session_id,
+            old_msgs=old_msgs,
+            summary=summary or "(压缩失败，原文被丢弃)",
+            pre_count=pre_msg_count,
+            post_count=post_msg_count,
+            pre_tokens=pre_tokens,
+            post_tokens=post_tokens,
+        )
+        try:
+            bus.write("context.compressed", {
+                "session_id": session_id,
+                "pre_msg_count": pre_msg_count,
+                "post_msg_count": post_msg_count,
+                "pre_tokens": pre_tokens,
+                "post_tokens": post_tokens,
+                "summary_length": len(summary or ""),
+                "archived_count": len(old_msgs),
+            })
+        except Exception:
+            logger.warning("context.compressed 事件写入失败（静默降级）", exc_info=True)
 
     def _classify_query(self) -> Optional[str]:
         """根据当前用户输入判断查询类别，返回类别名称或 None（使用全部工具）。"""
