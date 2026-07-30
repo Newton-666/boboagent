@@ -71,7 +71,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
     STATE_DONE = "done"
     STATE_ERROR = "error"
 
-    MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 70))
+    MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 200))
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
                  confirm_callback: Callable = None, test_mode: bool = False):
