@@ -344,19 +344,25 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         // 原会话已不存在（resume 失败），回落到最近会话并明确提示，
         // 而不是让用户面对一个空的就绪态。TICKET-017。
         turnController.pushActivity('原会话已丢失，已回到最近会话', 'warn')
-        rpc<SessionMostRecentResponse>('session.most_recent', {}).then(r => {
-          const target = r?.session_id
+        rpc<SessionMostRecentResponse>('session.most_recent', {})
+          .then(r => {
+            const target = r?.session_id
 
-          if (target) {
-            patchUiState({ status: 'resuming most recent…' })
-            resumeById(target)
+            if (target) {
+              patchUiState({ status: 'resuming most recent…' })
+              resumeById(target)
 
-            return
-          }
+              return
+            }
 
-          patchUiState({ status: 'forging session…' })
-          newSession()
-        })
+            patchUiState({ status: 'forging session…' })
+            newSession()
+          })
+          .catch(() => {
+            // most_recent 查询失败（如 db locked）：兜底新会话，不卡死在恢复态。
+            patchUiState({ status: 'forging session…' })
+            newSession()
+          })
       })
       // After resumeById: it synchronously sets status to 'resuming…' on entry,
       // so override it here to keep the distinct "recovering" label visible for

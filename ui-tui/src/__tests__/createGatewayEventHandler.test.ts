@@ -706,6 +706,80 @@ describe('createGatewayEventHandler', () => {
     expect(getUiState().status).toBe('recovering session…')
   })
 
+  it('on gateway.ready when recovered sid resume fails, falls back to most recent with a notice', async () => {
+    const appended: Msg[] = []
+    const newSession = vi.fn()
+    const resumeById = vi.fn()
+    const ctx = buildCtx(appended)
+
+    ctx.session.newSession = newSession
+    // Simulate the recovered session being gone: resumeById invokes onFail.
+    ctx.session.resumeById = resumeById.mockImplementation((_id, onFail) => onFail?.())
+    ctx.session.STARTUP_RESUME_ID = ''
+    ctx.session.recoverSidRef = ref<null | string>('sess-crashed')
+    ctx.gateway.rpc = vi.fn(async (method: string) => {
+      if (method === 'session.most_recent') {
+        return { session_id: 'sess-most-recent' }
+      }
+
+      return null
+    })
+
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+
+    await vi.waitFor(() => expect(resumeById).toHaveBeenCalledWith('sess-most-recent'))
+    // 串台防护：sid 丢失后必须明确提示用户，而不是静默切会话。
+    expect(getTurnState().activity.some(a => a.text.includes('原会话已丢失'))).toBe(true)
+    expect(newSession).not.toHaveBeenCalled()
+  })
+
+  it('on gateway.ready when recovered sid resume fails and no most recent, forges a new session with a notice', async () => {
+    const appended: Msg[] = []
+    const newSession = vi.fn()
+    const resumeById = vi.fn()
+    const ctx = buildCtx(appended)
+
+    ctx.session.newSession = newSession
+    ctx.session.resumeById = resumeById.mockImplementation((_id, onFail) => onFail?.())
+    ctx.session.STARTUP_RESUME_ID = ''
+    ctx.session.recoverSidRef = ref<null | string>('sess-crashed')
+    ctx.gateway.rpc = vi.fn(async (method: string) => {
+      if (method === 'session.most_recent') {
+        return { session_id: null }
+      }
+
+      return null
+    })
+
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+
+    await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
+    expect(getTurnState().activity.some(a => a.text.includes('原会话已丢失'))).toBe(true)
+  })
+
+  it('on gateway.ready when recovered sid resume fails and most_recent rejects, still forges a new session', async () => {
+    const appended: Msg[] = []
+    const newSession = vi.fn()
+    const resumeById = vi.fn()
+    const ctx = buildCtx(appended)
+
+    ctx.session.newSession = newSession
+    ctx.session.resumeById = resumeById.mockImplementation((_id, onFail) => onFail?.())
+    ctx.session.STARTUP_RESUME_ID = ''
+    ctx.session.recoverSidRef = ref<null | string>('sess-crashed')
+    ctx.gateway.rpc = vi.fn(async (method: string) => {
+      if (method === 'session.most_recent') {
+        throw new Error('db locked')
+      }
+
+      return null
+    })
+
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+
+    await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
+  })
+
   it('on gateway.ready with auto_resume on and a recent session, resumes it', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
