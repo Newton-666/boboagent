@@ -478,6 +478,21 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       return clearSelection()
     }
 
+    // Ctrl+K：清空当前输入行（终端/browser 标准行为，零学习成本）
+    if ((key.ctrl || key.meta) && ch === 'k') {
+      cActions.setInput('')
+      return
+    }
+
+    if (key.escape) {
+      // Esc 兜底：关闭所有可关闭的弹窗（sessions、agents 等）
+      const dismissible = overlay.sessions || overlay.agents
+      if (dismissible) {
+        patchOverlayState({ sessions: false, agents: false })
+        return
+      }
+    }
+
     if (key.upArrow && !cState.inputBuf.length) {
       const inputSel = getInputSelection()
       const cursor = inputSel && inputSel.start === inputSel.end ? inputSel.start : null
