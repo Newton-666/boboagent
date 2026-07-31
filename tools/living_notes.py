@@ -43,8 +43,8 @@ _SKELETON_SECTIONS = ["概述", "关键结论", "决策与原因", "待办与未
 _HUMAN_MARK = re.compile(r"^.*·\s*人手\s*$")
 _USER_REV_START = re.compile(r"^>\s*用户修订")
 
-# 重写 LLM 的 system prompt
-_REWRITE_SYSTEM = """你是活体知识库的笔记重写器。把【旧笔记全文】与【本轮要点】合并为整篇新笔记。
+# 重写 LLM 的 system prompt（LN-2S：改吃完整回复全文 + 密度铁律）
+_REWRITE_SYSTEM = """你是活体知识库的笔记重写器。把【旧笔记全文】与【本轮完整回复】合并为整篇新笔记。
 
 固定骨架（所有主题笔记统一）：
 ---
@@ -63,14 +63,53 @@ source_sessions: [<session_id>...]
 ## 时间线
 
 规则：
-1. 新要点与旧结论冲突 → 用新结论替换旧表述，不要两句并列。
-2. 旧章节缺少新要点相关信息 → 追加进对应章节（不是文末堆）。
+1. 新内容与旧结论冲突 → 用新结论替换旧表述，不要两句并列。
+2. 旧章节缺少新内容相关信息 → 追加进对应章节（不是文末堆）。
 3. 与本轮无关的旧内容 → 原样保留。
 4. 标有「· 人手」后缀的行 / 「> 用户修订」引用块 → 逐字保留，不许改。
 5. ## 时间线 保留追加性质：旧时间线行原样保留，本轮追加一行「- HH:MM 要点」。
 6. 空章节直接删掉，不留空标题。
 7. frontmatter 只输出 topic/domain/created 三项；version/last_touched/source_sessions 由系统维护，不要输出。
+
+密度铁律（LN-2S，最高优先级）：
+- 笔记的信息量必须 ≥ 本轮回复。回复中的公式、代码、参数、结论、推理链、待办，
+  一个都不许丢——你的任务是**组织**它们进骨架章节，不是缩略它们。
+- 宁多勿少：拿不准是否该记的，记进对应章节。
+- 过程花絮（如"Bobo承认表述混淆"这类元对话）→ 进时间线或丢弃，不进正文。
 只输出整篇 markdown 笔记，不要任何其他文字。"""
+
+# 新主题成文 LLM 的 system prompt（LN-2S：首轮笔记也要 1 次 LLM 成文，不做免成文捷径）
+_NEW_NOTE_SYSTEM = """你是活体知识库的笔记起草器。把【本轮完整回复】组织为整篇骨架笔记。
+
+固定骨架（所有主题笔记统一）：
+---
+topic: <主题>
+domain: <领域>
+created: YYYY-MM-DD
+---
+
+## 概述
+## 关键结论
+## 决策与原因
+## 待办与未决
+## 时间线
+
+规则：
+1. 概述：把回复的核心内容展开成多句完整表述，不是单行要点。
+2. 关键结论/决策与原因/待办与未决：按内容归位，回复里的结论、决策、参数、待办一个都不许丢。
+3. 时间线：写一行「- HH:MM 本轮主题一句话」。
+4. 空章节直接删掉，不留空标题。
+5. frontmatter 只输出 topic/domain/created 三项；version/last_touched/source_sessions 由系统维护，不要输出。
+
+密度铁律（LN-2S，最高优先级）：
+- 笔记的信息量必须 ≥ 本轮回复。回复中的公式、代码、参数、结论、推理链、待办，
+  一个都不许丢——你的任务是**组织**它们进骨架章节，不是缩略它们。
+- 宁多勿少：拿不准是否该记的，记进对应章节。
+- 过程花絮（如"Bobo承认表述混淆"这类元对话）→ 进时间线或丢弃，不进正文。
+只输出整篇 markdown 笔记，不要任何其他文字。"""
+
+# 防爆 token：完整回复超过此长度才截断（记 notes.error truncated=true）
+_MAX_REPLY_CHARS = 32000
 
 # 主题名净化：非法字符 + 首尾空格
 _ILLEGAL_CHARS = re.compile(r'[/\\:*?"<>|]')
@@ -157,25 +196,6 @@ def _parse_judge_response(content: str) -> dict | None:
     if match is not None:
         match = str(match).strip() or None
     return {"topic": topic, "domain": domain, "section": section, "match": match}
-
-
-def _format_section(section: str, sid: str) -> str:
-    """LLM 返回的 section → 落盘小节正文。
-
-    每条非空行末尾带出处（源自会话 {sid}）。已是列表项则挂在行尾；
-    无出处标记的普通行同样追加。空行保留。
-    """
-    lines = []
-    for raw in section.split("\n"):
-        line = raw.rstrip()
-        if not line.strip():
-            lines.append("")
-            continue
-        if "（源自会话" in line:
-            lines.append(line)
-        else:
-            lines.append(f"{line}（源自会话 {sid}）")
-    return "\n".join(lines)
 
 
 def _read_frontmatter(path: Path) -> dict:
@@ -273,20 +293,45 @@ def _structure_check(new_text: str, old_text: str,
     return True, ""
 
 
-def _write_new_note(domain: str, topic: str, section_body: str, sid: str) -> Path:
-    """新主题 → 骨架笔记：frontmatter + 五章节骨架（概述=本轮要点，时间线=1 行）。"""
+def _write_new_note(domain: str, topic: str, material: str, sid: str, llm_call) -> Path:
+    """新主题 → LLM 成文骨架笔记（LN-2S：首轮也 1 次 LLM 调用，不吃免成文捷径）。
+
+    material: 本轮完整回复全文（超长已在外层截断）。
+    流程：LLM 按 _NEW_NOTE_SYSTEM 组织全文 → 校验（缺 frontmatter/正文空 → 拒）
+    → 程序维护 frontmatter（version 1 / last_touched / source_sessions）→ 原子写。
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     now_hm = datetime.now().strftime("%H:%M")
     domain_dir = LIBRARY_DIR / domain
     domain_dir.mkdir(parents=True, exist_ok=True)
     path = domain_dir / f"{topic}.md"
-    # 时间线首行：取 section 第一条要点（去列表前缀，出处只保留一个）
-    first = next((l.strip() for l in section_body.split("\n") if l.strip()), "本轮要点")
-    if first.startswith("- "):
-        first = first[2:].strip()
-    if "（源自会话" not in first:
-        first = f"{first}（源自会话 {sid}）"
-    fm = (
+
+    # 1. LLM 成文：完整回复 → 整篇骨架笔记
+    prompt = [
+        {"role": "system", "content": _NEW_NOTE_SYSTEM},
+        {"role": "user", "content": (
+            f"当前时间：{now_hm}（时间线新行用这个时间）\n\n"
+            f"本轮完整回复：\n{material}"
+        )},
+    ]
+    response = llm_call(prompt, use_tools=False)
+    if isinstance(response, dict) and "error" in response:
+        raise ValueError(f"llm error: {response.get('error')}")
+    content = (response.get("choices", [{}])[0]
+               .get("message", {}).get("content", ""))
+    new_text = (content or "").strip()
+    if not new_text:
+        raise ValueError("new note returned empty")
+
+    # 2. 校验：缺 frontmatter / 正文空 → 拒（新主题无旧版可对比 30%）
+    ok, reason = _structure_check(new_text, "", set())
+    if not ok:
+        raise ValueError(f"new note structure check failed: {reason}")
+
+    # 3. 程序维护 frontmatter：正文取 LLM 输出第一个 --- 之后全部
+    sep = new_text.find("\n---", 3)
+    body = new_text[sep + 4:].strip("\n") if sep != -1 else new_text
+    new_fm = (
         "---\n"
         f"topic: {topic}\n"
         f"domain: {domain}\n"
@@ -294,23 +339,35 @@ def _write_new_note(domain: str, topic: str, section_body: str, sid: str) -> Pat
         f"last_touched: {today}\n"
         "version: 1\n"
         f"source_sessions: [{sid}]\n"
-        "---\n\n"
+        "---\n"
     )
-    body = (
-        f"## 概述\n\n{section_body}\n\n"
-        "## 关键结论\n\n"
-        "## 决策与原因\n\n"
-        "## 待办与未决\n\n"
-        f"## 时间线\n\n- {now_hm} {first}\n"
-    )
-    path.write_text(fm + body, encoding="utf-8")
+    final = new_fm + "\n" + body + "\n"
+
+    # 4. 原子写
+    fd, tmp = tempfile.mkstemp(dir=domain_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(final)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+    # 5. notes.written 事件
+    _emit("notes.written", {
+        "path": str(path), "topic": topic, "is_new": True, "version": 1,
+    })
     return path
 
 
 def _rewrite_note(domain: str, topic: str, path: Path,
-                  section_body: str, sid: str, llm_call) -> Path:
+                  material: str, sid: str, llm_call) -> Path:
     """骨架重写式：快照 → LLM 输出整篇新笔记 → 校验三拒 → 原子写。
 
+    material: 本轮完整回复全文（LN-2S：重写原料从要点升级为全文，超长已在外层截断）。
     校验不过 → 抛 ValueError（调用方记 WARNING + notes.error），
     旧版已快照进 .history、笔记文件保持原样。
     """
@@ -326,13 +383,13 @@ def _rewrite_note(domain: str, topic: str, path: Path,
     # 1. 旧版整篇快照（v{version}，无限保留）
     _snapshot(domain, topic, version, old_text)
 
-    # 2. LLM 重写：旧笔记全文 + 本轮要点 → 整篇新笔记
+    # 2. LLM 重写：旧笔记全文 + 本轮完整回复 → 整篇新笔记
     prompt = [
         {"role": "system", "content": _REWRITE_SYSTEM},
         {"role": "user", "content": (
             f"当前时间：{now_hm}（时间线新行用这个时间）\n\n"
             f"旧笔记全文：\n{old_text}\n\n"
-            f"本轮要点：\n{section_body}"
+            f"本轮完整回复：\n{material}"
         )},
     ]
     response = llm_call(prompt, use_tools=False)
@@ -419,14 +476,17 @@ def _rebuild_index():
 
 # ── 对外 API ─────────────────────────────────────
 
-def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call) -> dict:
+def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call,
+                       full_reply: str = "") -> dict:
     """RESPONDING 收工钩子入口（engine.py 调用，try/except 包裹）。
 
     参数：
-      takeaways: 本轮提取的要点（非空才触发本函数）
+      takeaways: 本轮提取的要点（非空才触发本函数；仅作主题判定廉价信号）
       user_msg: 最近一条用户消息
       sid: 会话 id（小节出处 + frontmatter source_sessions）
       llm_call: 可调用对象，签名 llm_call(prompt, use_tools=False) → dict
+      full_reply: 本轮 assistant 完整回复全文（LN-2S：成文/重写的唯一原料，
+        不截断传入；空则回退用 takeaways 拼列表，保旧调用兼容）
 
     返回：
       {"written": bool, "path": str|None, "is_new": bool|None,
@@ -437,6 +497,15 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call) 
         return {"written": False, "error": "disabled"}
     if not takeaways:
         return {"written": False, "error": None}
+
+    # LN-2S：成文/重写原料 = 完整回复全文（超 32000 才截断 + notes.error truncated）
+    material = full_reply if full_reply else "\n".join(f"- {t}" for t in takeaways)
+    if len(material) > _MAX_REPLY_CHARS:
+        material = material[:_MAX_REPLY_CHARS]
+        _emit("notes.error", {
+            "truncated": True, "reason": "reply too long",
+            "full_len": len(full_reply), "kept_len": len(material),
+        })
 
     try:
         # 1. 主题判定（唯一一次 LLM 调用）
@@ -466,7 +535,6 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call) 
         domain = _sanitize_name(judge["domain"]) or "general"
         if not topic:
             raise ValueError("empty topic after sanitize")
-        section_body = _format_section(judge["section"], sid)
 
         # match 命中 → 找对应已有笔记文件
         match_topic = None
@@ -489,12 +557,12 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call) 
                 is_new = False
                 break
 
-        # 3. 落盘（骨架重写式：新主题建骨架，已有主题快照+LLM 重写+校验三拒）
+        # 3. 落盘（骨架式：新主题 LLM 成文，已有主题快照+LLM 重写+校验三拒）
         if is_new:
-            path = _write_new_note(target_domain, topic, section_body, sid)
+            path = _write_new_note(target_domain, topic, material, sid, llm_call)
         else:
             path = _rewrite_note(target_domain, topic, target_path,
-                                 section_body, sid, llm_call)
+                                 material, sid, llm_call)
 
         # 4. index.md 幂等重生成
         _rebuild_index()

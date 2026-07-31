@@ -1056,11 +1056,21 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             m.get("content", "") for m in self.history[-4:]
                             if m.get("role") == "user" and m.get("content")
                         ]
+                        # ── 票 LN-2S：full_reply = 本轮 assistant 完整回复（不截断）──
+                        # 来源同 _extract_takeaways(fallback_content=...)：
+                        # history 末条 assistant 优先，否则 _pending_content 兜底。
+                        _ln_asst_msgs = [
+                            m.get("content", "") for m in self.history[-4:]
+                            if m.get("role") == "assistant" and m.get("content")
+                        ]
+                        _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
+                                       else (self._pending_content or ""))
                         write_living_notes(
                             takeaways,
                             _ln_user_msgs[-1] if _ln_user_msgs else "",
                             self.sid,
                             self.llm_caller,
+                            full_reply=_full_reply,
                         )
                     except Exception:
                         pass

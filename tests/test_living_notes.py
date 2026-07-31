@@ -24,10 +24,35 @@ import tools.living_notes as ln
 
 
 def _fake_llm(result: dict):
-    """构造一个返回固定 JSON 的假 LLM 调用器。"""
+    """构造一个返回固定 JSON 的假 LLM 调用器（单阶段：判定用）。"""
     def _call(prompt, use_tools=False):
         return {"choices": [{"message": {"content": json.dumps(result, ensure_ascii=False)}}]}
     return _call
+
+
+def _stage_llm(judge: dict, note_body: str):
+    """两阶段假 LLM（LN-2S：判定调用 → judge JSON；成文/重写调用 → 整篇笔记）。
+
+    判定 prompt 含"本轮要点"；成文 prompt 含"本轮完整回复"；重写含"旧笔记全文"。
+    """
+    def _call(prompt, use_tools=False):
+        user = prompt[-1]["content"] if isinstance(prompt, list) else str(prompt)
+        if "本轮完整回复" in user or "旧笔记全文" in user:
+            return {"choices": [{"message": {"content": note_body}}]}
+        return {"choices": [{"message": {"content": json.dumps(judge, ensure_ascii=False)}}]}
+    return _call
+
+
+def _skeleton_body(topic: str, domain: str, sid: str = "sid-1",
+                   content: str = "要点") -> str:
+    """新主题成文响应：整篇骨架笔记（含 frontmatter）。"""
+    return (
+        "---\n"
+        f"topic: {topic}\ndomain: {domain}\ncreated: 2026-07-31\n---\n\n"
+        f"## 概述\n\n- {content}（源自会话 {sid}）\n\n"
+        f"## 关键结论\n\n- 结论（源自会话 {sid}）\n\n"
+        f"## 时间线\n\n- 10:30 本轮要点（源自会话 {sid}）\n"
+    )
 
 
 @pytest.fixture
@@ -42,11 +67,14 @@ def ln_env(tmp_path, monkeypatch):
 # ── 验收 1：新主题建骨架笔记 ────────────────────────
 
 def test_new_topic_creates_note(ln_env):
-    llm = _fake_llm({
-        "topic": "收工闸", "domain": "agent开发",
-        "section": "- 收工闸在 RESPONDING 前检查待办\n- 回注最多两次",
-        "match": None,
-    })
+    llm = _stage_llm(
+        {
+            "topic": "收工闸", "domain": "agent开发",
+            "section": "- 收工闸在 RESPONDING 前检查待办\n- 回注最多两次",
+            "match": None,
+        },
+        _skeleton_body("收工闸", "agent开发", content="收工闸在 RESPONDING 前检查待办"),
+    )
     result = ln.write_living_notes(
         ["收工闸会拦截未完成的承诺"], "收工闸怎么实现的", "sid-1", llm
     )
@@ -63,8 +91,8 @@ def test_new_topic_creates_note(ln_env):
     assert "last_touched:" in text
     assert "version: 1" in text
     assert "source_sessions: [sid-1]" in text
-    # 五章节骨架
-    for sec in ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]:
+    # 骨架核心章节（空章节由 LLM 按规则删除，只断言有内容的章节）
+    for sec in ["概述", "关键结论", "时间线"]:
         assert f"## {sec}" in text
     # 概述含出处 sid
     assert "（源自会话 sid-1）" in text
@@ -73,10 +101,13 @@ def test_new_topic_creates_note(ln_env):
 # ── 验收 2：同主题重写（旧版进 .history、version+1）──
 
 def test_same_topic_rewrites(ln_env):
-    llm1 = _fake_llm({
-        "topic": "收工闸", "domain": "agent开发",
-        "section": "- 第一条要点", "match": None,
-    })
+    llm1 = _stage_llm(
+        {
+            "topic": "收工闸", "domain": "agent开发",
+            "section": "- 第一条要点", "match": None,
+        },
+        _skeleton_body("收工闸", "agent开发", content="第一条要点"),
+    )
     ln.write_living_notes(["第一次记录"], "用户消息1", "sid-1", llm1)
     path = ln_env / "agent开发" / "收工闸.md"
     first = path.read_text(encoding="utf-8")
@@ -135,11 +166,14 @@ def test_empty_takeaways_noop(ln_env):
 # ── 验收 4：命名违规矫正 ────────────────────────────
 
 def test_sanitize_bad_name(ln_env):
-    llm = _fake_llm({
-        "topic": "2026-07-31 收工闸: 实现/细节",
-        "domain": "agent:开发",
-        "section": "- 要点", "match": None,
-    })
+    llm = _stage_llm(
+        {
+            "topic": "2026-07-31 收工闸: 实现/细节",
+            "domain": "agent:开发",
+            "section": "- 要点", "match": None,
+        },
+        _skeleton_body("2026-07-31 收工闸 实现细节", "agent开发", content="要点"),
+    )
     ln.write_living_notes(["要点"], "消息", "sid-1", llm)
     # 文件名不含 / : 等非法字符
     files = [p.name for p in ln_env.rglob("*.md") if p.name != "index.md"]
@@ -151,18 +185,18 @@ def test_sanitize_bad_name(ln_env):
 
 def test_match_null_creates_new(ln_env):
     # 先建一个已有笔记
-    ln.write_living_notes(["旧主题内容"], "消息1", "sid-1", _fake_llm({
-        "topic": "旧主题", "domain": "生活",
-        "section": "- 旧要点", "match": None,
-    }))
+    ln.write_living_notes(["旧主题内容"], "消息1", "sid-1", _stage_llm(
+        {"topic": "旧主题", "domain": "生活", "section": "- 旧要点", "match": None},
+        _skeleton_body("旧主题", "生活", content="旧要点"),
+    ))
     old_path = ln_env / "生活" / "旧主题.md"
     before = old_path.read_text(encoding="utf-8")
 
     # 新内容 match=null → 建新笔记，不动旧笔记
-    ln.write_living_notes(["全新主题内容"], "消息2", "sid-2", _fake_llm({
-        "topic": "新主题", "domain": "生活",
-        "section": "- 新要点", "match": None,
-    }))
+    ln.write_living_notes(["全新主题内容"], "消息2", "sid-2", _stage_llm(
+        {"topic": "新主题", "domain": "生活", "section": "- 新要点", "match": None},
+        _skeleton_body("新主题", "生活", content="新要点"),
+    ))
     new_path = ln_env / "生活" / "新主题.md"
     assert new_path.exists()
     # 旧笔记一字未动
@@ -172,14 +206,14 @@ def test_match_null_creates_new(ln_env):
 # ── 验收 6：index 正确 ──────────────────────────────
 
 def test_index_rebuild(ln_env):
-    ln.write_living_notes(["A 要点"], "消息1", "sid-1", _fake_llm({
-        "topic": "主题甲", "domain": "agent开发",
-        "section": "- A 要点", "match": None,
-    }))
-    ln.write_living_notes(["B 要点"], "消息2", "sid-2", _fake_llm({
-        "topic": "主题乙", "domain": "生活",
-        "section": "- B 要点", "match": None,
-    }))
+    ln.write_living_notes(["A 要点"], "消息1", "sid-1", _stage_llm(
+        {"topic": "主题甲", "domain": "agent开发", "section": "- A 要点", "match": None},
+        _skeleton_body("主题甲", "agent开发", content="A 要点"),
+    ))
+    ln.write_living_notes(["B 要点"], "消息2", "sid-2", _stage_llm(
+        {"topic": "主题乙", "domain": "生活", "section": "- B 要点", "match": None},
+        _skeleton_body("主题乙", "生活", content="B 要点"),
+    ))
     index = (ln_env / "index.md").read_text(encoding="utf-8")
     assert "## agent开发" in index
     assert "## 生活" in index
