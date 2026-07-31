@@ -290,7 +290,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
   )
 
   const resumeById = useCallback(
-    (id: string) => {
+    (id: string, onFail?: () => void) => {
       patchOverlayState({ sessions: false })
       patchUiState({ status: 'resuming…' })
 
@@ -310,6 +310,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
             if (!r) {
               sys('error: invalid response: session.resume')
+              onFail?.()
 
               return patchUiState({ status: 'ready' })
             }
@@ -341,6 +342,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           })
           .catch((e: Error) => {
             sys(`error: ${e.message}`)
+            onFail?.()
             patchUiState({ status: 'ready' })
           })
       })

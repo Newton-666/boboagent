@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { existsSync } from 'node:fs'
-import { delimiter, resolve } from 'node:path'
+import { existsSync, unlinkSync } from 'node:fs'
+import { type Socket, createConnection } from 'node:net'
+import { tmpdir } from 'node:os'
+import { delimiter, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import type { GatewayEvent } from './gatewayTypes.js'
@@ -115,6 +117,13 @@ export class GatewayClient extends EventEmitter {
   private proc: ChildProcess | null = null
   private ws: WebSocket | null = null
   private wsConnectPromise: Promise<void> | null = null
+  // TICKET-018：unix socket 传输。python bind/listen，node 只做连接方——
+  // 管道 fd 被原生层误关（2026-07-31 连环死亡案）从此只是"客户端断开"，
+  // 自动重连即可，gateway 进程不死、会话不丢。
+  private sock: Socket | null = null
+  private sockRl: ReturnType<typeof createInterface> | null = null
+  private sockPath: string | null = null
+  private socketDisabled = process.env.BOBO_DISABLE_SOCKET_TRANSPORT === '1'
   private sidecarWs: WebSocket | null = null
   private attachUrl: null | string = null
   private sidecarUrl: null | string = null
@@ -188,6 +197,15 @@ export class GatewayClient extends EventEmitter {
     this.stdoutRl = null
     this.stderrRl = null
     this.clearReadyTimer()
+    // socket 传输（TICKET-018）清理：先摘引用和监听器再 destroy，
+    // 防止 close 事件触发重连逻辑（此处是主动替换，不是断线）
+    const sock = this.sock
+    this.sock = null
+    this.sockRl?.close()
+    this.sockRl = null
+    sock?.removeAllListeners()
+    sock?.destroy()
+    this.sockPath = null
   }
 
   private startReadyTimer(python: string, cwd: string) {
@@ -292,9 +310,35 @@ export class GatewayClient extends EventEmitter {
     const pyPath = env.PYTHONPATH?.trim()
 
     env.PYTHONPATH = pyPath ? `${root}${delimiter}${pyPath}` : root
+    // TICKET-018：socket 模式——让 python 自己 bind/listen，node 仅作连接方
+    const sockPath = this.socketDisabled ? null : join(tmpdir(), `bobo-gw-${process.pid}-${Date.now()}.sock`)
+    if (sockPath) {
+      env.BOBO_GW_SOCKET = sockPath
+    }
     this.startReadyTimer(python, cwd)
     this.proc = spawn(python, ['-m', 'bobo_tui_gateway.entry'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
-    this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd}`)
+    this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd}${sockPath ? ' [socket 模式]' : ' [stdio 模式]'}`)
+
+    if (sockPath) {
+      this.connectSocketWithRetry(this.proc, sockPath, 0)
+    }
+
+    // 法医探针（2026-07-31 连环静默死亡案）：gateway 多次死于 stdin EOF，
+    // 但父进程活着、没 kill、没 replace。给三根管道装带调用栈的监听器，
+    // 谁掐断管道，栈里就有谁的名字。
+    const pipeOwner = this.proc
+    pipeOwner.stdin?.on('error', err => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdin ERROR: ${err.message}\n${err.stack ?? ''}`)
+    })
+    pipeOwner.stdin?.on('close', () => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdin CLOSED trace:\n${new Error('stdin-close-trace').stack ?? ''}`)
+    })
+    pipeOwner.stdout?.on('error', err => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdout ERROR: ${err.message}`)
+    })
 
     this.stdoutRl = createInterface({ input: this.proc.stdout! })
     this.stdoutRl.on('line', raw => {
@@ -429,6 +473,7 @@ export class GatewayClient extends EventEmitter {
     this.resetStartupState()
 
     if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
+      this.lifecycle(`[lifecycle] start() replacing live child pid=${this.proc.pid ?? 'unknown'}`)
       this.lifecycle(`[lifecycle] replacing live gateway child ${describeChild(this.proc)}`)
       this.proc.kill()
     }
@@ -550,6 +595,148 @@ export class GatewayClient extends EventEmitter {
     return this.ws
   }
 
+  // ── TICKET-018 socket 传输 ──────────────────────────────────────────
+
+  private wireSocket(ownedProc: ChildProcess, sockPath: string, sock: Socket) {
+    this.sock = sock
+    this.sockPath = sockPath
+    this.lifecycle(`[socket] 已连接 ${sockPath}（gateway 自持监听，前端断开不再致命）`)
+    const rl = createInterface({ input: sock })
+    this.sockRl = rl
+    rl.on('line', raw => {
+      try {
+        this.dispatch(JSON.parse(raw))
+      } catch {
+        const preview = raw.trim().slice(0, MAX_LOG_PREVIEW) || '(empty line)'
+        this.pushLog(`[protocol] malformed socket frame: ${preview}`)
+        this.publish({ type: 'gateway.protocol_error', payload: { preview } })
+      }
+    })
+    sock.on('close', () => this.handleSocketClose(ownedProc, sockPath, sock))
+    sock.on('error', err => {
+      if (this.proc === ownedProc) {
+        this.lifecycle(`[socket] error: ${err.message}`)
+      }
+    })
+  }
+
+  private connectSocketWithRetry(ownedProc: ChildProcess, sockPath: string, attempt: number) {
+    const timer = setTimeout(() => {
+      if (this.proc !== ownedProc || this.sock) {
+        return
+      }
+      if (ownedProc.killed || ownedProc.exitCode !== null) {
+        return
+      }
+      if (!existsSync(sockPath)) {
+        if (attempt < 50) {
+          this.connectSocketWithRetry(ownedProc, sockPath, attempt + 1)
+        } else {
+          this.lifecycle('[socket] 等待 socket 文件超时 → kill 后以 stdio 模式重启 child')
+          this.socketDisabled = true
+          ownedProc.kill()
+        }
+        return
+      }
+      const sock = createConnection(sockPath)
+      let opened = false
+      sock.on('connect', () => {
+        opened = true
+        if (this.proc !== ownedProc || this.sock) {
+          sock.destroy()
+          return
+        }
+        this.wireSocket(ownedProc, sockPath, sock)
+      })
+      sock.on('error', () => {
+        if (!opened) {
+          sock.destroy()
+          if (attempt < 50) {
+            this.connectSocketWithRetry(ownedProc, sockPath, attempt + 1)
+          }
+        }
+      })
+    }, attempt === 0 ? 0 : 100)
+    timer.unref?.()
+  }
+
+  private handleSocketClose(ownedProc: ChildProcess, sockPath: string, sock: Socket) {
+    if (this.sock === sock) {
+      this.sock = null
+    }
+    if (this.proc !== ownedProc) {
+      return
+    }
+    if (ownedProc.killed || ownedProc.exitCode !== null) {
+      return // child 已死，走既有 transport exit 流程
+    }
+    // child 活着但 socket 断了——正是 fd 凶杀案现场。重连，不判死。
+    this.lifecycle('[socket] 连接断开但 gateway 存活 → 自动重连（不再判 gateway 死亡）')
+    this.reconnectSocket(ownedProc, sockPath, 0)
+  }
+
+  private reconnectSocket(ownedProc: ChildProcess, sockPath: string, attempt: number) {
+    if (attempt >= 20) {
+      this.lifecycle('[socket] 重连 20 次失败 → kill child，走既有 recovery 流程')
+      ownedProc.kill()
+      return
+    }
+    const timer = setTimeout(() => {
+      if (this.proc !== ownedProc || this.sock || ownedProc.killed || ownedProc.exitCode !== null) {
+        return
+      }
+      const sock = createConnection(sockPath)
+      let opened = false
+      sock.on('connect', () => {
+        opened = true
+        if (this.proc !== ownedProc || this.sock) {
+          sock.destroy()
+          return
+        }
+        this.lifecycle('[socket] 重连成功 ✓ gateway 会话无损')
+        this.wireSocket(ownedProc, sockPath, sock)
+      })
+      sock.on('error', () => {
+        if (!opened) {
+          sock.destroy()
+          this.reconnectSocket(ownedProc, sockPath, attempt + 1)
+        }
+      })
+    }, 300)
+    timer.unref?.()
+  }
+
+  private requestOverSocket<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const id = `r${++this.reqId}`
+
+    return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(this.onTimeout, REQUEST_TIMEOUT_MS, id)
+
+      timeout.unref?.()
+
+      this.pending.set(id, {
+        id,
+        method,
+        reject,
+        resolve: v => resolve(v as T),
+        timeout
+      })
+
+      try {
+        this.sock!.write(JSON.stringify({ id, jsonrpc: '2.0', method, params }) + '\n')
+      } catch (e) {
+        const pending = this.pending.get(id)
+
+        if (pending) {
+          clearTimeout(pending.timeout)
+          this.pending.delete(id)
+        }
+
+        reject(e)
+      }
+    })
+  }
+
   private requestOverWebSocket<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     return this.ensureAttachedWebSocket(method).then(
       ws =>
@@ -592,6 +779,11 @@ export class GatewayClient extends EventEmitter {
       }
 
       return this.requestOverWebSocket<T>(method, params)
+    }
+
+    // TICKET-018：socket 已连接时优先走 socket（gateway 自持，断线可重连）
+    if (this.sock && !this.sock.destroyed) {
+      return this.requestOverSocket<T>(method, params)
     }
 
     if (!this.proc?.stdin || this.proc.killed || this.proc.exitCode !== null) {
@@ -641,5 +833,16 @@ export class GatewayClient extends EventEmitter {
     this.closeSidecarSocket()
     this.clearReadyTimer()
     this.rejectPending(new Error('gateway closed'))
+    // socket 传输清理（TICKET-018）：断开连接并删掉 socket 文件
+    const sock = this.sock
+    this.sock = null
+    this.sockRl?.close()
+    this.sockRl = null
+    sock?.removeAllListeners()
+    sock?.destroy()
+    if (this.sockPath) {
+      try { unlinkSync(this.sockPath) } catch { /* 已被 python 侧清理或不存在 */ }
+      this.sockPath = null
+    }
   }
 }

@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 def _shutdown(signum, frame):
     """SIGINT/SIGTERM 处理：保存会话后退出"""
+    logger.critical("gateway 退出: 收到信号 %s", signum)
     from bobo_tui_gateway.server import shutdown_sessions
     shutdown_sessions()
     sys.exit(0)
@@ -170,33 +171,34 @@ def main():
     print("=" * 60)
 
 
-def _run_backend():
-    """Run as TUI backend process (stdin/stdout JSON-RPC)."""
-
+def _scan_vault_tree(root):
+    """扫描 Obsidian vault 目录，返回文件树结构"""
     from pathlib import Path
+    max_depth = 4
+    tree = []
+    root_path = Path(root)
+    try:
+        for entry in sorted(root_path.iterdir(), key=lambda x: (not x.is_dir(), x.name)):
+            if entry.name.startswith('.'):
+                continue
+            if len(tree) >= 100:
+                break
+            if entry.is_dir():
+                subtree = _scan_vault_tree(entry) if max_depth > 0 else []
+                tree.append({"name": entry.name, "type": "folder", "children": subtree})
+            elif entry.name.endswith(('.md', '.txt', '.json')):
+                tree.append({"name": entry.name, "type": "file", "path": str(entry)})
+    except PermissionError:
+        pass
+    return tree
 
-    # 扫描 Obsidian vault 目录，返回文件树结构
-    def _scan_vault_tree(root):
-        max_depth = 4
-        tree = []
-        root_path = Path(root)
-        try:
-            for entry in sorted(root_path.iterdir(), key=lambda x: (not x.is_dir(), x.name)):
-                if entry.name.startswith('.'):
-                    continue
-                if len(tree) >= 100:
-                    break
-                if entry.is_dir():
-                    subtree = _scan_vault_tree(entry) if max_depth > 0 else []
-                    tree.append({"name": entry.name, "type": "folder", "children": subtree})
-                elif entry.name.endswith(('.md', '.txt', '.json')):
-                    tree.append({"name": entry.name, "type": "file", "path": str(entry)})
-        except PermissionError:
-            pass
-        return tree
 
-    import signal
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+def _serve_connection(lines_iter):
+    """服务一条连接（stdio 或 socket）：发 ready → 笔记树 → RPC 主循环。
+
+    返回退出原因："eof" / "write_broken"。不保存会话、不退出进程——
+    调用方决定连接结束后怎么办（stdio 模式退出；socket 模式等待重连）。
+    """
     # 发送 ready 事件（包含皮肤配置）
     if not write_json({
         "jsonrpc": "2.0",
@@ -206,7 +208,7 @@ def _run_backend():
             "payload": {"skin": resolve_skin()}
         },
     }):
-        sys.exit(0)
+        return "write_broken"
 
     # 检查 API Key — 如果缺失，gateway.ready 已发送，TUI 会显示设置界面
     from config import API_KEY
@@ -228,7 +230,7 @@ def _run_backend():
         pass
 
     # 读取并处理请求
-    for raw in sys.stdin:
+    for raw in lines_iter:
         line = raw.strip()
         if not line:
             continue
@@ -252,8 +254,75 @@ def _run_backend():
             pass
         if resp is not None:
             if not write_json(resp):
-                logger.warning("stdout 写入失败，TUI 已断开（rpc=%s）", req.get("method"))
-                break  # stdout 写入失败，TUI 已断开
+                logger.warning("写入失败，前端已断开（rpc=%s）", req.get("method"))
+                return "write_broken"
+
+    return "eof"
+
+
+def _run_socket_backend(sock_path: str):
+    """TICKET-018：unix socket 服务端模式——gateway 自己的命自己扛。
+
+    python bind/listen，TUI（Node）作为客户端连接。前端侧任何故障
+    （fd 被原生层误关、Node 崩溃、管道被掐）都只表现为"客户端断开"，
+    gateway 进程不退出、会话状态全保留，回到 accept 等待重连。
+    """
+    import socket as _socket
+
+    from bobo_tui_gateway.transport import SocketTransport, set_transport
+
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+
+    srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    srv.bind(sock_path)
+    os.chmod(sock_path, 0o600)
+    srv.listen(1)
+    logger.critical("gateway socket 模式: 监听 %s（前端断开不再致命，等待重连）", sock_path)
+
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except OSError as e:
+            logger.critical("gateway socket: accept 异常 %r，继续监听", e)
+            continue
+        logger.critical("gateway socket: 前端已连接")
+        set_transport(SocketTransport(conn))
+        try:
+            reader = conn.makefile("r", encoding="utf-8", newline="\n")
+            reason = _serve_connection(reader)
+            logger.critical("gateway socket: 前端断开（原因=%s），进程保持存活，等待重连", reason)
+        except OSError as e:
+            logger.critical("gateway socket: 连接异常 %r，等待重连", e)
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+
+def _run_backend():
+    """Run as TUI backend process (JSON-RPC over stdio pipes or unix socket)."""
+
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # TICKET-018：socket 模式——前端故障不再杀死 gateway
+    sock_path = os.environ.get("BOBO_GW_SOCKET", "").strip()
+    if sock_path:
+        _run_socket_backend(sock_path)
+        return
+
+    reason = _serve_connection(sys.stdin)
+
+    # 主循环正常结束：登记死因（EOF 或 stdout 断裂）
+    if reason == "write_broken":
+        logger.critical("gateway 退出: stdout 断裂")
+    else:
+        logger.critical("gateway 退出: stdin EOF（父进程关闭了管道）")
+    logger.critical("gateway 退出: 主循环结束")
 
     # stdin 关闭（TUI 断开），保存所有活跃会话
     from bobo_tui_gateway.server import shutdown_sessions
