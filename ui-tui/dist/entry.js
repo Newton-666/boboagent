@@ -55278,55 +55278,6 @@ var init_nanostores = __esm({
   }
 });
 
-// node_modules/@nanostores/react/index.js
-function useStore(store, { keys, deps = [store, keys], ssr } = {}) {
-  let snapshotRef = (0, import_react56.useRef)();
-  snapshotRef.current = store.get();
-  let subscribe = (0, import_react56.useCallback)((onChange) => {
-    emit(snapshotRef, onChange)(store.value);
-    return keys?.length > 0 ? listenKeys(store, keys, emit(snapshotRef, onChange)) : store.listen(emit(snapshotRef, onChange));
-  }, deps);
-  let get = () => snapshotRef.current;
-  let server = get;
-  if (ssr && "init" in store) {
-    server = ssr === "initial" ? () => store.init : ssr;
-  }
-  return (0, import_react56.useSyncExternalStore)(subscribe, get, server);
-}
-var import_react56, emit;
-var init_react = __esm({
-  "node_modules/@nanostores/react/index.js"() {
-    init_nanostores();
-    import_react56 = __toESM(require_react(), 1);
-    emit = (snapshotRef, onChange) => (value) => {
-      if (snapshotRef.current === value) return;
-      snapshotRef.current = value;
-      onChange();
-    };
-  }
-});
-
-// src/app/gatewayContext.tsx
-function GatewayProvider({ children, value }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(GatewayContext.Provider, { value, children });
-}
-function useGateway() {
-  const value = (0, import_react57.useContext)(GatewayContext);
-  if (!value) {
-    throw new Error("GatewayContext missing");
-  }
-  return value;
-}
-var import_react57, import_jsx_runtime16, GatewayContext;
-var init_gatewayContext = __esm({
-  "src/app/gatewayContext.tsx"() {
-    "use strict";
-    import_react57 = __toESM(require_react(), 1);
-    import_jsx_runtime16 = __toESM(require_jsx_runtime(), 1);
-    GatewayContext = (0, import_react57.createContext)(null);
-  }
-});
-
 // src/domain/usage.ts
 var ZERO;
 var init_usage = __esm({
@@ -55705,7 +55656,7 @@ var init_interfaces = __esm({
 });
 
 // src/app/uiStore.ts
-var buildUiState, $uiState, $uiTheme, $uiSessionId, getUiState, patchUiState2;
+var buildUiState, $uiState, $uiTheme, $uiSessionId, getUiState, patchUiState;
 var init_uiStore = __esm({
   "src/app/uiStore.ts"() {
     "use strict";
@@ -55745,7 +55696,56 @@ var init_uiStore = __esm({
     $uiTheme = computed($uiState, (state) => state.theme);
     $uiSessionId = computed($uiState, (state) => state.sid);
     getUiState = () => $uiState.get();
-    patchUiState2 = (next) => $uiState.set(typeof next === "function" ? next($uiState.get()) : { ...$uiState.get(), ...next });
+    patchUiState = (next) => $uiState.set(typeof next === "function" ? next($uiState.get()) : { ...$uiState.get(), ...next });
+  }
+});
+
+// node_modules/@nanostores/react/index.js
+function useStore(store, { keys, deps = [store, keys], ssr } = {}) {
+  let snapshotRef = (0, import_react56.useRef)();
+  snapshotRef.current = store.get();
+  let subscribe = (0, import_react56.useCallback)((onChange) => {
+    emit(snapshotRef, onChange)(store.value);
+    return keys?.length > 0 ? listenKeys(store, keys, emit(snapshotRef, onChange)) : store.listen(emit(snapshotRef, onChange));
+  }, deps);
+  let get = () => snapshotRef.current;
+  let server = get;
+  if (ssr && "init" in store) {
+    server = ssr === "initial" ? () => store.init : ssr;
+  }
+  return (0, import_react56.useSyncExternalStore)(subscribe, get, server);
+}
+var import_react56, emit;
+var init_react = __esm({
+  "node_modules/@nanostores/react/index.js"() {
+    init_nanostores();
+    import_react56 = __toESM(require_react(), 1);
+    emit = (snapshotRef, onChange) => (value) => {
+      if (snapshotRef.current === value) return;
+      snapshotRef.current = value;
+      onChange();
+    };
+  }
+});
+
+// src/app/gatewayContext.tsx
+function GatewayProvider({ children, value }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(GatewayContext.Provider, { value, children });
+}
+function useGateway() {
+  const value = (0, import_react57.useContext)(GatewayContext);
+  if (!value) {
+    throw new Error("GatewayContext missing");
+  }
+  return value;
+}
+var import_react57, import_jsx_runtime16, GatewayContext;
+var init_gatewayContext = __esm({
+  "src/app/gatewayContext.tsx"() {
+    "use strict";
+    import_react57 = __toESM(require_react(), 1);
+    import_jsx_runtime16 = __toESM(require_jsx_runtime(), 1);
+    GatewayContext = (0, import_react57.createContext)(null);
   }
 });
 
@@ -58004,7 +58004,7 @@ var init_turnController = __esm({
         }
         if (getUiState().notice?.key === key) {
           this.clearNoticeTimer();
-          patchUiState2({ notice: null });
+          patchUiState({ notice: null });
         }
       }
       // Apply a notice to the visible UI state and (re)arm its TTL clock.
@@ -58013,13 +58013,13 @@ var init_turnController = __esm({
       // 'sticky' (default) persists until an explicit clear.
       applyNotice(notice) {
         this.clearNoticeTimer();
-        patchUiState2({ notice });
+        patchUiState({ notice });
         if (notice.kind === "ttl" && typeof notice.ttl_ms === "number" && notice.ttl_ms > 0) {
           const id = notice.id;
           this.noticeTimer = setTimeout(() => {
             this.noticeTimer = null;
             if (getUiState().notice?.id === id) {
-              patchUiState2({ notice: null });
+              patchUiState({ notice: null });
             }
           }, notice.ttl_ms);
         }
@@ -58049,7 +58049,7 @@ var init_turnController = __esm({
         this.pendingNotice = null;
         this.clearNoticeTimer();
         if (getUiState().notice) {
-          patchUiState2({ notice: null });
+          patchUiState({ notice: null });
         }
       }
       endReasoningPhase() {
@@ -58071,7 +58071,7 @@ var init_turnController = __esm({
           tools: [],
           turnTrail: []
         });
-        patchUiState2({ busy: false });
+        patchUiState({ busy: false });
         resetFlowOverlays();
       }
       // `keepBusy` holds the session busy after interrupting so a queued message
@@ -58107,13 +58107,13 @@ var init_turnController = __esm({
         }
         this.clearStatusTimer();
         if (opts.keepBusy) {
-          patchUiState2({ busy: true, status: "interrupting\u2026" });
+          patchUiState({ busy: true, status: "interrupting\u2026" });
           return;
         }
-        patchUiState2({ status: "interrupted" });
+        patchUiState({ status: "interrupted" });
         this.statusTimer = setTimeout(() => {
           this.statusTimer = null;
-          patchUiState2({ status: "ready" });
+          patchUiState({ status: "ready" });
         }, INTERRUPT_COOLDOWN_MS);
         this.flushPendingNotice();
       }
@@ -58504,7 +58504,7 @@ ${stripped}
         if (yieldingNoticeKey === "credits.usage" || yieldingNoticeKey === "credits.grant_spent") {
           this.clearNotice(yieldingNoticeKey);
         }
-        patchUiState2({ busy: true });
+        patchUiState({ busy: true });
         patchTurnState({ activity: [], outcome: "", subagents: [], toolTokens: 0, tools: [], turnTrail: [] });
       }
       upsertSubagent(p, patch, opts = { createIfMissing: true }) {
@@ -58659,7 +58659,7 @@ function createGatewayEventHandler(ctx) {
       clearTimeout(thinkingStatusTimer);
       thinkingStatusTimer = null;
     }
-    patchUiState2({ status });
+    patchUiState({ status });
   };
   const scheduleThinkingStatus = (status) => {
     pendingThinkingStatus = status;
@@ -58668,14 +58668,14 @@ function createGatewayEventHandler(ctx) {
     }
     thinkingStatusTimer = setTimeout(() => {
       thinkingStatusTimer = null;
-      patchUiState2({ status: pendingThinkingStatus || statusFromBusy() });
+      patchUiState({ status: pendingThinkingStatus || statusFromBusy() });
     }, STREAM_BATCH_MS);
   };
   const restoreStatusAfter = (ms) => {
     turnController.clearStatusTimer();
     turnController.statusTimer = setTimeout(() => {
       turnController.statusTimer = null;
-      patchUiState2({ status: statusFromBusy(), statusKind: "" });
+      patchUiState({ status: statusFromBusy(), statusKind: "" });
     }, ms);
   };
   const scheduleStartupPrompt = () => {
@@ -58727,18 +58727,18 @@ function createGatewayEventHandler(ctx) {
     if (recoverSidRef && recoverSid) {
       recoverSidRef.current = null;
       resumeById(recoverSid);
-      patchUiState2({ status: "recovering session\u2026" });
+      patchUiState({ status: "recovering session\u2026" });
       return;
     }
     if (STARTUP_RESUME_ID2) {
-      patchUiState2({ status: "resuming\u2026" });
+      patchUiState({ status: "resuming\u2026" });
       resumeById(STARTUP_RESUME_ID2);
       scheduleStartupPrompt();
       return;
     }
     getFullConfigOnce().then((cfg) => {
       if (!cfg?.config?.display?.tui_auto_resume_recent) {
-        patchUiState2({ status: "forging session\u2026" });
+        patchUiState({ status: "forging session\u2026" });
         newSession();
         scheduleStartupPrompt();
         return;
@@ -58746,17 +58746,17 @@ function createGatewayEventHandler(ctx) {
       return rpc("session.most_recent", {}).then((r) => {
         const target = r?.session_id;
         if (target) {
-          patchUiState2({ status: "resuming most recent\u2026" });
+          patchUiState({ status: "resuming most recent\u2026" });
           resumeById(target);
           scheduleStartupPrompt();
           return;
         }
-        patchUiState2({ status: "forging session\u2026" });
+        patchUiState({ status: "forging session\u2026" });
         newSession();
         scheduleStartupPrompt();
       });
     }).catch(() => {
-      patchUiState2({ status: "forging session\u2026" });
+      patchUiState({ status: "forging session\u2026" });
       newSession();
       scheduleStartupPrompt();
     });
@@ -58777,7 +58777,7 @@ function createGatewayEventHandler(ctx) {
         return;
       case "session.info": {
         const info = ev.payload;
-        patchUiState2((state) => ({
+        patchUiState((state) => ({
           ...state,
           info,
           status: state.status === "starting agent\u2026" ? "ready" : state.status,
@@ -58813,12 +58813,12 @@ function createGatewayEventHandler(ctx) {
           sys(p.text);
           const brief = p.text.startsWith("\u2713") ? "\u2713 goal complete" : p.text.startsWith("\u21BB") ? "\u21BB goal continuing" : p.text.startsWith("\u23F8") ? "\u23F8 goal paused" : "ready";
           setStatus(brief);
-          patchUiState2({ statusKind: "goal" });
+          patchUiState({ statusKind: "goal" });
           restoreStatusAfter(6e3);
           return;
         }
         setStatus(p.text);
-        patchUiState2({ statusKind: p.kind || "" });
+        patchUiState({ statusKind: p.kind || "" });
         if (p.kind === "compressing") {
           sys(p.text);
           return;
@@ -59094,9 +59094,9 @@ function createGatewayEventHandler(ctx) {
           }
         }
         setStatus("ready");
-        patchUiState2({ statusKind: "" });
+        patchUiState({ statusKind: "" });
         if (ev.payload?.usage) {
-          patchUiState2((state) => ({ ...state, usage: { ...state.usage, ...ev.payload.usage } }));
+          patchUiState((state) => ({ ...state, usage: { ...state.usage, ...ev.payload.usage } }));
         }
         return;
       }
@@ -59133,7 +59133,7 @@ var init_createGatewayEventHandler = __esm({
     init_uiStore();
     NO_PROVIDER_RE = /\bNo (?:LLM|inference) provider configured\b/i;
     statusFromBusy = () => getUiState().busy ? "running\u2026" : "ready";
-    applySkin = (s) => patchUiState2({
+    applySkin = (s) => patchUiState({
       theme: fromSkin(
         s.colors ?? {},
         s.branding ?? {},
@@ -59143,7 +59143,7 @@ var init_createGatewayEventHandler = __esm({
         s.help_header ?? ""
       )
     });
-    dropBgTask = (taskId) => patchUiState2((state) => {
+    dropBgTask = (taskId) => patchUiState((state) => {
       const next = new Set(state.bgTasks);
       next.delete(taskId);
       return { ...state, bgTasks: next };
@@ -59528,7 +59528,7 @@ var init_core = __esm({
           if (next === null) {
             return ctx.transcript.sys("usage: /mouse [on|off|toggle|wheel|buttons|all]");
           }
-          patchUiState2({ mouseTracking: next });
+          patchUiState({ mouseTracking: next });
           ctx.gateway.rpc("config.set", { key: "mouse", value: next }).catch(() => {
           });
           queueMicrotask(() => ctx.transcript.sys(`mouse tracking ${next}`));
@@ -59545,7 +59545,7 @@ var init_core = __esm({
           const isNew = cmd.startsWith("/new");
           const requestedTitle = isNew ? arg.trim() : "";
           const commit = () => {
-            patchUiState2({ status: "forging session\u2026" });
+            patchUiState({ status: "forging session\u2026" });
             ctx.session.newSession(isNew ? "new session started" : void 0, requestedTitle || void 0);
           };
           if (NO_CONFIRM_DESTRUCTIVE) {
@@ -59618,7 +59618,7 @@ var init_core = __esm({
           if (next === null) {
             return ctx.transcript.sys("usage: /compact [on|off|toggle]");
           }
-          patchUiState2({ compact: next });
+          patchUiState({ compact: next });
           ctx.gateway.rpc("config.set", { key: "compact", value: next ? "on" : "off" }).catch(() => {
           });
           queueMicrotask(() => ctx.transcript.sys(`compact ${next ? "on" : "off"}`));
@@ -59636,7 +59636,7 @@ var init_core = __esm({
                 return;
               }
               const mode = parseDetailsMode(r?.value) ?? ui.detailsMode;
-              patchUiState2({ detailsMode: mode, detailsModeCommandOverride: false });
+              patchUiState({ detailsMode: mode, detailsModeCommandOverride: false });
               const overrides = SECTION_NAMES.filter((s) => ui.sections[s]).map((s) => `${s}=${ui.sections[s]}`).join(" ");
               transcript.sys(`details: ${mode}${overrides ? `  (${overrides})` : ""}`);
             }).catch(() => !ctx.stale() && transcript.sys(`details: ${ui.detailsMode}`));
@@ -59650,7 +59650,7 @@ var init_core = __esm({
               return transcript.sys(DETAILS_SECTION_USAGE);
             }
             const { [first]: _drop, ...rest } = ui.sections;
-            patchUiState2({ sections: mode ? { ...rest, [first]: mode } : rest });
+            patchUiState({ sections: mode ? { ...rest, [first]: mode } : rest });
             gateway.rpc("config.set", { key: `details_mode.${first}`, value: mode ?? "" }).catch(() => {
             });
             transcript.sys(`details ${first}: ${mode ?? "reset"}`);
@@ -59661,7 +59661,7 @@ var init_core = __esm({
             return transcript.sys(DETAILS_USAGE);
           }
           const sections = Object.fromEntries(SECTION_NAMES.map((section) => [section, next]));
-          patchUiState2({ detailsMode: next, detailsModeCommandOverride: true, sections });
+          patchUiState({ detailsMode: next, detailsModeCommandOverride: true, sections });
           gateway.rpc("config.set", { key: "details_mode", value: next }).catch(() => {
           });
           transcript.sys(`details: ${next}`);
@@ -59811,7 +59811,7 @@ ${clipped}`;
           if (!next) {
             return ctx.transcript.sys("usage: /statusbar [on|off|top|bottom|toggle]");
           }
-          patchUiState2({ statusBar: next });
+          patchUiState({ statusBar: next });
           ctx.gateway.rpc("config.set", { key: "statusbar", value: next }).catch(() => {
           });
           queueMicrotask(() => ctx.transcript.sys(`status bar ${next}`));
@@ -60535,7 +60535,7 @@ var init_session = __esm({
               if (!r.task_id) {
                 return;
               }
-              patchUiState2((state) => ({ ...state, bgTasks: new Set(state.bgTasks).add(r.task_id) }));
+              patchUiState((state) => ({ ...state, bgTasks: new Set(state.bgTasks).add(r.task_id) }));
               ctx.transcript.sys(`bg ${r.task_id} started`);
             })
           );
@@ -60571,7 +60571,7 @@ var init_session = __esm({
               }
               ctx.transcript.sys(`model \u2192 ${r.value}`);
               ctx.local.maybeWarn(r);
-              patchUiState2((state) => ({
+              patchUiState((state) => ({
                 ...state,
                 info: state.info ? { ...state.info, model: r.value } : { model: r.value, skills: {}, tools: {} }
               }));
@@ -60644,10 +60644,10 @@ var init_session = __esm({
                 ctx.transcript.setHistoryItems(r.info ? [introMsg(r.info), ...rows] : rows);
               }
               if (r.info) {
-                patchUiState2({ info: r.info });
+                patchUiState({ info: r.info });
               }
               if (r.usage) {
-                patchUiState2((state) => ({ ...state, usage: { ...state.usage, ...r.usage } }));
+                patchUiState((state) => ({ ...state, usage: { ...state.usage, ...r.usage } }));
               }
               if (r.summary?.headline) {
                 const prefix = r.summary.noop ? "" : "\u2713 ";
@@ -60682,7 +60682,7 @@ var init_session = __esm({
                 return;
               }
               void ctx.session.closeSession(prevSid);
-              patchUiState2({ sid: r.session_id });
+              patchUiState({ sid: r.session_id });
               ctx.session.setSessionStartedAt(Date.now());
               ctx.transcript.sys(`branched \u2192 ${r.title ?? ""}`);
             })
@@ -60770,7 +60770,7 @@ var init_session = __esm({
               if (!r.value) {
                 return;
               }
-              patchUiState2({ indicatorStyle: value });
+              patchUiState({ indicatorStyle: value });
               ctx.transcript.sys(`indicator \u2192 ${r.value}`);
             })
           );
@@ -60800,13 +60800,13 @@ var init_session = __esm({
                 return;
               }
               if (r.value === "hide") {
-                patchUiState2((state) => ({
+                patchUiState((state) => ({
                   ...state,
                   sections: { ...state.sections, thinking: "hidden" },
                   showReasoning: false
                 }));
               } else if (r.value === "show") {
-                patchUiState2((state) => ({
+                patchUiState((state) => ({
                   ...state,
                   sections: { ...state.sections, thinking: "expanded" },
                   showReasoning: true
@@ -60837,7 +60837,7 @@ var init_session = __esm({
             ctx.guarded((r) => {
               const next = r.value === "fast" ? "fast" : "normal";
               ctx.transcript.sys(`fast mode: ${next}`);
-              patchUiState2((state) => ({
+              patchUiState((state) => ({
                 ...state,
                 info: state.info ? {
                   ...state.info,
@@ -60890,7 +60890,7 @@ var init_session = __esm({
               return;
             }
             if (r) {
-              patchUiState2({
+              patchUiState({
                 usage: { calls: r.calls ?? 0, input: r.input ?? 0, output: r.output ?? 0, total: r.total ?? 0 }
               });
             }
@@ -60952,25 +60952,25 @@ var init_externalCli = __esm({
 async function runExternalSetup({ args, ctx, done, launcher, suspend }) {
   const { gateway, session, transcript } = ctx;
   transcript.sys(`launching \`hermes ${args.join(" ")}\`\u2026`);
-  patchUiState2({ status: "setup running\u2026" });
+  patchUiState({ status: "setup running\u2026" });
   let result = { code: null };
   await suspend(async () => {
     result = await launcher(args);
   });
   if (result.error) {
     transcript.sys(`error launching hermes: ${result.error}`);
-    patchUiState2({ status: "setup required" });
+    patchUiState({ status: "setup required" });
     return;
   }
   if (result.code !== 0) {
     transcript.sys(`hermes ${args[0]} exited with code ${result.code}`);
-    patchUiState2({ status: "setup required" });
+    patchUiState({ status: "setup required" });
     return;
   }
   const setup = await gateway.rpc("setup.status", {});
   if (setup?.provider_configured === false) {
     transcript.sys("still no provider configured");
-    patchUiState2({ status: "setup required" });
+    patchUiState({ status: "setup required" });
     return;
   }
   transcript.sys(done);
@@ -61920,7 +61920,7 @@ var init_useConfigSync = __esm({
       if (setVoiceRecordKey && cfg) {
         setVoiceRecordKey(_voiceRecordKeyFromConfig(cfg));
       }
-      patchUiState2({
+      patchUiState({
         busyInputMode: normalizeBusyInputMode(d.busy_input_mode),
         compact: !!d.tui_compact,
         detailsMode: resolveDetailsMode(d),
@@ -62570,7 +62570,7 @@ function useSessionLifecycle(opts) {
     turnController.fullReset();
     setVoiceRecording(false);
     setVoiceProcessing(false);
-    patchUiState2({ bgTasks: /* @__PURE__ */ new Set(), info: null, sid: null, usage: ZERO });
+    patchUiState({ bgTasks: /* @__PURE__ */ new Set(), info: null, sid: null, usage: ZERO });
     setHistoryItems([]);
     setLastUserMsg("");
     setStickyPrompt("");
@@ -62588,7 +62588,7 @@ function useSessionLifecycle(opts) {
       setLastUserMsg("");
       composerActions.setPasteSnips([]);
       patchTurnState({ activity: [] });
-      patchUiState2({ info, usage: usageFrom(info) });
+      patchUiState({ info, usage: usageFrom(info) });
     },
     [composerActions, setHistoryItems, setLastUserMsg, setStickyPrompt]
   );
@@ -62597,7 +62597,7 @@ function useSessionLifecycle(opts) {
       const setup = await rpc("setup.status", {});
       if (setup?.provider_configured === false) {
         panel(SETUP_REQUIRED_TITLE, buildSetupRequiredSections());
-        patchUiState2({ status: "setup required" });
+        patchUiState({ status: "setup required" });
         return null;
       }
       if (!keepCurrent) {
@@ -62605,7 +62605,7 @@ function useSessionLifecycle(opts) {
       }
       const r = await rpc("session.create", { cols: colsRef.current });
       if (!r) {
-        patchUiState2({ status: "ready" });
+        patchUiState({ status: "ready" });
         return null;
       }
       const info = r.info ?? null;
@@ -62613,7 +62613,7 @@ function useSessionLifecycle(opts) {
       resetSession();
       setSessionStartedAt(Date.now());
       writeActiveSessionFile(r.session_id);
-      patchUiState2({
+      patchUiState({
         info,
         sid: r.session_id,
         status: info?.version ? "ready" : "starting agent\u2026",
@@ -62668,12 +62668,12 @@ function useSessionLifecycle(opts) {
   const activateLiveSession = (0, import_react70.useCallback)(
     (id) => {
       patchOverlayState({ sessions: false });
-      patchUiState2({ status: "switching session\u2026" });
+      patchUiState({ status: "switching session\u2026" });
       gw2.request("session.activate", { session_id: id }).then((raw) => {
         const r = asRpcResult(raw);
         if (!r) {
           sys("error: invalid response: session.activate");
-          return patchUiState2({ status: "ready" });
+          return patchUiState({ status: "ready" });
         }
         const info = r.info ?? null;
         const running = Boolean(r.running || r.status === "working" || r.status === "waiting");
@@ -62682,7 +62682,7 @@ function useSessionLifecycle(opts) {
         const transcript = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)];
         setHistoryItems(info ? [introMsg(info), ...transcript] : transcript);
         writeActiveSessionFile(r.session_key ?? r.session_id);
-        patchUiState2({
+        patchUiState({
           busy: running,
           info,
           sid: r.session_id,
@@ -62693,7 +62693,7 @@ function useSessionLifecycle(opts) {
         setTimeout(() => scrollRef.current?.scrollToBottom(), 0);
       }).catch((e) => {
         sys(`error: ${e.message}`);
-        patchUiState2({ status: "ready" });
+        patchUiState({ status: "ready" });
       });
     },
     [gw2, resetSession, scrollRef, setHistoryItems, setSessionStartedAt, sys]
@@ -62701,11 +62701,11 @@ function useSessionLifecycle(opts) {
   const resumeById = (0, import_react70.useCallback)(
     (id) => {
       patchOverlayState({ sessions: false });
-      patchUiState2({ status: "resuming\u2026" });
+      patchUiState({ status: "resuming\u2026" });
       rpc("setup.status", {}).then((setup) => {
         if (setup?.provider_configured === false) {
           panel(SETUP_REQUIRED_TITLE, buildSetupRequiredSections());
-          patchUiState2({ status: "setup required" });
+          patchUiState({ status: "setup required" });
           return;
         }
         const previousSid = getUiState().sid;
@@ -62713,7 +62713,7 @@ function useSessionLifecycle(opts) {
           const r = asRpcResult(raw);
           if (!r) {
             sys("error: invalid response: session.resume");
-            return patchUiState2({ status: "ready" });
+            return patchUiState({ status: "ready" });
           }
           const info = r.info ?? null;
           const running = Boolean(r.running || r.status === "working" || r.status === "waiting");
@@ -62722,7 +62722,7 @@ function useSessionLifecycle(opts) {
           const resumed = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)];
           setHistoryItems(info ? [introMsg(info), ...resumed] : resumed);
           writeActiveSessionFile(r.resumed ?? r.session_id);
-          patchUiState2({
+          patchUiState({
             busy: running,
             info,
             sid: r.session_id,
@@ -62736,7 +62736,7 @@ function useSessionLifecycle(opts) {
           setTimeout(() => scrollRef.current?.scrollToBottom(), 0);
         }).catch((e) => {
           sys(`error: ${e.message}`);
-          patchUiState2({ status: "ready" });
+          patchUiState({ status: "ready" });
         });
       });
     },
@@ -62893,17 +62893,17 @@ function useSubmission(opts) {
         if (showUserMessage2) {
           appendMessage({ role: "user", text: displayText });
         }
-        patchUiState2({ busy: true, status: "running\u2026" });
+        patchUiState({ busy: true, status: "running\u2026" });
         turnController.bufRef = "";
         turnController.interrupted = false;
         gw2.request("prompt.submit", { session_id: sid2, text: submitText }).catch((e) => {
           if (isSessionBusyError(e)) {
             composerActions.enqueue(submitText);
-            patchUiState2({ busy: true, status: "queued for next turn" });
+            patchUiState({ busy: true, status: "queued for next turn" });
             return sys(`queued: "${submitText.slice(0, 50)}${submitText.length > 50 ? "\u2026" : ""}"`);
           }
           sys(`error: ${e.message}`);
-          patchUiState2({ busy: false, status: "ready" });
+          patchUiState({ busy: false, status: "ready" });
         });
       };
       const sid = getUiState().sid;
@@ -62927,7 +62927,7 @@ function useSubmission(opts) {
   const shellExec = (0, import_react71.useCallback)(
     (cmd) => {
       appendMessage({ role: "user", text: `!${cmd}` });
-      patchUiState2({ busy: true, status: "running\u2026" });
+      patchUiState({ busy: true, status: "running\u2026" });
       gw2.request("shell.exec", { command: cmd }).then((raw) => {
         const r = asRpcResult(raw);
         if (!r) {
@@ -62940,13 +62940,13 @@ function useSubmission(opts) {
         if (r.code !== 0 || !out) {
           sys(`exit ${r.code}`);
         }
-      }).catch((e) => sys(`error: ${e.message}`)).finally(() => patchUiState2({ busy: false, status: "ready" }));
+      }).catch((e) => sys(`error: ${e.message}`)).finally(() => patchUiState({ busy: false, status: "ready" }));
     },
     [appendMessage, gw2, sys]
   );
   const interpolate = (0, import_react71.useCallback)(
     (text, then) => {
-      patchUiState2({ status: "interpolating\u2026" });
+      patchUiState({ status: "interpolating\u2026" });
       const matches = [...text.matchAll(new RegExp(INTERPOLATION_RE.source, "g"))];
       Promise.all(
         matches.map(
@@ -62965,7 +62965,7 @@ function useSubmission(opts) {
         return shellExec(text.slice(1).trim());
       }
       if (hasInterpolation(text)) {
-        patchUiState2({ busy: true });
+        patchUiState({ busy: true });
         return interpolate(text, send);
       }
       send(text);
@@ -63054,7 +63054,7 @@ function useSubmission(opts) {
         return handleBusyInput(full);
       }
       if (hasInterpolation(full)) {
-        patchUiState2({ busy: true });
+        patchUiState({ busy: true });
         return interpolate(full, send);
       }
       send(full);
@@ -63445,7 +63445,7 @@ function useMainApp(gw2) {
   useConfigSync({ gw: gw2, setBellOnComplete, setVoiceEnabled, setVoiceRecordKey, sid: ui.sid });
   (0, import_react73.useEffect)(() => {
     if (!ui.sid) {
-      patchUiState2({ liveSessionCount: 0 });
+      patchUiState({ liveSessionCount: 0 });
       return;
     }
     let stopped = false;
@@ -63458,7 +63458,7 @@ function useMainApp(gw2) {
           const sessionTitle = result.sessions.find((s) => s.current || s.id === currentSid)?.title?.trim() ?? "";
           const prev = getUiState();
           if (prev.liveSessionCount !== liveSessionCount || prev.sessionTitle !== sessionTitle) {
-            patchUiState2({ liveSessionCount, sessionTitle });
+            patchUiState({ liveSessionCount, sessionTitle });
           }
         }
       }).catch(() => {
@@ -63520,7 +63520,7 @@ function useMainApp(gw2) {
             tools: [buildToolTrailLine("clarify", clarify.question)]
           });
           appendMessage({ role: "user", text: answer });
-          patchUiState2({ status: "running\u2026" });
+          patchUiState({ status: "running\u2026" });
         } else {
           appendMessage({
             role: "system",
@@ -63566,7 +63566,7 @@ function useMainApp(gw2) {
     }
     const next = composerActions.dequeue();
     if (next) {
-      patchUiState2({ busy: true, status: "running\u2026" });
+      patchUiState({ busy: true, status: "running\u2026" });
       sendQueued(next);
     }
   }, [ui.sid, ui.busy, composerActions, composerRefs, sendQueued]);
@@ -63642,7 +63642,7 @@ function useMainApp(gw2) {
       turnController.reset();
       const plan = planGatewayRecovery(getUiState().sid, recoverSidRef.current, recoveryAtRef.current, Date.now());
       recoveryAtRef.current = plan.attempts;
-      patchUiState2({ busy: false, sid: null, status: "gateway exited" });
+      patchUiState({ busy: false, sid: null, status: "gateway exited" });
       if (plan.recover && plan.sid) {
         recoverSidRef.current = plan.sid;
         turnController.pushActivity("gateway exited \xB7 recovering session\u2026", "warn");
@@ -63722,7 +63722,7 @@ function useMainApp(gw2) {
     (choice) => respondWith("approval.respond", { choice, session_id: ui.sid }, () => {
       patchOverlayState({ approval: null });
       patchTurnState({ outcome: choice === "deny" ? "denied" : `approved (${choice})` });
-      patchUiState2({ status: "running\u2026" });
+      patchUiState({ status: "running\u2026" });
     }),
     [respondWith, ui.sid]
   );
@@ -63733,7 +63733,7 @@ function useMainApp(gw2) {
       }
       return respondWith("sudo.respond", { password: pw, request_id: overlay.sudo.requestId }, () => {
         patchOverlayState({ sudo: null });
-        patchUiState2({ status: "running\u2026" });
+        patchUiState({ status: "running\u2026" });
       });
     },
     [overlay.sudo, respondWith]
@@ -63745,7 +63745,7 @@ function useMainApp(gw2) {
       }
       return respondWith("secret.respond", { request_id: overlay.secret.requestId, value }, () => {
         patchOverlayState({ secret: null });
-        patchUiState2({ status: "running\u2026" });
+        patchUiState({ status: "running\u2026" });
       });
     },
     [overlay.secret, respondWith]
@@ -63756,15 +63756,15 @@ function useMainApp(gw2) {
   }, []);
   const closeLiveSession = (0, import_react73.useCallback)(
     async (id) => {
-      patchUiState2({ status: "closing session\u2026" });
+      patchUiState({ status: "closing session\u2026" });
       try {
         const result = await session.closeSession(id);
-        patchUiState2({ status: "ready" });
+        patchUiState({ status: "ready" });
         return result;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         sys(`error: ${message}`);
-        patchUiState2({ status: "ready" });
+        patchUiState({ status: "ready" });
         throw e;
       }
     },
@@ -63777,7 +63777,7 @@ function useMainApp(gw2) {
         maybeWarn,
         modelArg,
         newLiveSession: session.newLiveSession,
-        onModelSwitched: (value) => patchUiState2((state) => ({
+        onModelSwitched: (value) => patchUiState((state) => ({
           ...state,
           info: state.info ? { ...state.info, model: value } : { model: value, skills: {}, tools: {} }
         })),
@@ -73489,6 +73489,7 @@ function resetTerminalModes(stream = process.stdout) {
 }
 
 // src/entry.tsx
+init_uiStore();
 var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
 if (!process.stdin.isTTY) {
   console.log("bobo-tui: no TTY");
@@ -73497,6 +73498,18 @@ if (!process.stdin.isTTY) {
 resetTerminalModes();
 process.on("exit", () => {
   resetTerminalModes();
+});
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+  recordParentLifecycle(`unhandledRejection: ${message.slice(0, 400)}`);
+  patchUiState({
+    notice: {
+      key: "unhandled-rejection",
+      kind: "sticky",
+      level: "error",
+      text: `bobo-tui: unhandled rejection \u2014 ${message.slice(0, 160)}`
+    }
+  });
 });
 if (TERMUX_TUI_MODE) {
   process.stdout.write("\n");

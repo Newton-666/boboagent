@@ -11,6 +11,7 @@ import { type MemorySnapshot, startMemoryMonitor } from './lib/memoryMonitor.js'
 import { openExternalUrl } from './lib/openExternalUrl.js'
 import { recordParentLifecycle } from './lib/parentLog.js'
 import { resetTerminalModes } from './lib/terminalModes.js'
+import { patchUiState } from './app/uiStore.js'
 
 if (!process.stdin.isTTY) {
   console.log('bobo-tui: no TTY')
@@ -21,6 +22,25 @@ resetTerminalModes()
 
 process.on('exit', () => {
   resetTerminalModes()
+})
+
+// P0-016: an unhandled promise rejection (e.g. a ReferenceError from an
+// undefined symbol that esbuild bundled untype-checked) used to kill the
+// parent process outright (default Node behaviour), taking the TUI down with
+// it. Catch it instead: log a breadcrumb to the parent crash log and surface
+// the message in the status bar (UiState.notice), but do NOT exit — the user
+// can keep working / retry.
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason)
+  recordParentLifecycle(`unhandledRejection: ${message.slice(0, 400)}`)
+  patchUiState({
+    notice: {
+      key: 'unhandled-rejection',
+      kind: 'sticky',
+      level: 'error',
+      text: `bobo-tui: unhandled rejection — ${message.slice(0, 160)}`
+    }
+  })
 })
 
 if (TERMUX_TUI_MODE) {
