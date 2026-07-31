@@ -48,3 +48,4 @@ data/logs/
 
 # ── 票 LN-1：活体知识库镜像（用户可读写入口，不进 git）──
 library/
+crmeb_arena/
