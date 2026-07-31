@@ -1,8 +1,58 @@
 """Tests for PromptInjector — messages 构建管道。"""
 
+import json
+
 import pytest
 
 from core.injector import PromptInjector
+
+
+@pytest.fixture(autouse=True)
+def isolated_memory(tmp_path, monkeypatch):
+    """票 LN-4：隔离临时记忆库，不依赖真实 knowledge_base.json（灭环境污染）。
+
+    注入两条固定记忆（其中一条含 "skill" 字样，让依赖该字样的断言稳定成立）。
+    """
+    import tools.v5_memory as v5
+    kb = tmp_path / "knowledge_base.json"
+    payload = json.dumps({
+        "entries": [
+            {
+                "id": 1,
+                "text": "保存为 skill 的流程：说『开始教学』录制，完成后说『保存为 skill <名称>』",
+                "timestamp": "2026-07-31 10:00:00",
+                "signal_score": 150,
+                "folder": "general", "type": "general",
+                "tags": [], "last_time_decay": "",
+            },
+            {
+                "id": 2,
+                "text": "记忆库隔离测试条目二",
+                "timestamp": "2026-07-30 10:00:00",
+                "signal_score": 80,
+                "folder": "general", "type": "general",
+                "tags": [], "last_time_decay": "",
+            },
+        ],
+        "folders": [],
+    }, ensure_ascii=False)
+    kb.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
+    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+
+
+@pytest.fixture(autouse=True)
+def silence_event_bus(monkeypatch):
+    """票 LN-4：prompt.budget 事件不写真实 events.jsonl（测试日志隔离）。"""
+    import core.event_bus as eb
+    fired = []
+
+    class _Bus:
+        def write(self, t, d):
+            fired.append((t, d))
+
+    monkeypatch.setattr(eb, "event_bus", _Bus())
+    return fired
 
 
 class MockTracker:
