@@ -101,9 +101,18 @@ def _rewrite_llm(path, builder, match_topic="收工闸"):
 # ── 验收 1：首轮新主题 → 骨架笔记 ───────────────────
 
 def test_new_topic_skeleton(ln_env):
-    llm = lambda prompt, use_tools=False: {"choices": [{"message": {"content": json.dumps({
-        "topic": "新主题", "domain": "agent开发",
-        "section": "- 要点一\n- 要点二", "match": None})}}]}
+    def llm(prompt, use_tools=False):
+        user = prompt[-1]["content"] if isinstance(prompt, list) else str(prompt)
+        if "本轮完整回复" in user:  # 成文调用
+            return {"choices": [{"message": {"content": (
+                "---\ntopic: 新主题\ndomain: agent开发\ncreated: 2026-07-31\n---\n\n"
+                "## 概述\n\n- 要点一（源自会话 sid-1）\n- 要点二（源自会话 sid-1）\n\n"
+                "## 关键结论\n\n- 结论（源自会话 sid-1）\n\n"
+                "## 时间线\n\n- 10:30 本轮要点（源自会话 sid-1）\n"
+            )}}]}
+        return {"choices": [{"message": {"content": json.dumps({
+            "topic": "新主题", "domain": "agent开发",
+            "section": "- 要点一\n- 要点二", "match": None})}}]}
     result = ln.write_living_notes(["要点一"], "消息", "sid-1", llm)
     assert result["written"] is True and result["is_new"] is True
     path = ln_env / "agent开发" / "新主题.md"
@@ -113,7 +122,7 @@ def test_new_topic_skeleton(ln_env):
     for field in ["topic: 新主题", "domain: agent开发", "created:",
                   "last_touched:", "version: 1", "source_sessions: [sid-1]"]:
         assert field in text
-    for sec in ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]:
+    for sec in ["概述", "关键结论", "时间线"]:
         assert f"## {sec}" in text
     assert "（源自会话 sid-1）" in text
 
