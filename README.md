@@ -31,6 +31,32 @@ On first launch, the TUI setup wizard walks you through selecting a provider (De
 
 ---
 
+## Updating
+
+**Installed with the one-line script** (most users): re-run the same installer — it pulls the latest `main` and overwrites the old version:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Newton-666/boboagent/main/install.sh | bash
+```
+
+**Developer install** (`git clone` + editable): pull and restart:
+
+```bash
+git pull && bobo
+```
+
+Your data (memory, notes, config, `~/.bobo`) is never touched by updates.
+
+<details><summary>中文说明</summary>
+
+- **一键脚本安装的用户**：重跑一遍上面的安装命令即可升级到最新版。
+- **开发者安装**（git clone）：`git pull` 后重启 bobo。
+- 更新不会动你的数据（记忆、笔记、配置都在代码之外）。
+
+</details>
+
+---
+
 ## What Makes Bobo Unique
 
 ### Skill System — Teach Once, Use Forever
