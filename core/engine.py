@@ -1047,6 +1047,23 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                                         _save(data)
                         except Exception:
                             pass
+                    # ── 票 LN-2：主题笔记钩子（takeaways 非空才触发）──
+                    # 逻辑全在 tools/living_notes.py，这里只做 try/except 包裹。
+                    # 内部已保证失败静默降级（WARNING + notes.error），绝不阻塞收工。
+                    try:
+                        from tools.living_notes import write_living_notes
+                        _ln_user_msgs = [
+                            m.get("content", "") for m in self.history[-4:]
+                            if m.get("role") == "user" and m.get("content")
+                        ]
+                        write_living_notes(
+                            takeaways,
+                            _ln_user_msgs[-1] if _ln_user_msgs else "",
+                            self.sid,
+                            self.llm_caller,
+                        )
+                    except Exception:
+                        pass
                     logger.debug("RESPONDING extract_takeaways done: %d items", len(takeaways) if takeaways else 0)
                 # 自动 skill 发现：检查候选模式并主动提议
                 if self.proactive.mode != "off":
