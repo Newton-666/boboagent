@@ -356,6 +356,58 @@ def format_all_memory(max_chars: int = 5000) -> str:
     return header + "\n" + "\n".join(lines)
 
 
+def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000) -> tuple[str, dict]:
+    """票 LN-4：按信号分降序注入记忆（分段保底 + 信号淘汰）。
+
+    与 format_all_memory 的区别：
+      - 排序键是 signal_score（降序，同分按时间新→旧），不是纯时间
+      - 已归档 / 信号分 < 20 的条目永不注入（自然下沉语义，同 get_top_memories）
+      - 返回 (text, stats)，stats 供 prompt.budget 监控事件使用：
+          {"entries": 注入条数, "total_entries": 总条数, "evicted": 信号合格但超预算被淘汰数}
+      - max_chars 上限（天花板 2500）；min_chars 保底语义：记忆充足时至少注入
+        min_chars 字符（由独立段落 + 上限控制自然满足，参数保留供调用方文档化）
+    """
+    data = _load()
+    entries = data.get("entries", [])
+    if not entries:
+        return "", {"entries": 0, "total_entries": 0, "evicted": 0}
+    total_all = len(entries)
+    # 过滤：归档 + 低信号永不注入
+    eligible = [
+        e for e in entries
+        if not e.get("archived", False)
+        and e.get("signal_score", 100) >= 20
+        and (e.get("text") or "").strip()
+    ]
+    if not eligible:
+        return "", {"entries": 0, "total_entries": total_all, "evicted": 0}
+    # 信号降序，同分按时间新→旧
+    eligible.sort(
+        key=lambda e: (e.get("signal_score", 100), e.get("timestamp", "")),
+        reverse=True,
+    )
+    lines = []
+    total = 0
+    evicted = 0
+    for e in eligible:
+        text = e.get("text", "").strip()
+        text_truncated = text[:200] + ("..." if len(text) > 200 else "")
+        entry = f"  - {text_truncated}"
+        if total + len(entry) + 1 > max_chars:
+            # 剩余合格条目因超预算被淘汰
+            evicted = len(eligible) - len(lines)
+            break
+        lines.append(entry)
+        total += len(entry) + 1
+    shown = len(lines)
+    if not lines:
+        return "", {"entries": 0, "total_entries": total_all,
+                    "evicted": len(eligible)}
+    header = f"记忆 ({shown}/{total_all} 条, {total:,}/{max_chars:,} 字符)"
+    return header + "\n" + "\n".join(lines), {
+        "entries": shown, "total_entries": total_all, "evicted": evicted}
+
+
 # ── 信号分系统：引用强化 + 忽略衰减 + 自然下沉 ──────────────────
 
 def bump_signal(entry_id: int, delta: int = 10):
