@@ -102,8 +102,8 @@ var init_env = __esm({
 // src/lib/memory.ts
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { homedir as homedir2, tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
+import { join as join3 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { getHeapSnapshot, getHeapSpaceStatistics, getHeapStatistics } from "node:v8";
 async function captureMemoryDiagnostics(trigger) {
@@ -177,11 +177,11 @@ async function captureMemoryDiagnostics(trigger) {
 async function performHeapDump(trigger = "manual") {
   try {
     const diagnostics = await captureMemoryDiagnostics(trigger);
-    const dir2 = process.env.HERMES_HEAPDUMP_DIR?.trim() || join2(homedir2() || tmpdir(), ".hermes", "heapdumps");
+    const dir2 = process.env.HERMES_HEAPDUMP_DIR?.trim() || join3(homedir2() || tmpdir2(), ".hermes", "heapdumps");
     await mkdir(dir2, { recursive: true });
     const base = `hermes-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${process.pid}-${trigger}`;
-    const heapPath = join2(dir2, `${base}.heapsnapshot`);
-    const diagPath = join2(dir2, `${base}.diagnostics.json`);
+    const heapPath = join3(dir2, `${base}.heapsnapshot`);
+    const diagPath = join3(dir2, `${base}.diagnostics.json`);
     await writeFile(diagPath, JSON.stringify(diagnostics, null, 2), { mode: 384 });
     const isAuto = trigger === "auto-critical" || trigger === "auto-high";
     const autoEnabled = /^(?:1|true|yes|on)$/i.test((process.env.HERMES_AUTO_HEAPDUMP ?? "").trim());
@@ -203,7 +203,7 @@ async function pruneHeapdumps(dir2) {
   const names = await readdir(dir2);
   const stats = await Promise.all(
     names.map(async (name) => {
-      const path = join2(dir2, name);
+      const path = join3(dir2, name);
       const s = await stat(path).catch(() => null);
       return s && s.isFile() ? { mtimeMs: s.mtimeMs, path, size: s.size } : null;
     })
@@ -56857,7 +56857,7 @@ var init_rpc = __esm({
 // src/lib/terminalSetup.ts
 import { copyFile, mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 function detectVSCodeLikeTerminal(env3 = process.env) {
   const askpass = env3["VSCODE_GIT_ASKPASS_MAIN"]?.toLowerCase() ?? "";
   if (env3["CURSOR_TRACE_ID"] || askpass.includes("cursor")) {
@@ -56913,12 +56913,12 @@ function isRemoteShellSession(env3) {
 }
 function getVSCodeStyleConfigDir(appName, platform2 = process.platform, env3 = process.env, homeDir = homedir3()) {
   if (platform2 === "darwin") {
-    return join3(homeDir, "Library", "Application Support", appName, "User");
+    return join4(homeDir, "Library", "Application Support", appName, "User");
   }
   if (platform2 === "win32") {
-    return env3["APPDATA"] ? join3(env3["APPDATA"], appName, "User") : null;
+    return env3["APPDATA"] ? join4(env3["APPDATA"], appName, "User") : null;
   }
-  return join3(homeDir, ".config", appName, "User");
+  return join4(homeDir, ".config", appName, "User");
 }
 function isKeybinding(value) {
   return typeof value === "object" && value !== null;
@@ -57002,7 +57002,7 @@ async function configureTerminalKeybindings(terminal, options) {
       message: `Could not determine ${meta.label} settings path on this platform.`
     };
   }
-  const keybindingsFile = join3(configDir, "keybindings.json");
+  const keybindingsFile = join4(configDir, "keybindings.json");
   try {
     await ops.mkdir(configDir, { recursive: true });
     let keybindings = [];
@@ -57093,7 +57093,7 @@ async function shouldPromptForTerminalSetup(options) {
     return false;
   }
   try {
-    const content = await ops.readFile(join3(configDir, "keybindings.json"), "utf8");
+    const content = await ops.readFile(join4(configDir, "keybindings.json"), "utf8");
     const parsed = JSON.parse(stripJsonComments(content));
     if (!Array.isArray(parsed)) {
       return true;
@@ -61314,7 +61314,7 @@ var init_useCompletion = __esm({
 // src/lib/history.ts
 import { appendFileSync as appendFileSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 function load2() {
   if (cache5) {
     return cache5;
@@ -61374,8 +61374,8 @@ var init_history = __esm({
   "src/lib/history.ts"() {
     "use strict";
     MAX = 1e3;
-    dir = process.env.HERMES_HOME ?? join4(homedir4(), ".hermes");
-    file = join4(dir, ".hermes_history");
+    dir = process.env.HERMES_HOME ?? join5(homedir4(), ".hermes");
+    file = join5(dir, ".hermes_history");
     cache5 = null;
   }
 });
@@ -61466,7 +61466,7 @@ var init_useQueue = __esm({
 
 // src/lib/editor.ts
 import { accessSync, constants as constants2 } from "node:fs";
-import { delimiter as delimiter2, join as join5 } from "node:path";
+import { delimiter as delimiter2, join as join6 } from "node:path";
 var FALLBACKS, isExecutable, resolveEditor;
 var init_editor = __esm({
   "src/lib/editor.ts"() {
@@ -61489,7 +61489,7 @@ var init_editor = __esm({
         return ["notepad.exe"];
       }
       const dirs = (env3.PATH ?? "").split(delimiter2).filter(Boolean);
-      const found = FALLBACKS.flatMap((name) => dirs.map((d) => join5(d, name))).find(isExecutable);
+      const found = FALLBACKS.flatMap((name) => dirs.map((d) => join6(d, name))).find(isExecutable);
       return [found ?? "vi"];
     };
   }
@@ -61498,8 +61498,8 @@ var init_editor = __esm({
 // src/app/useComposerState.ts
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync as readFileSync4, rmSync, writeFileSync } from "node:fs";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join6 } from "node:path";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join7 } from "node:path";
 function insertAtCursor(value, cursor, text) {
   const lead = cursor > 0 && !/\s/.test(value[cursor - 1] ?? "") ? " " : "";
   const tail = cursor < value.length && !/\s/.test(value[cursor] ?? "") ? " " : "";
@@ -61658,8 +61658,8 @@ function useComposerState({
     [handleResolvedPaste, onClipboardPaste, querier]
   );
   const openEditor = (0, import_react65.useCallback)(async () => {
-    const dir2 = mkdtempSync(join6(tmpdir2(), "hermes-"));
-    const file2 = join6(dir2, "prompt.md");
+    const dir2 = mkdtempSync(join7(tmpdir3(), "hermes-"));
+    const file2 = join7(dir2, "prompt.md");
     const [cmd, ...args] = resolveEditor();
     writeFileSync(file2, [...inputBuf, input].join("\n"));
     let exitCode = null;
@@ -64007,7 +64007,7 @@ __export(perfPane_exports, {
 });
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
-import { dirname, join as join7 } from "node:path";
+import { dirname, join as join8 } from "node:path";
 function PerfPane({ children, id }) {
   if (!ENABLED) {
     return children;
@@ -64023,7 +64023,7 @@ var init_perfPane = __esm({
     import_jsx_runtime17 = __toESM(require_jsx_runtime(), 1);
     ENABLED = /^(?:1|true|yes|on)$/i.test((process.env.HERMES_DEV_PERF ?? "").trim());
     THRESHOLD_MS = Number(process.env.HERMES_DEV_PERF_MS ?? "2") || 0;
-    LOG_PATH = process.env.HERMES_DEV_PERF_LOG?.trim() || join7(homedir5(), ".hermes", "perf.log");
+    LOG_PATH = process.env.HERMES_DEV_PERF_LOG?.trim() || join8(homedir5(), ".hermes", "perf.log");
     logReady = false;
     writeRow = (row) => {
       if (!logReady) {
@@ -72719,8 +72719,10 @@ init_env();
 // src/gatewayClient.ts
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
-import { delimiter, resolve } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
+import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
+import { delimiter, join as join2, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 // src/lib/circularBuffer.ts
@@ -72864,6 +72866,13 @@ var GatewayClient = class extends EventEmitter {
   proc = null;
   ws = null;
   wsConnectPromise = null;
+  // TICKET-018：unix socket 传输。python bind/listen，node 只做连接方——
+  // 管道 fd 被原生层误关（2026-07-31 连环死亡案）从此只是"客户端断开"，
+  // 自动重连即可，gateway 进程不死、会话不丢。
+  sock = null;
+  sockRl = null;
+  sockPath = null;
+  socketDisabled = process.env.BOBO_DISABLE_SOCKET_TRANSPORT === "1";
   sidecarWs = null;
   attachUrl = null;
   sidecarUrl = null;
@@ -72927,6 +72936,13 @@ var GatewayClient = class extends EventEmitter {
     this.stdoutRl = null;
     this.stderrRl = null;
     this.clearReadyTimer();
+    const sock = this.sock;
+    this.sock = null;
+    this.sockRl?.close();
+    this.sockRl = null;
+    sock?.removeAllListeners();
+    sock?.destroy();
+    this.sockPath = null;
   }
   startReadyTimer(python, cwd2) {
     this.readyTimer = setTimeout(() => {
@@ -73010,9 +73026,16 @@ var GatewayClient = class extends EventEmitter {
     const env3 = { ...process.env };
     const pyPath = env3.PYTHONPATH?.trim();
     env3.PYTHONPATH = pyPath ? `${root2}${delimiter}${pyPath}` : root2;
+    const sockPath = this.socketDisabled ? null : join2(tmpdir(), `bobo-gw-${process.pid}-${Date.now()}.sock`);
+    if (sockPath) {
+      env3.BOBO_GW_SOCKET = sockPath;
+    }
     this.startReadyTimer(python, cwd2);
     this.proc = spawn(python, ["-m", "bobo_tui_gateway.entry"], { cwd: cwd2, env: env3, stdio: ["pipe", "pipe", "pipe"] });
-    this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd2}`);
+    this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd2}${sockPath ? " [socket \u6A21\u5F0F]" : " [stdio \u6A21\u5F0F]"}`);
+    if (sockPath) {
+      this.connectSocketWithRetry(this.proc, sockPath, 0);
+    }
     const pipeOwner = this.proc;
     pipeOwner.stdin?.on("error", (err) => {
       if (this.proc !== pipeOwner) return;
@@ -73233,6 +73256,135 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
     }
     return this.ws;
   }
+  // ── TICKET-018 socket 传输 ──────────────────────────────────────────
+  wireSocket(ownedProc, sockPath, sock) {
+    this.sock = sock;
+    this.sockPath = sockPath;
+    this.lifecycle(`[socket] \u5DF2\u8FDE\u63A5 ${sockPath}\uFF08gateway \u81EA\u6301\u76D1\u542C\uFF0C\u524D\u7AEF\u65AD\u5F00\u4E0D\u518D\u81F4\u547D\uFF09`);
+    const rl = createInterface({ input: sock });
+    this.sockRl = rl;
+    rl.on("line", (raw) => {
+      try {
+        this.dispatch(JSON.parse(raw));
+      } catch {
+        const preview = raw.trim().slice(0, MAX_LOG_PREVIEW) || "(empty line)";
+        this.pushLog(`[protocol] malformed socket frame: ${preview}`);
+        this.publish({ type: "gateway.protocol_error", payload: { preview } });
+      }
+    });
+    sock.on("close", () => this.handleSocketClose(ownedProc, sockPath, sock));
+    sock.on("error", (err) => {
+      if (this.proc === ownedProc) {
+        this.lifecycle(`[socket] error: ${err.message}`);
+      }
+    });
+  }
+  connectSocketWithRetry(ownedProc, sockPath, attempt) {
+    const timer = setTimeout(() => {
+      if (this.proc !== ownedProc || this.sock) {
+        return;
+      }
+      if (ownedProc.killed || ownedProc.exitCode !== null) {
+        return;
+      }
+      if (!existsSync(sockPath)) {
+        if (attempt < 50) {
+          this.connectSocketWithRetry(ownedProc, sockPath, attempt + 1);
+        } else {
+          this.lifecycle("[socket] \u7B49\u5F85 socket \u6587\u4EF6\u8D85\u65F6 \u2192 kill \u540E\u4EE5 stdio \u6A21\u5F0F\u91CD\u542F child");
+          this.socketDisabled = true;
+          ownedProc.kill();
+        }
+        return;
+      }
+      const sock = createConnection(sockPath);
+      let opened = false;
+      sock.on("connect", () => {
+        opened = true;
+        if (this.proc !== ownedProc || this.sock) {
+          sock.destroy();
+          return;
+        }
+        this.wireSocket(ownedProc, sockPath, sock);
+      });
+      sock.on("error", () => {
+        if (!opened) {
+          sock.destroy();
+          if (attempt < 50) {
+            this.connectSocketWithRetry(ownedProc, sockPath, attempt + 1);
+          }
+        }
+      });
+    }, attempt === 0 ? 0 : 100);
+    timer.unref?.();
+  }
+  handleSocketClose(ownedProc, sockPath, sock) {
+    if (this.sock === sock) {
+      this.sock = null;
+    }
+    if (this.proc !== ownedProc) {
+      return;
+    }
+    if (ownedProc.killed || ownedProc.exitCode !== null) {
+      return;
+    }
+    this.lifecycle("[socket] \u8FDE\u63A5\u65AD\u5F00\u4F46 gateway \u5B58\u6D3B \u2192 \u81EA\u52A8\u91CD\u8FDE\uFF08\u4E0D\u518D\u5224 gateway \u6B7B\u4EA1\uFF09");
+    this.reconnectSocket(ownedProc, sockPath, 0);
+  }
+  reconnectSocket(ownedProc, sockPath, attempt) {
+    if (attempt >= 20) {
+      this.lifecycle("[socket] \u91CD\u8FDE 20 \u6B21\u5931\u8D25 \u2192 kill child\uFF0C\u8D70\u65E2\u6709 recovery \u6D41\u7A0B");
+      ownedProc.kill();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (this.proc !== ownedProc || this.sock || ownedProc.killed || ownedProc.exitCode !== null) {
+        return;
+      }
+      const sock = createConnection(sockPath);
+      let opened = false;
+      sock.on("connect", () => {
+        opened = true;
+        if (this.proc !== ownedProc || this.sock) {
+          sock.destroy();
+          return;
+        }
+        this.lifecycle("[socket] \u91CD\u8FDE\u6210\u529F \u2713 gateway \u4F1A\u8BDD\u65E0\u635F");
+        this.wireSocket(ownedProc, sockPath, sock);
+      });
+      sock.on("error", () => {
+        if (!opened) {
+          sock.destroy();
+          this.reconnectSocket(ownedProc, sockPath, attempt + 1);
+        }
+      });
+    }, 300);
+    timer.unref?.();
+  }
+  requestOverSocket(method, params = {}) {
+    const id = `r${++this.reqId}`;
+    return new Promise((resolve3, reject) => {
+      const timeout = setTimeout(this.onTimeout, REQUEST_TIMEOUT_MS, id);
+      timeout.unref?.();
+      this.pending.set(id, {
+        id,
+        method,
+        reject,
+        resolve: (v) => resolve3(v),
+        timeout
+      });
+      try {
+        this.sock.write(JSON.stringify({ id, jsonrpc: "2.0", method, params }) + "\n");
+      } catch (e) {
+        const pending = this.pending.get(id);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          this.pending.delete(id);
+        }
+        reject(e);
+      }
+    });
+  }
   requestOverWebSocket(method, params = {}) {
     return this.ensureAttachedWebSocket(method).then(
       (ws) => new Promise((resolve3, reject) => {
@@ -73267,6 +73419,9 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
         this.start();
       }
       return this.requestOverWebSocket(method, params);
+    }
+    if (this.sock && !this.sock.destroyed) {
+      return this.requestOverSocket(method, params);
     }
     if (!this.proc?.stdin || this.proc.killed || this.proc.exitCode !== null) {
       this.start();
@@ -73305,6 +73460,19 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
     this.closeSidecarSocket();
     this.clearReadyTimer();
     this.rejectPending(new Error("gateway closed"));
+    const sock = this.sock;
+    this.sock = null;
+    this.sockRl?.close();
+    this.sockRl = null;
+    sock?.removeAllListeners();
+    sock?.destroy();
+    if (this.sockPath) {
+      try {
+        unlinkSync(this.sockPath);
+      } catch {
+      }
+      this.sockPath = null;
+    }
   }
 };
 
