@@ -429,6 +429,7 @@ export class GatewayClient extends EventEmitter {
     this.resetStartupState()
 
     if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
+      this.lifecycle(`[lifecycle] start() replacing live child pid=${this.proc.pid ?? 'unknown'}`)
       this.lifecycle(`[lifecycle] replacing live gateway child ${describeChild(this.proc)}`)
       this.proc.kill()
     }

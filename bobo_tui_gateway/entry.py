@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 def _shutdown(signum, frame):
     """SIGINT/SIGTERM 处理：保存会话后退出"""
+    logger.critical("gateway 退出: 收到信号 %s", signum)
     from bobo_tui_gateway.server import shutdown_sessions
     shutdown_sessions()
     sys.exit(0)
@@ -228,6 +229,7 @@ def _run_backend():
         pass
 
     # 读取并处理请求
+    exit_reason = None
     for raw in sys.stdin:
         line = raw.strip()
         if not line:
@@ -253,7 +255,15 @@ def _run_backend():
         if resp is not None:
             if not write_json(resp):
                 logger.warning("stdout 写入失败，TUI 已断开（rpc=%s）", req.get("method"))
+                exit_reason = "stdout_broken"
                 break  # stdout 写入失败，TUI 已断开
+
+    # 主循环正常结束：登记死因（EOF 或 stdout 断裂）
+    if exit_reason == "stdout_broken":
+        logger.critical("gateway 退出: stdout 断裂")
+    else:
+        logger.critical("gateway 退出: stdin EOF（父进程关闭了管道）")
+    logger.critical("gateway 退出: 主循环结束")
 
     # stdin 关闭（TUI 断开），保存所有活跃会话
     from bobo_tui_gateway.server import shutdown_sessions
