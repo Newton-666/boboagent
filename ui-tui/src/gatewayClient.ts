@@ -296,6 +296,23 @@ export class GatewayClient extends EventEmitter {
     this.proc = spawn(python, ['-m', 'bobo_tui_gateway.entry'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd}`)
 
+    // 法医探针（2026-07-31 连环静默死亡案）：gateway 多次死于 stdin EOF，
+    // 但父进程活着、没 kill、没 replace。给三根管道装带调用栈的监听器，
+    // 谁掐断管道，栈里就有谁的名字。
+    const pipeOwner = this.proc
+    pipeOwner.stdin?.on('error', err => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdin ERROR: ${err.message}\n${err.stack ?? ''}`)
+    })
+    pipeOwner.stdin?.on('close', () => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdin CLOSED trace:\n${new Error('stdin-close-trace').stack ?? ''}`)
+    })
+    pipeOwner.stdout?.on('error', err => {
+      if (this.proc !== pipeOwner) return
+      this.lifecycle(`[forensics] gateway stdout ERROR: ${err.message}`)
+    })
+
     this.stdoutRl = createInterface({ input: this.proc.stdout! })
     this.stdoutRl.on('line', raw => {
       try {

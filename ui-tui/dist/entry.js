@@ -58726,7 +58726,22 @@ function createGatewayEventHandler(ctx) {
     const recoverSid = recoverSidRef?.current;
     if (recoverSidRef && recoverSid) {
       recoverSidRef.current = null;
-      resumeById(recoverSid);
+      resumeById(recoverSid, () => {
+        turnController.pushActivity("\u539F\u4F1A\u8BDD\u5DF2\u4E22\u5931\uFF0C\u5DF2\u56DE\u5230\u6700\u8FD1\u4F1A\u8BDD", "warn");
+        rpc("session.most_recent", {}).then((r) => {
+          const target = r?.session_id;
+          if (target) {
+            patchUiState({ status: "resuming most recent\u2026" });
+            resumeById(target);
+            return;
+          }
+          patchUiState({ status: "forging session\u2026" });
+          newSession();
+        }).catch(() => {
+          patchUiState({ status: "forging session\u2026" });
+          newSession();
+        });
+      });
       patchUiState({ status: "recovering session\u2026" });
       return;
     }
@@ -62699,7 +62714,7 @@ function useSessionLifecycle(opts) {
     [gw2, resetSession, scrollRef, setHistoryItems, setSessionStartedAt, sys]
   );
   const resumeById = (0, import_react70.useCallback)(
-    (id) => {
+    (id, onFail) => {
       patchOverlayState({ sessions: false });
       patchUiState({ status: "resuming\u2026" });
       rpc("setup.status", {}).then((setup) => {
@@ -62713,6 +62728,7 @@ function useSessionLifecycle(opts) {
           const r = asRpcResult(raw);
           if (!r) {
             sys("error: invalid response: session.resume");
+            onFail?.();
             return patchUiState({ status: "ready" });
           }
           const info = r.info ?? null;
@@ -62736,6 +62752,7 @@ function useSessionLifecycle(opts) {
           setTimeout(() => scrollRef.current?.scrollToBottom(), 0);
         }).catch((e) => {
           sys(`error: ${e.message}`);
+          onFail?.();
           patchUiState({ status: "ready" });
         });
       });
@@ -63823,11 +63840,11 @@ function useMainApp(gw2) {
       // must respect the busy guard just like the `/resume` slash path.
       // (Switching between live sessions and `+ new` keep the current session
       // running, so those stay unguarded — that's the orchestrator's purpose.)
-      resumeById: (id) => {
+      resumeById: (id, onFail) => {
         if (session.guardBusySessionSwitch("switch sessions")) {
           return;
         }
-        session.resumeById(id);
+        session.resumeById(id, onFail);
       },
       setStickyPrompt
     }),
@@ -72996,6 +73013,21 @@ var GatewayClient = class extends EventEmitter {
     this.startReadyTimer(python, cwd2);
     this.proc = spawn(python, ["-m", "bobo_tui_gateway.entry"], { cwd: cwd2, env: env3, stdio: ["pipe", "pipe", "pipe"] });
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd2}`);
+    const pipeOwner = this.proc;
+    pipeOwner.stdin?.on("error", (err) => {
+      if (this.proc !== pipeOwner) return;
+      this.lifecycle(`[forensics] gateway stdin ERROR: ${err.message}
+${err.stack ?? ""}`);
+    });
+    pipeOwner.stdin?.on("close", () => {
+      if (this.proc !== pipeOwner) return;
+      this.lifecycle(`[forensics] gateway stdin CLOSED trace:
+${new Error("stdin-close-trace").stack ?? ""}`);
+    });
+    pipeOwner.stdout?.on("error", (err) => {
+      if (this.proc !== pipeOwner) return;
+      this.lifecycle(`[forensics] gateway stdout ERROR: ${err.message}`);
+    });
     this.stdoutRl = createInterface({ input: this.proc.stdout });
     this.stdoutRl.on("line", (raw) => {
       try {
@@ -73107,6 +73139,7 @@ var GatewayClient = class extends EventEmitter {
     this.sidecarUrl = sidecarUrl;
     this.resetStartupState();
     if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
+      this.lifecycle(`[lifecycle] start() replacing live child pid=${this.proc.pid ?? "unknown"}`);
       this.lifecycle(`[lifecycle] replacing live gateway child ${describeChild(this.proc)}`);
       this.proc.kill();
     }
