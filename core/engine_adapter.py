@@ -205,6 +205,14 @@ def run_engine(
         except Exception:
             pass
 
+        # ── 票 HR-1：启动补报——缺昨天的健康日报则生成（零 LLM 纯统计）──
+        # 失败静默降级：报告生成失败记 WARNING，绝不影响启动。
+        try:
+            from tools.health_report import ensure_report
+            ensure_report()
+        except Exception:
+            pass
+
         engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底

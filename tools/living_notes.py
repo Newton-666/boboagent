@@ -70,12 +70,14 @@ def _sanitize_name(name: str) -> str:
 def _existing_topics() -> list[dict]:
     """扫描 library/<domain>/<topic>.md，返回 [{"domain", "topic", "path"}]。
 
-    排除 MEMORY.md / index.md（非主题笔记）。
+    排除 MEMORY.md / index.md / 健康日报目录（非讨论主题）。
     """
     result = []
     if not LIBRARY_DIR.exists():
         return result
     for domain_dir in sorted(p for p in LIBRARY_DIR.iterdir() if p.is_dir()):
+        if domain_dir.name == "健康日报":
+            continue
         for f in sorted(domain_dir.glob("*.md")):
             stem = f.stem
             if stem in ("MEMORY", "index"):
