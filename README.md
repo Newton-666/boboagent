@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/Newton-666/boboagent/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-709%20passed-brightgreen.svg" alt="709 Tests Passed"></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-1407%20passed-brightgreen.svg" alt="1407 Tests Passed"></a>
 </p>
 
 ---
@@ -162,14 +162,14 @@ Talk to Bobo: "connect Notion" — it'll ask for your Notion API key.
 bobo (CLI)
   └── ui-tui/              Hermes TUI frontend (React/Ink/TypeScript)
         └── spawns python backend via JSON-RPC over stdin/stdout
-              └── core/    Agent engine (~340 LOC each)
+              └── core/    Agent engine
                     ├── engine.py      State machine, skill injection
                     ├── context.py     Dynamic context budget, token estimation
                     ├── tool_runner.py Parallel execution, result marking
                     ├── llm_caller.py  API caller with streaming + retry
                     ├── provider.py    8 built-in providers
                     └── session_manager.py  Atomic persistence
-              └── tools/              78 auto-discovered tools with gating
+              └── tools/              79 auto-discovered tools with gating
               └── data/skill-standards/ Preset workflow standards (auto-discovered)
               └── ~/.bobo/             User config + data directory
 ```
@@ -183,7 +183,7 @@ git clone https://github.com/Newton-666/boboagent.git
 cd boboagent
 pip install -e ".[dev]"
 
-# Run tests (no API key needed, 735 passed, 2 skipped)
+# Run tests (no API key needed, 1407 passed, 2 skipped)
 pytest tests/ -q
 ```
 
