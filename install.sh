@@ -66,13 +66,15 @@ PIP_FAILED=false
 VENV_INSTALLED=false  # 标记是否为 venv 安装（跳过通用 PATH 警告）
 
 # Try: user-site first (handles PEP 668 EXTERNALLY-MANAGED)
-$PYTHON -m pip install --user --quiet git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1 || PIP_FAILED=true
+# --upgrade --force-reinstall: 版本号未变时 pip 会以 "already satisfied" 跳过，
+# 导致老用户重跑安装脚本拿不到新代码（2026-07-31 实锤 bug）
+$PYTHON -m pip install --user --quiet --upgrade --force-reinstall git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1 || PIP_FAILED=true
 
 if $PIP_FAILED; then
     # If --user failed, try pipx
     if command -v pipx &>/dev/null; then
         echo "  --user 失败，尝试 pipx ..."
-        if pipx install git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
+        if pipx install --force git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
             PIP_FAILED=false
         fi
     fi
@@ -84,7 +86,7 @@ if $PIP_FAILED; then
     VENV_DIR="$HOME/.bobo/venv"
     $PYTHON -m venv "$VENV_DIR" 2>/dev/null || true
     if [ -f "$VENV_DIR/bin/python" ]; then
-        if "$VENV_DIR/bin/python" -m pip install --quiet git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
+        if "$VENV_DIR/bin/python" -m pip install --quiet --upgrade --force-reinstall git+https://github.com/Newton-666/boboagent.git >"$PIP_LOG" 2>&1; then
             PIP_FAILED=false
             VENV_INSTALLED=true
             echo -e "${GREEN}✓${NC} 已安装到 $VENV_DIR"
