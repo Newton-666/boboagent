@@ -1,8 +1,8 @@
-"""票 LN-2：主题笔记 MVP 的验收测试。
+"""票 LN-2 + LN-2R：主题笔记验收测试。
 
 覆盖 9 项金标准（全部 tmpdir 物理检查）：
-  1. 新主题建笔记：frontmatter 齐全，小节含出处 sid
-  2. 同主题追加：match 命中 → 同一文件多出第二个日期小节，旧小节逐字节不变
+  1. 新主题建骨架笔记：frontmatter 齐全 + 五章节骨架 + version 1
+  2. 同主题重写：match 命中 → 旧版进 .history、version+1、时间线追加
   3. 零价值不建：takeaways 为空 → library 无新文件、零 LLM 调用
   4. 命名违规矫正：日期主题名 → 文件名净化，不含 / : 等字符
   5. 误判保守：match=null → 建新笔记，不动任何已有笔记
@@ -39,7 +39,7 @@ def ln_env(tmp_path, monkeypatch):
     return library
 
 
-# ── 验收 1：新主题建笔记 ────────────────────────────
+# ── 验收 1：新主题建骨架笔记 ────────────────────────
 
 def test_new_topic_creates_note(ln_env):
     llm = _fake_llm({
@@ -61,15 +61,18 @@ def test_new_topic_creates_note(ln_env):
     assert "domain: agent开发" in text
     assert "created:" in text
     assert "last_touched:" in text
+    assert "version: 1" in text
     assert "source_sessions: [sid-1]" in text
-    # 小节含出处 sid
-    assert "## " in text and "会话" in text
+    # 五章节骨架
+    for sec in ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]:
+        assert f"## {sec}" in text
+    # 概述含出处 sid
     assert "（源自会话 sid-1）" in text
 
 
-# ── 验收 2：同主题追加，旧小节逐字节不变 ────────────
+# ── 验收 2：同主题重写（旧版进 .history、version+1）──
 
-def test_same_topic_appends(ln_env):
+def test_same_topic_rewrites(ln_env):
     llm1 = _fake_llm({
         "topic": "收工闸", "domain": "agent开发",
         "section": "- 第一条要点", "match": None,
@@ -77,25 +80,38 @@ def test_same_topic_appends(ln_env):
     ln.write_living_notes(["第一次记录"], "用户消息1", "sid-1", llm1)
     path = ln_env / "agent开发" / "收工闸.md"
     first = path.read_text(encoding="utf-8")
+    assert "version: 1" in first
 
-    llm2 = _fake_llm({
-        "topic": "收工闸", "domain": "agent开发",
-        "section": "- 第二条要点", "match": "收工闸",
-    })
-    ln.write_living_notes(["第二次记录"], "用户消息2", "sid-2", llm2)
+    # 第二次：match 命中 → 骨架重写（判定 + 重写两次 LLM 调用）
+    def seq_llm(prompt, use_tools=False):
+        if "旧笔记全文" in str(prompt):
+            # 重写输出：动态保留旧笔记时间线行
+            old = path.read_text(encoding="utf-8")
+            tl = old.split("## 时间线")[1].strip()
+            new = (
+                "---\ntopic: 收工闸\ndomain: agent开发\ncreated: 2026-07-31\n---\n\n"
+                "## 概述\n\n- 第一条要点（源自会话 sid-1）\n- 第二条要点（源自会话 sid-2）\n\n"
+                "## 关键结论\n\n- 结论更新（源自会话 sid-2）\n\n"
+                "## 时间线\n\n" + tl + "\n- 10:30 第二条要点（源自会话 sid-2）\n"
+            )
+            return {"choices": [{"message": {"content": new}}]}
+        return {"choices": [{"message": {"content": json.dumps({
+            "topic": "收工闸", "domain": "agent开发",
+            "section": "- 第二条要点", "match": "收工闸"})}}]}
+
+    ln.write_living_notes(["第二次记录"], "用户消息2", "sid-2", seq_llm)
     second = path.read_text(encoding="utf-8")
 
-    # 两个日期小节
-    assert second.count("## ") == 2
-    # 第一个小节内容逐字节不变（frontmatter 的 source_sessions/last_touched
-    # 更新是预期行为，正文小节才是"旧内容"）
-    first_section = first[first.index("## "):]
-    assert first_section in second
-    # 第二个小节含新要点 + 出处
-    assert "第二条要点" in second
-    assert "（源自会话 sid-2）" in second
-    # last_touched 更新（按天，若同一天则值相同也可——检查 source_sessions 追加）
+    # .history 有 v1 快照（逐字等于旧版）
+    hist = ln_env / ".history" / "agent开发" / "收工闸" / "v1.md"
+    assert hist.exists()
+    assert hist.read_text(encoding="utf-8") == first
+    # version +1、source_sessions 追加
+    assert "version: 2" in second
     assert "source_sessions: [sid-1, sid-2]" in second
+    # 时间线两行（旧行保留 + 新行追加）
+    tl = second.split("## 时间线")[1].strip()
+    assert tl.count("- ") == 2
 
 
 # ── 验收 3：零价值不建 ──────────────────────────────

@@ -1,12 +1,16 @@
-# tools/living_notes.py — 主题笔记 MVP（票 LN-2）
+# tools/living_notes.py — 主题笔记（票 LN-2 + LN-2R 重写机制）
 #
 # 收工时（RESPONDING，takeaways 非空才触发）自动把本轮要点写进
 # library/<领域>/<主题>.md 主题笔记，并维护 library/index.md 目录。
 #
-# MVP 铁律：
-#   - 只做追加式记录：新信息永远追加 `## YYYY-MM-DD 会话` 小节，旧内容一字不动。
-#     旧小节改写 / 蒸馏晋升 / 反向注入是 LN-3/4 的活，本文件不碰。
-#   - 全程最多 1 次额外 LLM 调用（主题判定+成文合并为一次）。
+# 铁律：
+#   - 新主题：建骨架笔记（frontmatter + 五章节骨架）。
+#   - 已有主题：骨架重写式——旧版快照进 library/.history/，拿【旧笔记全文 + 本轮要点】
+#     让 LLM 输出整篇新笔记（合并/去重/重构/删旧结论，新信息进对应章节）。
+#     时间线小节保留追加性（每轮一行 `- HH:MM 要点`），其余章节全量进化。
+#   - 结构校验三拒（缺 frontmatter / 正文空 / 新 < 旧 30%）→ 拒写、保留旧版、发 notes.error。
+#   - 人手段落（`· 人手` 行 / `> 用户修订` 引用块）逐字保护，重写后硬校验。
+#   - 全程最多 2 次 LLM 调用（主题判定 1 次 + 重写 1 次，成本闸保留）。
 #   - 总开关 BOBO_LIVING_NOTES=off 整体关闭，零动作。
 #   - 所有失败静默降级记 WARNING + notes.error 事件，绝不阻塞收工。
 #
@@ -31,6 +35,42 @@ INDEX_PATH = LIBRARY_DIR / "index.md"
 
 # 总开关
 _ENV_OFF = "BOBO_LIVING_NOTES"
+
+# 固定骨架章节（LN-2R：所有主题笔记统一）
+_SKELETON_SECTIONS = ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]
+
+# 人手段落保护（LN-2R：逐字保留，不许改）
+_HUMAN_MARK = re.compile(r"^.*·\s*人手\s*$")
+_USER_REV_START = re.compile(r"^>\s*用户修订")
+
+# 重写 LLM 的 system prompt
+_REWRITE_SYSTEM = """你是活体知识库的笔记重写器。把【旧笔记全文】与【本轮要点】合并为整篇新笔记。
+
+固定骨架（所有主题笔记统一）：
+---
+topic: <主题>
+domain: <领域>
+created: YYYY-MM-DD
+last_touched: YYYY-MM-DD
+version: <int>
+source_sessions: [<session_id>...]
+---
+
+## 概述
+## 关键结论
+## 决策与原因
+## 待办与未决
+## 时间线
+
+规则：
+1. 新要点与旧结论冲突 → 用新结论替换旧表述，不要两句并列。
+2. 旧章节缺少新要点相关信息 → 追加进对应章节（不是文末堆）。
+3. 与本轮无关的旧内容 → 原样保留。
+4. 标有「· 人手」后缀的行 / 「> 用户修订」引用块 → 逐字保留，不许改。
+5. ## 时间线 保留追加性质：旧时间线行原样保留，本轮追加一行「- HH:MM 要点」。
+6. 空章节直接删掉，不留空标题。
+7. frontmatter 只输出 topic/domain/created 三项；version/last_touched/source_sessions 由系统维护，不要输出。
+只输出整篇 markdown 笔记，不要任何其他文字。"""
 
 # 主题名净化：非法字符 + 首尾空格
 _ILLEGAL_CHARS = re.compile(r'[/\\:*?"<>|]')
@@ -158,65 +198,194 @@ def _read_frontmatter(path: Path) -> dict:
     return fm
 
 
-def _write_note(domain: str, topic: str, section_body: str, sid: str, is_new: bool) -> Path:
-    """落盘主题笔记（非破坏性）。
+def _merge_sessions(raw: str, sid: str) -> list[str]:
+    """frontmatter source_sessions 追加 sid（去重，保序）。"""
+    sessions = raw.strip("[]").replace(" ", "")
+    lst = [s for s in sessions.split(",") if s] if sessions else []
+    if sid not in lst:
+        lst.append(sid)
+    return lst
 
-    - 新笔记：frontmatter + 首个 `## YYYY-MM-DD 会话` 小节。
-    - 已有笔记：更新 frontmatter（last_touched / source_sessions），
-      文末追加 `## YYYY-MM-DD 会话` 小节，旧内容一字不动。
-    """
+
+def _snapshot(domain: str, topic: str, version: int, old_text: str) -> Path:
+    """旧版整篇快照 → library/.history/<domain>/<topic>/v{N}.md（无限保留，永不删）。"""
+    hist = LIBRARY_DIR / ".history" / domain / topic
+    hist.mkdir(parents=True, exist_ok=True)
+    p = hist / f"v{version}.md"
+    p.write_text(old_text, encoding="utf-8")
+    return p
+
+
+def _protected_lines(old_text: str) -> set[str]:
+    """提取需逐字保护的行：`· 人手` 后缀行、`> 用户修订` 引用块、时间线旧行。"""
+    protected: set[str] = set()
+    lines = old_text.split("\n")
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        if _HUMAN_MARK.search(line):
+            protected.add(line.rstrip())
+            i += 1
+            continue
+        if _USER_REV_START.match(line):
+            # 引用块：起始行 + 后续连续 > 行整体保护
+            protected.add(line.rstrip())
+            i += 1
+            while i < n and lines[i].startswith(">"):
+                protected.add(lines[i].rstrip())
+                i += 1
+            continue
+        i += 1
+    # 时间线旧行（## 时间线 小节内的 - 行）
+    in_tl = False
+    for line in lines:
+        if line.startswith("## 时间线"):
+            in_tl = True
+            continue
+        if in_tl:
+            if line.startswith("## "):
+                break
+            if line.strip().startswith("- "):
+                protected.add(line.rstrip())
+    return protected
+
+
+def _structure_check(new_text: str, old_text: str,
+                     protected: set[str]) -> tuple[bool, str]:
+    """结构校验三拒 + 人手/时间线保护硬校验。返回 (ok, reason)。"""
+    # 拒 1：缺 frontmatter
+    if not new_text.startswith("---"):
+        return False, "missing frontmatter"
+    sep = new_text.find("\n---", 3)
+    if sep == -1:
+        return False, "missing frontmatter"
+    body = new_text[sep + 4:].strip()
+    # 拒 2：正文为空
+    if not body:
+        return False, "empty body"
+    # 拒 3：新笔记长度 < 旧版 30%（防 LLM 截断毁灭笔记）
+    if len(new_text) < len(old_text) * 0.3:
+        return False, "too short (<30% of old)"
+    # 人手/时间线保护行逐字保留
+    for pl in sorted(protected):
+        if pl not in new_text:
+            return False, f"protected line lost: {pl[:40]!r}"
+    return True, ""
+
+
+def _write_new_note(domain: str, topic: str, section_body: str, sid: str) -> Path:
+    """新主题 → 骨架笔记：frontmatter + 五章节骨架（概述=本轮要点，时间线=1 行）。"""
     today = datetime.now().strftime("%Y-%m-%d")
+    now_hm = datetime.now().strftime("%H:%M")
     domain_dir = LIBRARY_DIR / domain
     domain_dir.mkdir(parents=True, exist_ok=True)
     path = domain_dir / f"{topic}.md"
-    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 时间线首行：取 section 第一条要点（去列表前缀，出处只保留一个）
+    first = next((l.strip() for l in section_body.split("\n") if l.strip()), "本轮要点")
+    if first.startswith("- "):
+        first = first[2:].strip()
+    if "（源自会话" not in first:
+        first = f"{first}（源自会话 {sid}）"
+    fm = (
+        "---\n"
+        f"topic: {topic}\n"
+        f"domain: {domain}\n"
+        f"created: {today}\n"
+        f"last_touched: {today}\n"
+        "version: 1\n"
+        f"source_sessions: [{sid}]\n"
+        "---\n\n"
+    )
+    body = (
+        f"## 概述\n\n{section_body}\n\n"
+        "## 关键结论\n\n"
+        "## 决策与原因\n\n"
+        "## 待办与未决\n\n"
+        f"## 时间线\n\n- {now_hm} {first}\n"
+    )
+    path.write_text(fm + body, encoding="utf-8")
+    return path
 
-    if is_new:
-        fm = (
-            "---\n"
-            f"topic: {topic}\n"
-            f"domain: {domain}\n"
-            f"created: {today}\n"
-            f"last_touched: {today}\n"
-            f"source_sessions: [{sid}]\n"
-            "---\n\n"
-        )
-        body = f"## {today} 会话\n\n{section_body}\n"
-        path.write_text(fm + body, encoding="utf-8")
-        return path
 
-    # 已有笔记：读全文，改 frontmatter，正文追加
+def _rewrite_note(domain: str, topic: str, path: Path,
+                  section_body: str, sid: str, llm_call) -> Path:
+    """骨架重写式：快照 → LLM 输出整篇新笔记 → 校验三拒 → 原子写。
+
+    校验不过 → 抛 ValueError（调用方记 WARNING + notes.error），
+    旧版已快照进 .history、笔记文件保持原样。
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_hm = datetime.now().strftime("%H:%M")
     old_text = path.read_text(encoding="utf-8")
     fm = _read_frontmatter(path)
-    # 更新 last_touched / source_sessions
-    sessions = fm.get("source_sessions", "")
-    sessions = sessions.strip("[]").replace(" ", "")
-    sid_list = [s for s in sessions.split(",") if s] if sessions else []
-    if sid not in sid_list:
-        sid_list.append(sid)
+    try:
+        version = int(fm.get("version", 1) or 1)
+    except (TypeError, ValueError):
+        version = 1
+
+    # 1. 旧版整篇快照（v{version}，无限保留）
+    _snapshot(domain, topic, version, old_text)
+
+    # 2. LLM 重写：旧笔记全文 + 本轮要点 → 整篇新笔记
+    prompt = [
+        {"role": "system", "content": _REWRITE_SYSTEM},
+        {"role": "user", "content": (
+            f"当前时间：{now_hm}（时间线新行用这个时间）\n\n"
+            f"旧笔记全文：\n{old_text}\n\n"
+            f"本轮要点：\n{section_body}"
+        )},
+    ]
+    response = llm_call(prompt, use_tools=False)
+    if isinstance(response, dict) and "error" in response:
+        raise ValueError(f"llm error: {response.get('error')}")
+    content = (response.get("choices", [{}])[0]
+               .get("message", {}).get("content", ""))
+    new_text = (content or "").strip()
+    if not new_text:
+        raise ValueError("rewrite returned empty")
+
+    # 3. 结构校验三拒 + 人手/时间线保护
+    protected = _protected_lines(old_text)
+    ok, reason = _structure_check(new_text, old_text, protected)
+    if not ok:
+        raise ValueError(f"rewrite structure check failed: {reason}")
+
+    # 4. 程序维护 frontmatter：正文取 LLM 输出第一个 --- 之后全部
+    sep = new_text.find("\n---", 3)
+    body = new_text[sep + 4:].strip("\n") if sep != -1 else new_text
+    sessions = _merge_sessions(fm.get("source_sessions", ""), sid)
     new_fm = (
         "---\n"
         f"topic: {fm.get('topic', topic)}\n"
         f"domain: {fm.get('domain', domain)}\n"
         f"created: {fm.get('created', today)}\n"
         f"last_touched: {today}\n"
-        f"source_sessions: [{', '.join(sid_list)}]\n"
+        f"version: {version + 1}\n"
+        f"source_sessions: [{', '.join(sessions)}]\n"
         "---\n"
     )
-    # 替换旧 frontmatter（只动 frontmatter 块，正文一字不动）
-    if old_text.startswith("---"):
-        end = old_text.find("\n---", 3)
-        if end != -1:
-            old_text = new_fm + old_text[end + 4:]
-        else:
-            old_text = new_fm + old_text
-    else:
-        old_text = new_fm + old_text
-    # 文末追加小节（确保以换行结尾再接）
-    if not old_text.endswith("\n"):
-        old_text += "\n"
-    old_text += f"\n## {today} 会话\n\n{section_body}\n"
-    path.write_text(old_text, encoding="utf-8")
+    final = new_fm + "\n" + body + "\n"
+
+    # 5. 原子写（临时文件 + os.replace，与 memory_mirror 同款）
+    domain_dir = LIBRARY_DIR / domain
+    domain_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=domain_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(final)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+    # 6. notes.updated 事件（version、旧长度、新长度）
+    _emit("notes.updated", {
+        "path": str(path), "topic": topic, "version": version + 1,
+        "old_len": len(old_text), "new_len": len(final),
+    })
     return path
 
 
@@ -306,19 +475,26 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call) 
         # 规范化主题名完全相同（净化后文件名已存在）
         is_new = True
         target_domain = domain
+        target_path = None
         for t in existing:
             if t["topic"] == topic:
                 target_domain = t["domain"]
+                target_path = t["path"]
                 is_new = False
                 break
             if match_topic and t["topic"] == match_topic:
                 target_domain = t["domain"]
                 topic = t["topic"]
+                target_path = t["path"]
                 is_new = False
                 break
 
-        # 3. 落盘（非破坏性）
-        path = _write_note(target_domain, topic, section_body, sid, is_new)
+        # 3. 落盘（骨架重写式：新主题建骨架，已有主题快照+LLM 重写+校验三拒）
+        if is_new:
+            path = _write_new_note(target_domain, topic, section_body, sid)
+        else:
+            path = _rewrite_note(target_domain, topic, target_path,
+                                 section_body, sid, llm_call)
 
         # 4. index.md 幂等重生成
         _rebuild_index()
