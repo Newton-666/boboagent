@@ -9,7 +9,7 @@ import os as _os
 from typing import Tuple
 from core.file_safety import is_write_denied
 
-# Bobo 自身仓库根（core/ 的上级目录，即 ~/Desktop/BOBO_Project_Backup）
+# Bobo 自身仓库根（core/ 的上级目录，即 ~/Desktop/boboagent_main）
 _BOBO_REPO_ROOT = _os.path.abspath(
     _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..")
 )
