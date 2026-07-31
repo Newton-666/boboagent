@@ -45,6 +45,12 @@ def _atomic_save(data):
         except Exception:
             pass
         raise
+    # 票 LN-1：JSON 写成功后幂等重生成 MEMORY.md 镜像（失败静默降级，绝不影响主流程）
+    try:
+        from tools.memory_mirror import sync_mirror
+        sync_mirror()
+    except Exception:
+        pass
 
 
 def _load():
@@ -406,6 +412,9 @@ def decay_all(decay: int = -5):
         data = _load()
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         for e in data.get("entries", []):
+            # 票 LN-1：人手编辑条目豁免轮次衰减（用户手写记忆不随时间贬值）
+            if e.get("human_edited", False):
+                continue
             last = e.get("last_matched", e.get("timestamp", ""))
             if last < now[:16]:  # 本轮未被匹配到（last_matched 没更新）
                 e["signal_score"] = max(0, e.get("signal_score", 100) + decay)
@@ -430,6 +439,9 @@ def time_decay():
         data = _load()
         for e in data.get("entries", []):
             if e.get("archived", False):
+                continue
+            # 票 LN-1：人手编辑条目豁免时间衰减与草稿自动归档
+            if e.get("human_edited", False):
                 continue
 
             # ── 时间衰减 ──

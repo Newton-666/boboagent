@@ -197,6 +197,14 @@ def run_engine(
         with current_engines_lock:
             current_engines[sid] = interrupt_event
 
+        # ── 票 LN-1：bobo 启动时 MEMORY.md → JSON 导入（md 比 JSON 新才解析）──
+        # 失败保守降级：解析不了就跳过，绝不污染 knowledge_base.json。
+        try:
+            from tools.memory_mirror import import_from_md
+            import_from_md()
+        except Exception:
+            pass
+
         engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
