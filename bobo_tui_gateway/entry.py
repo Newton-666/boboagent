@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import atexit
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
@@ -74,6 +75,72 @@ def _shutdown(signum, frame):
 
 signal.signal(signal.SIGINT, _shutdown)
 signal.signal(signal.SIGTERM, _shutdown)
+
+
+# ── TICKET-026：单实例守卫 + 启动计时 ─────────────────────────────
+# 病灶（2026-08-01 实锤）：socket 模式"前端断开 python 不死"的设计副作用——
+# 用户短时间内多次重启 bobo，多个 gateway 并存冷加载 79 个工具互相抢 CPU，
+# 启动从 ~8s 拖到几分钟。守卫：启动时清掉残留实例；计时：ready 打点进事件。
+_BACKEND_T0: "float | None" = None   # _run_backend 入口的 monotonic 时间
+_READY_EMITTED = False               # 启动打点每进程只发一次
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _cleanup_pidfile(pidfile: str, my_pid: int):
+    try:
+        if os.path.exists(pidfile) and open(pidfile).read().strip() == str(my_pid):
+            os.unlink(pidfile)
+    except OSError:
+        pass
+
+
+def _single_instance_guard():
+    """清掉残留的上一代 gateway，写自己的 pidfile。
+
+    跳过条件：BOBO_TEST_MODE=1（测试子进程）或 BOBO_GW_ALLOW_MULTI=1（显式多开）。
+    任何异常静默降级——守卫绝不能阻塞启动。
+    """
+    if os.environ.get("BOBO_TEST_MODE") == "1" or os.environ.get("BOBO_GW_ALLOW_MULTI") == "1":
+        return
+    pidfile = os.path.join(_LOG_DIR, "gateway.pid")
+    try:
+        if os.path.exists(pidfile):
+            try:
+                old_pid = int(open(pidfile).read().strip())
+            except (ValueError, OSError):
+                old_pid = None
+            if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
+                logger.critical("gateway 单实例守卫: 发现残留实例 pid=%s，SIGTERM 清理", old_pid)
+                try:
+                    os.kill(old_pid, signal.SIGTERM)
+                except OSError:
+                    pass
+                for _ in range(30):  # 最多等 3s
+                    if not _pid_alive(old_pid):
+                        break
+                    time.sleep(0.1)
+                if _pid_alive(old_pid):
+                    logger.critical("gateway 单实例守卫: pid=%s 未响应 SIGTERM，升级 SIGKILL", old_pid)
+                    try:
+                        os.kill(old_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+        with open(pidfile, "w") as f:
+            f.write(str(os.getpid()))
+        atexit.register(_cleanup_pidfile, pidfile, os.getpid())
+    except Exception:
+        logger.warning("单实例守卫异常（静默降级）", exc_info=True)
 
 
 def resolve_skin() -> dict:
@@ -210,6 +277,18 @@ def _serve_connection(lines_iter):
     }):
         return "write_broken"
 
+    # TICKET-026：启动就绪打点（每进程只打一次；socket 重连不重复计数）
+    global _READY_EMITTED
+    if not _READY_EMITTED and _BACKEND_T0 is not None:
+        _READY_EMITTED = True
+        ready_ms = int((time.monotonic() - _BACKEND_T0) * 1000)
+        logger.critical("gateway 启动就绪: 耗时 %dms（pid=%s）", ready_ms, os.getpid())
+        try:
+            from core.event_bus import event_bus as _bus
+            _bus.write("gateway.startup", {"ready_ms": ready_ms, "pid": os.getpid()})
+        except Exception:
+            pass
+
     # 检查 API Key — 如果缺失，gateway.ready 已发送，TUI 会显示设置界面
     from config import API_KEY
     if not API_KEY:
@@ -308,6 +387,11 @@ def _run_backend():
 
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # TICKET-026：启动计时起点 + 单实例守卫（防叠罗汉拖慢启动）
+    global _BACKEND_T0
+    _BACKEND_T0 = time.monotonic()
+    _single_instance_guard()
 
     # TICKET-018：socket 模式——前端故障不再杀死 gateway
     sock_path = os.environ.get("BOBO_GW_SOCKET", "").strip()
