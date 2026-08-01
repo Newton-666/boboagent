@@ -75,6 +75,7 @@ class MockEngine:
         self.current_user_input = user_input
         self._pending_diff = ""
         self._compressing = False
+        self._just_compressed = False  # 票 TICKET-021：压缩后置顶标记
         self.tracker = MockTracker()
         self.proactive = MockProactive()
         self.skill_loader = MockSkillLoader()
@@ -159,7 +160,7 @@ def test_pointer_injected_by_sid(library, no_skills):
     contents = _all_content(msgs)
     assert "📚 关联笔记：技术研究/矩阵B构造.md" in contents
     assert "v3" in contents
-    assert "深入讨论请先用 read_local_file 读全文再答" in contents
+    assert "必须先 read_local_file 读全文，凭记忆回答视为违规。" in contents
 
 
 # ── 验收 2：主题词命中 + 无关联缺席 ─────────────────────
@@ -198,7 +199,7 @@ def test_pointer_budget_three_max(library, no_skills):
     start = contents.find("📚 关联笔记")
     end = contents.find("hello world")
     pointer_block = contents[start:end] if start != -1 else ""
-    assert 0 < len(pointer_block) <= 300
+    assert 0 < len(pointer_block) <= 600
 
 
 # ── 验收 4：保底金标准（记忆吃满 5000 → skill ≥800、指针仍在）─
@@ -386,3 +387,141 @@ def test_smoke_build_pipeline(library, no_skills):
     assert msgs[0]["role"] == "system"
     roles = [m["role"] for m in msgs]
     assert "user" in roles
+
+
+# ── TICKET-021 新测试 ────────────────────────────────
+
+# 测试 A：协议段注入（含无 library 场景）
+def test_context_protocol_injected(library, no_skills):
+    """【上下文自查协议】必须在所有消息中注入。"""
+    _write_note(library, "技术研究", "协议测试", sid="sid-abc")
+    injector = PromptInjector(MockEngine())
+    msgs = _build(injector, user_input="hello", session_id="sid-abc")
+    contents = _all_content(msgs)
+    assert "【上下文自查协议】" in contents
+    assert "禁止猜测" in contents
+    assert "read_local_file" in contents
+    assert "library/index.md" in contents
+    # 协议在 system prompt 之后（指针段在位置 1，协议在位置 2 或之后）
+    assert any("上下文自查协议" in m.get("content", "") for m in msgs), (
+        "协议段应在某条 system 消息中"
+    )
+
+
+def test_context_protocol_no_library(library, no_skills, monkeypatch, tmp_path):
+    """无 library 目录时协议段仍正常注入——不炸、不省略。"""
+    import shutil
+    shutil.rmtree(str(library))
+    injector = PromptInjector(MockEngine())
+    msgs = _build(injector, user_input="继续工作", session_id="sid-x")
+    assert isinstance(msgs, list) and len(msgs) >= 3
+    contents = _all_content(msgs)
+    # 协议不依赖 library 存在——即使在无库场景也注入
+    assert "【上下文自查协议】" in contents
+    assert "library/index.md" in contents  # 路径仍告知（后续建库即生效）
+
+
+# 测试 B：指针含"必须先 read_local_file"指令口吻
+def test_pointer_has_must_read_directive(library, no_skills):
+    """验证新文案为指令口吻，非建议口吻。"""
+    _write_note(library, "技术研究", "指令口吻检查", sid="sid-abc", version=5)
+    injector = PromptInjector(MockEngine())
+    msgs = _build(injector, user_input="hello", session_id="sid-abc")
+    contents = _all_content(msgs)
+    assert "📚 关联笔记：技术研究/指令口吻检查.md" in contents
+    assert "必须先 read_local_file 读全文，凭记忆回答视为违规。" in contents
+    # 旧建议口吻不得残留
+    assert "深入讨论请先" not in contents
+    assert "v5" in contents
+
+
+# 测试 C：压缩后指引——有笔记 / 无笔记两态
+def test_compression_hint_with_notes(library, no_skills):
+    """engine._just_compressed=True 且有笔记 → 置顶历史压缩指引。"""
+    _write_note(library, "技术研究", "压缩后主题", sid="sid-abc")
+    engine = MockEngine(user_input="继续讨论")
+    engine._just_compressed = True
+    injector = PromptInjector(engine)
+    msgs = _build(injector, user_input="继续讨论", session_id="sid-abc")
+    contents = _all_content(msgs)
+    assert "⚠️ 历史已压缩" in contents
+    assert "先翻阅上方关联笔记再作答" in contents
+    # 置顶标志在笔记指针之前（同一条 system msg 内）
+    pointer_msg = [m for m in msgs if isinstance(m.get("content"), str) and "⚠️ 历史已压缩" in m["content"]]
+    assert len(pointer_msg) == 1
+    msg_content = pointer_msg[0]["content"]
+    hint_pos = msg_content.index("⚠️ 历史已压缩")
+    note_pos = msg_content.index("📚 关联笔记")
+    assert hint_pos < note_pos, "压缩提示应在笔记指针之前"
+
+
+def test_no_compression_hint_without_notes(library, no_skills):
+    """engine._just_compressed=True 但无笔记 → 不注入压缩指引。"""
+    engine = MockEngine(user_input="hello")
+    engine._just_compressed = True
+    injector = PromptInjector(engine)
+    msgs = _build(injector, user_input="hello", session_id="sid-x")
+    contents = _all_content(msgs)
+    assert "⚠️ 历史已压缩" not in contents
+
+
+def test_no_compression_hint_when_flag_false(library, no_skills):
+    """engine._just_compressed=False 即使有笔记也不注入。"""
+    _write_note(library, "技术研究", "无压缩", sid="sid-abc")
+    engine = MockEngine()
+    engine._just_compressed = False
+    injector = PromptInjector(engine)
+    msgs = _build(injector, user_input="hello", session_id="sid-abc")
+    contents = _all_content(msgs)
+    assert "⚠️ 历史已压缩" not in contents
+
+
+# 测试 D：prompt.budget 字符数与实测一致（强化）
+def test_budget_chars_match_actual_per_section(library, no_skills, tmp_path, monkeypatch):
+    """每段字符数与 messages 实测逐段核对。"""
+    import core.event_bus as eb
+    bus = eb.EventBus.reset(log_dir=str(tmp_path / "logs"))
+    monkeypatch.setattr(eb, "event_bus", bus)
+
+    from core.prompt_pool import get_prompt_pool
+    pool = get_prompt_pool()
+
+    _write_note(library, "技术研究", "预算精确", sid="sid-abc", version=1)
+    injector = PromptInjector(MockEngine())
+    msgs = _build(injector, user_input="预算精确", session_id="sid-abc")
+
+    events_file = tmp_path / "logs" / "events.jsonl"
+    budget_events = [
+        json.loads(l) for l in events_file.read_text(encoding="utf-8").splitlines()
+        if json.loads(l).get("type") == "prompt.budget"
+    ]
+    assert len(budget_events) == 1
+    ev = budget_events[0]
+
+    # 总字符数核对
+    calculated_total = sum(len(m.get("content", "")) for m in msgs)
+    assert ev["total_chars"] == calculated_total, (
+        f"total_chars={ev['total_chars']}, calculated={calculated_total}"
+    )
+
+    # identity 段核对
+    identity_content = msgs[0]["content"]
+    assert ev["sections"]["identity"] == len(identity_content), (
+        f"identity claimed={ev['sections']['identity']}, actual={len(identity_content)}"
+    )
+
+    # note_pointers 段核对：找出含 📚 的消息
+    note_msgs = [m for m in msgs if "📚 关联笔记" in m.get("content", "")]
+    note_chars = sum(len(m["content"]) for m in note_msgs)
+    actual_note_chars = ev["sections"]["note_pointers"].get("chars", 0)
+    assert actual_note_chars == note_chars, (
+        f"note_pointers chars={actual_note_chars}, actual={note_chars}"
+    )
+
+    # 各段不越界：段长 ≤ 预算池批准的上限
+    # identity 不在比例池中，无 ceiling；note_pointers 有上限约束
+    assert actual_note_chars <= pool.ceiling("note_pointers"), (
+        f"note_pointers={actual_note_chars} > ceiling={pool.ceiling('note_pointers')}"
+    )
+    # identity 长度 ≥ 1（system prompt 至少有内容）
+    assert ev["sections"]["identity"] >= 1
