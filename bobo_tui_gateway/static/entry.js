@@ -63664,7 +63664,10 @@ function useMainApp(gw2) {
         recoverSidRef.current = plan.sid;
         turnController.pushActivity("gateway exited \xB7 recovering session\u2026", "warn");
         sys("gateway exited \u2014 recovering your session (any in-flight reply was lost)");
-        gw2.start();
+        const delayMs = Math.min(1500 * Math.max(recoveryAtRef.current.length, 1), 8e3);
+        setTimeout(() => {
+          gw2.start();
+        }, delayMs);
         return;
       }
       recoverSidRef.current = null;

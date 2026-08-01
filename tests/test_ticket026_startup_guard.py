@@ -46,9 +46,10 @@ def _spawn_dead():
 
 class TestSingleInstanceGuard:
     def test_kills_stale_instance(self, monkeypatch):
-        """pidfile 指向存活的旧实例 + 授权旗标 → SIGTERM 清理，写自己 pid。"""
+        """孤儿旧实例（父 TUI 已死）+ 授权旗标 → SIGTERM 清理，写自己 pid。"""
         monkeypatch.setenv("BOBO_GW_GUARD", "1")
         monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
+        monkeypatch.setattr(entry, "_parent_alive", lambda pid: False)  # 模拟孤儿
         monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
         sleeper = _spawn_sleeper()
         try:
@@ -65,6 +66,31 @@ class TestSingleInstanceGuard:
         finally:
             if entry._pid_alive(sleeper.pid):
                 sleeper.kill()
+
+    def test_skips_when_parent_tui_alive(self, monkeypatch):
+        """TICKET-029 金标准：旧 gateway 的父 TUI 还活着 → 不杀、不抢 pidfile。
+
+        互杀风暴复现：另一个正在使用的 bobo 是正规军，不是残留。
+        """
+        monkeypatch.setenv("BOBO_GW_GUARD", "1")
+        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
+        monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
+        monkeypatch.setattr(entry, "_parent_alive", lambda pid: True)  # 父 TUI 存活
+        sleeper = _spawn_sleeper()
+        try:
+            pidfile = Path(entry._LOG_DIR, "gateway.pid")
+            pidfile.write_text(str(sleeper.pid))
+            entry._single_instance_guard()
+            assert entry._pid_alive(sleeper.pid), "父 TUI 存活时不得清理"
+            assert pidfile.read_text().strip() == str(sleeper.pid), "不得抢写 pidfile"
+        finally:
+            sleeper.kill()
+
+    def test_parent_alive_semantics(self):
+        """_parent_alive：当前进程的父进程（pytest/shell）必然存活。"""
+        assert entry._parent_alive(os.getpid()) is True
+        dead = _spawn_dead()
+        assert entry._parent_alive(dead.pid) is False
 
     def test_skips_without_guard_flag(self, monkeypatch):
         """TICKET-028 金标准：无 BOBO_GW_GUARD=1 → 不动任何实例。
