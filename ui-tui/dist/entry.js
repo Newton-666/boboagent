@@ -73202,6 +73202,7 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
   settle(p, err, result) {
     clearTimeout(p.timeout);
     this.pending.delete(p.id);
+    this.perf(`rpc \u5E94\u7B54 ${p.method} ${p.id}`);
     if (err) {
       p.reject(err);
     } else {
@@ -73389,6 +73390,7 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
       });
       try {
         this.sock.write(JSON.stringify({ id, jsonrpc: "2.0", method, params }) + "\n");
+        this.perf(`rpc \u53D1\u51FA(socket) ${method} ${id}`);
       } catch (e) {
         const pending = this.pending.get(id);
         if (pending) {
@@ -73456,6 +73458,7 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
       });
       try {
         this.proc.stdin.write(JSON.stringify({ id, jsonrpc: "2.0", method, params }) + "\n");
+        this.perf(`rpc \u53D1\u51FA(stdin) ${method} ${id}`);
       } catch (e) {
         const pending = this.pending.get(id);
         if (pending) {
