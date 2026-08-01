@@ -13,7 +13,7 @@ class TestGetProvider:
         assert cfg is not None
         assert cfg["env_key"] == "DEEPSEEK_API_KEY"
         assert "deepseek-v4-pro" in cfg["models"]
-        assert cfg["context_length"] == 1_000_000
+        assert cfg["context_length"] == 128_000  # TICKET-023 窗口修正
 
     def test_known_provider_openai(self):
         cfg = get_provider("openai")
@@ -120,7 +120,7 @@ class TestResolveProvider:
     def test_context_length_included(self):
         result = resolve_provider(provider_name="deepseek")
         assert "context_length" in result
-        assert result["context_length"] == 1_000_000
+        assert result["context_length"] == 128_000  # TICKET-023 窗口修正
 
     def test_ollama_no_api_key_needed(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "ollama")

@@ -12,7 +12,9 @@ PROVIDERS = {
         "env_key": "DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com/v1/chat/completions",
         "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
-        "context_length": 1000000,
+        # 128K：DeepSeek 实际上下文窗口为 128K（deepseek-chat / deepseek-reasoner）。
+        # 错误的高估会让 token 预算失效，宁可低估。
+        "context_length": 128000,
     },
     "openai": {
         "name": "OpenAI",
@@ -40,7 +42,7 @@ PROVIDERS = {
         "env_key": "GOOGLE_API_KEY",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "models": ["gemini-2.0-flash", "gemini-2.0-pro"],
-        "context_length": 1000000,
+        "context_length": 128000,  # 保守值：Gemini 2.0 Flash 官方 1M，但高估会让 token 预算失效
     },
     "ollama": {
         "name": "Ollama",
