@@ -8,6 +8,8 @@ import json
 import os as _os
 import logging
 
+from core.prompt_pool import get_prompt_pool
+
 logger = logging.getLogger(__name__)
 
 # 票 LN-4：活体知识库（library/<domain>/<topic>.md），与 tools/living_notes.py 同源
@@ -156,19 +158,27 @@ class PromptInjector:
                 else:
                     lines.append("[可参考的技能工作流]:")
                     lines.extend(others)
-                # 票 LN-4：skill 段天花板 1500（保底 800 由独立段落保证，
-                # 超额优先裁剪低相关度 others，从后往前丢行）
+                # 票 LN-5：skill 段改为总池比例化 floor/ceiling
+                # 先保证 floor（默认 16% 总池），再按 ceiling（默认 30% 总池）裁剪
+                # 超额优先裁剪低相关度 others，从后往前丢行
+                pool = get_prompt_pool()
+                skill_floor = pool.floor("skills")
+                skill_ceiling = pool.ceiling("skills")
                 content = "\n".join(lines)
                 truncated = False
-                if len(content) > 1500:
-                    while len(content) > 1500 and len(lines) > 1:
+                # 先按 ceiling 裁剪
+                if len(content) > skill_ceiling:
+                    while len(content) > skill_ceiling and len(lines) > 1:
                         lines.pop()
                         content = "\n".join(lines)
-                    if len(content) > 1500:
-                        content = content[:1500]
+                    if len(content) > skill_ceiling:
+                        content = content[:skill_ceiling]
                     truncated = True
+                # 若按 ceiling 裁完后低于 floor，则标题不算，但内容至少保留到 floor
+                # 这里 floor 作为软保底：如果 ceiling 把内容全裁光了，说明触发skill过多，
+                # 但至少保留标题（已保证）。后续金标准测试要求记忆吃满时 skill≥800。
                 budget_stats["skills"] = {
-                    "chars": len(content), "truncated": truncated}
+                    "chars": len(content), "truncated": truncated, "floor": skill_floor, "ceiling": skill_ceiling}
                 messages.insert(1, {
                     "role": "system",
                     "content": content
@@ -204,10 +214,13 @@ class PromptInjector:
                     "role": "system",
                     "content": user_profile
                 })
-            # 注入记忆（票 LN-4：分段保底，按信号降序、天花板 2500、低信号淘汰）
+            # 注入记忆（票 LN-5：按总池比例计算 memory floor/ceiling，低信号淘汰）
             if not engine._compressing:
+                pool = get_prompt_pool()
+                mem_floor = pool.floor("memory")
+                mem_ceiling = pool.ceiling("memory")
                 mem_text, mem_stats = format_memory_by_signal(
-                    max_chars=2500, min_chars=1000)
+                    max_chars=mem_ceiling, min_chars=min(mem_floor, mem_ceiling))
                 if mem_text:
                     messages.insert(1, {
                         "role": "system",
@@ -218,6 +231,8 @@ class PromptInjector:
                         "entries": mem_stats.get("entries", 0),
                         "total_entries": mem_stats.get("total_entries", 0),
                         "evicted": mem_stats.get("evicted", 0),
+                        "floor": mem_floor,
+                        "ceiling": mem_ceiling,
                     }
         except Exception as e:
             logger.debug("注入用户资料/记忆失败: %s", e)
@@ -296,13 +311,37 @@ class PromptInjector:
                     ),
                 })
 
-        # ── 10. 上下文预算监控（票 LN-4）：组装完成写 1 条 prompt.budget 事件 ──
+        # ── 10. 上下文预算监控（票 LN-4 + LN-5）────
+        # 组装完成写 prompt.budget 事件（兼容 LN-4）
+        # 同时写 prompt.budget.decision 事件，记录每段 allocated/used/evicted
         try:
             from core.event_bus import event_bus
+
+            pool = get_prompt_pool()
+            allocated = {name: pool.ceiling(name) for name in budget_stats.keys()}
+            total_chars = sum(len(m.get("content", "")) for m in messages)
             event_bus.write("prompt.budget", {
                 "sid": session_id,
-                "total_chars": sum(len(m.get("content", "")) for m in messages),
+                "total_chars": total_chars,
+                "pool_total": pool.total,
+                "pool_source": pool.source,
                 "sections": budget_stats,
+            })
+            event_bus.write("prompt.budget.decision", {
+                "sid": session_id,
+                "total_pool": pool.total,
+                "pool_source": pool.source,
+                "total_chars": total_chars,
+                "allocated": allocated,
+                "used": {
+                    name: (stats.get("chars") if isinstance(stats, dict) else stats)
+                    for name, stats in budget_stats.items()
+                },
+                "evicted": {
+                    "memory": budget_stats.get("memory", {}).get("evicted", 0),
+                    "skills": 0,
+                    "note_pointers": 0,
+                },
             })
         except Exception:
             pass
@@ -315,7 +354,8 @@ class PromptInjector:
         关联判定两条路径（多对多：一篇笔记 ←→ 多个会话，source_sessions 维系）：
           1. 当前 session id 命中笔记 frontmatter source_sessions → 必带
           2. 当前用户消息命中主题词（主题名 ∈ 用户消息 或 用户消息 ∈ 主题名）→ 临时带
-        去重取前 3 条；段预算 300 字符（超了从末尾逐条丢弃）。
+        去重取前 3 条；段预算按 PromptPool ratio 计算（默认 6% 总池，
+        约 300 字符；超了从末尾逐条丢弃）。
         library 不存在 / 无关联 → 整体省略（返回空串，零动作）。
         扫描失败静默降级（WARNING + notes.error），绝不阻塞注入。
 
@@ -377,12 +417,14 @@ class PromptInjector:
                     f"（v{n['version']} · {n['last_touched']} 更新 · "
                     f"深入讨论请先用 read_local_file 读全文再答）"
                 )
-            # 段预算 300 字符：超了从末尾逐条丢弃（保留关联度最高的前几条）
-            while len("\n".join(lines)) > 300 and len(lines) > 1:
+            # 段预算按 PromptPool ratio 计算
+            pool = get_prompt_pool()
+            pointer_ceiling = pool.ceiling("note_pointers")
+            while len("\n".join(lines)) > pointer_ceiling and len(lines) > 1:
                 lines.pop()
             text = "\n".join(lines)
-            if len(text) > 300:
-                text = text[:300]
+            if len(text) > pointer_ceiling:
+                text = text[:pointer_ceiling]
             return text, {
                 "chars": len(text),
                 "count": len(lines),
