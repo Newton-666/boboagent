@@ -1,7 +1,10 @@
-"""TICKET-026: 单实例守卫 + 启动计时打点。
+"""TICKET-030: auto-exit 孤儿场景测试（守卫已拆除，保留启动计时打点）。
 
-核心命题：① 残留 gateway 实例被自动清理，新实例不再叠罗汉；
-② ready 打点进日志/事件，启动快慢从此有据可查。
+核心命题：
+① 从未连接客户端的孤儿 gateway 在 BOBO_GW_IDLE_TIMEOUT 秒后自动退出
+② 连接过的 gateway 在客户端断开后超时自动退出
+③ BOBO_GW_IDLE_TIMEOUT=0 禁用 auto-exit，gateway 永不退出
+④ gateway.startup 打点仍正常（每进程一次）
 """
 
 import json
@@ -9,6 +12,7 @@ import os
 import signal
 import socket
 import subprocess
+import tempfile
 import sys
 import time
 from pathlib import Path
@@ -25,7 +29,7 @@ from bobo_tui_gateway.transport import SocketTransport, set_transport, StdioTran
 
 @pytest.fixture(autouse=True)
 def _restore_globals(monkeypatch, tmp_path):
-    """隔离 pidfile 到 tmp_path，测试后还原模块全局状态。"""
+    """隔离 _LOG_DIR 到 tmp_path，测试后还原模块全局状态。"""
     monkeypatch.setattr(entry, "_LOG_DIR", str(tmp_path))
     old_t0, old_emitted = entry._BACKEND_T0, entry._READY_EMITTED
     yield
@@ -33,108 +37,128 @@ def _restore_globals(monkeypatch, tmp_path):
     set_transport(StdioTransport())
 
 
-def _spawn_sleeper():
-    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+def _spawn_gateway(sock_path: str, idle_timeout: int | None = None,
+                   connect: bool = False, extra_env: dict | None = None) -> subprocess.Popen:
+    """以子进程启动 _run_socket_backend。
 
+    idle_timeout=None 时不设 BOBO_GW_IDLE_TIMEOUT（使用默认 60s）。
+    connect=True 时启动一个客户端连接再立即断开，模拟"有过客户但已断开"。
+    """
+    import copy
+    env = copy.copy(dict(os.environ))
+    env["BOBO_GW_SOCKET"] = sock_path
+    if extra_env:
+        env.update(extra_env)
+    if idle_timeout is not None:
+        env["BOBO_GW_IDLE_TIMEOUT"] = str(idle_timeout)
+    # 确保守卫不会运行（TICKET-030 守卫已拆除，但旧代码可能残留）
+    env.pop("BOBO_GW_GUARD", None)
+    env["BOBO_TEST_MODE"] = "1"
 
-def _spawn_dead():
-    """立刻退出的进程，用于构造"已死 pid"。"""
-    p = subprocess.Popen([sys.executable, "-c", "pass"])
-    p.wait()
-    return p
+    code = f"""
+import os, sys
+os.environ.update({env!r})
+sys.path.insert(0, {str(_root)!r})
+from bobo_tui_gateway.entry import _run_socket_backend
+_run_socket_backend({sock_path!r})
+"""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
+    # 等待 socket 文件出现
+    for _ in range(50):
+        if os.path.exists(sock_path):
+            break
+        time.sleep(0.05)
 
-class TestSingleInstanceGuard:
-    def test_kills_stale_instance(self, monkeypatch):
-        """孤儿旧实例（父 TUI 已死）+ 授权旗标 → SIGTERM 清理，写自己 pid。"""
-        monkeypatch.setenv("BOBO_GW_GUARD", "1")
-        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
-        monkeypatch.setattr(entry, "_parent_alive", lambda pid: False)  # 模拟孤儿
-        monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
-        sleeper = _spawn_sleeper()
+    if connect and os.path.exists(sock_path):
+        # 连一下立刻断开，模拟"有过客户端"
         try:
-            pidfile = Path(entry._LOG_DIR) / "gateway.pid"
-            pidfile.write_text(str(sleeper.pid))
-            entry._single_instance_guard()
-            # 回收子进程（不 wait 会是僵尸，os.kill(pid,0) 仍判活）
+            conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            conn.settimeout(2)
+            conn.connect(sock_path)
+            time.sleep(0.05)  # 让 gateway 处理连接
+            conn.close()
+        except OSError:
+            pass
+
+    return proc
+
+
+class TestAutoExitOrphan:
+    def test_never_connected_orphan_exits(self, tmp_path):
+        """从未连接客户端的孤儿 gateway —— BOBO_GW_IDLE_TIMEOUT 秒后自动退出。"""
+        sock = tempfile.mktemp(prefix="bobo_gw_t030a_", suffix=".sock")
+        proc = _spawn_gateway(sock, idle_timeout=2, connect=False)
+
+        try:
+            proc.wait(timeout=8)
+            # 应正常退出（被 auto-exit 超时触发）
+            assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr.read()}"
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            pytest.fail("孤儿 gateway 未在 auto-exit 超时后退出（等待 8s 仍存活）")
+
+    def test_disconnected_client_exits(self, tmp_path):
+        """客户端连接后断开 —— auto-exit 倒计时从断开时刻起算。"""
+        sock = tempfile.mktemp(prefix="bobo_gw_t030b_", suffix=".sock")
+        proc = _spawn_gateway(sock, idle_timeout=2, connect=True)
+
+        try:
+            proc.wait(timeout=8)
+            assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr.read()}"
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            pytest.fail("有客户后断开的 gateway 未在 auto-exit 超时后退出")
+
+    def test_idle_timeout_zero_never_exits(self, tmp_path):
+        """BOBO_GW_IDLE_TIMEOUT=0 → 永不自动退出。"""
+        sock = tempfile.mktemp(prefix="bobo_gw_t030_", suffix="_test_never.sock")
+        proc = _spawn_gateway(sock, idle_timeout=0, connect=False)
+
+        try:
+            proc.wait(timeout=4)
+            pytest.fail("BOBO_GW_IDLE_TIMEOUT=0 时不应自动退出，但进程退出了")
+        except subprocess.TimeoutExpired:
+            # 预期行为：进程仍在运行
+            pass
+        finally:
+            proc.kill()
+            proc.wait(timeout=2)
+
+    def test_client_connected_resets_timer(self, tmp_path):
+        """有客户端保持连接时 gateway 不应退出（idle timer 被重置）。"""
+        sock = tempfile.mktemp(prefix="bobo_gw_t030_", suffix="_test_connected.sock")
+        proc = _spawn_gateway(sock, idle_timeout=2, connect=False)
+
+        # 客户端连接并保持
+        try:
+            conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            conn.settimeout(3)
+            for _ in range(30):
+                try:
+                    conn.connect(sock)
+                    break
+                except (ConnectionRefusedError, FileNotFoundError):
+                    time.sleep(0.1)
+
+            # 保持连接 3 秒（超过 2s 的 idle_timeout）
+            time.sleep(3)
+            # gateway 应仍在运行
+            assert proc.poll() is None, "有活跃客户端时 gateway 不应退出"
+        finally:
             try:
-                sleeper.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pytest.fail("残留实例未被清理（5s 内未退出）")
-            assert not entry._pid_alive(sleeper.pid)
-            assert pidfile.read_text().strip() == str(os.getpid())
-        finally:
-            if entry._pid_alive(sleeper.pid):
-                sleeper.kill()
-
-    def test_skips_when_parent_tui_alive(self, monkeypatch):
-        """TICKET-029 金标准：旧 gateway 的父 TUI 还活着 → 不杀、不抢 pidfile。
-
-        互杀风暴复现：另一个正在使用的 bobo 是正规军，不是残留。
-        """
-        monkeypatch.setenv("BOBO_GW_GUARD", "1")
-        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
-        monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
-        monkeypatch.setattr(entry, "_parent_alive", lambda pid: True)  # 父 TUI 存活
-        sleeper = _spawn_sleeper()
-        try:
-            pidfile = Path(entry._LOG_DIR, "gateway.pid")
-            pidfile.write_text(str(sleeper.pid))
-            entry._single_instance_guard()
-            assert entry._pid_alive(sleeper.pid), "父 TUI 存活时不得清理"
-            assert pidfile.read_text().strip() == str(sleeper.pid), "不得抢写 pidfile"
-        finally:
-            sleeper.kill()
-
-    def test_parent_alive_semantics(self):
-        """_parent_alive：当前进程的父进程（pytest/shell）必然存活。"""
-        assert entry._parent_alive(os.getpid()) is True
-        dead = _spawn_dead()
-        assert entry._parent_alive(dead.pid) is False
-
-    def test_skips_without_guard_flag(self, monkeypatch):
-        """TICKET-028 金标准：无 BOBO_GW_GUARD=1 → 不动任何实例。
-
-        误杀案复现：隔壁测试/基准起的野子进程，绝不允许触发守卫。
-        """
-        monkeypatch.delenv("BOBO_GW_GUARD", raising=False)
-        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
-        monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
-        sleeper = _spawn_sleeper()
-        try:
-            Path(entry._LOG_DIR, "gateway.pid").write_text(str(sleeper.pid))
-            entry._single_instance_guard()
-            assert entry._pid_alive(sleeper.pid), "无授权旗标时不得清理任何实例"
-            # pidfile 也不应被覆写
-            assert Path(entry._LOG_DIR, "gateway.pid").read_text().strip() == str(sleeper.pid)
-        finally:
-            sleeper.kill()
-
-    def test_skips_when_test_mode(self, monkeypatch):
-        """BOBO_TEST_MODE=1 → 不动残留实例（测试场景多实例合法）。"""
-        monkeypatch.setenv("BOBO_GW_GUARD", "1")
-        monkeypatch.setenv("BOBO_TEST_MODE", "1")
-        sleeper = _spawn_sleeper()
-        try:
-            Path(entry._LOG_DIR, "gateway.pid").write_text(str(sleeper.pid))
-            entry._single_instance_guard()
-            assert entry._pid_alive(sleeper.pid), "测试模式下不应清理实例"
-        finally:
-            sleeper.kill()
-
-    def test_stale_pidfile_dead_pid_noop(self, monkeypatch):
-        """pidfile 指向已死 pid → 不炸，直接覆盖写自己。"""
-        monkeypatch.setenv("BOBO_GW_GUARD", "1")
-        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
-        dead = _spawn_dead()
-        Path(entry._LOG_DIR, "gateway.pid").write_text(str(dead.pid))
-        entry._single_instance_guard()
-        assert Path(entry._LOG_DIR, "gateway.pid").read_text().strip() == str(os.getpid())
-
-    def test_pid_alive_semantics(self):
-        assert entry._pid_alive(os.getpid()) is True
-        dead = _spawn_dead()
-        assert entry._pid_alive(dead.pid) is False
+                conn.close()
+            except OSError:
+                pass
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=2)
 
 
 class TestStartupTiming:
@@ -156,7 +180,6 @@ class TestStartupTiming:
         result = {}
 
         def _serve():
-            # 与真实代码同构：读写同一条连接
             result["reason"] = entry._serve_connection(
                 conn.makefile("r", encoding="utf-8", newline="\n"))
 
@@ -164,11 +187,9 @@ class TestStartupTiming:
             set_transport(SocketTransport(conn))
             t = threading.Thread(target=_serve, daemon=True)
             t.start()
-            # 前端收 ready 帧（transport 与 reader 同连接，write 不会假阻塞）
             client.settimeout(5)
             data = client.recv(65536).decode("utf-8")
             assert "gateway.ready" in data
-            # 前端断开（真实 FIN，因为 client 没有 makefile 占着 fd）
             client.close()
             t.join(timeout=5)
             assert not t.is_alive(), "前端断开后 _serve_connection 未返回"

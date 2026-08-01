@@ -77,101 +77,9 @@ signal.signal(signal.SIGINT, _shutdown)
 signal.signal(signal.SIGTERM, _shutdown)
 
 
-# ── TICKET-026：单实例守卫 + 启动计时 ─────────────────────────────
-# 病灶（2026-08-01 实锤）：socket 模式"前端断开 python 不死"的设计副作用——
-# 用户短时间内多次重启 bobo，多个 gateway 并存冷加载 79 个工具互相抢 CPU，
-# 启动从 ~8s 拖到几分钟。守卫：启动时清掉残留实例；计时：ready 打点进事件。
+# ── TICKET-030：启动计时 + 工具预热（守卫已拆除，auto-exit 接管叠罗汉治理）──
 _BACKEND_T0: "float | None" = None   # _run_backend 入口的 monotonic 时间
 _READY_EMITTED = False               # 启动打点每进程只发一次
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def _cleanup_pidfile(pidfile: str, my_pid: int):
-    try:
-        if os.path.exists(pidfile) and open(pidfile).read().strip() == str(my_pid):
-            os.unlink(pidfile)
-    except OSError:
-        pass
-
-
-def _parent_alive(pid: int) -> bool:
-    """gateway 的父进程（TUI/node）是否还活着（TICKET-029 认父逻辑）。
-
-    查不到/父进程是 init（ppid<=1）→ 视为孤儿。多开场景下父 TUI 活着
-    的 gateway 是正规军，不是残留。
-    """
-    import subprocess as _sp
-    try:
-        out = _sp.check_output(
-            ["ps", "-o", "ppid=", "-p", str(pid)], text=True,
-            stdin=_sp.DEVNULL, stderr=_sp.DEVNULL).strip()
-        ppid = int(out)
-    except Exception:
-        return False
-    if ppid <= 1:
-        return False
-    return _pid_alive(ppid)
-
-
-def _single_instance_guard():
-    """清掉残留的上一代 gateway，写自己的 pidfile。
-
-    启用条件（TICKET-028 误杀修复）：仅当 node 前端 spawn 时显式设
-    BOBO_GW_GUARD=1——只有 TUI 的正规军才执行单实例清理。
-    测试子进程、基准脚本、其他 agent 随手起的野子进程一律不触发，
-    杜绝"隔壁测试的守卫误杀用户真 bobo"（2026-08-01 TUI 崩屏案）。
-    跳过条件：BOBO_TEST_MODE=1 或 BOBO_GW_ALLOW_MULTI=1。
-    任何异常静默降级——守卫绝不能阻塞启动。
-    """
-    if os.environ.get("BOBO_GW_GUARD") != "1":
-        return
-    if os.environ.get("BOBO_TEST_MODE") == "1" or os.environ.get("BOBO_GW_ALLOW_MULTI") == "1":
-        return
-    pidfile = os.path.join(_LOG_DIR, "gateway.pid")
-    try:
-        if os.path.exists(pidfile):
-            try:
-                old_pid = int(open(pidfile).read().strip())
-            except (ValueError, OSError):
-                old_pid = None
-            if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
-                # TICKET-029 认父：父 TUI 还活着 = 另一个正在使用的 bobo，
-                # 不是残留——跳过清理且不抢 pidfile，终结正规军互杀风暴
-                if _parent_alive(old_pid):
-                    logger.critical(
-                        "gateway 单实例守卫: pid=%s 的父 TUI 仍存活（多开并存），跳过清理", old_pid)
-                    return
-                logger.critical("gateway 单实例守卫: 发现孤儿实例 pid=%s，SIGTERM 清理", old_pid)
-                try:
-                    os.kill(old_pid, signal.SIGTERM)
-                except OSError:
-                    pass
-                for _ in range(10):  # 最多等 1s（TICKET-027 加速）
-                    if not _pid_alive(old_pid):
-                        break
-                    time.sleep(0.1)
-                if _pid_alive(old_pid):
-                    logger.critical("gateway 单实例守卫: pid=%s 未响应 SIGTERM，升级 SIGKILL", old_pid)
-                    try:
-                        os.kill(old_pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-        with open(pidfile, "w") as f:
-            f.write(str(os.getpid()))
-        atexit.register(_cleanup_pidfile, pidfile, os.getpid())
-    except Exception:
-        logger.warning("单实例守卫异常（静默降级）", exc_info=True)
 
 
 def resolve_skin() -> dict:
@@ -404,7 +312,7 @@ def _run_socket_backend(sock_path: str):
         srv.settimeout(1.0)  # 每 1 秒检查空闲超时
     logger.critical("gateway socket 模式: 监听 %s（前端断开不再致命，等待重连）", sock_path)
 
-    _idle_since: "float | None" = None  # 前端断开的时间戳；None=当前有连接或从未有过客户端
+    _idle_since: float = time.monotonic()  # TICKET-030：初始化为 listen 时刻，堵住"从未连接的孤儿永不退出"盲区
     while True:
         try:
             conn, _ = srv.accept()
@@ -452,10 +360,9 @@ def _run_backend():
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    # TICKET-026：启动计时起点 + 单实例守卫（防叠罗汉拖慢启动）
+    # TICKET-030：启动计时起点（守卫已拆除，auto-exit 接管叠罗汉治理）
     global _BACKEND_T0
     _BACKEND_T0 = time.monotonic()
-    _single_instance_guard()
 
     # TICKET-027：后台预热工具导入——避免堵在 session.create 关键路径，
     # 消除 TUI 长时间卡在 "summoning hermes…" 的体验。

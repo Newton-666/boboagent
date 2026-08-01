@@ -315,9 +315,7 @@ export class GatewayClient extends EventEmitter {
     if (sockPath) {
       env.BOBO_GW_SOCKET = sockPath
     }
-    // TICKET-028：显式授权单实例守卫——只有 TUI 正规军 spawn 的 gateway
-    // 才执行残留清理；测试/基准/其他 agent 的子进程不触发，防误杀
-    env.BOBO_GW_GUARD = '1'
+    // TICKET-030：守卫已拆除，auto-exit 接管叠罗汉治理
     this.startReadyTimer(python, cwd)
     this.proc = spawn(python, ['-m', 'bobo_tui_gateway.entry'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd}${sockPath ? ' [socket 模式]' : ' [stdio 模式]'}`)
