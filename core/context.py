@@ -177,6 +177,58 @@ class ContextMixin:
     # 笔记/邮件类查询不限制工具 — 让 LLM 根据已配置的平台自由选择
     _NO_FILTER_CATEGORIES = {"obsidian", "notion", "email"}
 
+    def _build_work_anchor(self) -> dict[str, str]:
+        """构建工作锚点——跨压缩存活的机械提取状态快照。
+
+        不从 LLM 摘要提取，从可靠来源直接取：
+        - 当前任务：self.current_user_input（前 200 字符）
+        - 已写文件：self.tracker._change_log 中提取路径，去重最多 10 条
+        - 台账未完成项：self.task_ledger 中 status != "done" 的项（最多 5 条）
+
+        每次压缩时重建，旧锚点被新锚点替换。
+        任何来源读取失败 → 降级跳过对应段，绝不阻塞压缩。
+        """
+        lines = ["[工作锚点 · 压缩豁免 · 每轮更新]"]
+
+        # ── 当前任务 ──
+        task = (getattr(self, 'current_user_input', None) or '').strip()
+        if task:
+            lines.append(f"🎯 当前任务：{task[:200]}")
+
+        # ── 已写文件 ──
+        try:
+            if hasattr(self, 'tracker') and hasattr(self.tracker, '_change_log'):
+                written: set[str] = set()
+                for entry in self.tracker._change_log:
+                    desc = entry.get('desc', '')
+                    for sep in (':', '（'):
+                        idx = desc.find(sep)
+                        if idx > 0:
+                            fpath = desc[:idx].strip()
+                            if fpath and not fpath.startswith('['):
+                                written.add(fpath)
+                            break
+                if written:
+                    file_list = sorted(written)[:10]
+                    lines.append(f"📁 本会话已写文件：{', '.join(file_list)}（共 {len(written)} 个）")
+        except Exception:
+            pass
+
+        # ── 台账 ──
+        try:
+            ledger = getattr(self, 'task_ledger', None) or []
+            pending = [e for e in ledger if e.get('status') != 'done']
+            if pending:
+                circles = ['①', '②', '③', '④', '⑤']
+                items = []
+                for i, e in enumerate(pending[:5]):
+                    items.append(f"{circles[i] if i < 5 else ''}{e.get('title', '')[:40]}")
+                lines.append(f"📋 台账未完成：{' '.join(items)}")
+        except Exception:
+            pass
+
+        return {"role": "system", "content": "\n".join(lines)}
+
     def _compress_history(self, *, _event_bus=None):
         """将早期对话压缩为结构化摘要（票 T 增强版）。
 
@@ -249,13 +301,26 @@ class ContextMixin:
         old_msgs = self.history[:split_idx]
         self.history = self.history[split_idx:]
 
+        # ── 票 020：构建工作锚点，跨压缩存活 ──
+        anchor_msg = self._build_work_anchor()
+        # 清除旧锚点（旧锚点被新锚点替换，只留一份）
+        _ANCHOR_PREFIX = "[工作锚点"
+        self.history = [m for m in self.history
+                        if not (m.get("role") == "system"
+                                and m.get("content", "").startswith(_ANCHOR_PREFIX))]
+        old_msgs = [m for m in old_msgs
+                    if not (m.get("role") == "system"
+                            and m.get("content", "").startswith(_ANCHOR_PREFIX))]
+        # 新锚点插在 history 最头部
+        self.history.insert(0, anchor_msg)
+
         # ── 保留已有摘要（幂等：跨压缩轮次不丢旧摘要） ──
         existing_summaries = [m for m in old_msgs
                               if m.get("role") == "system"
                               and m.get("content", "").startswith("[对话历史摘要]")]
         # 从 old_msgs 中排除已有摘要，只压缩纯对话
         old_msgs_no_summary = [m for m in old_msgs if m not in existing_summaries]
-        # 把已有摘要重新插回 history 头部
+        # 把已有摘要重新插回 history 头部（锚点之后）
         for sm in reversed(existing_summaries):
             self.history.insert(0, sm)
 
