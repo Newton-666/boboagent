@@ -569,9 +569,7 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call,
         # 4. index.md 幂等重生成
         _rebuild_index()
 
-        _emit("notes.written", {
-            "path": str(path), "topic": topic, "is_new": is_new,
-        })
+        # notes.written / notes.updated 已在 _write_new_note / _rewrite_note 内部发射（带 sid）
         return {"written": True, "path": str(path), "is_new": is_new, "error": None}
     except Exception as e:
         logger.warning("living notes write failed (silent degrade): %s", e)
