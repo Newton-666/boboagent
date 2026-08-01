@@ -377,3 +377,41 @@ class TestAnchorRobust:
         content = anchors[0]["content"]
         assert "a:b:c" in content
         assert "x.py" in content
+
+    def test_phase_transition_preserves_files(self, monkeypatch):
+        """验收 3（追加）：_handle_phase_transition 后 _session_written_files
+        不清空，锚点仍含阶段转换前写入的文件。
+
+        设计纪律：_session_written_files 只在 __init__ 初始化，之后只增不删。
+        """
+        eng = _make_engine()
+        # 模拟阶段转换前的文件写入
+        eng._session_written_files = {"phase1_report.md", "phase1_data.csv"}
+        eng.task_ledger = [{"id": "1", "title": "阶段二", "status": "in_progress"}]
+        eng.current_user_input = "开始阶段二"
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+
+        # 填充 history 使 _handle_phase_transition 可正常工作
+        _fill_history(eng, n_pairs=40)
+        # 末尾补一条含阶段完成信号的 assistant 消息，触发 phase transition
+        eng.history.append({
+            "role": "assistant",
+            "content": "阶段1完成。\n### 成果\n- 写入了 phase1_report.md\n- 写入了 phase1_data.csv\n\n[PLAN]进入阶段二[/PLAN]"
+        })
+
+        # 执行阶段转换
+        eng._handle_phase_transition()
+
+        # 验证集合未被清空
+        assert eng._session_written_files == {"phase1_report.md", "phase1_data.csv"}, \
+            "_session_written_files 不应被 _handle_phase_transition 清空"
+
+        # 后续压缩 → 锚点仍含阶段一文件
+        eng.sid = "test-phase-004"
+        eng._compress_history()
+        anchors = [m for m in eng.history
+                   if m.get("role") == "system"
+                   and m.get("content", "").startswith("[工作锚点")]
+        content = anchors[0]["content"]
+        assert "phase1_report.md" in content
+        assert "phase1_data.csv" in content

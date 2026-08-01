@@ -473,7 +473,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self.tracker._read_files = {}
         self._recent_tool_calls = []
         self.tracker._change_log = []
-        self._session_written_files = set()
 
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
