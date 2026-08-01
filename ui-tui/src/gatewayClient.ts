@@ -207,6 +207,7 @@ export class GatewayClient extends EventEmitter {
     sock?.removeAllListeners()
     sock?.destroy()
     this.sockPath = null
+    this.settleSockReady(new Error('gateway restarting'))  // TICKET-032
   }
 
   private startReadyTimer(python: string, cwd: string) {
@@ -547,6 +548,31 @@ export class GatewayClient extends EventEmitter {
     }
   }
 
+  // TICKET-032：socket 就绪闸门。socket 模式连接建立前（~200ms），
+  // 抢跑 stdin 的请求会石沉大海（python 不读 stdin）挂满 120s 超时——
+  // 2026-08-01 慢启动案的断点。就绪前一律等闸门，不许抢跑。
+  private sockReady: { promise: Promise<void>, resolve: () => void, reject: (e: Error) => void } | null = null
+
+  private beginSockReady() {
+    if (this.sockReady) {
+      return
+    }
+    let resolve!: () => void
+    let reject!: (e: Error) => void
+    const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej })
+    this.sockReady = { promise, resolve, reject }
+  }
+
+  private settleSockReady(err: Error | null) {
+    const r = this.sockReady
+    this.sockReady = null
+    if (err) {
+      r?.reject(err)
+    } else {
+      r?.resolve()
+    }
+  }
+
   private rejectPending(err: Error) {
     for (const p of this.pending.values()) {
       clearTimeout(p.timeout)
@@ -632,14 +658,19 @@ export class GatewayClient extends EventEmitter {
         this.lifecycle(`[socket] error: ${err.message}`)
       }
     })
+    this.settleSockReady(null)  // TICKET-032：开闸放行
   }
 
   private connectSocketWithRetry(ownedProc: ChildProcess, sockPath: string, attempt: number) {
+    if (attempt === 0) {
+      this.beginSockReady()  // TICKET-032：开闸——就绪前请求排队
+    }
     const timer = setTimeout(() => {
       if (this.proc !== ownedProc || this.sock) {
         return
       }
       if (ownedProc.killed || ownedProc.exitCode !== null) {
+        this.settleSockReady(new Error('gateway child died before socket connect'))
         return
       }
       if (!existsSync(sockPath)) {
@@ -648,6 +679,7 @@ export class GatewayClient extends EventEmitter {
         } else {
           this.lifecycle('[socket] 等待 socket 文件超时 → kill 后以 stdio 模式重启 child')
           this.socketDisabled = true
+          this.settleSockReady(new Error('socket file wait timeout'))
           ownedProc.kill()
         }
         return
@@ -690,8 +722,12 @@ export class GatewayClient extends EventEmitter {
   }
 
   private reconnectSocket(ownedProc: ChildProcess, sockPath: string, attempt: number) {
+    if (attempt === 0) {
+      this.beginSockReady()  // TICKET-032：重连期间同样闸住
+    }
     if (attempt >= 20) {
       this.lifecycle('[socket] 重连 20 次失败 → kill child，走既有 recovery 流程')
+      this.settleSockReady(new Error('socket reconnect failed'))
       ownedProc.kill()
       return
     }
@@ -799,6 +835,15 @@ export class GatewayClient extends EventEmitter {
     // TICKET-018：socket 已连接时优先走 socket（gateway 自持，断线可重连）
     if (this.sock && !this.sock.destroyed) {
       return this.requestOverSocket<T>(method, params)
+    }
+
+    // TICKET-032：socket 模式连接建立中 → 排队等闸门，绝不抢跑 stdin
+    // （python socket 模式不读 stdin，抢跑=挂 120s 超时，慢启动案断点）
+    if (this.sockReady) {
+      return this.sockReady.promise.then(
+        () => this.request<T>(method, params),
+        () => this.request<T>(method, params)  // 连接失败回退既有 stdin/重启路径
+      )
     }
 
     if (!this.proc?.stdin || this.proc.killed || this.proc.exitCode !== null) {
