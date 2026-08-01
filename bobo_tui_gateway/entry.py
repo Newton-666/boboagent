@@ -105,6 +105,25 @@ def _cleanup_pidfile(pidfile: str, my_pid: int):
         pass
 
 
+def _parent_alive(pid: int) -> bool:
+    """gateway 的父进程（TUI/node）是否还活着（TICKET-029 认父逻辑）。
+
+    查不到/父进程是 init（ppid<=1）→ 视为孤儿。多开场景下父 TUI 活着
+    的 gateway 是正规军，不是残留。
+    """
+    import subprocess as _sp
+    try:
+        out = _sp.check_output(
+            ["ps", "-o", "ppid=", "-p", str(pid)], text=True,
+            stdin=_sp.DEVNULL, stderr=_sp.DEVNULL).strip()
+        ppid = int(out)
+    except Exception:
+        return False
+    if ppid <= 1:
+        return False
+    return _pid_alive(ppid)
+
+
 def _single_instance_guard():
     """清掉残留的上一代 gateway，写自己的 pidfile。
 
@@ -127,7 +146,13 @@ def _single_instance_guard():
             except (ValueError, OSError):
                 old_pid = None
             if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
-                logger.critical("gateway 单实例守卫: 发现残留实例 pid=%s，SIGTERM 清理", old_pid)
+                # TICKET-029 认父：父 TUI 还活着 = 另一个正在使用的 bobo，
+                # 不是残留——跳过清理且不抢 pidfile，终结正规军互杀风暴
+                if _parent_alive(old_pid):
+                    logger.critical(
+                        "gateway 单实例守卫: pid=%s 的父 TUI 仍存活（多开并存），跳过清理", old_pid)
+                    return
+                logger.critical("gateway 单实例守卫: 发现孤儿实例 pid=%s，SIGTERM 清理", old_pid)
                 try:
                     os.kill(old_pid, signal.SIGTERM)
                 except OSError:

@@ -795,7 +795,10 @@ export function useMainApp(gw: GatewayClient) {
         recoverSidRef.current = plan.sid
         turnController.pushActivity('gateway exited · recovering session…', 'warn')
         sys('gateway exited — recovering your session (any in-flight reply was lost)')
-        gw.start()
+        // TICKET-029 重生退避：被杀后立即重生是守卫战放大器（0.2s 连孵实测）。
+        // 按本次窗口内尝试次数延迟，第 1 次 1.5s，逐次递增，上限 8s。
+        const delayMs = Math.min(1500 * Math.max(recoveryAtRef.current.length, 1), 8000)
+        setTimeout(() => { gw.start() }, delayMs)
 
         return
       }
