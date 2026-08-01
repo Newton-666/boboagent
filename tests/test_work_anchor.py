@@ -66,9 +66,9 @@ def engine_with_files():
     eng = _make_engine()
     # 模拟已写文件（通过 change_log）
     eng.tracker._change_log = [
-        {"ts": 1000, "desc": "x.py: old → new"},
-        {"ts": 1001, "desc": "y.py（write）"},
-        {"ts": 1002, "desc": "z.md: a → b"},
+        {"ts": 1000, "desc": "x.py: old → new", "path": "x.py"},
+        {"ts": 1001, "desc": "y.py（write）", "path": "y.py"},
+        {"ts": 1002, "desc": "z.md: a → b", "path": "z.md"},
     ]
     eng.task_ledger = [
         {"id": "1", "title": "修复 bug", "status": "in_progress"},
@@ -193,7 +193,7 @@ class TestWorkAnchorDegradation:
     def test_no_task_ledger(self, monkeypatch):
         """无台账时锚点正常生成（只有任务 + 文件）。"""
         eng = _make_engine()
-        eng.tracker._change_log = [{"ts": 1, "desc": "a.py（write）"}]
+        eng.tracker._change_log = [{"ts": 1, "desc": "a.py（write）", "path": "a.py"}]
         eng.task_ledger = []
         eng.current_user_input = "写一个脚本"
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
@@ -213,7 +213,7 @@ class TestWorkAnchorDegradation:
     def test_no_current_user_input(self, monkeypatch):
         """无 current_user_input 时锚点仍有文件 + 台账。"""
         eng = _make_engine()
-        eng.tracker._change_log = [{"ts": 1, "desc": "b.md（write）"}]
+        eng.tracker._change_log = [{"ts": 1, "desc": "b.md（write）", "path": "b.md"}]
         eng.task_ledger = [{"id": "1", "title": "任务", "status": "pending"}]
         eng.current_user_input = None
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
@@ -253,7 +253,7 @@ class TestWorkAnchorDegradation:
     def test_anchor_survives_pure_tool_segment(self, monkeypatch):
         """金标准扩展：纯工具记录段（零摘要路径）也应有锚点。"""
         eng = _make_engine(["压缩摘要"])
-        eng.tracker._change_log = [{"ts": 1, "desc": "x.py（write）"}]
+        eng.tracker._change_log = [{"ts": 1, "desc": "x.py（write）", "path": "x.py"}]
         eng.task_ledger = [{"id": "1", "title": "修复", "status": "pending"}]
         eng.current_user_input = "修复"
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "10")  # 极小预算确保压缩

@@ -990,9 +990,9 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                                 if name == "edit_file":
                                     old = a.get("old_string", "")[:40]
                                     new = a.get("new_string", "")[:40]
-                                    self.tracker.log_change(f"{fpath}: {old} → {new}", path=fpath)
+                                    self.tracker.log_change(f"{old} → {new}", path=fpath)
                                 else:
-                                    self.tracker.log_change(f"{fpath}（{a.get('action','write')}）", path=fpath)
+                                    self.tracker.log_change(f"{a.get('action','write')}", path=fpath)
                                 self._session_written_files.add(fpath)
                         except Exception:
                             pass
