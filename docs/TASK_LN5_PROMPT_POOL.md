@@ -63,6 +63,40 @@ LN-4 埋下的 `prompt.budget` 事件）：
 7. 全量 pytest 零回归（基线 1415 passed / 2 skipped）+ 新增测试全绿，连跑 3 次
 8. 改了 core/ → 五查第 6 项填"是，需重启"
 
+## 实现记录
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `core/prompt_pool.py` | PromptPool 数据类 + 环境变量解析 + 单例 |
+| `tests/test_prompt_pool.py` | 比例化正确性 / 覆盖 / 降级 / 回退 / 边界测试 |
+| `scripts/analyze_prompt_budget.py` | prompt.budget 数据分析脚本 |
+| `tests/test_analyze_prompt_budget.py` | 构造样例数据断言各指标计算正确 |
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `core/injector.py` | skills / memory / note_pointers 段改用 PromptPool.floor/ceiling；prompt.budget 事件扩展 pool_total/pool_source |
+| `scripts/context_lab.py` | 新增 `--prompt-budget` 子命令，复用 analyze_prompt_budget |
+| `tests/test_injector.py` | 环境变量名从 PROMPT_POOL_TOTAL 改为 BOBO_PROMPT_POOL_CHARS |
+
+### 默认值换算验证（5000 池，与 LN-4 等价）
+
+| 段 | 比例 | 5000池值 | LN-4 原值 | 一致 |
+|----|------|----------|-----------|------|
+| skills floor | 16% | 800 | 800 | ✅ |
+| skills ceiling | 30% | 1500 | 1500 | ✅ |
+| memory floor | 20% | 1000 | 1000 | ✅ |
+| memory ceiling | 50% | 2500 | 2500 | ✅ |
+| note_pointers ceiling | 6% | 300 | 300 | ✅ |
+
+### 测试结果
+
+- 全量 pytest：**1429 passed / 2 skipped**（与基线 1415 passed 相比 +14 新增测试）
+- 相关模块（injector / context_budget / event_bus / prompt_pool 等）全部通过
+
 ## 纪律
 
 - 从最新 main 切 `feat/prompt-pool-ratio`，开工第一件事 `git branch --show-current` 确认

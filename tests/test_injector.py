@@ -286,3 +286,74 @@ class TestSkillInjectionImportFix:
         assert "可用的项目标准" in contents or "skill" in contents.lower(), (
             f"skill_loader 注入段可能受影响: {contents[:200]}"
         )
+
+
+class TestPromptPoolIntegration:
+    """票 LN-5：验证 PromptPool ratio 真正影响 injector 各段 ceiling。"""
+
+    def test_prompt_pool_ratio_truncates_skills(self, monkeypatch, injector):
+        """固定总池 10000，skills ceiling 30%，超长 skill 列表应被截断到 ceiling 内。"""
+        from core import prompt_pool as pp
+        monkeypatch.delenv("BOBO_PROMPT_POOL_RATIO", raising=False)
+        monkeypatch.delenv("BOBO_PROVIDER", raising=False)
+        monkeypatch.setenv("BOBO_PROMPT_POOL_CHARS", "10000")
+        pp.reset_prompt_pool()
+        pool = pp.get_prompt_pool()
+        skill_ceiling = pool.ceiling("skills")
+        assert skill_ceiling == 3000  # 30% of 10000
+
+        # 注入 30 条技能，每条 80 字符，总长远超 1000 字符 ceiling
+        long_skills = [
+            {
+                "name": f"skill_{i}",
+                "description": "x" * 80,
+                "triggers": ["test"],
+            }
+            for i in range(30)
+        ]
+        monkeypatch.setattr(
+            "core.skill_manager.get_skill_manager",
+            lambda: MockSkillManager(skills=long_skills),
+        )
+        injector._engine.current_user_input = "test trigger"
+
+        msgs = injector.build_messages(
+            system_prompt="You are Bobo.",
+            user_input="test trigger",
+            tools_schema=[],
+            extra_categories=set(),
+            session_id="s1",
+        )
+        skill_msgs = [m for m in msgs if m["role"] == "system" and "skill_" in (m.get("content") or "")]
+        assert skill_msgs, "no skill section injected"
+        skill_content = skill_msgs[0]["content"]
+        assert len(skill_content) <= skill_ceiling, (
+            f"skills section exceeded ceiling: {len(skill_content)} > {skill_ceiling}"
+        )
+        # 至少应保留一条具体 skill（不只是标题）
+        assert any(f"skill_{i}" in skill_content for i in range(30)), (
+            f"all skills were evicted, content: {skill_content!r}"
+        )
+        pp.reset_prompt_pool()
+
+    def test_prompt_pool_decision_event_emitted(self, silence_event_bus, injector):
+        """build_messages 应同时发出 prompt.budget 和 prompt.budget.decision 事件。"""
+        injector.build_messages(
+            system_prompt="You are Bobo.",
+            user_input="hello",
+            tools_schema=[],
+            extra_categories=set(),
+            session_id="s1",
+        )
+        types = [t for t, d in silence_event_bus]
+        assert "prompt.budget" in types
+        assert "prompt.budget.decision" in types
+
+        decision = [d for t, d in silence_event_bus if t == "prompt.budget.decision"][0]
+        assert "allocated" in decision
+        assert "used" in decision
+        assert "total_pool" in decision
+        assert decision["total_pool"] > 0
+        assert "identity" in decision["allocated"]
+        assert "memory" in decision["used"]
+        assert decision["used"]["memory"] >= 0

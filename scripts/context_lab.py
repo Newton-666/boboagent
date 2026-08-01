@@ -402,6 +402,39 @@ def export_json(results, path=None):
 # ── 入口 ──
 
 
+def _run_prompt_budget_report(path: Path, since=None, output=None, fmt="text"):
+    """票 LN-5：--prompt-budget 报表模式，复用 analyze_prompt_budget 逻辑。"""
+    import importlib.util
+    from datetime import datetime, timezone
+
+    spec = importlib.util.spec_from_file_location(
+        "analyze_prompt_budget",
+        Path(__file__).resolve().parent / "analyze_prompt_budget.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    since_dt = None
+    if since:
+        since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+
+    events = list(mod.iter_events(path, since=since_dt))
+    report = mod.analyze(events)
+
+    if fmt == "json":
+        out = json.dumps(report, ensure_ascii=False, indent=2)
+    elif fmt == "csv":
+        out = mod.format_csv(report)
+    else:
+        out = mod.format_text(report)
+
+    if output:
+        Path(output).write_text(out, encoding="utf-8")
+        print(f"[context_lab] prompt-budget 报告已导出: {output}")
+    else:
+        print(out)
+
+
 def main():
     parser = argparse.ArgumentParser(description="上下文实验台 — 用事件总线数据找压缩最优解")
     parser.add_argument("--path", default=str(DEFAULT_EVENTS_PATH),
@@ -412,7 +445,19 @@ def main():
     parser.add_argument("--json-path", help="JSON 导出路径")
     parser.add_argument("--compare", action="store_true", help="对比模式")
     parser.add_argument("--group-by-file", nargs="+", help="多文件对比")
+    parser.add_argument("--prompt-budget", action="store_true",
+                        help="票 LN-5：输出 prompt.budget 统计分析报表")
+    parser.add_argument("--format", choices=["text", "json", "csv"], default="text",
+                        help="prompt-budget 输出格式（默认 text）")
+    parser.add_argument("--output", help="prompt-budget 报告输出路径")
     args = parser.parse_args()
+
+    # 票 LN-5：prompt-budget 模式优先
+    if args.prompt_budget:
+        _run_prompt_budget_report(
+            Path(args.path), since=args.since, output=args.output, fmt=args.format
+        )
+        return
 
     if args.compare and args.group_by_file:
         print(f"[context_lab] 对比模式: {args.group_by_file}")
