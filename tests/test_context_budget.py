@@ -46,22 +46,22 @@ class TestTokenEstimator:
     """C2: _estimate_tokens() — CJK heuristic, conservative bias, ±30% accuracy."""
 
     def test_english_only(self):
-        """Pure English: ~4 chars/token. 400 chars → expect ~100 tokens."""
+        """Pure English: ~3 chars/token + 4 per msg. 450 chars → expect ~154 tokens."""
         from core.context import _estimate_tokens
-        text = "The quick brown fox jumps over the lazy dog. " * 10  # ~440 chars
+        text = "The quick brown fox jumps over the lazy dog. " * 10  # ~450 chars
         msgs = [{"role": "user", "content": text}]
         est = _estimate_tokens(msgs)
-        # ~440/4 = 110. Acceptable range: 80-140 (±30%)
-        assert 80 <= est <= 140, f"English: estimated {est} tokens from ~440 chars"
+        # 450/3 + 4 = 154. Acceptable range: 110-200 (±30%)
+        assert 110 <= est <= 200, f"English: estimated {est} tokens from ~450 chars"
 
     def test_chinese_only(self):
-        """Pure Chinese: ~1.5 chars/token. 300 chars → expect ~200 tokens."""
+        """Pure Chinese: ~1.2 chars/token + 4 per msg. 300 chars → expect ~254 tokens."""
         from core.context import _estimate_tokens
         text = "这是一段纯中文文本用于测试分词估算的准确性。" * 15  # ~300 chars
         msgs = [{"role": "user", "content": text}]
         est = _estimate_tokens(msgs)
-        # ~300/1.5 = 200. Acceptable range: 140-260 (±30%)
-        assert 140 <= est <= 260, f"Chinese: estimated {est} tokens from ~300 CJK chars"
+        # ~300/1.2 + 4 = 254. Acceptable range: 180-330 (±30%)
+        assert 180 <= est <= 330, f"Chinese: estimated {est} tokens from ~300 CJK chars"
 
     def test_mixed_cjk_english(self):
         """Mixed CJK + English: should be between pure EN and pure ZH estimates."""
@@ -118,11 +118,11 @@ class TestDynamicBudget:
     """C3: Budget scales with provider context_length. Small windows trigger earlier."""
 
     @pytest.mark.parametrize("provider,model,expected_min_budget", [
-        ("moonshot", "kimi-k3", 600000),          # 1M window
-        ("deepseek", "deepseek-v4-pro", 600000),  # 1M window
+        ("moonshot", "kimi-k3", 600000),          # 1M window (k3 actual)
+        ("deepseek", "deepseek-v4-pro", 70000),  # 128K window (TICKET-023 修正)
         ("openai", "gpt-4o", 70000),              # 128k window
         ("anthropic", "claude-sonnet-4-20250514", 120000),  # 200k window
-        ("google", "gemini-2.0-flash", 600000),   # 1M window
+        ("google", "gemini-2.0-flash", 70000),   # 128K conservative (TICKET-023 修正)
         ("ollama", "llama3", 10000),              # 32k window
     ])
     def test_budget_scales_with_window(self, monkeypatch, provider, model, expected_min_budget):

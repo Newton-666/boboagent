@@ -16,8 +16,12 @@ logger = logging.getLogger(__name__)
 def _estimate_tokens(messages: list) -> int:
     """保守估算消息列表的 token 数。
 
-    CJK 字符（一-鿿, ぀-ヿ, 가-힯）按 1 token ≈ 1.5 字符；
-    其余字符按 1 token ≈ 4 字符。刻意偏保守（宁高估），保证不溢出。
+    CJK 字符（一-鿿, ぀-ヿ, 가-힯）按 1 token ≈ 1.2 字符；
+    JSON/代码/拉丁字符按 1 token ≈ 3 字符；
+    每条消息 +4 token 固定开销（role/content 元信息）。
+    刻意偏保守（宁高估），保证不溢出。
+
+    注意：偏差仍然存在，彻底校准留给 TICKET-024。
     """
     total_chars = 0
     cjk_chars = 0
@@ -36,8 +40,8 @@ def _estimate_tokens(messages: list) -> int:
                 total_chars += 1
 
     total_chars += cjk_chars
-    # CJK: ~1.5 chars/token, non-CJK: ~4 chars/token
-    return int(cjk_chars / 1.5 + (total_chars - cjk_chars) / 4)
+    # CJK: ~1.2 chars/token, non-CJK: ~3 chars/token, +4 per message overhead
+    return int(cjk_chars / 1.2 + (total_chars - cjk_chars) / 3) + len(messages) * 4
 
 
 # ── 消息数预算（票 T：BOBO_CONTEXT_BUDGET 环境变量）───────────────
@@ -110,6 +114,58 @@ def _get_context_budget(_engine=None) -> int:
     max_tokens = min(raw_max_tokens, int(context_len * 0.5))
     ratio = float(os.environ.get("BOBO_CONTEXT_BUDGET_RATIO", "0.7"))
     return max(int((context_len - max_tokens) * ratio), 1)  # 至少 1 token
+
+def _build_local_fallback_summary(old_msgs: list) -> str:
+    """生成本地机械摘要——当 LLM 摘要失败或无文本时做兜底（票 TICKET-023）。
+
+    输出格式：
+      [对话历史摘要 · 本地兜底]
+      ## 用户发言（逐条，截断 200 字）
+      ## 助手结论（最后一条非工具文本，截断 400 字）
+      ## 工具动作（名称 + 结果前 50 字）
+
+    宁可机械，不丢数据。
+    """
+    lines = ["[对话历史摘要 · 本地兜底]"]
+
+    # 用户发言
+    user_parts = []
+    for m in old_msgs:
+        if m.get("role") == "user":
+            content = str(m.get("content", "") or "")[:200]
+            if content.strip():
+                user_parts.append(f"- {content}")
+    if user_parts:
+        lines.append("## 用户发言")
+        lines.extend(user_parts[:20])
+    else:
+        lines.append("## 用户发言\n(无)")
+
+    # 助手结论（最后一条非工具文本）
+    asst_text = ""
+    for m in reversed(old_msgs):
+        if m.get("role") == "assistant":
+            content = str(m.get("content", "") or "")
+            if content.strip() and "[RESULT:" not in content[:30]:
+                asst_text = content[:400]
+                break
+    lines.append(f"## 助手结论\n{asst_text if asst_text else '(无)'}")
+
+    # 工具动作
+    tool_parts = []
+    for m in old_msgs:
+        if m.get("role") == "tool":
+            name = m.get("name", m.get("tool_call_id", "?"))
+            content = str(m.get("content", "") or "")[:50].replace("\n", " ")
+            if content.strip():
+                tool_parts.append(f"- {name}: {content}")
+    if tool_parts:
+        lines.append("## 工具动作")
+        lines.extend(tool_parts[:20])
+    else:
+        lines.append("## 工具动作\n(无)")
+
+    return "\n".join(lines)
 
 
 class ContextMixin:
@@ -273,7 +329,9 @@ class ContextMixin:
         # 历史 → 压缩永久空转、零归档零事件。单位必须也是消息条数）
         split_idx = max(0, total_msg_count - keep_count)
         # 切割点对齐到 user 消息边界（向前找，保证切在回合开头）
-        while (split_idx > 0 and
+        # 票 TICKET-023：向前推进加上限，最多推进到 budget 50% 处，防止边界对齐把不该压的也压了
+        floor = max(0, total_msg_count - keep_count - int(budget * 0.5))
+        while (split_idx > floor and split_idx > 0 and
                self.history[split_idx].get("role") != "user"):
             split_idx -= 1
         # 安全边界：split 点不能切在 tool_calls/tool_result 配对中间。
@@ -295,6 +353,31 @@ class ContextMixin:
                     idx = self.history.index(m)
                     split_idx = idx
                 break
+
+        # ── 空转防护（票 TICKET-023）：可归档段 token 占比 < 15% 则不压缩 ──
+        archivable_tokens = _estimate_tokens(self.history[:split_idx])
+        total_tokens = _estimate_tokens(self.history)
+        ratio = archivable_tokens / max(total_tokens, 1)
+        if ratio < 0.15:
+            session_id = getattr(self, 'sid', '')
+            try:
+                bus.write("context.compress_skipped", {
+                    "session_id": session_id,
+                    "reason": "archivable_too_small",
+                    "ratio": round(ratio, 4),
+                    "archivable_tokens": archivable_tokens,
+                    "total_tokens": total_tokens,
+                })
+            except Exception:
+                logger.warning("context.compress_skipped 事件写入失败（静默降级）", exc_info=True)
+            # ── 票 TICKET-023：空转跳过时也重建工作锚点 ──
+            anchor_msg = self._build_work_anchor()
+            _ANCHOR_PREFIX = "[工作锚点"
+            self.history = [m for m in self.history
+                            if not (m.get("role") == "system"
+                                    and m.get("content", "").startswith(_ANCHOR_PREFIX))]
+            self.history.insert(0, anchor_msg)
+            return
 
         # ── 预统计（用于事件） ──
         pre_msg_count = len(self.history)
@@ -338,26 +421,33 @@ class ContextMixin:
                 else:
                     text_parts.append(f"{label}: {content[:200]}")
         if not text_parts:
-            # 纯工具记录段（无 user/assistant 文本）：即便无法生成摘要，
-            # 也必须归档 + 发事件——否则压缩静默空转（2026-07-29 破案）
+            # 票 TICKET-023：零摘要改为本地机械兜底，而非直接丢弃
+            local_summary = _build_local_fallback_summary(old_msgs_no_summary)
+            self.history.insert(0, {
+                "role": "system",
+                "content": local_summary
+            })
             session_id = getattr(self, 'sid', '')
+            post_msg_count = len(self.history)
+            post_tokens = _estimate_tokens(self.history)
             _archive_compressed(
                 session_id=session_id,
                 old_msgs=old_msgs,
-                summary="(纯工具记录段，无文本摘要)",
+                summary=local_summary,
                 pre_count=pre_msg_count,
-                post_count=len(self.history),
+                post_count=post_msg_count,
                 pre_tokens=pre_tokens,
-                post_tokens=_estimate_tokens(self.history),
+                post_tokens=post_tokens,
             )
             try:
                 bus.write("context.compressed", {
                     "session_id": session_id,
                     "pre_msg_count": pre_msg_count,
-                    "post_msg_count": len(self.history),
+                    "post_msg_count": post_msg_count,
                     "pre_tokens": pre_tokens,
-                    "post_tokens": _estimate_tokens(self.history),
-                    "summary_length": 0,
+                    "post_tokens": post_tokens,
+                    "summary_length": len(local_summary),
+                    "summary_source": "local_fallback",
                     "archived_count": len(old_msgs),
                 })
             except Exception:
@@ -425,12 +515,23 @@ class ContextMixin:
         post_msg_count = len(self.history)
         post_tokens = _estimate_tokens(self.history)
 
+        summary_source = "llm"
         if summary:
             self.history.insert(0, {
                 "role": "system",
                 "content": f"[对话历史摘要]:\n{summary}"
             })
             # 重新计算后统计（插入摘要后）
+            post_msg_count = len(self.history)
+            post_tokens = _estimate_tokens(self.history)
+        else:
+            # 票 TICKET-023：零摘要改为本地机械兜底
+            summary = _build_local_fallback_summary(old_msgs_no_summary)
+            summary_source = "local_fallback"
+            self.history.insert(0, {
+                "role": "system",
+                "content": summary
+            })
             post_msg_count = len(self.history)
             post_tokens = _estimate_tokens(self.history)
 
@@ -453,6 +554,7 @@ class ContextMixin:
                 "pre_tokens": pre_tokens,
                 "post_tokens": post_tokens,
                 "summary_length": len(summary or ""),
+                "summary_source": summary_source,
                 "archived_count": len(old_msgs),
             })
         except Exception:
