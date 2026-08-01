@@ -71,7 +71,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
     STATE_DONE = "done"
     STATE_ERROR = "error"
 
-    MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 200))
+    MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 500))
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
                  confirm_callback: Callable = None, test_mode: bool = False):
@@ -1261,7 +1261,11 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 })
                 self._emit_state_change(self.STATE_DONE, "max_steps fuse")
                 break
-            if self._step_count >= 50 and self._step_count % 5 == 0:
+            if self._step_count >= int(self.MAX_STEPS * 0.8):
+                if self._step_count % 10 == 0:
+                    self._notify("thinking", {"phase": "continuing",
+                        "message": f"已用 {self._step_count}/{self.MAX_STEPS} 步"})
+            elif self._step_count >= 100 and self._step_count % 25 == 0:
                 self._notify("thinking", {"phase": "continuing",
                     "message": f"已用 {self._step_count}/{self.MAX_STEPS} 步"})
             # 检查中断信号
