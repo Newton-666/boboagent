@@ -105,6 +105,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._all_confirmed = False
         self._compressing = False
         self._compressed_this_turn = False  # 本轮已压缩过——不再触发
+        self._just_compressed = False  # 票 TICKET-021：上轮压缩过，下轮置顶提示
         self._tool_failures: dict[str, int] = {}
         self._last_usage: dict = {}
         self._pending_diff: str = ""
@@ -665,6 +666,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         )
 
         self._notify("thinking", {"phase": "calling_llm", "message": "正在思考..."})
+
+        # ── 票 TICKET-021：本轮压缩完成后，下轮置顶"历史已压缩"指引 ──
+        if self._compressed_this_turn:
+            self._just_compressed = True
 
         # ── 票 H 运行时孤儿防线 Layer 1：发送前清洗（作用在发送副本上，不动 history） ──
         # 注意: messages 是新 list，但内层 dict 与 engine.history 共享引用。不可 mutate 元素内容。

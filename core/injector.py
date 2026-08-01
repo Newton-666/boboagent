@@ -89,6 +89,18 @@ class PromptInjector:
 
         messages = [{"role": "system", "content": system_prompt}] + engine.history
 
+        # ── 票 TICKET-021：失忆自查协议（身份段追加，指令口吻，≤250字符）──
+        _lib_index = _os.path.relpath(_os.path.join(_LIBRARY_DIR, "index.md"))
+        messages.insert(1, {
+            "role": "system",
+            "content": (
+                "【上下文自查协议】当你无法确定本会话之前做过什么、"
+                "或用户引用你没有印象的前文时：禁止猜测。"
+                f"先 read_local_file 读 {_lib_index} 找相关笔记，"
+                "再读笔记全文恢复上下文。笔记是你在过去会话中亲手写的工作记录，可信。"
+            ),
+        })
+
         # ── 票 LN-4：上下文预算统计（各段组装时填充，return 前写 prompt.budget 事件）──
         budget_stats = {
             "identity": len(system_prompt),
@@ -242,6 +254,13 @@ class PromptInjector:
             pointer_text, pointer_stats = self._build_note_pointers(
                 session_id, user_input)
             if pointer_text:
+                # 票 TICKET-021：上轮压缩过则置顶"历史已压缩"指引
+                if getattr(engine, '_just_compressed', False):
+                    pointer_text = (
+                        "⚠️ 历史已压缩。若对早前工作有疑问，先翻阅上方关联笔记再作答。\n"
+                        + pointer_text
+                    )
+                    engine._just_compressed = False
                 messages.insert(1, {
                     "role": "system",
                     "content": pointer_text
@@ -414,8 +433,8 @@ class PromptInjector:
             for n in picked:
                 lines.append(
                     f"📚 关联笔记：{n['domain']}/{n['topic']}.md"
-                    f"（v{n['version']} · {n['last_touched']} 更新 · "
-                    f"深入讨论请先用 read_local_file 读全文再答）"
+                    f"（v{n['version']} · {n['last_touched']}）— "
+                    f"回答相关话题前必须先 read_local_file 读全文，凭记忆回答视为违规。"
                 )
             # 段预算按 PromptPool ratio 计算
             pool = get_prompt_pool()
