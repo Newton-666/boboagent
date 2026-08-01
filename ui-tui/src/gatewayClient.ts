@@ -521,6 +521,7 @@ export class GatewayClient extends EventEmitter {
   private settle(p: Pending, err: Error | null, result: unknown) {
     clearTimeout(p.timeout)
     this.pending.delete(p.id)
+    this.perf(`rpc 应答 ${p.method} ${p.id}`)  // TICKET-031
 
     if (err) {
       p.reject(err)
@@ -737,6 +738,7 @@ export class GatewayClient extends EventEmitter {
 
       try {
         this.sock!.write(JSON.stringify({ id, jsonrpc: '2.0', method, params }) + '\n')
+        this.perf(`rpc 发出(socket) ${method} ${id}`)  // TICKET-031
       } catch (e) {
         const pending = this.pending.get(id)
 
@@ -824,6 +826,7 @@ export class GatewayClient extends EventEmitter {
 
       try {
         this.proc!.stdin!.write(JSON.stringify({ id, jsonrpc: '2.0', method, params }) + '\n')
+        this.perf(`rpc 发出(stdin) ${method} ${id}`)  // TICKET-031
       } catch (e) {
         const pending = this.pending.get(id)
 
