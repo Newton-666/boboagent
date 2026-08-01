@@ -621,42 +621,37 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         if len(self.history) > self.MAX_HISTORY_MESSAGES:
             self._truncate_history()
 
-        # ── 票 T：msg_count 超阈值自动压缩归档 ──
+        # ── TICKET-024：token 驱动压缩（主线），条数 200 硬上限兜底 ──
         # 只在空闲态压缩——工具执行中途修改 history 会导致
         # tool_calls/tool_result 配对断裂 → API 报错 → engine 崩溃。
-        # 每轮最多压缩一次，压缩后幂等检查（msg_count 降到预算内）。
+        # 每轮最多压缩一次。
         if (not self._compressing and not self._compressed_this_turn
                 and self.state != self.STATE_EXECUTING):
             from core.context import _get_msg_count_budget, _estimate_tokens, _get_context_budget
 
+            est_tokens = _estimate_tokens(self.history)
+            token_budget = _get_context_budget()
             msg_count = len(self.history)
             msg_budget = _get_msg_count_budget()
 
-            if msg_count > msg_budget:
-                # 静默压缩（用户 2026-07-29 要求）：压缩在后台完成，不占 TUI 状态栏。
-                # 调试时设 BOBO_SHOW_COMPRESS=1 恢复提示。可观测性走事件总线
-                # context.compressed，不打扰用户。
+            # TICKET-024：token 优先触发
+            trigger_token = est_tokens > token_budget
+            # 条数兜底（200 硬上限）
+            trigger_msg = msg_count > msg_budget
+
+            if trigger_token or trigger_msg:
+                trigger_reason = "token" if trigger_token else "msg_fallback"
                 if os.environ.get("BOBO_SHOW_COMPRESS") == "1":
                     self._notify("thinking", {
                         "phase": "compressing",
-                        "message": f"正在压缩历史上下文...（{msg_count} 条消息, 预算 {msg_budget} 条）"
+                        "message": f"正在压缩历史上下文...（{est_tokens} tokens, "
+                                   f"预算 {token_budget}, 触发: {trigger_reason}）"
                     })
                 self._compress_history()
                 self._compressed_this_turn = True
-            else:
-                # 仅当 msg_count 未超限时，降级做 token 预算检查（保留存量行为）
-                est_tokens = _estimate_tokens(self.history)
-                token_budget = _get_context_budget()
-                if est_tokens > token_budget * 0.5:
-                    self.tracker.retroactive_mark()
-                if est_tokens > token_budget:
-                    if os.environ.get("BOBO_SHOW_COMPRESS") == "1":
-                        self._notify("thinking", {
-                            "phase": "compressing",
-                            "message": f"正在压缩历史上下文...（估算 {est_tokens} tokens, 预算 {token_budget}）"
-                        })
-                    self._compress_history()
-                    self._compressed_this_turn = True
+            elif est_tokens > token_budget * 0.5:
+                # 接近阈值时打补记标记（retroactive mark）
+                self.tracker.retroactive_mark()
 
         messages = self.injector.build_messages(
             system_prompt=self.system_prompt,

@@ -55,40 +55,42 @@ class TestTokenEstimator:
         assert 110 <= est <= 200, f"English: estimated {est} tokens from ~450 chars"
 
     def test_chinese_only(self):
-        """Pure Chinese: ~1.2 chars/token + 4 per msg. 300 chars → expect ~254 tokens."""
+        """Pure Chinese: cl100k_base encodes CJK at ~1.2 tokens/char. 330 chars → ~390 tokens."""
         from core.context import _estimate_tokens
-        text = "这是一段纯中文文本用于测试分词估算的准确性。" * 15  # ~300 chars
+        text = "这是一段纯中文文本用于测试分词估算的准确性。" * 15  # ~330 chars
         msgs = [{"role": "user", "content": text}]
         est = _estimate_tokens(msgs)
-        # ~300/1.2 + 4 = 254. Acceptable range: 180-330 (±30%)
-        assert 180 <= est <= 330, f"Chinese: estimated {est} tokens from ~300 CJK chars"
+        # tiktoken cl100k_base: CJK ≈ 1.2 tokens/char. 330 chars + 4 msg ≈ 390.
+        assert 310 <= est <= 470, f"Chinese: estimated {est} tokens from ~330 CJK chars"
 
     def test_mixed_cjk_english(self):
-        """Mixed CJK + English: should be between pure EN and pure ZH estimates."""
+        """Mixed CJK + English: token count reflects actual cl100k_base encoding."""
         from core.context import _estimate_tokens
-        text = ("Hello world 你好世界 Python 编程 " * 20)  # mixed
+        text = ("Hello world 你好世界 Python 编程 " * 20)  # ~540 chars
         msgs = [{"role": "user", "content": text}]
         est = _estimate_tokens(msgs)
         # Should produce a reasonable non-zero estimate
         assert est > 0, f"Mixed text: got {est}"
-        # Conservative: estimate should be <= char count (i.e. not underestimating)
-        assert est <= len(text), f"Mixed estimate {est} should be <= {len(text)} chars"
+        # With tiktoken, CJK chars ≈ 1.2 tokens/char; overall est ~257
+        assert 180 <= est <= 350, f"Mixed: estimated {est} tokens from ~540 chars"
 
     def test_conservative_bias(self):
-        """Estimate should never exceed actual char count (conservative = no under-counting tokens)."""
+        """Tiktoken cl100k_base gives accurate (not inflated) token counts."""
         from core.context import _estimate_tokens
-        # For any reasonable text, est <= len(text) (since tokens_per_char < 1)
-        for text in [
-            "Hello world " * 100,
-            "你好世界" * 100,
-            "Hi 你好 world 世界" * 50,
+        # Pure English: tokens <= chars (about 3.5-4 chars/token)
+        # CJK: tokens can exceed chars (about 0.8-0.9 chars/token in cl100k_base)
+        # Mixed: tokens ≤ chars (dominated by English ratio)
+        for text, max_ratio in [
+            ("Hello world " * 100, 1.0),   # English: tokens < chars
+            ("你好世界" * 100, 1.5),        # CJK: tokens can exceed chars up to 1.5x
+            ("Hi 你好 world 世界" * 50, 1.2),  # Mixed: moderate ratio
         ]:
             msgs = [{"role": "user", "content": text}]
             est = _estimate_tokens(msgs)
-            assert est <= len(text), (
-                f"Estimate {est} exceeds char count {len(text)} — not conservative"
-            )
             assert est > 0, f"Got zero estimate for non-empty text"
+            assert est <= len(text) * max_ratio, (
+                f"Estimate {est} exceeds {max_ratio}x char count {len(text)} — unreasonable"
+            )
 
     def test_empty_history(self):
         """Empty history → zero tokens. Single empty message → small (dict overhead)."""
@@ -119,11 +121,11 @@ class TestDynamicBudget:
 
     @pytest.mark.parametrize("provider,model,expected_min_budget", [
         ("moonshot", "kimi-k3", 600000),          # 1M window (k3 actual)
-        ("deepseek", "deepseek-v4-pro", 70000),  # 128K window (TICKET-023 修正)
-        ("openai", "gpt-4o", 70000),              # 128k window
-        ("anthropic", "claude-sonnet-4-20250514", 120000),  # 200k window
-        ("google", "gemini-2.0-flash", 70000),   # 128K conservative (TICKET-023 修正)
-        ("ollama", "llama3", 10000),              # 32k window
+        ("deepseek", "deepseek-v4-pro", 50000),  # 128K - 25K overhead * 0.7
+        ("openai", "gpt-4o", 50000),              # 128k window
+        ("anthropic", "claude-sonnet-4-20250514", 100000),  # 200k window
+        ("google", "gemini-2.0-flash", 50000),   # 128K conservative
+        ("ollama", "llama3", 5000),              # 32k window (overhead capped at 40%)
     ])
     def test_budget_scales_with_window(self, monkeypatch, provider, model, expected_min_budget):
         """Budget should be roughly (context_len - max_tokens) * 0.7."""
@@ -174,8 +176,8 @@ class TestDynamicBudget:
         monkeypatch.setenv("BOBO_MAX_TOKENS", "8192")
         from core.context import _get_context_budget
         budget = _get_context_budget()
-        assert 70000 <= budget <= 90000, (
-            f"Unknown provider budget {budget:,} should be ~128k-based"
+        assert 50000 <= budget <= 90000, (
+            f"Unknown provider budget {budget:,} should be ~128k-based (with fixed overhead)"
         )
 
     def test_ratio_env_override(self, monkeypatch):
@@ -428,13 +430,13 @@ class TestRetroactiveMarking:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestMsgCountCompression:
-    """C5: _get_msg_count_budget(), 80-msg trigger, archive, event, idempotent."""
+    """C5: _get_msg_count_budget(), 200-msg hard limit, archive, event, idempotent."""
 
     def test_msg_count_budget_default(self, monkeypatch):
-        """BOBO_CONTEXT_BUDGET default = 60."""
+        """BOBO_CONTEXT_BUDGET default = 200 (TICKET-024 硬上限兜底)."""
         from core.context import _get_msg_count_budget
         monkeypatch.delenv("BOBO_CONTEXT_BUDGET", raising=False)
-        assert _get_msg_count_budget() == 60
+        assert _get_msg_count_budget() == 200
 
     def test_msg_count_budget_env_override(self, monkeypatch):
         """BOBO_CONTEXT_BUDGET env var overrides default."""
@@ -443,10 +445,10 @@ class TestMsgCountCompression:
         assert _get_msg_count_budget() == 30
 
     @pytest.mark.parametrize("bad_val,fallback", [
-        ("abc", 60),
+        ("abc", 200),
         ("-5", 10),
         ("0", 10),
-        ("", 60),
+        ("", 200),
     ])
     def test_msg_count_budget_bad_values(self, monkeypatch, bad_val, fallback):
         """Invalid env values fall back to default/min."""
@@ -460,6 +462,10 @@ class TestMsgCountCompression:
     def test_compress_reduces_msg_count(self, engine, monkeypatch, tmp_path):
         """80 messages → compression drops history below budget."""
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：新触发模型要求 token 预算也超标；短消息 token 低，需 monkeypatch
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200  # 让消息溢出到 compressible
         from core.context import _get_msg_count_budget, _archive_compressed
         budget = _get_msg_count_budget()
 
@@ -481,11 +487,13 @@ class TestMsgCountCompression:
         assert len(engine.history) < budget + 10, (
             f"History len {len(engine.history)} should be < {budget + 10} after compression"
         )
-        # Summary should exist
+        # Summary should exist (TICKET-024: L2/L1 或本地兜底)
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
-        assert len(summaries) == 1, f"Expected 1 summary, got {len(summaries)}"
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
+        assert len(summaries) >= 1, f"Expected ≥1 summary, got {len(summaries)}"
 
     def test_archive_file_exists(self, engine, monkeypatch):
         """Compressed content is archived to session file."""
@@ -521,6 +529,10 @@ class TestMsgCountCompression:
     def test_event_emitted(self, engine, monkeypatch):
         """context.compressed event is written via event_bus."""
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：短消息全装层0导致 compressible 为空，需降层0上限
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
 
         engine.sid = "test-session-events"
         engine.history = []
@@ -548,19 +560,22 @@ class TestMsgCountCompression:
 
     def test_summary_contains_key_info(self, engine, monkeypatch):
         """Summary should preserve key decisions, active task, etc."""
-        # Replace mock responses: first call (compression) returns structured summary
+        # TICKET-024：mock 响应需遵守新压缩输出格式（### L2_ULTRA_BRIEF / ### L1_SEGMENT）
         from tests.mock_llm import text_response
         engine.llm_caller.responses[0] = text_response(
-            "## Active Task\n分析用户数据\n\n"
-            "## Completed\n- 加载数据集\n\n"
-            "## Pending User Asks\n- 确认分析范围\n\n"
-            "## Remaining Work\n- 生成报告\n\n"
-            "## Key Decisions\n- 使用 Python 进行分析\n\n"
-            "## Relevant Files\n- data.csv\n\n"
-            "## Work State\n- 进度 50%"
+            "### L2_ULTRA_BRIEF\n"
+            "分析用户数据，已完成数据集加载。使用 Python 进行分析，进度 50%。\n\n"
+            "### L1_SEGMENT_1\n"
+            "用户要求分析数据，Bobo 开始加载数据集并确认分析范围。\n\n"
+            "### MEMORY\n"
+            "- KEY_DECISION: 使用 Python 进行分析\n"
         )
 
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：短消息全装层0导致 compressible 为空，需降层0上限
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         engine.history = []
         for i in range(40):
             engine.history.append({"role": "user", "content": f"用户消息 {i}"})
@@ -570,32 +585,37 @@ class TestMsgCountCompression:
         engine._compressed_this_turn = False
         engine._compress_history()
 
+        # TICKET-024：摘要前缀更新为 [L2 极简摘要] 或 [对话历史摘要·本地兜底]
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
         assert len(summaries) == 1
         summary = summaries[0]["content"]
-        # Should contain the key sections from the structured summary
-        assert "Active Task" in summary
-        assert "Key Decisions" in summary
-        assert "Work State" in summary
+        # Should contain the key info from the structured summary
+        assert "分析用户数据" in summary
+        assert "Python" in summary
 
     def test_conversation_continues(self, engine, monkeypatch):
         """After compression, the engine can still process new user input."""
         from tests.mock_llm import text_response
 
-        # Replace mock: response[0]=compression summary, response[1]=actual reply
+        # TICKET-024：response[0] 供压缩 LLM 消费（需遵守 ### L2_ULTRA_BRIEF 格式）
+        # response[1] 供正常回复
         engine.llm_caller.responses = [
             text_response(
-                "## Active Task\n任务进行中\n## Completed\n- 部分完成\n"
-                "## Pending User Asks\n- 无\n## Remaining Work\n- 继续\n"
-                "## Key Decisions\n- 已决定\n## Relevant Files\n- main.py\n"
-                "## Work State\n- 进行中"
+                "### L2_ULTRA_BRIEF\n任务进行中，部分完成。已决定继续推进。\n\n"
+                "### L1_SEGMENT_1\n用户持续输入，Bobo 逐一回复。\n\n"
+                "### MEMORY\n- KEY_DECISION: 已决定\n"
             ),
             text_response("我继续工作了，进度正常。"),
         ]
 
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：token 预算 + 层0上限适配
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         # Ensure we skip the worker reminder and other early-step interventions
         engine._worker_reminded = True
 
@@ -625,19 +645,25 @@ class TestMsgCountCompression:
         """After first compression, if msg_count exceeds budget again, compress again."""
         from tests.mock_llm import text_response
 
-        # Replace mock with two summary responses (for first + second compression)
+        # TICKET-024：mock 响应需遵守 ### L2_ULTRA_BRIEF 格式
         engine.llm_caller.responses = [
             text_response(
-                "## Active Task\n任务1\n## Completed\n- 完成1\n## Pending User Asks\n- 无\n"
-                "## Remaining Work\n- 继续1\n## Key Decisions\n- 决定1\n## Relevant Files\n- f1.py\n## Work State\n- 50%"
+                "### L2_ULTRA_BRIEF\n任务1进行中，完成1。决定1。\n\n"
+                "### L1_SEGMENT_1\n第一批对话的段摘要。\n\n"
+                "### MEMORY\n- KEY_DECISION: 决定1\n"
             ),
             text_response(
-                "## Active Task\n任务2\n## Completed\n- 完成2\n## Pending User Asks\n- 无\n"
-                "## Remaining Work\n- 继续2\n## Key Decisions\n- 决定2\n## Relevant Files\n- f2.py\n## Work State\n- 75%"
+                "### L2_ULTRA_BRIEF\n任务2进行中，完成2。决定2。\n\n"
+                "### L1_SEGMENT_1\n第二批对话的段摘要。\n\n"
+                "### MEMORY\n- KEY_DECISION: 决定2\n"
             ),
         ]
 
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：token 预算 + 层0上限适配
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         engine.sid = "test-idempotent"
 
         # Build 80 messages
@@ -669,11 +695,13 @@ class TestMsgCountCompression:
             f"After second compression: {after_second} msgs, "
             f"should be similar to first: {after_first}"
         )
-        # Should now have 2 summaries
+        # Should now have 2 summaries (TICKET-024: L2/L1 格式)
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
-        assert len(summaries) == 2, f"Expected 2 summaries after 2 compressions, got {len(summaries)}"
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
+        assert len(summaries) >= 2, f"Expected ≥2 summaries after 2 compressions, got {len(summaries)}"
 
     def test_no_compression_when_within_budget(self, engine, monkeypatch):
         """Compression is skipped when msg_count is within budget."""
@@ -696,17 +724,21 @@ class TestMsgCountCompression:
         """Full flow: 80 messages → step → compression → response works."""
         from tests.mock_llm import text_response
 
-        # response[0]=compression summary, response[1]=actual reply
+        # TICKET-024：response[0] 供压缩 LLM（需 ### L2_ULTRA_BRIEF 格式），response[1] 供回复
         engine.llm_caller.responses = [
             text_response(
-                "## Active Task\n数据分析中\n## Completed\n- 数据加载\n## Pending User Asks\n- 确认参数\n"
-                "## Remaining Work\n- 模型训练\n## Key Decisions\n- 使用随机森林\n## Relevant Files\n- data.csv\n"
-                "## Work State\n- 数据准备完成"
+                "### L2_ULTRA_BRIEF\n数据分析中，数据已加载。使用随机森林。\n\n"
+                "### L1_SEGMENT_1\n用户持续输入数据分析请求，Bobo 加载数据准备模型训练。\n\n"
+                "### MEMORY\n- KEY_DECISION: 使用随机森林\n"
             ),
             text_response("分析正在进行中，数据已加载完毕。"),
         ]
 
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：token 预算 + 层0上限适配
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         engine._worker_reminded = True
 
         # Populate 80 messages
@@ -726,11 +758,13 @@ class TestMsgCountCompression:
         engine._step()
         assert engine.state == engine.STATE_RESPONDING
 
-        # History should contain summary
+        # History should contain summary (TICKET-024: L2/L1 格式)
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
-        assert len(summaries) == 1, f"Summary missing after full flow"
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
+        assert len(summaries) >= 1, f"Summary missing after full flow"
 
         # Archive should exist
         from core.context import _get_archive_dir

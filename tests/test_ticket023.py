@@ -22,12 +22,17 @@ class TestCompressSkip:
     def test_skipped_when_archivable_too_small(self, monkeypatch, tmp_path):
         """61 条历史，末 3 条含 user → 空转跳过 + compress_skipped 事件。
 
+        TICKET-024：token_budget=8K 触发 token 溢出，msg_budget=200 让保险丝不拦截。
         构造：
           msg  0-30: 极短（可归档段，token 占比 ≈2%）
           msg 31-60: 极长（保留段），最后一条 user 在第 58 位
           → archivable_ratio < 15%，触发 compress_skipped
         """
-        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "60")
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "8")  # token_budget=8192
+        # 解耦 msg_budget：保险丝不拦截，让空转防护自然生效
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_msg_count_budget", lambda: 200)
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 7000)
 
         # 事件总线指向 temp dir
         log_dir = tmp_path / "events"
@@ -38,9 +43,6 @@ class TestCompressSkip:
         engine.sid = "test-023-skip"
 
         # 构造 61 条消息
-        # msg 0-30（31 条极短 = 可归档段）：15 对 user/assistant + 1 user
-        # msg 31-54（24 条极长）：12 对 user/assistant
-        # msg 55-60（6 条短尾）：末 3 条含 user（user 在 msg 58）
         engine.history = []
         for _ in range(15):
             engine.history.append({"role": "user", "content": "x"})
@@ -83,40 +85,45 @@ class TestCompressSkip:
     def test_normal_compress_when_archivable_above_threshold(self, monkeypatch, tmp_path):
         """可归档段 ≥30% → 正常压缩，出现摘要。
 
-        构造：可归档段放大量长内容，保留段放短内容 → archivable_ratio ≈ 80%
+        TICKET-024 token 驱动：15 条长消息 + 8 条短消息 = 23 条，
+        token 远超 15K 层0 + 7K 触发预算 → 压缩生产摘要。
         """
-        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "60")
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "8")
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_msg_count_budget", lambda: 200)
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 7000)
 
         log_dir = tmp_path / "events2"
         EventBus.reset(str(log_dir))
 
-        # LLM 返回非空摘要
         caller = MockLLMCaller([text_response("This is a compressed summary of the conversation.")])
         engine = Engine(caller, execute_tool, test_mode=True)
         engine.sid = "test-023-normal"
 
-        engine.history = []
-        # 前 31 条（可归档）：长内容
-        for i in range(15):
-            engine.history.append({"role": "user", "content": f"Question {i}: " + "x" * 300})
-            engine.history.append({"role": "assistant", "content": f"Answer {i}: " + "y" * 300})
-        engine.history.append({"role": "user", "content": "x" * 300})  # msg 30
+        _TEXT = "The quick brown fox jumps over the lazy dog. " * 150  # ~1500 tokens
 
-        # 后 30 条（保留段）：短内容
-        for i in range(15):
+        engine.history = []
+        # 前 15 条（可归档）：长内容，token 远超 15K 层0
+        for i in range(7):
+            engine.history.append({"role": "user", "content": f"Question {i}: {_TEXT}"})
+            engine.history.append({"role": "assistant", "content": f"Answer {i}: {_TEXT}"})
+        engine.history.append({"role": "user", "content": _TEXT})  # msg 14
+
+        # 后 8 条（保留段 = 层0）：短内容
+        for i in range(4):
             engine.history.append({"role": "user", "content": f"q{i}"})
             engine.history.append({"role": "assistant", "content": f"a{i}"})
-
-        assert len(engine.history) == 61
 
         engine._compressing = False
         engine._compressed_this_turn = False
         engine._compress_history()
 
-        # 应该产生压缩摘要
+        # 应该产生压缩摘要（TICKET-024 三层前缀：L1 段摘要 / L2 极简摘要）
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
+                     and (m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要 · 本地兜底]"))]
         assert len(summaries) >= 1, "Expected at least 1 summary after normal compression"
 
         # 消息数应显著减少
@@ -139,35 +146,33 @@ class TestLocalFallback:
     """零摘要 → 本地机械兜底，不再直接删。"""
 
     def test_empty_llm_summary_produces_local_fallback(self, monkeypatch, tmp_path):
-        """mock LLM 返回空 → history 出现本地兜底 + summary_source=local_fallback。"""
-        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "60")
+        """mock LLM 返回空 → history 出现本地兜底 + summary_source=local_fallback。
+
+        TICKET-024 token 驱动：可归档段用大消息（>15K 层0），LLM 返回空字符串。
+        """
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "8")
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_msg_count_budget", lambda: 200)
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 7000)
 
         log_dir = tmp_path / "events3"
         EventBus.reset(str(log_dir))
 
-        # LLM 返回空 content
         caller = MockLLMCaller([{"choices": [{"message": {"content": ""}}]}])
         engine = Engine(caller, execute_tool, test_mode=True)
         engine.sid = "test-023-fallback"
 
-        engine.history = []
-        # 前 31 条（可归档，内容要足够大确保 ≥30% 占比；避免 tool_calls 触发孤儿保护）
-        engine.history.append({"role": "user", "content": "帮我查一下今天的天气如何？" + "x" * 300})
-        engine.history.append({"role": "assistant", "content": "让我帮你查询天气。" + "y" * 300})
-        # tool 对（tool_calls + tool_result）放在可归档段但注意孤儿保护：
-        # 孤儿保护只检查 kept 段是否有 result，两个都在 archivable 段时会误判。
-        # 所以去掉 tool_calls，只保留纯文本对话。
-        for i in range(14):
-            engine.history.append({"role": "user", "content": f"问题 {i} " + "p" * 200})
-            engine.history.append({"role": "assistant", "content": f"回答 {i} " + "q" * 200})
-        engine.history.append({"role": "user", "content": "最后一个可归档问题" + "r" * 200})  # +1 → 31 条可归档
+        _TEXT = "The quick brown fox jumps over the lazy dog. " * 150
 
-        # 后 30 条（保留段）：短内容，确保可归档段占大头
-        for i in range(15):
+        engine.history = []
+        for i in range(7):
+            engine.history.append({"role": "user", "content": f"帮我查 Q{i}: {_TEXT}"})
+            engine.history.append({"role": "assistant", "content": f"回答 A{i}: {_TEXT}"})
+        engine.history.append({"role": "user", "content": f"最后一个可归档问题: {_TEXT}"})
+
+        for i in range(4):
             engine.history.append({"role": "user", "content": f"新问题 {i}"})
             engine.history.append({"role": "assistant", "content": f"新回答 {i}"})
-
-        assert len(engine.history) == 61
 
         engine._compressing = False
         engine._compressed_this_turn = False
@@ -182,7 +187,7 @@ class TestLocalFallback:
         )
         content = fallback_msgs[0]["content"]
         assert "## 用户发言" in content, f"Missing '## 用户发言' in: {content[:200]}"
-        assert "帮我查一下" in content, "Should contain original user messages"
+        assert "帮我查 Q0" in content, "Should contain original user messages"
 
         # 验证事件 summary_source=local_fallback
         events_path = log_dir / "events.jsonl"
@@ -194,8 +199,15 @@ class TestLocalFallback:
         )
 
     def test_no_user_text_produces_local_fallback(self, monkeypatch, tmp_path):
-        """纯工具记录段（无 user/assistant 文本）→ 仍生成本地兜底而非丢弃。"""
-        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "20")  # 小预算触发
+        """纯工具记录段（无 user/assistant 文本）→ 仍生成本地兜底而非丢弃。
+
+        TICKET-024 token 驱动：工具消息在前（大量 token 撑满层0），
+        user/assistant 在后被切除为 archivable → 生成兜底。
+        """
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "8")
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_msg_count_budget", lambda: 200)
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 7000)
 
         log_dir = tmp_path / "events3b"
         EventBus.reset(str(log_dir))
@@ -204,16 +216,17 @@ class TestLocalFallback:
         engine = Engine(caller, execute_tool, test_mode=True)
         engine.sid = "test-023-nouser"
 
-        # 构造纯工具历史（前一半 tool 消息含大量文本，后一半短 user+assistant）
+        _TEXT = "The quick brown fox jumps over the lazy dog. " * 150
+
         engine.history = []
-        for i in range(10):
-            engine.history.append({"role": "tool", "content": f"result {i}: " + "d" * 200,
-                                   "tool_call_id": f"tc{i}", "name": "echo"})
-        for i in range(11):
+        # user/assistant 在前（compressible）：工具撑满层0后这些被切除
+        for i in range(5):
             engine.history.append({"role": "user", "content": f"msg {i}"})
             engine.history.append({"role": "assistant", "content": f"reply {i}"})
-
-        assert len(engine.history) == 10 + 22  # 32
+        # 工具消息在末尾：无条件入层0，12×1534≈18408 token > 15K → user/assistant 全被切除
+        for i in range(12):
+            engine.history.append({"role": "tool", "content": f"result {i}: {_TEXT}",
+                                   "tool_call_id": f"tc{i}", "name": "echo"})
 
         engine._compressing = False
         engine._compressed_this_turn = False
@@ -231,61 +244,126 @@ class TestLocalFallback:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestTokenEstimatorPrecision:
-    """_estimate_tokens 与公式期望误差 < 10%。"""
+    """_estimate_tokens 与 tiktoken cl100k_base encoder 实测值一致（TICKET-024 切 tiktoken）。"""
+
+    @staticmethod
+    def _encoder_expected(msgs: list) -> int:
+        """用 tiktoken cl100k_base 计算期望 token 数 = sum(encode(msg)) + N*4。"""
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        return sum(len(enc.encode(str(m))) for m in msgs) + len(msgs) * 4
 
     def test_pure_english_precision(self):
-        """纯英文 ~585 字符 → str(msg) 总 618 非 CJK → int(0 + 618/3) + 4 = 210。"""
+        """纯英文 → _estimate_tokens 结果与 encoder 实测值一致。"""
         from core.context import _estimate_tokens
 
-        text = "The quick brown fox jumps over the lazy dog. " * 13  # ~585 chars
+        text = "The quick brown fox jumps over the lazy dog. " * 13
         msgs = [{"role": "user", "content": text}]
 
         actual = _estimate_tokens(msgs)
-        # str(msg) 含约 33 字符结构开销，总非 CJK ≈ 618，int(618/3) + 4 = 206 + 4 ≈ 210
-        expected = 210
-        assert abs(actual - expected) < 21, (
-            f"Pure English: expected ~{expected}, got {actual}"
+        expected = self._encoder_expected(msgs)
+        assert actual == expected, (
+            f"Pure English: expected {expected}, got {actual}"
         )
 
     def test_pure_cjk_precision(self):
-        """纯 CJK 330 字符 → str(msg) 含 315 CJK + 48 非CJK → int(315/1.2 + 48/3)+4 = int(262.5+16)+4 = 282。"""
+        """纯 CJK → _estimate_tokens 结果与 encoder 实测值一致。"""
         from core.context import _estimate_tokens
 
-        text = "这是一段纯中文文本用于测试分词估算的准确性。" * 15  # 330 chars
+        text = "这是一段纯中文文本用于测试分词估算的准确性。" * 15
         msgs = [{"role": "user", "content": text}]
 
         actual = _estimate_tokens(msgs)
-        # CJK=315, non-CJK=48 → int(315/1.2 + 48/3) + 4 = int(262.5 + 16) + 4 = 282
-        expected = 282
-        assert abs(actual - expected) < 29, (
-            f"Pure CJK: expected ~{expected}, got {actual}"
+        expected = self._encoder_expected(msgs)
+        assert actual == expected, (
+            f"Pure CJK: expected {expected}, got {actual}"
         )
 
     def test_mixed_cjk_english_precision(self):
-        """混排：150 CJK + 33 结构（含 150CJK）→ CJK=150, non-CJK=333 → int(150/1.2+333/3)+4 = 240。"""
+        """混排 CJK+英文 → _estimate_tokens 结果与 encoder 实测值一致。"""
         from core.context import _estimate_tokens
 
         cjk = "中文" * 75   # 150 CJK chars
         eng = "abc" * 100   # 300 non-CJK chars
-        text = cjk + eng    # 450 chars total
+        text = cjk + eng
         msgs = [{"role": "user", "content": text}]
 
         actual = _estimate_tokens(msgs)
-        # str 开销 33 非 CJK，内容 150 CJK + 300 非 CJK → total chars: 150 CJK + 333 non-CJK
-        # int(150/1.2) = 125, int(333/3) = 111, +4 = 240
-        expected = 240
-        assert abs(actual - expected) < 24, (
-            f"Mixed: expected ~{expected}, got {actual}"
+        expected = self._encoder_expected(msgs)
+        assert actual == expected, (
+            f"Mixed: expected {expected}, got {actual}"
         )
 
     def test_multiple_messages_overhead(self):
-        """10 条消息：每条 str(msg) ~61 非 CJK → 610 总非 CJK → int(610/3) + 40 = 203+40 = 243。"""
+        """多条消息 → _estimate_tokens 结果与 encoder 实测值一致（含每消息 +4 开销）。"""
         from core.context import _estimate_tokens
 
         msgs = [{"role": "user", "content": "hello" * 6} for _ in range(10)]
-        # 每条 str(msg) = "{'role': 'user', 'content': 'hello...'}" ≈ 61 非 CJK chars
+
         actual = _estimate_tokens(msgs)
-        expected = 243   # int(610/3) + 10*4 = 203 + 40
-        assert abs(actual - expected) < 25, (
-            f"Multi-msg: expected ~{expected}, got {actual}"
+        expected = self._encoder_expected(msgs)
+        assert actual == expected, (
+            f"Multi-msg: expected {expected}, got {actual}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# TICKET-024 回归：工具重型历史压缩后锚点恰好 1 个
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestToolHeavyCompression:
+    """工具输出尾部 >15K token 时，压缩不短路，锚点去重正确。"""
+
+    def test_tool_heavy_tail_compresses_and_dedup_anchor(self, monkeypatch, tmp_path):
+        """工具重型历史（>15K token 工具输出尾部）压缩后：
+        - 锚点恰好 1 个
+        - compressible 非空 → LLM 被调用
+        - 历史中不存在重复锚点
+        """
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "8")
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_msg_count_budget", lambda: 200)
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 7000)
+
+        log_dir = tmp_path / "events_tool_heavy"
+        EventBus.reset(str(log_dir))
+
+        caller = MockLLMCaller([text_response("[L2_ULTRA_BRIEF]\nHeavy tool session summary.")])
+        engine = Engine(caller, execute_tool, test_mode=True)
+        engine.sid = "test-024-tool-heavy"
+
+        _TEXT = "The quick brown fox jumps over the lazy dog. " * 150  # ~1500 tokens per msg
+
+        engine.history = []
+        # 前 5 条短对话（可归档 compressible）
+        for i in range(2):
+            engine.history.append({"role": "user", "content": f"Question {i}"})
+            engine.history.append({"role": "assistant", "content": f"Answer {i}"})
+        engine.history.append({"role": "user", "content": "Run heavy tool"})
+
+        # 尾部 12 条重型工具输出（>15K token 撑满层0）
+        for i in range(12):
+            engine.history.append({"role": "tool", "content": f"tool_result_{i}: {_TEXT}",
+                                   "tool_call_id": f"tc{i}", "name": "echo"})
+
+        engine._compressing = False
+        engine._compressed_this_turn = False
+        engine._compress_history()
+
+        # 检查锚点数量
+        _ANCHOR_PREFIX = "[工作锚点"
+        anchors = [m for m in engine.history
+                   if m.get("role") == "system" and
+                   m.get("content", "").startswith(_ANCHOR_PREFIX)]
+        assert len(anchors) == 1, (
+            f"Expected exactly 1 anchor, got {len(anchors)}: "
+            f"{[m.get('content','')[:80] for m in anchors]}"
+        )
+
+        # 检查有摘要产出（LLM 被调用）
+        summaries = [m for m in engine.history
+                     if m.get("role") == "system" and
+                     (m.get("content", "").startswith("[L2 极简摘要]")
+                      or m.get("content", "").startswith("[L1 段摘要]")
+                      or m.get("content", "").startswith("[对话历史摘要 · 本地兜底]"))]
+        assert len(summaries) >= 1, "Expected at least 1 summary after tool-heavy compression"

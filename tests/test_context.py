@@ -166,9 +166,13 @@ class TestHistoryCompression:
     def test_compression_flag_is_set_during_compression(self, engine, monkeypatch):
         engine.KEEP_EXCHANGES = 5  # 显式设回旧值兼容本测试
         engine.MAX_HISTORY_CHARS = 100
-        # 票 T：设低 msg_count 预算触发压缩
+        # TICKET-024：新触发模型 —— BOBO_CONTEXT_BUDGET 控制条数预算，
+        # 但 token 预算不触发 → monkeypatch；短消息全装层0 → 降 _LAYER_0_TOKEN_LIMIT
         import os as _os
         _os.environ["BOBO_CONTEXT_BUDGET"] = "10"
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         # Create enough history to trigger compression (20 exchanges > keep_count)
         for i in range(20):
             engine.history.append({"role": "user", "content": "x" * 100})

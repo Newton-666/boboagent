@@ -34,6 +34,10 @@ class TestSilentCompress:
     def test_compress_silent_by_default(self, engine, monkeypatch):
         """默认：压缩触发时不发 compressing 状态通知。"""
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：token 预算 + 层0上限适配，确保压缩真正触发
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine._LAYER_0_TOKEN_LIMIT = 200
         monkeypatch.delenv("BOBO_SHOW_COMPRESS", raising=False)
         _fill_history(engine)
 
@@ -48,10 +52,12 @@ class TestSilentCompress:
 
         compressing = [d for t, d in notices if d.get("phase") == "compressing"]
         assert not compressing, f"默认不应显示压缩提示，实际: {compressing}"
-        # 压缩确实发生了（摘要落 history）
+        # 压缩确实发生了（摘要落 history，TICKET-024: L2/L1/兜底 格式）
         summaries = [m for m in engine.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
         assert summaries, "压缩未生效"
 
     def test_compress_notice_with_env_flag(self, engine, monkeypatch):
