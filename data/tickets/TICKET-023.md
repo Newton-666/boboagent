@@ -22,8 +22,15 @@
 
 - 压缩前先算"可归档段 token 占 history 总 token 比例"，< 15% 直接不压
   （记 context.compress_skipped 事件：reason=archivable_too_small, ratio）
-- user 边界对齐改为：在可归档 token ≥15% 的候选区间里选最近的 user 边界
+- user 边界对齐改为：在可归档 token ≥15% 的候选区间里选最近的 user 边界；
+  **向前推进加上限——最多推进到 budget 的 50% 处**（pi 核查补充，
+  防止边界对齐把不该压的也压了）
 - 现有孤儿 tool_calls 对齐保护逻辑保持不变
+- **compress_skipped 分支也重建工作锚点**（pi 核查发现的交互缝隙：
+  空转防护上线后压缩次数骤降，若锚点只在压缩时重建，失忆防护反而变弱。
+  调 TICKET-020 的 _build_work_anchor + 替换旧锚点即可，不新增逻辑）
+- 窗口数值须按当前实际模型文档核实（pi 提醒：1M→128K 是保守安全值，
+  但施工时以 API 文档为准并在 commit 里写明依据）
 
 ### C. 零摘要本地兜底（_compress_history 的 text_parts 空分支 + LLM 摘要失败分支）
 

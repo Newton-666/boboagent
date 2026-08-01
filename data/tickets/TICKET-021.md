@@ -25,7 +25,8 @@
 再读笔记全文恢复上下文。笔记是你在过去会话中亲手写的工作记录，可信。
 ```
 
-（library 路径以实际为准，若 _LIBRARY_DIR 已有常量则复用）
+（library 路径必须复用 injector 的 `_LIBRARY_DIR` 常量——实际库址是
+项目根 `library/` 而非 `data/library/`，pi 核查发现的笔误风险，禁止硬编码）
 
 ### B. 指针文案升级（injector.py:416 附近）
 
