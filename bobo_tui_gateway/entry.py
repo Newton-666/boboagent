@@ -126,7 +126,7 @@ def _single_instance_guard():
                     os.kill(old_pid, signal.SIGTERM)
                 except OSError:
                     pass
-                for _ in range(30):  # 最多等 3s
+                for _ in range(10):  # 最多等 1s（TICKET-027 加速）
                     if not _pid_alive(old_pid):
                         break
                     time.sleep(0.1)
@@ -345,10 +345,20 @@ def _run_socket_backend(sock_path: str):
     python bind/listen，TUI（Node）作为客户端连接。前端侧任何故障
     （fd 被原生层误关、Node 崩溃、管道被掐）都只表现为"客户端断开"，
     gateway 进程不退出、会话状态全保留，回到 accept 等待重连。
+
+    TICKET-027：前端断开后若超过 BOBO_GW_IDLE_TIMEOUT 秒（默认 60）
+    无重连，则自动退出，根治多次重启导致的 gateway 叠罗汉。
+    设为 0 恢复旧行为（永不自动退出）。
     """
     import socket as _socket
 
     from bobo_tui_gateway.transport import SocketTransport, set_transport
+
+    _IDLE_TIMEOUT = 60
+    try:
+        _IDLE_TIMEOUT = int(os.environ.get("BOBO_GW_IDLE_TIMEOUT", "60"))
+    except (ValueError, TypeError):
+        pass
 
     try:
         os.unlink(sock_path)
@@ -359,27 +369,50 @@ def _run_socket_backend(sock_path: str):
     srv.bind(sock_path)
     os.chmod(sock_path, 0o600)
     srv.listen(1)
+    if _IDLE_TIMEOUT > 0:
+        srv.settimeout(1.0)  # 每 1 秒检查空闲超时
     logger.critical("gateway socket 模式: 监听 %s（前端断开不再致命，等待重连）", sock_path)
 
+    _idle_since: "float | None" = None  # 前端断开的时间戳；None=当前有连接或从未有过客户端
     while True:
         try:
             conn, _ = srv.accept()
+        except _socket.timeout:
+            if _IDLE_TIMEOUT > 0 and _idle_since is not None:
+                if time.monotonic() - _idle_since > _IDLE_TIMEOUT:
+                    logger.critical("gateway socket: 空闲 %ds 无重连，自动退出", _IDLE_TIMEOUT)
+                    break
+            continue
         except OSError as e:
             logger.critical("gateway socket: accept 异常 %r，继续监听", e)
             continue
+
+        _idle_since = None  # 有连接，重置空闲计时
         logger.critical("gateway socket: 前端已连接")
         set_transport(SocketTransport(conn))
         try:
             reader = conn.makefile("r", encoding="utf-8", newline="\n")
             reason = _serve_connection(reader)
-            logger.critical("gateway socket: 前端断开（原因=%s），进程保持存活，等待重连", reason)
+            if _idle_since is None:
+                _idle_since = time.monotonic()
+            if _IDLE_TIMEOUT > 0:
+                logger.critical("gateway socket: 前端断开（原因=%s），%ds 内无重连将自动退出", reason, _IDLE_TIMEOUT)
+            else:
+                logger.critical("gateway socket: 前端断开（原因=%s），进程保持存活，等待重连", reason)
         except OSError as e:
-            logger.critical("gateway socket: 连接异常 %r，等待重连", e)
+            if _idle_since is None:
+                _idle_since = time.monotonic()
+            logger.critical("gateway socket: 连接异常 %r，%ds 内无重连将自动退出", e, _IDLE_TIMEOUT)
         finally:
             try:
                 conn.close()
             except OSError:
                 pass
+
+    # 空闲超时退出：保存所有活跃会话
+    from bobo_tui_gateway.server import shutdown_sessions
+    shutdown_sessions()
+    logger.critical("gateway socket: 进程正常退出")
 
 
 def _run_backend():
@@ -392,6 +425,16 @@ def _run_backend():
     global _BACKEND_T0
     _BACKEND_T0 = time.monotonic()
     _single_instance_guard()
+
+    # TICKET-027：后台预热工具导入——避免堵在 session.create 关键路径，
+    # 消除 TUI 长时间卡在 "summoning hermes…" 的体验。
+    def _preload_tools():
+        try:
+            from tools import TOOLS_SCHEMA  # noqa: F811 — 仅触发缓存
+            logger.debug("工具预热完成: %d 个工具", len(TOOLS_SCHEMA))
+        except Exception:
+            logger.warning("工具预热失败（不影响启动）", exc_info=True)
+    threading.Thread(target=_preload_tools, daemon=True, name="tool-preloader").start()
 
     # TICKET-018：socket 模式——前端故障不再杀死 gateway
     sock_path = os.environ.get("BOBO_GW_SOCKET", "").strip()
