@@ -116,6 +116,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             workspace_dir=getattr(self, 'WORKSPACE_DIR', ''),
         )
         self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
+        self._session_written_files: set[str] = set()  # 票 TICKET-025：会话级只增集合，压缩不塌缩
         self.tracker = RoundTracker(self)  # 回合后处理（change_log / read_files / pattern）
         # ── 票 K v2：任务台账（收工闸核心） ──
         self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]
@@ -472,6 +473,7 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         self.tracker._read_files = {}
         self._recent_tool_calls = []
         self.tracker._change_log = []
+        self._session_written_files = set()
 
         # 4. 注入阶段摘要（放在 history 开头，紧接系统 prompt）
         self.history.insert(0, {"role": "system", "content": summary})
@@ -989,9 +991,10 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                                 if name == "edit_file":
                                     old = a.get("old_string", "")[:40]
                                     new = a.get("new_string", "")[:40]
-                                    self.tracker.log_change(f"{fpath}: {old} → {new}")
+                                    self.tracker.log_change(f"{fpath}: {old} → {new}", path=fpath)
                                 else:
-                                    self.tracker.log_change(f"{fpath}（{a.get('action','write')}）")
+                                    self.tracker.log_change(f"{fpath}（{a.get('action','write')}）", path=fpath)
+                                self._session_written_files.add(fpath)
                         except Exception:
                             pass
                     # 已读文件 → tracker（按 tool_call_id 匹配，并行执行时索引不可靠）

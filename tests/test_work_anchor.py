@@ -291,3 +291,89 @@ class TestWorkAnchorDegradation:
         content = anchors[0]["content"]
         assert "x.py" in content
         assert "修复" in content
+
+
+# ── TICKET-025：锚点瑕疵补丁验收 ──────────────────────────────────────
+
+class TestAnchorRobust:
+
+    def test_colon_filename_preserved(self, monkeypatch):
+        """验收 1：含冒号文件名（report_10:30.md）写入后锚点含完整路径。"""
+        eng = _make_engine()
+        # 模拟 file_operation write → 引擎同步入集
+        eng._session_written_files = {"report_10:30.md", "data/config:backup.json"}
+        eng.tracker._change_log = [
+            {"ts": 1000, "desc": "report_10:30.md（write）", "path": "report_10:30.md"},
+            {"ts": 1001, "desc": "data/config:backup.json: old → new", "path": "data/config:backup.json"},
+        ]
+        eng.task_ledger = [{"id": "1", "title": "冒号文件", "status": "in_progress"}]
+        eng.current_user_input = "保存报告"
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        _fill_history(eng)
+        eng.sid = "test-colon-001"
+
+        eng._compress_history()
+        anchors = [m for m in eng.history
+                   if m.get("role") == "system"
+                   and m.get("content", "").startswith("[工作锚点")]
+        assert len(anchors) == 1
+        content = anchors[0]["content"]
+        # 完整路径不被截断
+        assert "report_10:30.md" in content
+        assert "data/config:backup.json" in content
+        # 不会被误截断为 "report_10"
+        assert '"report_10"' not in content
+
+    def test_session_files_survive_compress(self, monkeypatch):
+        """验收 2：触发 compress_changelog 塌缩后，锚点仍含早期文件。"""
+        eng = _make_engine()
+        # 会话级集合——包含"早期"和"近期"文件
+        eng._session_written_files = {"early_a.py", "early_b.md", "recent_x.py"}
+        # change_log 触发塌缩（>20 条）
+        eng.tracker._change_log = [
+            {"ts": i, "desc": f"file_{i}.py（write）", "path": f"file_{i}.py"}
+            for i in range(30)
+        ]
+        eng.task_ledger = [{"id": "1", "title": "塌缩后存活", "status": "in_progress"}]
+        eng.current_user_input = "继续工作"
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        _fill_history(eng)
+        eng.sid = "test-survive-002"
+
+        # 先触发 change_log 塌缩
+        eng.tracker.compress_changelog()
+        # 塌缩后 change_log 只剩最近 10 条 + 1 条历史摘要
+        assert len(eng.tracker._change_log) <= 11
+
+        eng._compress_history()
+        anchors = [m for m in eng.history
+                   if m.get("role") == "system"
+                   and m.get("content", "").startswith("[工作锚点")]
+        content = anchors[0]["content"]
+        # 早期文件仍在（来自 _session_written_files，不受塌缩影响）
+        assert "early_a.py" in content
+        assert "early_b.md" in content
+        assert "recent_x.py" in content
+
+    def test_change_log_path_field_used(self, monkeypatch):
+        """结构化 path 字段优先：即使 desc 含复杂冒号也可正确提取。"""
+        eng = _make_engine()
+        # 不设 _session_written_files，验证回退路径用 path 字段
+        eng._session_written_files = set()  # falsy → 回退 change_log
+        eng.tracker._change_log = [
+            {"ts": 1000, "desc": "a:b:c（复杂描述）", "path": "a:b:c"},
+            {"ts": 1001, "desc": "x.py: 旧→新", "path": "x.py"},
+        ]
+        eng.task_ledger = []
+        eng.current_user_input = "测试 path 字段"
+        monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        _fill_history(eng)
+        eng.sid = "test-path-003"
+
+        eng._compress_history()
+        anchors = [m for m in eng.history
+                   if m.get("role") == "system"
+                   and m.get("content", "").startswith("[工作锚点")]
+        content = anchors[0]["content"]
+        assert "a:b:c" in content
+        assert "x.py" in content

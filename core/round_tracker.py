@@ -35,8 +35,11 @@ class RoundTracker:
         if len(self._change_log) > 50:
             self._change_log = self._change_log[-20:]
 
-    def log_change(self, desc: str):
-        self._change_log.append({"ts": time.time(), "desc": desc})
+    def log_change(self, desc: str, path: str = ""):
+        entry: dict = {"ts": time.time(), "desc": desc}
+        if path:
+            entry["path"] = path
+        self._change_log.append(entry)
 
     def recent_changes(self, limit: int = 5) -> list:
         return self._change_log[-limit:]
