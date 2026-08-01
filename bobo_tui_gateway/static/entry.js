@@ -72947,6 +72947,7 @@ var GatewayClient = class extends EventEmitter {
     sock?.removeAllListeners();
     sock?.destroy();
     this.sockPath = null;
+    this.settleSockReady(new Error("gateway restarting"));
   }
   startReadyTimer(python, cwd2) {
     this.readyTimer = setTimeout(() => {
@@ -73223,6 +73224,31 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
       this.lifecycle(`[perf] ${mark} t+${Date.now() - this._spawnT0}ms`);
     }
   }
+  // TICKET-032：socket 就绪闸门。socket 模式连接建立前（~200ms），
+  // 抢跑 stdin 的请求会石沉大海（python 不读 stdin）挂满 120s 超时——
+  // 2026-08-01 慢启动案的断点。就绪前一律等闸门，不许抢跑。
+  sockReady = null;
+  beginSockReady() {
+    if (this.sockReady) {
+      return;
+    }
+    let resolve3;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve3 = res;
+      reject = rej;
+    });
+    this.sockReady = { promise, resolve: resolve3, reject };
+  }
+  settleSockReady(err) {
+    const r = this.sockReady;
+    this.sockReady = null;
+    if (err) {
+      r?.reject(err);
+    } else {
+      r?.resolve();
+    }
+  }
   rejectPending(err) {
     for (const p of this.pending.values()) {
       clearTimeout(p.timeout);
@@ -73293,13 +73319,18 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
         this.lifecycle(`[socket] error: ${err.message}`);
       }
     });
+    this.settleSockReady(null);
   }
   connectSocketWithRetry(ownedProc, sockPath, attempt) {
+    if (attempt === 0) {
+      this.beginSockReady();
+    }
     const timer = setTimeout(() => {
       if (this.proc !== ownedProc || this.sock) {
         return;
       }
       if (ownedProc.killed || ownedProc.exitCode !== null) {
+        this.settleSockReady(new Error("gateway child died before socket connect"));
         return;
       }
       if (!existsSync(sockPath)) {
@@ -73308,6 +73339,7 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
         } else {
           this.lifecycle("[socket] \u7B49\u5F85 socket \u6587\u4EF6\u8D85\u65F6 \u2192 kill \u540E\u4EE5 stdio \u6A21\u5F0F\u91CD\u542F child");
           this.socketDisabled = true;
+          this.settleSockReady(new Error("socket file wait timeout"));
           ownedProc.kill();
         }
         return;
@@ -73347,8 +73379,12 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
     this.reconnectSocket(ownedProc, sockPath, 0);
   }
   reconnectSocket(ownedProc, sockPath, attempt) {
+    if (attempt === 0) {
+      this.beginSockReady();
+    }
     if (attempt >= 20) {
       this.lifecycle("[socket] \u91CD\u8FDE 20 \u6B21\u5931\u8D25 \u2192 kill child\uFF0C\u8D70\u65E2\u6709 recovery \u6D41\u7A0B");
+      this.settleSockReady(new Error("socket reconnect failed"));
       ownedProc.kill();
       return;
     }
@@ -73438,6 +73474,13 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
     }
     if (this.sock && !this.sock.destroyed) {
       return this.requestOverSocket(method, params);
+    }
+    if (this.sockReady) {
+      return this.sockReady.promise.then(
+        () => this.request(method, params),
+        () => this.request(method, params)
+        // 连接失败回退既有 stdin/重启路径
+      );
     }
     if (!this.proc?.stdin || this.proc.killed || this.proc.exitCode !== null) {
       this.start();
