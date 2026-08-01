@@ -148,18 +148,24 @@ class TestWorkAnchorGolden:
     def test_llm_summary_unaffected(self, engine_with_files, monkeypatch):
         """金标准 4：现有七段 LLM 摘要逻辑不受影响。"""
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET", "30")
+        # TICKET-024：token 预算 + 层0上限适配，确保压缩触发
+        import core.context as ctx_module
+        monkeypatch.setattr(ctx_module, "_get_context_budget", lambda _engine=None: 1)
+        engine_with_files._LAYER_0_TOKEN_LIMIT = 200
         _fill_history(engine_with_files)
         engine_with_files.sid = "test-session-004"
 
         engine_with_files._compress_history()
 
-        # 压缩后应同时存在锚点和 LLM 摘要
+        # 压缩后应同时存在锚点和 LLM 摘要（TICKET-024: L2/L1/兜底 格式）
         anchors = [m for m in engine_with_files.history
                    if m.get("role") == "system"
                    and m.get("content", "").startswith("[工作锚点")]
         summaries = [m for m in engine_with_files.history
                      if m.get("role") == "system"
-                     and m.get("content", "").startswith("[对话历史摘要]")]
+                     and (m.get("content", "").startswith("[L2 极简摘要]")
+                          or m.get("content", "").startswith("[L1 段摘要]")
+                          or m.get("content", "").startswith("[对话历史摘要]"))]
         assert anchors, "应有锚点"
         assert summaries, "应有 LLM 摘要"
 
