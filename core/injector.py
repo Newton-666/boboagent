@@ -7,6 +7,8 @@
 import json
 import os as _os
 import logging
+import time as _time
+from datetime import datetime as _datetime
 
 from core.prompt_pool import get_prompt_pool
 
@@ -250,9 +252,16 @@ class PromptInjector:
             logger.debug("注入用户资料/记忆失败: %s", e)
 
         # ── 4.5 关联笔记指针（票 LN-4：轻指针 + 按需翻阅，不整篇注入）──
+        # 票 TICKET-022：分区展示——产出清单在前（"你写的"），主题词命中在后（"相关"）
+        # 翻阅纪律作为尾部文案
         try:
+            ledger_text, ledger_stats = self._build_session_notes_ledger(session_id)
             pointer_text, pointer_stats = self._build_note_pointers(
                 session_id, user_input)
+
+            combined_parts = []
+            if ledger_text:
+                combined_parts.append(ledger_text)
             if pointer_text:
                 # 票 TICKET-021：上轮压缩过则置顶"历史已压缩"指引
                 if getattr(engine, '_just_compressed', False):
@@ -261,11 +270,17 @@ class PromptInjector:
                         + pointer_text
                     )
                     engine._just_compressed = False
+                combined_parts.append(pointer_text)
+
+            if combined_parts:
+                combined = "\n".join(combined_parts)
                 messages.insert(1, {
                     "role": "system",
-                    "content": pointer_text
+                    "content": combined
                 })
-                budget_stats["note_pointers"] = pointer_stats
+                merged_stats = {**pointer_stats}
+                merged_stats["session_notes"] = ledger_stats.get("session_notes", 0)
+                budget_stats["note_pointers"] = merged_stats
         except Exception as e:
             logger.debug("注入笔记指针失败: %s", e)
 
@@ -366,6 +381,128 @@ class PromptInjector:
             pass
 
         return messages
+
+    def _build_session_notes_ledger(self, session_id: str) -> tuple[str, dict]:
+        """票 TICKET-022：会话笔记台账——从 events.jsonl 尾部读取 notes.written/updated
+        事件，按当前 sid 过滤，生成本会话产出清单。
+
+        IO 防护：只读尾部 N 行（默认 2000，可用 BOBO_EVENTS_TAIL_LINES 环境变量调），
+        禁止全文件扫描。文件不存在 / 无事件 / 读取失败 → 返回空串，静默省略。
+
+        返回 (text, stats)：stats = {"session_notes": 产出篇数}。
+        """
+        if not session_id:
+            return "", {"session_notes": 0}
+        try:
+            from core.event_bus import event_bus as _ebus
+        except Exception:
+            return "", {"session_notes": 0}
+
+        events_path = _ebus.filepath if hasattr(_ebus, 'filepath') else ""
+        if not events_path or not _os.path.isfile(events_path):
+            return "", {"session_notes": 0}
+
+        tail_lines = 2000
+        try:
+            tail_lines = int(_os.environ.get("BOBO_EVENTS_TAIL_LINES", "2000"))
+        except (ValueError, TypeError):
+            pass
+
+        try:
+            with open(events_path, "rb") as f:
+                f.seek(0, 2)
+                fsize = f.tell()
+                if fsize == 0:
+                    return "", {"session_notes": 0}
+                # 从尾部读约 tail_lines 行的块
+                chunk_size = tail_lines * 512
+                offset = max(0, fsize - chunk_size)
+                f.seek(offset)
+                raw = f.read().decode("utf-8", errors="replace")
+                lines = raw.splitlines()
+                if len(lines) > tail_lines:
+                    lines = lines[-tail_lines:]
+        except Exception:
+            return "", {"session_notes": 0}
+
+        # 解析尾部 JSONL，按 sid 过滤 notes.written / notes.updated
+        seen_paths: dict[str, dict] = {}  # path → {topic, version, ts}
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if e.get("type") not in ("notes.written", "notes.updated"):
+                continue
+            # sid 字段可能在 sid 或 session_id
+            e_sid = e.get("sid") or e.get("session_id", "")
+            if e_sid != session_id:
+                continue
+            path = e.get("path", "")
+            if not path:
+                continue
+            topic = e.get("topic", "")
+            version = e.get("version", 1)
+            ts = e.get("ts", 0)
+            # notes.updated 覆盖 notes.written（更高版本）
+            if path not in seen_paths or version > seen_paths[path].get("version", 0):
+                seen_paths[path] = {
+                    "path": path,
+                    "topic": topic,
+                    "version": version,
+                    "ts": ts,
+                }
+
+        if not seen_paths:
+            return "", {"session_notes": 0}
+
+        # 按时间排序，生成产出清单
+        sorted_notes = sorted(seen_paths.values(), key=lambda x: x["ts"])
+        count = len(sorted_notes)
+
+        # 预算来自 PromptPool note_pointers 段（6% 总池），产出清单在其中优先分配
+        pool = get_prompt_pool()
+        pointer_ceiling = pool.ceiling("note_pointers")
+
+        # 确保最少能展示页眉 + 翻阅纪律（约 120 字符），剩余给条目
+        header = f"\n📝 本会话已产出笔记 {count} 篇（可按需 read_local_file 翻阅，勿全量读取）：\n"
+        footer = "翻阅纪律：笔记按需单篇读取（read_local_file），禁止无目标批量遍历 library。"
+        fixed_budget = len(header) + len(footer) + 2  # 2 为换行
+
+        lines = []
+        for i, n in enumerate(sorted_notes, 1):
+            try:
+                ts_str = _datetime.fromtimestamp(n["ts"]).strftime("%m-%d %H:%M")
+            except Exception:
+                ts_str = "?"
+            # 展示主题名（topic 总是存在，来自事件字段）
+            rel = n["topic"]
+            lines.append(f"  {i}. {rel}（v{n['version']} · {ts_str}）")
+
+        available = pointer_ceiling - fixed_budget
+        if available <= 0:
+            text = header + footer
+            return text, {"session_notes": count}
+
+        # 条目超预算：省略中间保留首尾
+        while len("\n".join(lines)) > available and len(lines) > 2:
+            mid = len(lines) // 2
+            del lines[mid]
+
+        if len("\n".join(lines)) > available and len(lines) <= 2:
+            # 仍然超预算：逐条从末尾丢弃
+            while len("\n".join(lines)) > available and len(lines) > 0:
+                lines.pop()
+
+        body = "\n".join(lines)
+        text = header + body + "\n" + footer
+        # 最终硬裁剪
+        if len(text) > pointer_ceiling:
+            text = text[:pointer_ceiling]
+        return text, {"session_notes": count}
 
     def _build_note_pointers(self, session_id: str, user_input: str) -> tuple[str, dict]:
         """票 LN-4：关联笔记指针段（轻指针 + 按需翻阅，不整篇注入）。

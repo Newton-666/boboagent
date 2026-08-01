@@ -356,9 +356,10 @@ def _write_new_note(domain: str, topic: str, material: str, sid: str, llm_call) 
             pass
         raise
 
-    # 5. notes.written 事件
+    # 5. notes.written 事件（票 TICKET-022：补 sid，供 injector 按会话过滤）
     _emit("notes.written", {
         "path": str(path), "topic": topic, "is_new": True, "version": 1,
+        "sid": sid,
     })
     return path
 
@@ -438,10 +439,11 @@ def _rewrite_note(domain: str, topic: str, path: Path,
             pass
         raise
 
-    # 6. notes.updated 事件（version、旧长度、新长度）
+    # 6. notes.updated 事件（票 TICKET-022：补 sid，供 injector 按会话过滤）
     _emit("notes.updated", {
         "path": str(path), "topic": topic, "version": version + 1,
         "old_len": len(old_text), "new_len": len(final),
+        "sid": sid,
     })
     return path
 
