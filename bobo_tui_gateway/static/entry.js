@@ -72896,6 +72896,7 @@ var GatewayClient = class extends EventEmitter {
   publish(ev) {
     if (ev.type === "gateway.ready") {
       this.ready = true;
+      this.perf("gateway.ready \u6536\u5230");
       if (this.readyTimer) {
         clearTimeout(this.readyTimer);
         this.readyTimer = null;
@@ -73034,8 +73035,10 @@ var GatewayClient = class extends EventEmitter {
       env3.BOBO_GW_SOCKET = sockPath;
     }
     this.startReadyTimer(python, cwd2);
+    this._spawnT0 = Date.now();
     this.proc = spawn(python, ["-m", "bobo_tui_gateway.entry"], { cwd: cwd2, env: env3, stdio: ["pipe", "pipe", "pipe"] });
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd2}${sockPath ? " [socket \u6A21\u5F0F]" : " [stdio \u6A21\u5F0F]"}`);
+    this.perf("spawn \u5B8C\u6210");
     if (sockPath) {
       this.connectSocketWithRetry(this.proc, sockPath, 0);
     }
@@ -73212,6 +73215,13 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
     this.pushLog(line);
     recordParentLifecycle(line);
   }
+  // TICKET-031 启动计时面包屑：spawn/连接/ready 三点位，慢在哪个区间一目了然
+  _spawnT0 = 0;
+  perf(mark) {
+    if (this._spawnT0 > 0) {
+      this.lifecycle(`[perf] ${mark} t+${Date.now() - this._spawnT0}ms`);
+    }
+  }
   rejectPending(err) {
     for (const p of this.pending.values()) {
       clearTimeout(p.timeout);
@@ -73263,6 +73273,7 @@ ${new Error("stdin-close-trace").stack ?? ""}`);
   wireSocket(ownedProc, sockPath, sock) {
     this.sock = sock;
     this.sockPath = sockPath;
+    this.perf("socket \u5DF2\u8FDE\u63A5");
     this.lifecycle(`[socket] \u5DF2\u8FDE\u63A5 ${sockPath}\uFF08gateway \u81EA\u6301\u76D1\u542C\uFF0C\u524D\u7AEF\u65AD\u5F00\u4E0D\u518D\u81F4\u547D\uFF09`);
     const rl = createInterface({ input: sock });
     this.sockRl = rl;
