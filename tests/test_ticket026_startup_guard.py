@@ -46,7 +46,8 @@ def _spawn_dead():
 
 class TestSingleInstanceGuard:
     def test_kills_stale_instance(self, monkeypatch):
-        """pidfile 指向存活的旧实例 → SIGTERM 清理，写自己 pid。"""
+        """pidfile 指向存活的旧实例 + 授权旗标 → SIGTERM 清理，写自己 pid。"""
+        monkeypatch.setenv("BOBO_GW_GUARD", "1")
         monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
         monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
         sleeper = _spawn_sleeper()
@@ -65,8 +66,27 @@ class TestSingleInstanceGuard:
             if entry._pid_alive(sleeper.pid):
                 sleeper.kill()
 
+    def test_skips_without_guard_flag(self, monkeypatch):
+        """TICKET-028 金标准：无 BOBO_GW_GUARD=1 → 不动任何实例。
+
+        误杀案复现：隔壁测试/基准起的野子进程，绝不允许触发守卫。
+        """
+        monkeypatch.delenv("BOBO_GW_GUARD", raising=False)
+        monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
+        monkeypatch.delenv("BOBO_GW_ALLOW_MULTI", raising=False)
+        sleeper = _spawn_sleeper()
+        try:
+            Path(entry._LOG_DIR, "gateway.pid").write_text(str(sleeper.pid))
+            entry._single_instance_guard()
+            assert entry._pid_alive(sleeper.pid), "无授权旗标时不得清理任何实例"
+            # pidfile 也不应被覆写
+            assert Path(entry._LOG_DIR, "gateway.pid").read_text().strip() == str(sleeper.pid)
+        finally:
+            sleeper.kill()
+
     def test_skips_when_test_mode(self, monkeypatch):
         """BOBO_TEST_MODE=1 → 不动残留实例（测试场景多实例合法）。"""
+        monkeypatch.setenv("BOBO_GW_GUARD", "1")
         monkeypatch.setenv("BOBO_TEST_MODE", "1")
         sleeper = _spawn_sleeper()
         try:
@@ -78,6 +98,7 @@ class TestSingleInstanceGuard:
 
     def test_stale_pidfile_dead_pid_noop(self, monkeypatch):
         """pidfile 指向已死 pid → 不炸，直接覆盖写自己。"""
+        monkeypatch.setenv("BOBO_GW_GUARD", "1")
         monkeypatch.delenv("BOBO_TEST_MODE", raising=False)
         dead = _spawn_dead()
         Path(entry._LOG_DIR, "gateway.pid").write_text(str(dead.pid))
