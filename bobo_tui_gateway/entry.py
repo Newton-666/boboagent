@@ -108,9 +108,15 @@ def _cleanup_pidfile(pidfile: str, my_pid: int):
 def _single_instance_guard():
     """清掉残留的上一代 gateway，写自己的 pidfile。
 
-    跳过条件：BOBO_TEST_MODE=1（测试子进程）或 BOBO_GW_ALLOW_MULTI=1（显式多开）。
+    启用条件（TICKET-028 误杀修复）：仅当 node 前端 spawn 时显式设
+    BOBO_GW_GUARD=1——只有 TUI 的正规军才执行单实例清理。
+    测试子进程、基准脚本、其他 agent 随手起的野子进程一律不触发，
+    杜绝"隔壁测试的守卫误杀用户真 bobo"（2026-08-01 TUI 崩屏案）。
+    跳过条件：BOBO_TEST_MODE=1 或 BOBO_GW_ALLOW_MULTI=1。
     任何异常静默降级——守卫绝不能阻塞启动。
     """
+    if os.environ.get("BOBO_GW_GUARD") != "1":
+        return
     if os.environ.get("BOBO_TEST_MODE") == "1" or os.environ.get("BOBO_GW_ALLOW_MULTI") == "1":
         return
     pidfile = os.path.join(_LOG_DIR, "gateway.pid")
