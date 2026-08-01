@@ -31,6 +31,28 @@ export const userDisplay = (text: string) => {
   return `${prefix || '(message)'} [long message]`
 }
 
+/** 内部注入段标记前缀——命中则不在 TUI 展示，仅 LLM 可见。introMsg（text=''）不受影响。 */
+const INTERNAL_SYSTEM_PREFIXES: readonly string[] = [
+  '[工作锚点',
+  '[阶段完成摘要',
+  '⚠️ 历史已压缩',
+  '【上下文自查协议】',
+  '[最近读过的文件]',
+  '[已注册的自定义 API]',
+  '[项目规则 (AGENTS.md)]',
+  '📝 本会话已产出笔记',
+  '注意：这个任务涉及多个步骤或文件',
+  '注意：检测到多步任务但未建台账',
+  '翻阅纪律：',
+  '[对话历史摘要]',
+  '[Bobo 注意到]',
+  '[验证]',
+  '## 可用的项目标准',
+]
+
+const isInternalSystemMsg = (text: string) =>
+  INTERNAL_SYSTEM_PREFIXES.some(prefix => text.startsWith(prefix))
+
 export const toTranscriptMessages = (rows: unknown): Msg[] => {
   if (!Array.isArray(rows)) {
     return []
@@ -59,7 +81,14 @@ export const toTranscriptMessages = (rows: unknown): Msg[] => {
     if (role === 'assistant') {
       out.push({ role, text, ...(pending.length && { tools: pending }) })
       pending = []
-    } else if (role === 'user' || role === 'system') {
+    } else if (role === 'user') {
+      out.push({ role, text })
+      pending = []
+    } else if (role === 'system') {
+      // 票 TICKET-022：过滤内部注入的 system 消息，不对 TUI 用户可见
+      if (isInternalSystemMsg(text)) {
+        continue
+      }
       out.push({ role, text })
       pending = []
     }

@@ -56027,7 +56027,7 @@ ${boundedLiveRenderText(body, {
 });
 
 // src/domain/messages.ts
-var introMsg, imageTokenMeta, attachedImageNotice, userDisplay, toTranscriptMessages, fmtDuration;
+var introMsg, imageTokenMeta, attachedImageNotice, userDisplay, INTERNAL_SYSTEM_PREFIXES, isInternalSystemMsg, toTranscriptMessages, fmtDuration;
 var init_messages = __esm({
   "src/domain/messages.ts"() {
     "use strict";
@@ -56052,6 +56052,24 @@ var init_messages = __esm({
       const prefix = (words.length > 1 ? words.slice(0, 4).join(" ") : first).slice(0, 80);
       return `${prefix || "(message)"} [long message]`;
     };
+    INTERNAL_SYSTEM_PREFIXES = [
+      "[\u5DE5\u4F5C\u951A\u70B9",
+      "[\u9636\u6BB5\u5B8C\u6210\u6458\u8981",
+      "\u26A0\uFE0F \u5386\u53F2\u5DF2\u538B\u7F29",
+      "\u3010\u4E0A\u4E0B\u6587\u81EA\u67E5\u534F\u8BAE\u3011",
+      "[\u6700\u8FD1\u8BFB\u8FC7\u7684\u6587\u4EF6]",
+      "[\u5DF2\u6CE8\u518C\u7684\u81EA\u5B9A\u4E49 API]",
+      "[\u9879\u76EE\u89C4\u5219 (AGENTS.md)]",
+      "\u{1F4DD} \u672C\u4F1A\u8BDD\u5DF2\u4EA7\u51FA\u7B14\u8BB0",
+      "\u6CE8\u610F\uFF1A\u8FD9\u4E2A\u4EFB\u52A1\u6D89\u53CA\u591A\u4E2A\u6B65\u9AA4\u6216\u6587\u4EF6",
+      "\u6CE8\u610F\uFF1A\u68C0\u6D4B\u5230\u591A\u6B65\u4EFB\u52A1\u4F46\u672A\u5EFA\u53F0\u8D26",
+      "\u7FFB\u9605\u7EAA\u5F8B\uFF1A",
+      "[\u5BF9\u8BDD\u5386\u53F2\u6458\u8981]",
+      "[Bobo \u6CE8\u610F\u5230]",
+      "[\u9A8C\u8BC1]",
+      "## \u53EF\u7528\u7684\u9879\u76EE\u6807\u51C6"
+    ];
+    isInternalSystemMsg = (text) => INTERNAL_SYSTEM_PREFIXES.some((prefix) => text.startsWith(prefix));
     toTranscriptMessages = (rows) => {
       if (!Array.isArray(rows)) {
         return [];
@@ -56073,7 +56091,13 @@ var init_messages = __esm({
         if (role === "assistant") {
           out.push({ role, text, ...pending.length && { tools: pending } });
           pending = [];
-        } else if (role === "user" || role === "system") {
+        } else if (role === "user") {
+          out.push({ role, text });
+          pending = [];
+        } else if (role === "system") {
+          if (isInternalSystemMsg(text)) {
+            continue;
+          }
           out.push({ role, text });
           pending = [];
         }
