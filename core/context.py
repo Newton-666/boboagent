@@ -196,37 +196,20 @@ class ContextMixin:
             lines.append(f"🎯 当前任务：{task[:200]}")
 
         # ── 已写文件 ──
-        # 票 TICKET-025：优先从会话级只增集合取，防 change_log 塌缩丢失。
-        # 集合只在 engine.py 工具调用时同步入，不依赖 desc 文本解析。
+        # 票 TICKET-025：从会话级只增集合取，防 change_log 塌缩丢失。
+        # 集合只在 engine.py 工具调用时同步入。无文件→降级跳过。
         try:
             session_files = getattr(self, '_session_written_files', None)
             if session_files:
                 file_list = sorted(session_files)[:10]
                 lines.append(f"📁 本会话已写文件：{', '.join(file_list)}（共 {len(session_files)} 个）")
             elif hasattr(self, 'tracker') and hasattr(self.tracker, '_change_log'):
-                # 兼容路径：_session_written_files 不可用时回退 change_log
+                # 仅读结构化 path 字段——log_change 始终写入此字段（TICKET-025 ③）
                 written: set[str] = set()
                 for entry in self.tracker._change_log:
-                    # 优先结构化 path 字段
-                    structured_path = entry.get('path', '')
-                    if structured_path and not structured_path.startswith('['):
-                        written.add(structured_path)
-                        continue
-                    # 兜底：从 desc 文本右分割提取（含冒号文件名兼容）
-                    desc = entry.get('desc', '')
-                    # 用 rsplit 处理含冒号的文件名（如 report_10:30.md）
-                    for sep in (':', '（'):
-                        idx = desc.rfind(sep)
-                        if idx > 0:
-                            candidate = desc[:idx].strip()
-                            if candidate and not candidate.startswith('['):
-                                # 简单存在性校验：含 . 或 / 视为路径
-                                if '.' in candidate or '/' in candidate:
-                                    written.add(candidate)
-                                else:
-                                    # 无扩展名也收录（如 README）
-                                    written.add(candidate)
-                            break
+                    p = entry.get('path', '')
+                    if p and not p.startswith('['):
+                        written.add(p)
                 if written:
                     file_list = sorted(written)[:10]
                     lines.append(f"📁 本会话已写文件：{', '.join(file_list)}（共 {len(written)} 个）")
