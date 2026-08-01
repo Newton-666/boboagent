@@ -146,6 +146,7 @@ export class GatewayClient extends EventEmitter {
   private publish(ev: GatewayEvent) {
     if (ev.type === 'gateway.ready') {
       this.ready = true
+      this.perf('gateway.ready 收到')
 
       if (this.readyTimer) {
         clearTimeout(this.readyTimer)
@@ -317,8 +318,10 @@ export class GatewayClient extends EventEmitter {
     }
     // TICKET-030：守卫已拆除，auto-exit 接管叠罗汉治理
     this.startReadyTimer(python, cwd)
+    this._spawnT0 = Date.now()
     this.proc = spawn(python, ['-m', 'bobo_tui_gateway.entry'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd}${sockPath ? ' [socket 模式]' : ' [stdio 模式]'}`)
+    this.perf('spawn 完成')
 
     if (sockPath) {
       this.connectSocketWithRetry(this.proc, sockPath, 0)
@@ -535,6 +538,14 @@ export class GatewayClient extends EventEmitter {
     recordParentLifecycle(line)
   }
 
+  // TICKET-031 启动计时面包屑：spawn/连接/ready 三点位，慢在哪个区间一目了然
+  private _spawnT0 = 0
+  private perf(mark: string) {
+    if (this._spawnT0 > 0) {
+      this.lifecycle(`[perf] ${mark} t+${Date.now() - this._spawnT0}ms`)
+    }
+  }
+
   private rejectPending(err: Error) {
     for (const p of this.pending.values()) {
       clearTimeout(p.timeout)
@@ -601,6 +612,7 @@ export class GatewayClient extends EventEmitter {
   private wireSocket(ownedProc: ChildProcess, sockPath: string, sock: Socket) {
     this.sock = sock
     this.sockPath = sockPath
+    this.perf('socket 已连接')
     this.lifecycle(`[socket] 已连接 ${sockPath}（gateway 自持监听，前端断开不再致命）`)
     const rl = createInterface({ input: sock })
     this.sockRl = rl
