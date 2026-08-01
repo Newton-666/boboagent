@@ -8,55 +8,54 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import tiktoken
+
 logger = logging.getLogger(__name__)
 
 
-# ── Token 估算（CJK 启发式，不引入 tiktoken 依赖）───────────────────
+# ── Token 估算（tiktoken cl100k_base，TICKET-024 彻底校准）─────────
+
+_ENCODER = None
+
+
+def _get_encoder():
+    """惰性加载 tiktoken cl100k_base 编码器。"""
+    global _ENCODER
+    if _ENCODER is None:
+        _ENCODER = tiktoken.get_encoding("cl100k_base")
+    return _ENCODER
+
 
 def _estimate_tokens(messages: list) -> int:
-    """保守估算消息列表的 token 数。
+    """用 tiktoken cl100k_base 精确估算消息列表的 token 数。
 
-    CJK 字符（一-鿿, ぀-ヿ, 가-힯）按 1 token ≈ 1.2 字符；
-    JSON/代码/拉丁字符按 1 token ≈ 3 字符；
-    每条消息 +4 token 固定开销（role/content 元信息）。
-    刻意偏保守（宁高估），保证不溢出。
+    cl100k_base 是 GPT-4 / GPT-3.5-turbo 及大部分现代模型的编码，
+    跨模型偏差典型 <5%，彻底替代 023 的启发式补丁。
 
-    注意：偏差仍然存在，彻底校准留给 TICKET-024。
+    每条消息额外 +4 token 作为分隔符的保守开销（留安全边际）。
+    注意：工具 schema、name 字段等完整编码，不做特殊处理。
     """
-    total_chars = 0
-    cjk_chars = 0
-
+    enc = _get_encoder()
+    total = 0
     for msg in messages:
-        text = str(msg)
-        for ch in text:
-            cp = ord(ch)
-            if (0x4E00 <= cp <= 0x9FFF or  # CJK Unified
-                0x3400 <= cp <= 0x4DBF or  # CJK Extension A
-                0x3040 <= cp <= 0x309F or  # Hiragana
-                0x30A0 <= cp <= 0x30FF or  # Katakana
-                0xAC00 <= cp <= 0xD7AF):    # Hangul
-                cjk_chars += 1
-            else:
-                total_chars += 1
-
-    total_chars += cjk_chars
-    # CJK: ~1.2 chars/token, non-CJK: ~3 chars/token, +4 per message overhead
-    return int(cjk_chars / 1.2 + (total_chars - cjk_chars) / 3) + len(messages) * 4
+        total += len(enc.encode(str(msg)))
+    total += len(messages) * 4
+    return total
 
 
-# ── 消息数预算（票 T：BOBO_CONTEXT_BUDGET 环境变量）───────────────
+# ── 消息条数兜底（票 TICKET-024：token 触发为主，条数降级为硬上限）─
 
 def _get_msg_count_budget() -> int:
-    """返回消息数阈值，从 BOBO_CONTEXT_BUDGET 环境变量读取，默认 60。
+    """返回消息条数硬上限，从 BOBO_CONTEXT_BUDGET 环境变量读取，默认 200。
 
-    用于触发上下文压缩：当 self.history 的 msg_count 超过此值时，
-    _call_llm 入口将执行压缩。最小值为 10（防配置错误）。
+    TICKET-024 后此为兜底保护：正常压缩由 token 预算驱动（_get_context_budget），
+    仅在 token 估算异常或极端场景时，条数触发作为最后的防溢出保险。
     """
-    raw = os.environ.get("BOBO_CONTEXT_BUDGET", "60")
+    raw = os.environ.get("BOBO_CONTEXT_BUDGET", "200")
     try:
         return max(10, int(raw))
     except (ValueError, TypeError):
-        return 60
+        return 200
 
 
 # ── 上下文归档目录 ─────────────────────────────────────────────────
@@ -100,11 +99,18 @@ def _archive_compressed(session_id: str, old_msgs: list, summary: str,
         logger.warning("上下文归档失败（静默降级）", exc_info=True)
 
 
-def _get_context_budget(_engine=None) -> int:
-    """返回当前模型的上下文预算（token 数）。
+# ── 固定开销（工具 schema + system prompt + 记忆注入，实测约 20-25K）──
+_FIXED_OVERHEAD_TOKENS = 25000
 
-    预算 = (context_length - max_tokens 预留) * BOBO_CONTEXT_BUDGET_RATIO
-    max_tokens 扣除上限不超过 context_length 的 50%（防止大 max_tokens 配小窗口时预算为 0）
+
+def _get_context_budget(_engine=None) -> int:
+    """返回当前模型的上下文预算（token 数），TICKET-024 重构。
+
+    预算 = (context_length - max_tokens 预留 - 固定开销) × BOBO_CONTEXT_BUDGET_RATIO
+
+    固定开销 = 工具 schema + system prompt + 记忆注入（实测约 20-25K token）。
+    max_tokens 扣除上限不超过 context_length 的 50%（防大 max_tokens 配小窗口时预算归零）。
+    BOBO_CONTEXT_BUDGET_RATIO 默认 0.7，可通过环境变量覆盖。
     """
     import os
     from core.provider import get_context_length
@@ -113,7 +119,12 @@ def _get_context_budget(_engine=None) -> int:
     raw_max_tokens = int(os.environ.get("BOBO_MAX_TOKENS", "8192"))
     max_tokens = min(raw_max_tokens, int(context_len * 0.5))
     ratio = float(os.environ.get("BOBO_CONTEXT_BUDGET_RATIO", "0.7"))
-    return max(int((context_len - max_tokens) * ratio), 1)  # 至少 1 token
+    # TICKET-024：扣除固定开销（工具 schema + system prompt + 记忆注入）
+    # 固定开销上限不超过 (context_len - max_tokens) 的 40%，防止小窗口模型预算归零
+    effective_overhead = min(_FIXED_OVERHEAD_TOKENS,
+                             int((context_len - max_tokens) * 0.4))
+    available = context_len - max_tokens - effective_overhead
+    return max(int(available * ratio), 1)  # 至少 1 token
 
 def _build_local_fallback_summary(old_msgs: list) -> str:
     """生成本地机械摘要——当 LLM 摘要失败或无文本时做兜底（票 TICKET-023）。
@@ -287,260 +298,268 @@ class ContextMixin:
 
         return {"role": "system", "content": "\n".join(lines)}
 
+    # ── 三层压缩参数（TICKET-024）─────────────────────────────────────
+    _LAYER_0_TOKEN_LIMIT = 15000   # 层0 逐字保留 token 上限
+    _LAYER_1_SEGMENT_ROUNDS = 25   # 层1 每段约 25 轮
+    _LAYER_1_MAX_SEGMENTS = 5      # 层1 超过 5 段 → 二次压缩合并下沉
+    _LAYER_1_MAX_PER_SEGMENT = 300  # 每段摘要上限 token
+    _LAYER_2_MAX_TOKENS = 200       # 层2 极简摘要上限 token
+
     def _compress_history(self, *, _event_bus=None):
-        """将早期对话压缩为结构化摘要（票 T 增强版）。
+        """Token 驱动三层压缩（票 TICKET-024 重构）。
 
-        触发条件：self.history 的 msg_count > _get_msg_count_budget()。
-        压缩策略：
-          - 保留 system prompt（已有摘要标记的 system 消息）
-          - 保留最近 N 条完整对话（N = 预算 * 0.5，至少 10）
-          - 其余对话压缩为结构化摘要，插入 history 头部
-          - 被压缩的原文追加写入会话归档文件
-
-        幂等：压缩后历史条数降至预算内；若后续对话又超限，可再次压缩。
+        触发：history token > _get_context_budget()，或条数 > 200 硬上限兜底。
+        分层：
+          层0 逐字保留：最近 ~15K token 的消息（~15-20 条），完整原文
+          层1 分段摘要：中段每 20-30 轮结构化摘要（分段由 LLM 智能划分）
+          层2 极简摘要：最旧段合并为 Active Task + Key Decisions（一条消息）
+        二次压缩：层1 段数 > 5 时自动合并下沉为层2
+        记忆沉淀：同一次 LLM 调用产出摘要 + 知识条目 → knowledge_base.json
         """
         from core.event_bus import event_bus as _default_event_bus
 
         bus = _event_bus or _default_event_bus
-        budget = _get_msg_count_budget()
-        keep_count = max(10, int(budget * 0.5))
-
-        # 审计 #22：tool 消息的 key 是 "content" 而非 "tool_results"（此前键名不匹配导致
-        # 30K 截断永不生效）；kind/phase/text 也不存在于 history 消息中（死代码已移除）
-        tool_msgs = [(i, m) for i, m in enumerate(self.history) if m.get("role") == "tool"]
-        total_tool = sum(len(str(m.get("content", ""))) for _, m in tool_msgs)
-        if tool_msgs and total_tool > 30000:
-            per_tool = max(500, 30000 // len(tool_msgs))
-            for i, m in tool_msgs:
-                tr = m.get("content", "")
-                if len(str(tr)) > per_tool:
-                    m["content"] = str(tr)[:per_tool] + f"\n...(截断，原{len(str(tr))}字符)"
-
-        # 收集旧摘要（system 消息），这些始终保留
-        existing_summaries = [m for m in self.history
-                              if m.get("role") == "system"
-                              and m.get("content", "").startswith("[对话历史摘要]")]
+        token_budget = _get_context_budget()
+        msg_budget = _get_msg_count_budget()
         total_msg_count = len(self.history)
-        if total_msg_count <= budget:
+        total_tokens = _estimate_tokens(self.history)
+
+        # ── 触发判断：token 优先，条数兜底 ──
+        if total_tokens <= token_budget and total_msg_count <= msg_budget:
             return
 
-        # 找到分割点：保留最近 keep_count 条【消息】（破案 2026-07-29：
-        # 此前 keep_count 被当"用户轮次"用，工具密集型会话中 30 轮 ≈ 全部
-        # 历史 → 压缩永久空转、零归档零事件。单位必须也是消息条数）
-        split_idx = max(0, total_msg_count - keep_count)
-        # 切割点对齐到 user 消息边界（向前找，保证切在回合开头）
-        # 票 TICKET-023：向前推进加上限，最多推进到 budget 50% 处，防止边界对齐把不该压的也压了
-        floor = max(0, total_msg_count - keep_count - int(budget * 0.5))
-        while (split_idx > floor and split_idx > 0 and
-               self.history[split_idx].get("role") != "user"):
-            split_idx -= 1
-        # 安全边界：split 点不能切在 tool_calls/tool_result 配对中间。
-        while (split_idx < len(self.history) and
-               self.history[split_idx].get("role") == "tool"):
-            split_idx += 1
-
-        # 如果 old_msgs 的最后一条 assistant 有 tool_calls，检查其 tool_call_id
-        # 对应的 tool 结果是否全在 old_msgs 中。如果有孤立的 → 向前移 split。
-        for m in reversed(self.history[:split_idx]):
-            if m.get("role") == "assistant" and m.get("tool_calls"):
-                tc_ids = {tc.get("id", "") for tc in m["tool_calls"]}
-                for r in self.history[split_idx:]:
-                    if r.get("role") == "tool" and r.get("tool_call_id", "") in tc_ids:
-                        tc_ids.discard(r.get("tool_call_id", ""))
-                    if not tc_ids:
-                        break
-                if tc_ids:
-                    idx = self.history.index(m)
-                    split_idx = idx
+        # ── 空转防护（TICKET-023 保留）：可压缩段 token < 15% → 跳过 ──
+        layer_0_tokens = 0
+        layer_0_msgs = []
+        for m in reversed(self.history):
+            mt = _estimate_tokens([m])
+            if layer_0_tokens + mt > self._LAYER_0_TOKEN_LIMIT:
                 break
-
-        # ── 空转防护（票 TICKET-023）：可归档段 token 占比 < 15% 则不压缩 ──
-        archivable_tokens = _estimate_tokens(self.history[:split_idx])
-        total_tokens = _estimate_tokens(self.history)
-        ratio = archivable_tokens / max(total_tokens, 1)
-        if ratio < 0.15:
+            layer_0_msgs.insert(0, m)
+            layer_0_tokens += mt
+        split_idx = total_msg_count - len(layer_0_msgs)
+        archivable_ratio = 1.0 - (len(layer_0_msgs) / max(total_msg_count, 1))
+        if archivable_ratio < 0.15 and total_tokens <= token_budget * 1.2 and total_msg_count <= msg_budget:
+            # 可归档太少且未严重超预算 → 不压
             session_id = getattr(self, 'sid', '')
             try:
                 bus.write("context.compress_skipped", {
                     "session_id": session_id,
                     "reason": "archivable_too_small",
-                    "ratio": round(ratio, 4),
-                    "archivable_tokens": archivable_tokens,
+                    "ratio": round(archivable_ratio, 4),
                     "total_tokens": total_tokens,
+                    "token_budget": token_budget,
                 })
             except Exception:
                 logger.warning("context.compress_skipped 事件写入失败（静默降级）", exc_info=True)
-            # ── 票 TICKET-023：空转跳过时也重建工作锚点 ──
             anchor_msg = self._build_work_anchor()
             _ANCHOR_PREFIX = "[工作锚点"
             self.history = [m for m in self.history
-                            if not (m.get("role") == "system"
-                                    and m.get("content", "").startswith(_ANCHOR_PREFIX))]
+                            if not (m.get("role") == "system" and
+                                    m.get("content", "").startswith(_ANCHOR_PREFIX))]
             self.history.insert(0, anchor_msg)
             return
 
-        # ── 预统计（用于事件） ──
-        pre_msg_count = len(self.history)
-        pre_tokens = _estimate_tokens(self.history)
+        # ── 预统计 ──
+        pre_msg_count = total_msg_count
+        pre_tokens = total_tokens
 
-        old_msgs = self.history[:split_idx]
-        self.history = self.history[split_idx:]
-
-        # ── 票 020：构建工作锚点，跨压缩存活 ──
+        # ── 构建 + 插入工作锚点（TICKET-020） ──
         anchor_msg = self._build_work_anchor()
-        # 清除旧锚点（旧锚点被新锚点替换，只留一份）
         _ANCHOR_PREFIX = "[工作锚点"
         self.history = [m for m in self.history
-                        if not (m.get("role") == "system"
-                                and m.get("content", "").startswith(_ANCHOR_PREFIX))]
-        old_msgs = [m for m in old_msgs
-                    if not (m.get("role") == "system"
-                            and m.get("content", "").startswith(_ANCHOR_PREFIX))]
-        # 新锚点插在 history 最头部
+                        if not (m.get("role") == "system" and
+                                m.get("content", "").startswith(_ANCHOR_PREFIX))]
         self.history.insert(0, anchor_msg)
 
-        # ── 保留已有摘要（幂等：跨压缩轮次不丢旧摘要） ──
-        existing_summaries = [m for m in old_msgs
-                              if m.get("role") == "system"
-                              and m.get("content", "").startswith("[对话历史摘要]")]
-        # 从 old_msgs 中排除已有摘要，只压缩纯对话
-        old_msgs_no_summary = [m for m in old_msgs if m not in existing_summaries]
-        # 把已有摘要重新插回 history 头部（锚点之后）
-        for sm in reversed(existing_summaries):
-            self.history.insert(0, sm)
+        # ── 三层分割 ──
+        # 层0：从尾部往前取，直到累计 token 超 _LAYER_0_TOKEN_LIMIT
+        # TICKET-024：锚点消息不计入层0 token 累计
+        layer_0 = []
+        layer_0_tokens = 0
+        tail_idx = len(self.history)
+        for m in reversed(self.history):
+            if m.get("role") == "system" and m.get("content", "").startswith(_ANCHOR_PREFIX):
+                layer_0.insert(0, m)
+                tail_idx -= 1
+                continue
+            mt = _estimate_tokens([m])
+            if layer_0_tokens + mt > self._LAYER_0_TOKEN_LIMIT:
+                break
+            layer_0.insert(0, m)
+            layer_0_tokens += mt
+            tail_idx -= 1
 
-        # ── 构造压缩摘要 ──
-        text_parts = []
-        for m in old_msgs_no_summary:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if role in ("user", "assistant") and content:
-                label = "用户" if role == "user" else "Bobo"
-                if "[RESULT]" in content:
-                    text_parts.append(f"{label}: {content[:400]}")
-                else:
-                    text_parts.append(f"{label}: {content[:200]}")
-        if not text_parts:
-            # 票 TICKET-023：零摘要改为本地机械兜底，而非直接丢弃
-            local_summary = _build_local_fallback_summary(old_msgs_no_summary)
-            self.history.insert(0, {
-                "role": "system",
-                "content": local_summary
-            })
-            session_id = getattr(self, 'sid', '')
-            post_msg_count = len(self.history)
-            post_tokens = _estimate_tokens(self.history)
-            _archive_compressed(
-                session_id=session_id,
-                old_msgs=old_msgs,
-                summary=local_summary,
-                pre_count=pre_msg_count,
-                post_count=post_msg_count,
-                pre_tokens=pre_tokens,
-                post_tokens=post_tokens,
+        # 可用于压缩的全部旧消息（层1+层2 原料）
+        compressible = self.history[:tail_idx]
+
+        # ── 工具截断：只作用于层0，compressible 中的工具保持原样 ──
+        # TICKET-024：截断从分层前移到分层后，确保 compressible 中工具内容完整交给摘要/兜底
+        tool_msgs_in_layer0 = [(i, m) for i, m in enumerate(layer_0) if m.get("role") == "tool"]
+        total_tool_l0 = sum(len(str(m.get("content", ""))) for _, m in tool_msgs_in_layer0)
+        if tool_msgs_in_layer0 and total_tool_l0 > 30000:
+            per_tool = max(500, 30000 // len(tool_msgs_in_layer0))
+            for i, m in tool_msgs_in_layer0:
+                tr = m.get("content", "")
+                if len(str(tr)) > per_tool:
+                    m["content"] = str(tr)[:per_tool] + f"\n...(截断，原{len(str(tr))}字符)"
+
+        # ── 分离已有摘要（幂等） ──
+        existing_l2 = [m for m in compressible
+                       if m.get("role") == "system" and
+                       m.get("content", "").startswith("[L2 极简摘要")]
+        existing_l1 = [m for m in compressible
+                       if m.get("role") == "system" and
+                       m.get("content", "").startswith("[L1 段摘要")]
+        existing_old_summary = [m for m in compressible
+                                if m.get("role") == "system" and
+                                m.get("content", "").startswith("[对话历史摘要]")
+                                and m not in existing_l2 and m not in existing_l1]
+
+        # 将旧的 [对话历史摘要] 归入层2（向下兼容旧格式）
+        existing_l2.extend(existing_old_summary)
+
+        # 纯对话（不含任何 system 摘要/锚点）
+        pure_msgs = [m for m in compressible
+                     if m not in existing_l2 and m not in existing_l1
+                     and not (m.get("role") == "system" and
+                               m.get("content", "").startswith("[对话历史摘要]"))
+                     ]
+
+        # ── 二次压缩：层1 段数 > 5 → 合并下沉为层2 ──
+        if len(existing_l1) > self._LAYER_1_MAX_SEGMENTS:
+            merged_text = "\n---\n".join(
+                m.get("content", "") for m in existing_l1
             )
-            try:
-                bus.write("context.compressed", {
-                    "session_id": session_id,
-                    "pre_msg_count": pre_msg_count,
-                    "post_msg_count": post_msg_count,
-                    "pre_tokens": pre_tokens,
-                    "post_tokens": post_tokens,
-                    "summary_length": len(local_summary),
-                    "summary_source": "local_fallback",
-                    "archived_count": len(old_msgs),
-                })
-            except Exception:
-                logger.warning("context.compressed 事件写入失败（静默降级）", exc_info=True)
+            if merged_text.strip():
+                # 调用 LLM 合并
+                merge_prompt_text = (
+                    "将以下多段历史摘要合并为一条 200 token 以内的极简摘要，"
+                    "只保留 Active Task / Completed / Key Decisions：\n\n"
+                    + merged_text
+                )
+                merge_summary = self._call_summary_llm(merge_prompt_text)
+                if merge_summary:
+                    existing_l2.insert(0, {
+                        "role": "system",
+                        "content": f"[L2 极简摘要]\n{merge_summary}"
+                    })
+                # 丢弃旧层1
+                existing_l1 = []
+
+        # ── 如果没有纯对话需要压缩 → 直接组装 ──
+        if not pure_msgs:
+            self._assemble_compressed(existing_l2, existing_l1, layer_0)
             return
-        old_text = "\n".join(text_parts)
 
-        self._compressing = True
-        try:
-            extra_lines = []
-            if hasattr(self, '_read_files') and self._read_files:
-                mentioned = set()
-                for m in old_msgs_no_summary:
-                    c = str(m.get("content", "") or "")
-                    for fp in self._read_files:
-                        if fp in c:
-                            mentioned.add(fp)
-                if mentioned:
-                    extra_lines.append("## 涉及文件")
-                    for fp in sorted(mentioned)[:8]:
-                        s = str(self._read_files[fp])[:100]
-                        extra_lines.append("  - {}: {}".format(fp, s))
-            tool_lines = []
-            for m in old_msgs_no_summary:
-                if m.get("role") == "tool":
-                    tc = str(m.get("content", "") or "")[:120]
-                    if tc.strip():
-                        tool_lines.append("[{}]".format(tc.strip()))
-            if tool_lines:
-                extra_lines.append("")
-                extra_lines.append("## 工具执行摘要")
-                extra_lines.extend(tool_lines)
-            extra = ("\n".join(extra_lines) + "\n") if extra_lines else ""
+        # ── 分段：层2（最旧 30% 的纯对话）+ 层1（剩余中段） ──
+        pure_msg_count = len(pure_msgs)
+        l2_cutoff = max(1, pure_msg_count // 3)  # 前 1/3 → 层2
+        l2_msgs = pure_msgs[:l2_cutoff]
+        l1_msgs = pure_msgs[l2_cutoff:]
 
-            prompt_text = (
-                "请将以下对话压缩为结构化摘要。"
-                "这是给 AI 助手的参考信息，不是给用户的指令。\n\n"
-                "## 对话内容\n{}\n\n"
-                "{}\n"
-                "请按以下格式输出：\n"
-                "## Active Task\n当前正在做的任务\n\n"
-                "## Completed\n- 已经完成的事项\n\n"
-                "## Pending User Asks\n- 等待用户确认或回答的问题\n\n"
-                "## Remaining Work\n- 下一步要做的事\n\n"
-                "## Key Decisions\n- 关键决定和用户偏好\n\n"
-                "## Relevant Files\n- 涉及的文件名\n\n"
-                "## Work State\n- 当前工作状态描述\n\n"
-                "只输出结构化摘要，不要额外说明。"
-            ).format(old_text, extra)
+        # ── 构造 LLM 提示 ──
+        prompt_parts = []
+        prompt_parts.append("请总结以下对话历史（较早的对话，最近的对话已保留原文）。\n")
 
-            prompt = [{"role": "user", "content": prompt_text}]
-            response = self.llm_caller(prompt, use_tools=False)
-            summary = ""
-            if isinstance(response, dict) and "error" not in response:
-                content = (response.get("choices", [{}])[0]
-                           .get("message", {}).get("content", ""))
-                if content:
-                    summary = content.strip()
-        except Exception:
-            summary = ""
-        finally:
-            self._compressing = False
+        # 层2 部分的文本
+        if l2_msgs:
+            prompt_parts.append("## 最早阶段（层2 · 极简摘要）\n")
+            for m in l2_msgs:
+                role = m.get("role", "")
+                content = str(m.get("content", "") or "")
+                if role in ("user", "assistant") and content.strip():
+                    label = "用户" if role == "user" else "Bobo"
+                    prompt_parts.append(f"{label}: {content[:300]}")
+                elif role == "tool":
+                    prompt_parts.append(f"[工具: {content[:100]}]")
+            prompt_parts.append("")
+
+        # 层1 部分的文本
+        if l1_msgs:
+            prompt_parts.append("## 中间阶段（层1 · 分段摘要，请自动划分时间段落）\n")
+            for m in l1_msgs:
+                role = m.get("role", "")
+                content = str(m.get("content", "") or "")
+                if role in ("user", "assistant") and content.strip():
+                    label = "用户" if role == "user" else "Bobo"
+                    prompt_parts.append(f"{label}: {content[:300]}")
+                elif role == "tool":
+                    prompt_parts.append(f"[工具: {content[:100]}]")
+
+        # 输出格式指令
+        prompt_parts.append("""
+## 输出格式（严格遵守）
+
+### L2_ULTRA_BRIEF
+[一段话：当前活跃任务、已完成事项、关键决策。200 token 以内。]
+
+### L1_SEGMENT_1
+[第一个段落的摘要，150-300 token]
+
+### L1_SEGMENT_2
+[第二个段落的摘要，150-300 token]
+...（根据对话内容自动划分 1-5 个段落）
+
+### MEMORY
+- KEY_DECISION: 内容
+- USER_PREF: 内容
+- FACT: 内容
+...（可选，无关键信息则省略此段）
+""")
+
+        full_prompt = "\n".join(prompt_parts)
+
+        # ── 调用 LLM（一次产出：摘要 + 记忆沉淀） ──
+        response_text = self._call_summary_llm(full_prompt)
+
+        # ── 解析 LLM 输出 ──
+        summary_source = "llm"
+        l2_text, l1_segments, memory_entries = self._parse_compression_output(response_text)
+
+        if not response_text or (not l2_text and not l1_segments):
+            # 降级：本地机械兜底
+            local_summary = _build_local_fallback_summary(pure_msgs)
+            existing_l2.insert(0, {
+                "role": "system",
+                "content": f"[L2 极简摘要]\n{local_summary}"
+            })
+            summary_source = "local_fallback"
+        else:
+            if l2_text:
+                existing_l2.insert(0, {
+                    "role": "system",
+                    "content": f"[L2 极简摘要]\n{l2_text}"
+                })
+            for seg in reversed(l1_segments):
+                existing_l1.insert(0, {
+                    "role": "system",
+                    "content": f"[L1 段摘要]\n{seg}"
+                })
+
+        # ── 记忆沉淀（TICKET-024 D） ──
+        if memory_entries:
+            self._precipitate_memory(memory_entries)
+
+        # ── 组装最终 history ──
+        self._assemble_compressed(existing_l2, existing_l1, layer_0)
 
         # ── 后统计 ──
         post_msg_count = len(self.history)
         post_tokens = _estimate_tokens(self.history)
-
-        summary_source = "llm"
-        if summary:
-            self.history.insert(0, {
-                "role": "system",
-                "content": f"[对话历史摘要]:\n{summary}"
-            })
-            # 重新计算后统计（插入摘要后）
-            post_msg_count = len(self.history)
-            post_tokens = _estimate_tokens(self.history)
-        else:
-            # 票 TICKET-023：零摘要改为本地机械兜底
-            summary = _build_local_fallback_summary(old_msgs_no_summary)
-            summary_source = "local_fallback"
-            self.history.insert(0, {
-                "role": "system",
-                "content": summary
-            })
-            post_msg_count = len(self.history)
-            post_tokens = _estimate_tokens(self.history)
+        layer_stats = {
+            "l0_msg_count": len(layer_0),
+            "l0_tokens": layer_0_tokens,
+            "l1_summary_count": len(existing_l1),
+            "l2_summary_count": len(existing_l2),
+        }
 
         # ── 归档 + 事件 ──
         session_id = getattr(self, 'sid', '')
         _archive_compressed(
             session_id=session_id,
-            old_msgs=old_msgs,
-            summary=summary or "(压缩失败，原文被丢弃)",
+            old_msgs=compressible,
+            summary=(l2_text or "") + (" | L1:" + str(len(l1_segments)) if l1_segments else ""),
             pre_count=pre_msg_count,
             post_count=post_msg_count,
             pre_tokens=pre_tokens,
@@ -553,12 +572,143 @@ class ContextMixin:
                 "post_msg_count": post_msg_count,
                 "pre_tokens": pre_tokens,
                 "post_tokens": post_tokens,
-                "summary_length": len(summary or ""),
                 "summary_source": summary_source,
-                "archived_count": len(old_msgs),
+                "layer_stats": layer_stats,
+                "archived_count": len(compressible),
             })
         except Exception:
             logger.warning("context.compressed 事件写入失败（静默降级）", exc_info=True)
+
+    def _call_summary_llm(self, prompt_text: str) -> str:
+        """调用 LLM 做摘要——轻量封装，失败返回空字符串。"""
+        self._compressing = True
+        try:
+            prompt = [{"role": "user", "content": prompt_text}]
+            response = self.llm_caller(prompt, use_tools=False)
+            if isinstance(response, dict) and "error" not in response:
+                content = (response.get("choices", [{}])[0]
+                           .get("message", {}).get("content", ""))
+                return content.strip() if content else ""
+            return ""
+        except Exception:
+            logger.warning("LLM 摘要调用失败（静默降级）", exc_info=True)
+            return ""
+        finally:
+            self._compressing = False
+
+    def _parse_compression_output(self, text: str) -> tuple:
+        """解析 LLM 压缩输出，返回 (l2_text, l1_segments_list, memory_entries_list)。"""
+        if not text:
+            return "", [], []
+
+        l2_text = ""
+        l1_segments = []
+        memory_entries = []
+        current_section = None
+        current_content = []
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("### L2_ULTRA_BRIEF") or stripped.startswith("## L2_ULTRA_BRIEF"):
+                if current_section == "l1" and current_content:
+                    l1_segments.append("\n".join(current_content).strip())
+                    current_content = []
+                if current_section == "l2" and current_content:
+                    l2_text = "\n".join(current_content).strip()
+                    current_content = []
+                current_section = "l2"
+            elif stripped.startswith("### L1_SEGMENT") or stripped.startswith("## L1_SEGMENT"):
+                if current_section == "l1" and current_content:
+                    l1_segments.append("\n".join(current_content).strip())
+                    current_content = []
+                if current_section == "l2" and current_content:
+                    l2_text = "\n".join(current_content).strip()
+                    current_content = []
+                current_section = "l1"
+            elif stripped.startswith("### MEMORY") or stripped.startswith("## MEMORY"):
+                if current_section == "l1" and current_content:
+                    l1_segments.append("\n".join(current_content).strip())
+                    current_content = []
+                if current_section == "l2" and current_content:
+                    l2_text = "\n".join(current_content).strip()
+                    current_content = []
+                current_section = "memory"
+            elif current_section and stripped:
+                current_content.append(line)
+
+        # 处理最后一段
+        if current_section == "l2" and current_content:
+            l2_text = "\n".join(current_content).strip()
+        elif current_section == "l1" and current_content:
+            l1_segments.append("\n".join(current_content).strip())
+        elif current_section == "memory" and current_content:
+            for entry in current_content:
+                entry = entry.strip().lstrip("- ")
+                if entry:
+                    memory_entries.append(entry)
+
+        return l2_text, l1_segments, memory_entries
+
+    def _precipitate_memory(self, entries: list):
+        """将 LLM 产出的知识条目写入 knowledge_base.json（信号分 100）。
+
+        条目格式：KEY_DECISION: xxx / USER_PREF: xxx / FACT: xxx
+        失败静默降级，不阻塞压缩。
+        """
+        try:
+            from tools.v5_memory import add_entry
+            for entry in entries:
+                # 解析 TYPE: content 格式
+                if ":" in entry:
+                    parts = entry.split(":", 1)
+                    etype = parts[0].strip().upper()
+                    content = parts[1].strip()
+                else:
+                    etype = "FACT"
+                    content = entry.strip()
+                if content:
+                    add_entry(
+                        text=content,
+                        entry_type=etype,
+                        tags=["compression"],
+                        folder="compressed",
+                    )
+        except Exception:
+            logger.warning("记忆沉淀失败（静默降级）", exc_info=True)
+
+    def _assemble_compressed(self, l2_summaries: list, l1_summaries: list,
+                              layer_0: list):
+        """组装压缩后的 history：[L2摘要] + [L1段摘要] + [锚点] + [层0逐字]。
+
+        TICKET-024：层0 内不得含锚点消息，否则会重复插入。
+        """
+        _ANCHOR_PREFIX = "[工作锚点"
+
+        # ── 断言/清理：层0 内不得含锚点 ──
+        anchors_in_l0 = [m for m in layer_0
+                         if m.get("role") == "system" and
+                         m.get("content", "").startswith(_ANCHOR_PREFIX)]
+        if anchors_in_l0:
+            logger.warning(
+                f"_assemble_compressed: 层0 内发现 {len(anchors_in_l0)} 个锚点消息，已自动剔除。"
+                f" 累计层0 token 时不应计入锚点，请检查调用方。"
+            )
+            layer_0 = [m for m in layer_0 if m not in anchors_in_l0]
+
+        # 保留已有锚点（在 history[0]）
+        anchor = self.history[0] if (self.history and
+                                     self.history[0].get("role") == "system" and
+                                     self.history[0].get("content", "").startswith(_ANCHOR_PREFIX)) else None
+        # 组装
+        new_history = []
+        new_history.extend(l2_summaries)
+        new_history.extend(l1_summaries)
+        if anchor:
+            new_history.append(anchor)
+        else:
+            new_history.append(self._build_work_anchor())
+        new_history.extend(layer_0)
+        self.history = new_history
 
     def _classify_query(self) -> Optional[str]:
         """根据当前用户输入判断查询类别，返回类别名称或 None（使用全部工具）。"""
