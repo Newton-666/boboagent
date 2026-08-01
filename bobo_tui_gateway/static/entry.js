@@ -73033,7 +73033,6 @@ var GatewayClient = class extends EventEmitter {
     if (sockPath) {
       env3.BOBO_GW_SOCKET = sockPath;
     }
-    env3.BOBO_GW_GUARD = "1";
     this.startReadyTimer(python, cwd2);
     this.proc = spawn(python, ["-m", "bobo_tui_gateway.entry"], { cwd: cwd2, env: env3, stdio: ["pipe", "pipe", "pipe"] });
     this.lifecycle(`[lifecycle] spawned gateway child ${describeChild(this.proc)} python=${python} cwd=${cwd2}${sockPath ? " [socket \u6A21\u5F0F]" : " [stdio \u6A21\u5F0F]"}`);
