@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.analyze_prompt_budget import analyze, iter_events
+from docs.战役工具.analyze_prompt_budget import analyze, iter_events
 
 
 @pytest.fixture
