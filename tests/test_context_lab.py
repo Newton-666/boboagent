@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from scripts.context_lab import (
+from docs.战役工具.context_lab import (
     _calc_amnesia_signals,
     _calc_basic_stats,
     _calc_compression_stats,
