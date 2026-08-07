@@ -97,8 +97,9 @@ def execute_tool(tool_name: str, arguments: dict, engine=None) -> str:
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
+            # 票 TICKET-E2b：describe_tool 需要路由到调用方 Engine 的 _extra_tools
             # 热修：注入前复制，禁止污染调用方字典本体（Engine 泄漏进 JSON 序列化会炸）
-            if tool_name == "task_ledger" and "_engine" not in arguments:
+            if tool_name in ("task_ledger", "describe_tool") and "_engine" not in arguments:
                 arguments = dict(arguments)
                 arguments["_engine"] = engine
             future = executor.submit(func, **arguments)
