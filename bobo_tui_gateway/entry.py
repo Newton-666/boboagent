@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import atexit
+import faulthandler  # TICKET-E1b：环形快照 dump 用（模块顶层，函数内 import 会变局部变量）
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 
@@ -52,13 +53,44 @@ def _log_sys_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = _log_sys_exception
 
-# faulthandler：每 2 分钟 dump 所有线程堆栈（帮助诊断"假死"）
+# ── TICKET-E1b：stack_dump 环形快照（log 卫生）──────────────
+# 默认模式：每 120s 覆盖写一屏（w 模式），文件恒定只留最新一屏。
+# BOBO_STACK_DUMP=1：保留旧版 repeat 追加模式（全量连拍，战时排查用）。
+_DUMP_INTERVAL = 120
+
+
+def _snapshot_loop(dump_path: str, interval: float):
+    """环形快照循环：每 interval 秒覆盖写一屏（daemon 线程运行）。"""
+    while True:
+        time.sleep(interval)
+        try:
+            with open(dump_path, "w", encoding="utf-8", errors="replace") as fd:
+                faulthandler.dump_traceback(file=fd)
+        except Exception:
+            pass  # 快照失败静默降级，不影响主流程
+
+
+def _setup_stack_dump(log_dir: str) -> str:
+    """配置 stack_dump 快照，返回模式名（'ring' 环形 / 'append' 连拍）。"""
+    dump_path = os.path.join(log_dir, "stack_dump.log")
+    if os.environ.get("BOBO_STACK_DUMP") == "1":
+        # 战时模式：全量连拍，追加写，与旧版行为一致
+        fd = open(dump_path, "a")
+        faulthandler.dump_traceback_later(120, repeat=True, file=fd)
+        atexit.register(lambda: fd.close())
+        return "append"
+    # 默认环形快照：daemon 后台线程每 120s 覆盖写最新一屏
+    threading.Thread(
+        target=_snapshot_loop,
+        args=(dump_path, _DUMP_INTERVAL),
+        daemon=True,
+        name="stack-dump-snapshot",
+    ).start()
+    return "ring"
+
+
 try:
-    import faulthandler
-    _dump_path = os.path.join(_LOG_DIR, "stack_dump.log")
-    _dump_fd = open(_dump_path, "a")
-    faulthandler.dump_traceback_later(120, repeat=True, file=_dump_fd)
-    atexit.register(lambda: _dump_fd.close())
+    _setup_stack_dump(_LOG_DIR)
 except Exception:
     pass
 
