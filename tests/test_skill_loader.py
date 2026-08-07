@@ -37,22 +37,9 @@ class TestLoadStandards:
         # 即使没有，也不应崩溃
 
 
-class TestListAvailable:
-    def test_list_available_returns_string(self, empty_loader):
-        result = empty_loader.list_available()
-        assert isinstance(result, str)
-
-    def test_list_available_not_crashing(self, empty_loader):
-        result = empty_loader.list_available()
-        # 无论是否有标准目录，都不崩溃
-        assert isinstance(result, str)
-
-
 class TestMissingDir:
     def test_handles_missing_skill_standards_dir(self):
         """即使 data/skill-standards/ 不存在也不崩溃。"""
         loader = SkillLoader(get_history=lambda: [])
         result = loader.load_standards()
         assert isinstance(result, list)
-        result2 = loader.list_available()
-        assert isinstance(result2, str)

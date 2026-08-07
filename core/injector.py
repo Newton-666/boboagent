@@ -18,6 +18,36 @@ logger = logging.getLogger(__name__)
 _LIBRARY_DIR = _os.path.join(
     _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "library")
 
+# 票 TICKET-E3b：GUIDANCE 预付层导航（L2，docs/GUIDANCE.md）
+_GUIDANCE_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "docs", "GUIDANCE.md")
+_GUIDANCE_CACHE: dict = {"mtime": -1, "content": None}
+
+
+def _load_guidance() -> str | None:
+    """模块级缓存读 docs/GUIDANCE.md：mtime 变化才重读，缺失静默返回 None。
+
+    每轮 build_messages 只做一次 _os.stat（无 IO），文件不变不重复读盘；
+    文件缺失或不可读时返回 None，调用方静默跳过注入。
+    """
+    try:
+        st = _os.stat(_GUIDANCE_PATH)
+    except OSError:
+        _GUIDANCE_CACHE["content"] = None
+        _GUIDANCE_CACHE["mtime"] = -1
+        return None
+    if st.st_mtime != _GUIDANCE_CACHE.get("mtime"):
+        try:
+            with open(_GUIDANCE_PATH, encoding="utf-8") as f:
+                _GUIDANCE_CACHE["content"] = f.read()
+            _GUIDANCE_CACHE["mtime"] = st.st_mtime
+        except OSError:
+            _GUIDANCE_CACHE["content"] = None
+            _GUIDANCE_CACHE["mtime"] = -1
+            return None
+    return _GUIDANCE_CACHE["content"]
+
 
 def _read_note_frontmatter(path) -> dict:
     """轻量解析笔记 frontmatter（topic/domain/version/last_touched/source_sessions）。
@@ -58,11 +88,11 @@ class PromptInjector:
     1. pending diff（代码审查）
     2. 自定义 API
     3. 用户资料 + 记忆
-    4. AGENTS.md（项目规则）
-    5. 改动日志（tracker.recent_changes）
-    6. 已读文件（tracker.recent_reads）
-    7. 主动连接（proactive.inject_context）
-    8. 技能标准（skill_loader.load_standards）
+    4. 改动日志（tracker.recent_changes）
+    5. 已读文件（tracker.recent_reads）
+    6. 主动连接（proactive.inject_context）
+    7. 技能标准（skill_loader.load_standards，命中才注入全文）
+    8. GUIDANCE 导航（docs/GUIDANCE.md，预付层 L2，紧跟自查协议之后）
     """
 
     def __init__(self, engine_ref):
@@ -108,7 +138,17 @@ class PromptInjector:
             "memory": {"chars": 0, "entries": 0, "total_entries": 0, "evicted": 0},
             "skills": {"chars": 0, "truncated": False},
             "note_pointers": {"chars": 0, "count": 0, "topics": []},
+            "guidance": {"chars": 0},
         }
+
+        # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
+        _guidance = _load_guidance()
+        if _guidance:
+            messages.insert(2, {
+                "role": "system",
+                "content": _guidance,
+            })
+            budget_stats["guidance"] = {"chars": len(_guidance)}
 
         # ── 1. pending diff ──
         if engine._pending_diff:
@@ -212,22 +252,6 @@ class PromptInjector:
         except Exception as e:
             logger.debug("注入笔记指针失败: %s", e)
 
-        # ── 5. AGENTS.md ──
-        try:
-            vault = _os.environ.get("OBSIDIAN_VAULT", "")
-            if vault:
-                agents_path = _os.path.join(vault, "AGENTS.md")
-                if _os.path.isfile(agents_path):
-                    with open(agents_path, encoding="utf-8") as _f:
-                        agents_content = _f.read(4000)
-                    if agents_content.strip():
-                        messages.insert(1, {
-                            "role": "system",
-                            "content": f"[项目规则 (AGENTS.md)]:\n{agents_content}"
-                        })
-        except Exception as e:
-            logger.debug("注入 AGENTS.md 失败: %s", e)
-
         # ── 6. 改动日志 ──
         if engine.tracker._change_log:
             items = engine.tracker._change_log[-5:]
@@ -250,7 +274,7 @@ class PromptInjector:
         # ── 8. 主动连接 ──
         messages = engine.proactive.inject_context(messages)
 
-        # ── 9. 技能标准 ──
+        # ── 9. 技能标准（票 TICKET-E3b：未命中清单已删，仅命中才注入）──
         skill_stds = engine.skill_loader.load_standards()
         if skill_stds:
             combined = "\n\n---\n\n".join(skill_stds)
@@ -261,17 +285,6 @@ class PromptInjector:
                     + combined
                 ),
             })
-        else:
-            # 没有命中任何标准时，仍然告知可用标准列表（让 Bobo 知道自己的技能）
-            available = engine.skill_loader.list_available()
-            if available:
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        "## 可用的项目标准（当前未命中，以下仅供参考）\n\n"
-                        + available
-                    ),
-                })
 
         # ── 10. 上下文预算监控（票 LN-4 + LN-5）────
         # 组装完成写 prompt.budget 事件（兼容 LN-4）

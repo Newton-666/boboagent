@@ -195,11 +195,10 @@ def test_pointer_budget_three_max(library, no_skills):
     contents = _all_content(msgs)
     # 只取前 3 条
     assert contents.count("📚 关联笔记") == 3
-    # 段长 ≤300 字符：找指针段
-    start = contents.find("📚 关联笔记")
-    end = contents.find("hello world")
-    pointer_block = contents[start:end] if start != -1 else ""
-    assert 0 < len(pointer_block) <= 600
+    # 段长 ≤300 字符：直接断言指针消息本体（GUIDANCE 是独立 system 消息，不混入指针段）
+    pointer_msgs = [m for m in msgs if "📚 关联笔记" in m.get("content", "")]
+    assert len(pointer_msgs) == 1
+    assert 0 < len(pointer_msgs[0]["content"]) <= 600
 
 
 # ── 验收 4：保底金标准（记忆吃满 5000 → skill ≥800、指针仍在）─
@@ -304,12 +303,13 @@ def test_prompt_budget_event(library, no_skills, tmp_path, monkeypatch):
     # total_chars 与实测一致
     assert ev["total_chars"] == sum(len(m.get("content", "")) for m in msgs)
     sec = ev["sections"]
-    # 四段齐全
-    assert set(sec.keys()) == {"identity", "memory", "skills", "note_pointers"}
+    # 五段齐全（票 TICKET-E3b：+guidance 预付层）
+    assert set(sec.keys()) == {"identity", "memory", "skills", "note_pointers", "guidance"}
     assert sec["identity"] == len("You are Bobo.")
     assert isinstance(sec["memory"], dict)
     assert isinstance(sec["skills"], dict)
     assert isinstance(sec["note_pointers"], dict)
+    assert isinstance(sec["guidance"], dict)
     # 指针段统计：主题正确
     assert sec["note_pointers"]["count"] == 1
     assert sec["note_pointers"]["topics"] == ["矩阵B构造"]
