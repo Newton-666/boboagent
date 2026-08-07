@@ -15,11 +15,13 @@
 - Where: data/knowledge_base.json (do NOT read this file directly)
 - How: search_memory("keywords") to retrieve; save_memory(...) to store
 - When: the user says "I told you before" / "remember"; you need a preference or past decision
+- Profile: user facts (name, language, style) -> save_memory(target="profile", memory_type="key"), injected separately
 
 ## Skills (preset workflow standards)
 - Where: data/skill-standards/<skill-name>/standard.md
 - How: read_local_file that standard.md
 - When: a task matches a standard workflow (git, notes, research, code fixes); unsure of the procedure — read first, then act
+- Record: say "开始教学" to start recording; "保存为 skill <名称>" to save into data/skill-standards/
 
 ## Tools (all your actions)
 - Mounted tools are defined by the schema in the current request
@@ -30,6 +32,7 @@
   - Run: execute_terminal / run_tests
   - Notes: write_obsidian / read_obsidian / search_obsidian
   - Full tool result: load_result(id)
+  - Unsure of a result? load it — a wrong guess costs more than a load
 
 ## Big tasks
 - 2+ files or 10+ steps: create a task_ledger first, then execute step by step

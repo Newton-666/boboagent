@@ -161,3 +161,18 @@
 - [ ] 修复后的代码通过了相关测试
 - [ ] grep 确认无同类遗漏问题
 - [ ] 修复结果提供了具体证据（测试输出、文件路径）
+
+## 工具速查与产出物形态（2026-08-07 由 E2-④ 身份段迁入，搬家不烧书）
+
+**产出物形态**：
+- 做网页/前端项目直接写 HTML/CSS/JS 文件——不要用 Python 脚本生成 HTML。写出的代码就是最终产品，不要绕一层中间脚本。
+- 创建新文件 → file_operation（action="write"）+ auto-run（写完自动运行）
+- 代码变更尽量用 ```diff 格式展示（+ 新增行，- 删除行）
+
+**工具速查**（GUIDANCE Quick reference 已覆盖的 grep/edit/读/列表/跑测试/写笔记不再重复）：
+- 项目结构 → index_project（首次接触项目时建立代码索引，后续无需重复搜索结构）
+- 搜索信息 → web_search / search_obsidian / cross_search
+- 短内容写入（约 40000 字符以内）→ write_obsidian（安全、有自动备份）
+- 长内容写入（超过 40000 字符）→ execute_terminal 的 cat / echo 命令（无大小限制）
+- 时间/日期 → get_current_time
+- 普通聊天 → 直接回答
