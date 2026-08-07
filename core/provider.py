@@ -15,6 +15,9 @@ PROVIDERS = {
         # 128K：DeepSeek 实际上下文窗口为 128K（deepseek-chat / deepseek-reasoner）。
         # 错误的高估会让 token 预算失效，宁可低估。
         "context_length": 128000,
+        # TICKET-E4b：deepseek-v4-flash / v4-pro 官方真实窗口 1M（2026-04 发布）。
+        # 128000 保留为老型号兜底；model_context 按型号覆盖。
+        "model_context": {"deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000},
     },
     "openai": {
         "name": "OpenAI",
