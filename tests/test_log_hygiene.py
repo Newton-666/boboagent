@@ -8,6 +8,7 @@
 
 import glob
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -87,9 +88,11 @@ class StuckThreadVisibleTest(unittest.TestCase):
         time.sleep(0.8)
 
         content = open(dump_path, encoding="utf-8", errors="replace").read()
-        # Python 3.14 faulthandler 显示线程名 [name]；断言阻塞线程名 + 其堆栈帧可见
-        self.assertIn("artificial-stuck-thread", content, "阻塞线程应出现在快照中")
+        # 阻塞线程的堆栈帧必须在快照中可见（Python 3.11+ 均成立）
         self.assertIn("stuck", content, "阻塞线程的堆栈帧应在快照中可见")
+        # 线程名 [name] 是 Python 3.14 faulthandler 才有的输出；3.11/3.12/3.13 仅显示 Thread 0x 地址
+        if sys.version_info >= (3, 14):
+            self.assertIn("artificial-stuck-thread", content, "阻塞线程名应出现在快照中")
 
 
 class BattleArchiveTest(unittest.TestCase):
