@@ -117,6 +117,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         )
         self._file_checkpoints: dict[str, str] = {}  # path -> content before write（每实例独立）
         self._session_written_files: set[str] = set()  # 票 TICKET-025：会话级只增集合，压缩不塌缩
+        self._extra_tools: set[str] = set()  # 票 TICKET-E2b：describe_tool 取件注册，会话级只增，压缩不清空
         self.tracker = RoundTracker(self)  # 回合后处理（change_log / read_files / pattern）
         # ── 票 K v2：任务台账（收工闸核心） ──
         self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]

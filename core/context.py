@@ -721,6 +721,9 @@ class ContextMixin:
                     return category
         return None
 
+    # 元工具：永远不可被分类裁剪（票 TICKET-E2b）
+    _META_TOOLS: set[str] = {"describe_tool", "load_result", "read_local_file"}
+
     def _get_filtered_tools(self, extra_categories: set[str] | None = None) -> Optional[list]:
         """根据查询类别 + 已扩张类别返回过滤后的工具列表，返回 None 表示使用全部工具。"""
         from tools import TOOLS_SCHEMA
@@ -752,6 +755,11 @@ class ContextMixin:
 
         if not allowed_names:
             return None
+
+        # 票 TICKET-E2b：describe_tool 取件注册的额外工具，永远并入允许集
+        allowed_names.update(getattr(self, "_extra_tools", set()) or set())
+        # 票 TICKET-E2b：元工具不可被分类裁剪
+        allowed_names.update(self._META_TOOLS)
 
         filtered = []
         for tool in TOOLS_SCHEMA:
