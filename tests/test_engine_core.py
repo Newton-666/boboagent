@@ -91,10 +91,12 @@ class TestTeachingMode:
         assert engine.teaching_mode is True  # Still in teaching mode
 
     def test_save_skill_with_name(self, engine, tmp_path, monkeypatch):
-        # Point skills dir to a temp directory
-        monkeypatch.setattr(engine, "skills_dir", tmp_path)
-        # Also patch the skill_executor's skills_dir
-        engine.skill_executor.skills_dir = tmp_path
+        # TICKET-E3a：新版 SkillManager 落盘到 _standards_dir()/name/standard.md，
+        # 测试 patch 静态方法指向 tmp_path，避免写入真实 data/skill-standards/
+        from core.skill_manager import SkillManager
+        monkeypatch.setattr(
+            SkillManager, "_standards_dir", staticmethod(lambda: tmp_path)
+        )
 
         engine.teaching_mode = True
         engine.recorded_messages = [
@@ -105,16 +107,9 @@ class TestTeachingMode:
         assert "已保存" in result
         assert engine.teaching_mode is False
 
-        # 2026-07-27: 录制保存到 data/skill-standards/ 而非 skills/*.yaml
-        import os as _os
-        std_path = _os.path.join(
-            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-            "data", "skill-standards", "search_test", "standard.md"
-        )
-        assert _os.path.isfile(std_path), f"standard.md not found at {std_path}"
-        # 清理测试文件
-        _os.remove(std_path)
-        _os.rmdir(_os.path.dirname(std_path))
+        # 录制保存到 data/skill-standards/（tmp_path）而非 skills/*.yaml
+        std_path = tmp_path / "search_test" / "standard.md"
+        assert std_path.is_file(), f"standard.md not found at {std_path}"
 
 
 class TestUndoCheckpoint:

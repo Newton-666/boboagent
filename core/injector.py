@@ -56,14 +56,13 @@ class PromptInjector:
 
     注入顺序：
     1. pending diff（代码审查）
-    2. 推荐技能
-    3. 自定义 API
-    4. 用户资料 + 记忆
-    5. AGENTS.md（项目规则）
-    6. 改动日志（tracker.recent_changes）
-    7. 已读文件（tracker.recent_reads）
-    8. 主动连接（proactive.inject_context）
-    9. 技能标准（skill_loader.load_standards）
+    2. 自定义 API
+    3. 用户资料 + 记忆
+    4. AGENTS.md（项目规则）
+    5. 改动日志（tracker.recent_changes）
+    6. 已读文件（tracker.recent_reads）
+    7. 主动连接（proactive.inject_context）
+    8. 技能标准（skill_loader.load_standards）
     """
 
     def __init__(self, engine_ref):
@@ -128,77 +127,6 @@ class PromptInjector:
                 )
             })
             engine._pending_diff = ""
-
-        # ── 2. 推荐技能 ──
-        try:
-            from core.skill_manager import get_skill_manager
-            _skill_mgr = get_skill_manager()
-            skill_refs = _skill_mgr.get_skill_tools()
-            if skill_refs:
-                user_text = (engine.current_user_input or "").lower()
-                matched = []
-                others = []
-                for s in skill_refs:
-                    name = s["function"]["name"].replace("run_skill:", "")
-                    desc = s["function"]["description"]
-                    triggers = s.get("triggers", [])
-                    if triggers and any(t.lower() in user_text for t in triggers):
-                        matched.append(f"  ▶ {name}: {desc}")
-                        # 注入匹配 skill 的完整步骤 → LLM 直接可见，不需调工具
-                        try:
-                            skill_data = _skill_mgr.get_skill(name)
-                            if skill_data and skill_data.get("steps"):
-                                step_lines = []
-                                for st in skill_data["steps"]:
-                                    sn = st.get("name", "")
-                                    sa = st.get("action", "")
-                                    si = st.get("step", "")
-                                    if sn or sa:
-                                        step_lines.append(f"    {si}. {sn}: {sa[:200]}")
-                                if step_lines:
-                                    matched.append("\n".join(step_lines))
-                        except Exception as e:
-                            logger.debug("注入技能步骤失败 (%s): %s", name, e)
-                    else:
-                        others.append(f"  {name}: {desc[:100]}")
-                lines = []
-                if matched:
-                    lines.append("[推荐技能 — 当前场景可用]:")
-                    lines.extend(matched)
-                    if others:
-                        lines.append("")
-                        lines.append("[其他技能]:")
-                        lines.extend(others)
-                else:
-                    lines.append("[可参考的技能工作流]:")
-                    lines.extend(others)
-                # 票 LN-5：skill 段改为总池比例化 floor/ceiling
-                # 先保证 floor（默认 16% 总池），再按 ceiling（默认 30% 总池）裁剪
-                # 超额优先裁剪低相关度 others，从后往前丢行
-                pool = get_prompt_pool()
-                skill_floor = pool.floor("skills")
-                skill_ceiling = pool.ceiling("skills")
-                content = "\n".join(lines)
-                truncated = False
-                # 先按 ceiling 裁剪
-                if len(content) > skill_ceiling:
-                    while len(content) > skill_ceiling and len(lines) > 1:
-                        lines.pop()
-                        content = "\n".join(lines)
-                    if len(content) > skill_ceiling:
-                        content = content[:skill_ceiling]
-                    truncated = True
-                # 若按 ceiling 裁完后低于 floor，则标题不算，但内容至少保留到 floor
-                # 这里 floor 作为软保底：如果 ceiling 把内容全裁光了，说明触发skill过多，
-                # 但至少保留标题（已保证）。后续金标准测试要求记忆吃满时 skill≥800。
-                budget_stats["skills"] = {
-                    "chars": len(content), "truncated": truncated, "floor": skill_floor, "ceiling": skill_ceiling}
-                messages.insert(1, {
-                    "role": "system",
-                    "content": content
-                })
-        except Exception as e:
-            logger.debug("注入技能工作流失败: %s", e)
 
         # ── 3. 自定义 API ──
         apis_dir = _os.path.expanduser("~/.bobo/apis")

@@ -223,25 +223,6 @@ def test_guarantee_floor_golden(library, no_skills, monkeypatch, tmp_path):
     monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
     monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
 
-    # 构造大量技能（matched 内容 ≥800 字符：多技能 × 多步骤）
-    skills = []
-    for i in range(6):
-        steps = [
-            {"step": str(s), "name": f"子步骤{i}-{s}",
-             "action": f"执行第 {i} 号技能的第 {s} 个操作动作"}
-            for s in range(1, 9)
-        ]
-        skills.append({
-            "name": f"skill_{i}",
-            "description": f"技能 {i}：处理第 {i} 类任务工作流（含详细操作说明）",
-            "triggers": ["处理"],
-            "steps": steps,
-        })
-    monkeypatch.setattr(
-        "core.skill_manager.get_skill_manager",
-        lambda: MockSkillManager(skills=skills),
-    )
-
     _write_note(library, "技术研究", "矩阵B构造", sid="sid-abc")
     engine = MockEngine(user_input="帮我处理一下任务")
     injector = PromptInjector(engine)
@@ -250,12 +231,6 @@ def test_guarantee_floor_golden(library, no_skills, monkeypatch, tmp_path):
 
     # 记忆段被截到 2500 内（吃满场景）
     assert "记忆 (" in contents
-    # skill 段仍 ≥800 字符
-    assert "[推荐技能" in contents
-    skill_start = contents.find("[推荐技能")
-    skill_end = contents.find("hello world")
-    skill_block = contents[skill_start:skill_end] if skill_start != -1 else ""
-    assert len(skill_block) >= 800, f"skill 段仅 {len(skill_block)} 字符"
     # 指针段仍在
     assert "📚 关联笔记" in contents
     assert "矩阵B构造" in contents

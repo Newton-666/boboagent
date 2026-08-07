@@ -7,7 +7,6 @@ import re
 import time
 import logging
 import threading
-from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Tuple
 
 logger = logging.getLogger(__name__)
@@ -84,14 +83,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 会话标识：gateway 在 open_session 中设 self.sid；无会话时走时间戳兜底
         _now = time.time()
         self.sid = f"boot-{int(_now)}-{os.urandom(2).hex()}"
-        self.skills_dir = Path(__file__).parent.parent / "skills"
         self.system_prompt = self._build_system_prompt()
 
         self.teaching_mode = False
         self.recorded_messages = []
         self.current_skill_name = None
 
-        self.skill_manager = get_skill_manager()
         self.skill_executor = get_skill_manager()
 
         self.state = self.STATE_IDLE
@@ -352,10 +349,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             msg["result"] = result
         self.recorded_messages.append(msg)
 
-    def _check_skill_match(self, user_input: str) -> Optional[str]:
-        """Skills are now tools (run_skill:xxx). No keyword matching needed."""
-        return None
-
     def _handle_pre_input(self, user_input: str) -> Optional[str]:
         if not user_input:
             return None
@@ -383,16 +376,6 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             # _notify 中的 file_info 已内嵌在 msg 内，此处复用 label 发通知
             self._notify("status.update", {"kind": "undo", "text": f"已回退到: {label}"})
             return msg
-        if self.teaching_mode:
-            return None
-        skill_name = self._check_skill_match(user_input)
-        if skill_name is not None:
-            skill = self.skill_executor.load_skill(skill_name)
-            if skill is not None:
-                self._notify("thinking", {"phase": "using_skill", "message": f"执行 Skill: {skill_name}"})
-                result = self.skill_executor.execute_skill(skill)
-                return result
-            return None
         return None
 
     def _compress_changelog(self):
