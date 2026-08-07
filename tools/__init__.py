@@ -33,8 +33,6 @@ def discover_tools():
     for py_file in current_dir.glob("*.py"):
         if py_file.name == "__init__.py":
             continue
-        if py_file.name == "execute_skill.py":
-            continue  # 跳过有问题的工具
         
         try:
             spec = importlib.util.spec_from_file_location(f"tools.{py_file.stem}", py_file)

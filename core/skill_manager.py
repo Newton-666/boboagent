@@ -1,11 +1,15 @@
-"""Skill 管理器 — 加载、执行、录制技能。技能作为动态工具暴露给 LLM。"""
+"""Skill 管理器 — 活系统：录制技能 + 技能列表。
 
-import json
+TICKET-E3a：退役 YAML 通路（_load_all/add_skill/get_skill/execute_skill/
+_resolve_vars/get_skill_tools/load_skill 全部删除，调用点已死或已移除）。
+只保留活系统：save_from_recording（写 data/skill-standards/standard.md）
++ list_skills（扫描 data/skill-standards/，供前端 /skills 展示）。
+"""
+
 import os
 import re
-import yaml
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 
 def _auto_triggers(name: str, desc: str = "") -> list:
@@ -26,114 +30,22 @@ def _auto_triggers(name: str, desc: str = "") -> list:
 
 
 class SkillManager:
-    def __init__(self, skills_dir: str = "skills"):
-        self.skills_dir = Path(skills_dir)
-        self.skills_dir.mkdir(exist_ok=True)
-        self._skills: dict = {}
-        self._load_all()
+    """活系统 Skill 管理器：技能目录 = data/skill-standards/。"""
 
-    def _load_all(self):
-        self._skills = {}
-        for f in self.skills_dir.glob("*.yaml"):
-            try:
-                with open(f, encoding="utf-8") as fp:
-                    skill = yaml.safe_load(fp)
-                if skill and skill.get("name"):
-                    self._skills[skill["name"]] = skill
-            except Exception:
-                pass
-        # Also load from index.json for backward compatibility
-        idx = self.skills_dir / "index.json"
-        if idx.exists():
-            try:
-                with open(idx, encoding="utf-8") as fp:
-                    for entry in json.load(fp).get("skills", []):
-                        name = entry["name"]
-                        if name not in self._skills:
-                            self._skills[name] = {
-                                "name": name,
-                                "description": entry.get("description", ""),
-                                "steps": [],
-                            }
-            except Exception:
-                pass
+    @staticmethod
+    def _standards_dir() -> Path:
+        return Path(__file__).resolve().parent.parent / "data" / "skill-standards"
 
-    def list_skills(self):
-        return list(self._skills.keys())
-
-    def get_skill(self, name: str) -> Optional[dict]:
-        return self._skills.get(name)
-
-    def get_skill_tools(self) -> list:
-        """Return tool definitions for all skills (for dynamic registration)."""
-        tools = []
-        for name, skill in self._skills.items():
-            desc = skill.get("description", f"Skill: {name}")
-            triggers = skill.get("triggers", [])
-            tool = {
-                "type": "function",
-                "function": {
-                    "name": f"run_skill:{name}",
-                    "description": desc,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": [],
-                    },
-                },
-            }
-            if triggers:
-                tool["triggers"] = triggers
-            tools.append(tool)
-        return tools
-
-    def execute_skill(self, skill: dict, context: dict = None) -> str:
-        """Execute a skill's steps. Returns a summary string."""
-        from core.tool_executor import execute_tool
-
-        steps = skill.get("steps", [])
-        results = []
-        context = context or {}
-
-        for step in steps:
-            step_type = step.get("type") or step.get("action", "tool_call")
-
-            if step_type == "tool_call":
-                tool_name = step.get("tool") or step.get("name", "")
-                args = step.get("args", {})
-                resolved = self._resolve_vars(args, context)
-                try:
-                    result = execute_tool(tool_name, resolved)
-                    preview = (result or "")[:100].replace("\n", " ")
-                    results.append(f"[{tool_name}] {preview}")
-                    context["last_result"] = result
-                except Exception as e:
-                    results.append(f"[{tool_name}] 失败: {str(e)}")
-            elif step_type == "display":
-                results.append(step.get("description", ""))
-            elif step_type == "generate_code":
-                results.append("[生成代码] 由 LLM 处理")
-
-        return "\n".join(results) if results else "Skill 执行完成"
-
-    def add_skill(self, skill: dict):
-        """Add a skill and save to disk."""
-        name = skill["name"]
-        self._skills[name] = skill
-        path = self.skills_dir / f"{name}.yaml"
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(skill, f, allow_unicode=True, default_flow_style=False)
-
-    def _resolve_vars(self, value, context: dict):
-        if isinstance(value, str):
-            for k, v in context.items():
-                value = value.replace(f"{{{k}}}", str(v))
-            return value
-        if isinstance(value, dict):
-            return {k: self._resolve_vars(v, context) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self._resolve_vars(v, context) for v in value]
-        return value
+    def list_skills(self) -> List[str]:
+        """扫描 data/skill-standards/*/standard.md，返回技能名列表。"""
+        std_dir = self._standards_dir()
+        if not std_dir.is_dir():
+            return []
+        return sorted(
+            entry.name
+            for entry in std_dir.iterdir()
+            if entry.is_dir() and (entry / "standard.md").exists()
+        )
 
     def save_from_recording(self, skill_name: str, messages: List[Dict], description: str = "") -> str:
         """将录制的对话保存为 standard.md 格式的 skill（data/skill-standards/）。"""
@@ -159,10 +71,9 @@ class SkillManager:
         user_examples = "、".join([u[:40] for u in user_inputs[:3]]) if user_inputs else skill_name
 
         # 写 standard.md
-        _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        std_dir = os.path.join(_project_root, "data", "skill-standards", skill_name)
+        std_dir = self._standards_dir() / skill_name
         os.makedirs(std_dir, exist_ok=True)
-        filepath = os.path.join(std_dir, "standard.md")
+        filepath = std_dir / "standard.md"
 
         content = f"""# {skill_name} v1
 
@@ -207,14 +118,6 @@ class SkillManager:
 
         return f"Skill '{skill_name}' 已保存到 data/skill-standards/{skill_name}/standard.md\n触发词: {trigger_str}\n工具流: {tool_flow}"
 
-    def load_skill(self, skill_name: str) -> dict:
-        """从 YAML 文件加载单个 skill（兼容旧 SkillExecutor 接口）。"""
-        filepath = self.skills_dir / f"{skill_name}.yaml"
-        if not filepath.exists():
-            return None
-        with open(filepath, encoding="utf-8") as f:
-            return yaml.safe_load(f)
-
 
 _skill_manager = None
 
@@ -224,7 +127,3 @@ def get_skill_manager():
     if _skill_manager is None:
         _skill_manager = SkillManager()
     return _skill_manager
-
-
-# 兼容别名：旧代码用 skill_executor → 统一到 skill_manager
-get_skill_executor = get_skill_manager
