@@ -504,7 +504,11 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
         if _os.environ.get("BOBO_TAKEAWAYS", "").lower() == "off":
             return []
         try:
-            user_msgs = [m.get("content", "") for m in self.history[-4:]
+            # ── 票 E4a：user 窗口从 [-4:] 扩大为向前回溯 20 条 ──
+            # 根因：多轮工具执行后收工，history 末尾常为 assistant/tool 交替，
+            # [-4:] 内无 user → user_msg 空 → 静默 return []（失语）。
+            _window = self.history[-20:]
+            user_msgs = [m.get("content", "") for m in _window
                          if m.get("role") == "user" and m.get("content")]
             asst_msgs = [m.get("content", "") for m in self.history[-4:]
                           if m.get("role") == "assistant" and m.get("content")]
@@ -515,11 +519,21 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                 elif fallback_content:
                     asst_msg = fallback_content
                 else:
+                    # ── 票 E4a：禁止静默轮——无可提取内容时留原因事件 ──
+                    event_bus.write("takeaway.skipped", {
+                        "reason": "no_history_content",
+                        "sid": getattr(self, "sid", ""),
+                    })
                     return []
             else:
                 asst_msg = asst_msgs[-1]
             user_msg = user_msgs[-1] if user_msgs else ""
             if not user_msg:
+                # ── 票 E4a：回溯仍无 user → 留原因事件，不静默 ──
+                event_bus.write("takeaway.skipped", {
+                    "reason": "no_user_msg_in_window",
+                    "sid": getattr(self, "sid", ""),
+                })
                 return []
             # ── 预筛闸门：不值得则零成本跳过 ──
             # 终审补漏（2026-07-29）：工具回合无条件放行——工作回合默认有
@@ -544,6 +558,14 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
             ]
             response = self.llm_caller(prompt, use_tools=False)
             if isinstance(response, dict) and "error" in response:
+                # ── 票 E4a：LLM 提取失败留痕，不静默 ──
+                logger.warning("takeaway extract llm error (sid=%s): %s",
+                               getattr(self, "sid", ""), response.get("error"))
+                event_bus.write("notes.error", {
+                    "session_id": getattr(self, "sid", ""),
+                    "error": str(response.get("error")),
+                    "stage": "takeaway_extract",
+                })
                 return []
             content = (response.get("choices", [{}])[0]
                        .get("message", {}).get("content", ""))
@@ -556,7 +578,15 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     "items": results,
                 })
             return results
-        except Exception:
+        except Exception as _e:
+            # ── 票 E4a：提取异常留痕（WARNING + notes.error），不静默吞 ──
+            logger.warning("takeaway extract failed (sid=%s): %s",
+                           getattr(self, "sid", ""), _e)
+            event_bus.write("notes.error", {
+                "session_id": getattr(self, "sid", ""),
+                "error": str(_e),
+                "stage": "takeaway_extract",
+            })
             return []
 
     def _truncate_history(self):
@@ -1038,8 +1068,9 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                     # 内部已保证失败静默降级（WARNING + notes.error），绝不阻塞收工。
                     try:
                         from tools.living_notes import write_living_notes
+                        # ── 票 E4a：窗口与 _extract_takeaways 同步（回溯 20 条）──
                         _ln_user_msgs = [
-                            m.get("content", "") for m in self.history[-4:]
+                            m.get("content", "") for m in self.history[-20:]
                             if m.get("role") == "user" and m.get("content")
                         ]
                         # ── 票 LN-2S：full_reply = 本轮 assistant 完整回复（不截断）──
@@ -1058,8 +1089,15 @@ Bobo 的预设工作流标准（data/skill-standards/*/standard.md）在对话�
                             self.llm_caller,
                             full_reply=_full_reply,
                         )
-                    except Exception:
-                        pass
+                    except Exception as _ln_err:
+                        # ── 票 E4a：钩子异常留痕（WARNING + notes.error），不静默吞 ──
+                        logger.warning("living notes hook failed (sid=%s): %s",
+                                       getattr(self, "sid", ""), _ln_err)
+                        event_bus.write("notes.error", {
+                            "session_id": getattr(self, "sid", ""),
+                            "error": str(_ln_err),
+                            "stage": "ln_hook",
+                        })
                     logger.debug("RESPONDING extract_takeaways done: %d items", len(takeaways) if takeaways else 0)
                 # 自动 skill 发现：检查候选模式并主动提议
                 if self.proactive.mode != "off":
