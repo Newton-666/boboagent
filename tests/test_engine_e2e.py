@@ -114,7 +114,6 @@ def _make_test_engine(llm_caller, tool_executor=None, monkeypatch=None):
 
     # 5. 禁用 skill_loader（避免扫描 skill-standards 目录）
     monkeypatch.setattr(engine.skill_loader, "load_standards", lambda: [])
-    monkeypatch.setattr(engine.skill_loader, "list_available", lambda: "")
 
     # 6. 禁用 verifier（避免额外 LLM 调用）
     engine.verifier.check_and_inject = lambda *a, **kw: False

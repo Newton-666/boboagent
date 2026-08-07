@@ -90,25 +90,3 @@ class SkillLoader:
             return [entries[name]["content"] for name in top_names]
         except Exception:
             return []
-
-    def list_available(self) -> str:
-        """扫描 data/skill-standards/，返回所有可用标准的名称和触发关键词。"""
-        try:
-            std_dir = _os.path.join(_os.path.dirname(_os.path.dirname(
-                _os.path.abspath(__file__))), "data", "skill-standards")
-            if not _os.path.isdir(std_dir):
-                return ""
-            lines = []
-            for entry in sorted(_os.listdir(std_dir)):
-                path = _os.path.join(std_dir, entry, "standard.md")
-                if not _os.path.isfile(path):
-                    continue
-                with open(path, "r", encoding="utf-8") as fh:
-                    content = fh.read()
-                title = content.split("\n")[0].lstrip("#").strip()
-                kw_match = _sre.search(r'keywords:\s*(.+)', content, _sre.IGNORECASE)
-                keywords = kw_match.group(1).strip()[:80] if kw_match else ""
-                lines.append(f"  - {title} | 触发词: {keywords}")
-            return "\n".join(lines) if lines else ""
-        except Exception:
-            return ""

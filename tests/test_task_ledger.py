@@ -186,7 +186,6 @@ class TestEngineLedgerReinjection:
         monkeypatch.setattr(engine.proactive, "inject_context", lambda msgs: msgs)
         monkeypatch.setattr(engine.proactive, "mode", "off")
         monkeypatch.setattr(engine.skill_loader, "load_standards", lambda: [])
-        monkeypatch.setattr(engine.skill_loader, "list_available", lambda: "")
         engine.verifier.check_and_inject = lambda *a, **kw: False
         engine._worker_reminded = True
         monkeypatch.setattr(engine, "_check_guards", lambda: False)
