@@ -120,7 +120,8 @@ class TestResolveProvider:
     def test_context_length_included(self):
         result = resolve_provider(provider_name="deepseek")
         assert "context_length" in result
-        assert result["context_length"] == 128_000  # TICKET-023 窗口修正
+        # TICKET-E4b：默认模型 deepseek-v4-pro 命中 model_context → 1M
+        assert result["context_length"] == 1_000_000
 
     def test_ollama_no_api_key_needed(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "ollama")
@@ -134,3 +135,51 @@ class TestResolveProvider:
         result = resolve_provider()
         assert result["name"] == "google"
         assert "gemini" in result["model"].lower() or result["model"] == "gemini-2.0-flash"
+
+
+class TestDeepSeekModelContext:
+    """TICKET-E4b：DeepSeek 分型号窗口（v4 系列 1M，老型号兜底 128K）。"""
+
+    def test_deepseek_v4_flash_1m(self, monkeypatch):
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-v4-flash")
+        result = resolve_provider()
+        assert result["name"] == "deepseek"
+        assert result["model"] == "deepseek-v4-flash"
+        assert result["context_length"] == 1_000_000
+
+    def test_deepseek_v4_pro_1m(self, monkeypatch):
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-v4-pro")
+        result = resolve_provider()
+        assert result["model"] == "deepseek-v4-pro"
+        assert result["context_length"] == 1_000_000
+
+    def test_deepseek_legacy_model_fallback_128k(self, monkeypatch):
+        # 老型号（deepseek-chat 等）不在 model_context → 走 context_length 兜底 128K
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-chat")
+        result = resolve_provider()
+        assert result["model"] == "deepseek-chat"
+        assert result["context_length"] == 128_000
+
+    def test_deepseek_no_model_env_default_1m(self, monkeypatch):
+        # 未设 API_MODEL_NAME → 默认模型 deepseek-v4-pro 命中 1M
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.delenv("API_MODEL_NAME", raising=False)
+        result = resolve_provider()
+        assert result["context_length"] == 1_000_000
+
+    def test_get_context_length_v4_flash(self, monkeypatch):
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-v4-flash")
+        monkeypatch.delenv("BOBO_CONTEXT_LENGTH", raising=False)
+        from core.provider import get_context_length
+        assert get_context_length() == 1_000_000
+
+    def test_get_context_length_legacy(self, monkeypatch):
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-chat")
+        monkeypatch.delenv("BOBO_CONTEXT_LENGTH", raising=False)
+        from core.provider import get_context_length
+        assert get_context_length() == 128_000

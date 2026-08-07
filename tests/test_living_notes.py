@@ -224,6 +224,40 @@ def test_index_rebuild(ln_env):
     assert index.count("[[") == 2
 
 
+# ── 验收 6b：TICKET-E4b 死链排查 — 文件被删后重建，index 不含死链 ──
+
+def test_index_rebuild_removes_dead_links(ln_env):
+    """笔记文件被删除（绕过 living_notes，如手动 rm）后重建索引，
+    index.md 必须不再引用已不存在的主题（幂等重建天然清除死链）。"""
+    ln.write_living_notes(["A 要点"], "消息1", "sid-1", _stage_llm(
+        {"topic": "主题甲", "domain": "agent开发", "section": "- A 要点", "match": None},
+        _skeleton_body("主题甲", "agent开发", content="A 要点"),
+    ))
+    ln.write_living_notes(["B 要点"], "消息2", "sid-2", _stage_llm(
+        {"topic": "主题乙", "domain": "agent开发", "section": "- B 要点", "match": None},
+        _skeleton_body("主题乙", "agent开发", content="B 要点"),
+    ))
+    index = (ln_env / "index.md").read_text(encoding="utf-8")
+    assert "[[主题甲]]" in index
+    assert "[[主题乙]]" in index
+
+    # 模拟死链场景：主题乙文件被外部删除（不经过 living_notes），
+    # index.md 此时仍残留 [[主题乙]] —— 即票据 A5 报告的死链形态
+    (ln_env / "agent开发" / "主题乙.md").unlink()
+    stale = (ln_env / "index.md").read_text(encoding="utf-8")
+    assert "[[主题乙]]" in stale  # 残留条目 = 死链
+
+    # 任意一次正常写入触发 _rebuild_index 幂等全量重建
+    ln.write_living_notes(["C 要点"], "消息3", "sid-3", _stage_llm(
+        {"topic": "主题丙", "domain": "agent开发", "section": "- C 要点", "match": None},
+        _skeleton_body("主题丙", "agent开发", content="C 要点"),
+    ))
+    rebuilt = (ln_env / "index.md").read_text(encoding="utf-8")
+    assert "[[主题甲]]" in rebuilt
+    assert "[[主题丙]]" in rebuilt
+    assert "[[主题乙]]" not in rebuilt  # 死链已清除
+
+
 # ── 验收 7：总开关 ──────────────────────────────────
 
 def test_env_off_noop(ln_env, monkeypatch):
