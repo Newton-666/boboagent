@@ -569,6 +569,20 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call,
         # 4. index.md 幂等重生成
         _rebuild_index()
 
+        # 4.5 版本化保底：library 独立仓库自动提交（票 G1：_rebuild_index 后、镜像前；
+        #     只 add/commit，无变更跳过；失败静默降级 notes.error，绝不阻塞主流程；
+        #     library_dir 传本模块 LIBRARY_DIR——测试 monkeypatch 后自动指向 tmp 库）
+        try:
+            from tools.library_git import auto_commit
+            result = auto_commit(library_dir=LIBRARY_DIR,
+                                 action="write" if is_new else "update",
+                                 topic=topic, sid=sid)
+            if result.get("error"):
+                _emit("notes.error", {"error": f"library_git: {result['error']}"})
+        except Exception as e:
+            logger.warning("library git auto-commit failed (silent degrade): %s", e)
+            _emit("notes.error", {"error": f"library_git: {e}"})
+
         # 5. 单向镜像：主库 → Obsidian vault 展示层（失败静默降级，纪律同 E4a）
         #    R2b 铁律：挂钩永远不许传 allow_mass_delete（闸 2 熔断在自动场景常开）；
         #    闸 1/闸 2 触发 blocked 时降级记 notes.error，不阻塞主流程。
