@@ -12,6 +12,15 @@ _running: dict[str, threading.Event] = {}
 _running_lock = threading.Lock()
 
 
+def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool:
+    """等待用户确认（票 B-3 可测化）。
+
+    超时返回 False = 安全默认 deny（auto 下外部不可逆操作无人应答即拒绝，
+    不默认放行——v0.6.1 火 2 安全默认）。此行为由测试钉死防回归。
+    """
+    return event.wait(timeout=timeout)
+
+
 def cancel(sid: str):
     """请求中断指定会话的 engine 执行。"""
     with _running_lock:
@@ -174,7 +183,7 @@ def run_engine(
                 "session_id": sid,
             })
 
-            if not event.wait(timeout=120):
+            if not _wait_for_confirmation(event, timeout=120):
                 with confirm_lock:
                     pending_confirm.pop(sid, None)
                 return False
