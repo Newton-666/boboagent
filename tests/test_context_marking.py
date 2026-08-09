@@ -81,7 +81,7 @@ class TestLoadResult:
     def workspace(self, tmp_path, monkeypatch):
         import tools.load_result as lr
         ws = tmp_path / "workspace"
-        monkeypatch.setattr(lr, "WORKSPACE_DIR", str(ws))
+        monkeypatch.setattr(lr, "_workspace_dir", lambda: str(ws))
         return ws
 
     def test_load_existing_result(self, workspace):

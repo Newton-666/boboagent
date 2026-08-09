@@ -35,8 +35,14 @@ def clean_db(tmp_path, monkeypatch):
 
     db = tmp_path / "knowledge_base_time_decay.json"
     db.write_text('{"entries": [], "folders": []}', encoding="utf-8")
-    monkeypatch.setattr(vm, "MEMORY_DB", str(db))
-    monkeypatch.setattr(vm, "_MEMORY_BACKUP", str(tmp_path / "kb_time_decay.bak"))
+    monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(vm, "_memory_backup", lambda: str(tmp_path / "kb_time_decay.bak"))
+    # 双通道隔离（TICKET-D2）：vm._save → sync_mirror 走 memory_mirror 自身路径，
+    # 只 patch v5 侧会读真实 knowledge_base.json、写真实 library/MEMORY.md。
+    import tools.memory_mirror as mm
+    monkeypatch.setattr(mm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(mm, "_memory_backup", lambda: str(tmp_path / "kb_time_decay.bak"))
+    monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
     # 清空模块级 _load 缓存副作用
     return db
 

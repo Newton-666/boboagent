@@ -31,7 +31,16 @@ logger = logging.getLogger("bobo.living_notes")
 # ── 库址（用户铁律：项目根一级，禁止嵌套）──
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 LIBRARY_DIR = _REPO_ROOT / "library"
-INDEX_PATH = LIBRARY_DIR / "index.md"
+
+
+def _index_path() -> Path:
+    """索引文件路径：调用时从当前 LIBRARY_DIR 动态解析。
+
+    TICKET-D2：废除 INDEX_PATH 快照常量——import 时派生的路径在测试
+    monkeypatch LIBRARY_DIR 后与扫描目录裂脑（扫描 tmp、写出真实 index.md）。
+    调用时解析保证 patch LIBRARY_DIR 后读写同源。
+    """
+    return LIBRARY_DIR / "index.md"
 
 # 总开关
 _ENV_OFF = "BOBO_LIVING_NOTES"
@@ -473,7 +482,7 @@ def _rebuild_index():
             lines.append(f"- [[{t['topic']}]] — 最后更新 {last}（{n} 篇会话）")
         lines.append("")
     LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    INDEX_PATH.write_text("\n".join(lines), encoding="utf-8")
+    _index_path().write_text("\n".join(lines), encoding="utf-8")
 
 
 # ── 对外 API ─────────────────────────────────────

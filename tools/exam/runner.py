@@ -120,11 +120,11 @@ def run_exam(provider: str | None = None, model: str | None = None,
     import tools.memory_mirror as _mm
     tmp_kb = Path(tmp_events) / "knowledge_base.json"
     tmp_kb.write_text('{"entries": [], "folders": []}', encoding="utf-8")
-    _v5.MEMORY_DB = str(tmp_kb)
-    _v5._MEMORY_BACKUP = str(tmp_kb) + ".bak"
-    _mm.MEMORY_DB = str(tmp_kb)
-    _mm._MEMORY_BACKUP = str(tmp_kb) + ".bak"
-    _mm.MIRROR_PATH = Path(tmp_events) / "MEMORY.md"
+    _v5._memory_db = lambda: str(tmp_kb)
+    _v5._memory_backup = lambda: str(tmp_kb) + ".bak"
+    _mm._memory_db = lambda: str(tmp_kb)
+    _mm._memory_backup = lambda: str(tmp_kb) + ".bak"
+    _mm._mirror_path = lambda: Path(tmp_events) / "MEMORY.md"
 
     # 笔记库隔离（同理：考试会话的"随手一记"不许污染真实 library/）
     import tools.living_notes as _ln

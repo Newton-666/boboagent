@@ -26,6 +26,36 @@ def _redirect_event_bus():
     EventBus.reset(log_dir=str(tmpdir))
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _redirect_memory_store():
+    """重定向 v5_memory + memory_mirror 全部数据路径到 tmp（票 D2 终审补刀）。
+
+    终审抓到 core/proactive.py:161 的 decay_all/time_decay 在引擎驱动的测试中
+    打真实记忆库：按日衰减一天只犯一次，复跑测不出来（第一轮复跑时真实信号
+    85→80、186 条被打上今日衰减标记）。per-test 的 monkeypatch 保留，
+    此处 session 级兜底：整个测试 session 默认碰不到真实记忆库。
+
+    覆盖路径（5 个函数）：
+    - v5._memory_db / v5._memory_backup
+    - mm._memory_db / mm._memory_backup / mm._mirror_path
+    （decay_all/time_decay → _load/_save → _atomic_save + sync_mirror 全收敛于此）
+    """
+    import tempfile
+    from pathlib import Path
+    import tools.v5_memory as v5
+    import tools.memory_mirror as mm
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="bobo_test_memory_"))
+    kb = tmpdir / "knowledge_base.json"
+    kb.write_text('{"entries": [], "folders": []}', encoding="utf-8")
+
+    v5._memory_db = lambda: str(kb)
+    v5._memory_backup = lambda: str(kb) + ".bak"
+    mm._memory_db = lambda: str(kb)
+    mm._memory_backup = lambda: str(kb) + ".bak"
+    mm._mirror_path = lambda: tmpdir / "MEMORY.md"
+
+
 @pytest.fixture
 def project_root():
     """Return the absolute project root path."""
@@ -92,8 +122,14 @@ def isolated_memory_db(tmp_path, monkeypatch):
         "folders": [],
     }, ensure_ascii=False)
     kb.write_text(payload, encoding="utf-8")
-    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
-    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+    monkeypatch.setattr(v5, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(v5, "_memory_backup", lambda: str(kb) + ".bak")
+    # 双通道隔离（TICKET-D2）：v5._save → sync_mirror 走 memory_mirror 自身路径，
+    # 只 patch v5 侧会读真实 knowledge_base.json、写真实 library/MEMORY.md。
+    import tools.memory_mirror as mm
+    monkeypatch.setattr(mm, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(mm, "_memory_backup", lambda: str(kb) + ".bak")
+    monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
     return kb
 
 

@@ -11,30 +11,40 @@ from config import BOBO_DATA_DIR
 import os
 
 TOOL_NAME = "load_result"
-WORKSPACE_DIR = str(BOBO_DATA_DIR / "workspace")
 
-_STATS_PATH = os.path.join(WORKSPACE_DIR, "_stats.json")
+
+def _workspace_dir() -> str:
+    """工作区路径：调用时从 BOBO_DATA_DIR 动态解析（TICKET-D2）。
+
+    废除 import 时快照 WORKSPACE_DIR——快照在测试 patch 目录后裂脑。
+    """
+    return str(BOBO_DATA_DIR / "workspace")
+
+
+def _stats_path() -> str:
+    """统计文件路径：随 _workspace_dir() 动态派生（原 _STATS_PATH 二次快照）。"""
+    return os.path.join(_workspace_dir(), "_stats.json")
 
 def _update_stats(key: str, delta: int = 1):
     """Atomically increment a counter in workspace/_stats.json."""
-    os.makedirs(WORKSPACE_DIR, exist_ok=True)
+    os.makedirs(_workspace_dir(), exist_ok=True)
     import threading, tempfile
     _stats_lock = threading.Lock()
     with _stats_lock:
         stats = {}
-        if os.path.exists(_STATS_PATH):
+        if os.path.exists(_stats_path()):
             try:
-                with open(_STATS_PATH, 'r', encoding='utf-8') as f:
+                with open(_stats_path(), 'r', encoding='utf-8') as f:
                     stats = json.load(f)
             except Exception:
                 stats = {}
         stats[key] = stats.get(key, 0) + delta
-        fd, tmp = tempfile.mkstemp(dir=WORKSPACE_DIR, suffix='.json', prefix='.st_')
+        fd, tmp = tempfile.mkstemp(dir=_workspace_dir(), suffix='.json', prefix='.st_')
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(stats, f, ensure_ascii=False, indent=2)
             import shutil
-            shutil.move(tmp, _STATS_PATH)
+            shutil.move(tmp, _stats_path())
         except Exception:
             try: os.unlink(tmp)
             except Exception: pass
@@ -42,10 +52,10 @@ def _update_stats(key: str, delta: int = 1):
 
 def get_marking_stats() -> dict:
     """Return current marking statistics: marked, loaded, load_miss, total_chars_saved."""
-    if not os.path.exists(_STATS_PATH):
+    if not os.path.exists(_stats_path()):
         return {"marked": 0, "loaded": 0, "load_miss": 0, "total_chars_saved": 0}
     try:
-        with open(_STATS_PATH, 'r', encoding='utf-8') as f:
+        with open(_stats_path(), 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return {"marked": 0, "loaded": 0, "load_miss": 0, "total_chars_saved": 0}
@@ -60,7 +70,7 @@ def execute(id: str, max_chars: int = 5000) -> str:
         max_chars: Maximum characters to return. Default 5000.
                    Exceeding content is truncated with a note.
     """
-    path = os.path.join(WORKSPACE_DIR, f"{id}.json")
+    path = os.path.join(_workspace_dir(), f"{id}.json")
     if not os.path.exists(path):
         return (
             f"[NOT FOUND] Result '{id}' no longer available "

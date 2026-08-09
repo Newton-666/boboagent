@@ -13,8 +13,20 @@ from config import BOBO_DATA_DIR
 
 _MEMORY_DIR = BOBO_DATA_DIR
 _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-MEMORY_DB = str(_MEMORY_DIR / "knowledge_base.json")
-_MEMORY_BACKUP = MEMORY_DB + ".bak"
+
+
+def _memory_db() -> str:
+    """记忆库 JSON 路径：调用时从 BOBO_DATA_DIR 动态解析（TICKET-D2）。
+
+    废除 import 时快照常量 MEMORY_DB——快照在测试 patch 目录后与
+    实际读写裂脑（读 tmp、写真实 knowledge_base.json）。
+    """
+    return str(BOBO_DATA_DIR / "knowledge_base.json")
+
+
+def _memory_backup() -> str:
+    """记忆库备份路径：随 _memory_db() 动态派生。"""
+    return _memory_db() + ".bak"
 
 MAX_TOTAL_CHARS = 100000  # 总记忆字符限制（约 36k tokens）
 MAX_SINGLE_ENTRY_CHARS = 5000  # 单条记忆字符限制
@@ -25,20 +37,20 @@ _write_lock = threading.Lock()
 
 def _atomic_save(data):
     """原子写入 JSON 文件（防止写入中断导致损坏）。同时保留 .bak 副本。"""
-    dirname = os.path.dirname(MEMORY_DB)
+    dirname = os.path.dirname(_memory_db())
     if dirname:
         os.makedirs(dirname, exist_ok=True)
     # 写入前先备份现有数据，防止损坏后无恢复路径（审计 #14）
-    if os.path.exists(MEMORY_DB):
+    if os.path.exists(_memory_db()):
         try:
-            shutil.copy2(MEMORY_DB, _MEMORY_BACKUP)
+            shutil.copy2(_memory_db(), _memory_backup())
         except Exception:
             pass
     fd, tmp_path = tempfile.mkstemp(dir=dirname or '.', suffix='.tmp', prefix='.mem_')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        shutil.move(tmp_path, MEMORY_DB)
+        shutil.move(tmp_path, _memory_db())
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -55,28 +67,28 @@ def _atomic_save(data):
 
 def _load():
     """加载知识库。JSON 损坏时不静默返回空结构，避免下次 _save 覆写清空（审计 #14）。"""
-    if not os.path.exists(MEMORY_DB):
+    if not os.path.exists(_memory_db()):
         return {'entries': [], 'folders': []}
     try:
-        with open(MEMORY_DB, 'r', encoding='utf-8') as f:
+        with open(_memory_db(), 'r', encoding='utf-8') as f:
             data = json.load(f)
             if 'entries' not in data:
                 data = {'entries': [], 'folders': []}
             return data
     except Exception:
         # 损坏了 → 移到 .broken，尝试从 .bak 恢复
-        broken_path = MEMORY_DB + ".broken." + datetime.now().strftime("%Y%m%d_%H%M%S")
+        broken_path = _memory_db() + ".broken." + datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            shutil.move(MEMORY_DB, broken_path)
+            shutil.move(_memory_db(), broken_path)
             import sys
             print(f"  知识库文件损坏，已备份至 {broken_path}", file=sys.stderr)
         except Exception:
             pass
-        if os.path.exists(_MEMORY_BACKUP):
+        if os.path.exists(_memory_backup()):
             try:
-                with open(_MEMORY_BACKUP, 'r', encoding='utf-8') as f:
+                with open(_memory_backup(), 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                shutil.copy2(_MEMORY_BACKUP, MEMORY_DB)
+                shutil.copy2(_memory_backup(), _memory_db())
                 import sys
                 print(f"  已从备份恢复记忆", file=sys.stderr)
                 if 'entries' not in data:
