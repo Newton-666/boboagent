@@ -164,7 +164,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 票 A：AUTO MODE 决策树——必须排在 _all_confirmed 之前（火 A-2：
         # 否则用户点过 always 后灰名单会绕过 auto 风险评估直接放行）
         if self._auto_mode_getter is not None and self._auto_mode_getter():
-            return self._auto_confirm(tool_name, tool_args, reason)
+            return self._auto_decide(tool_name, tool_args, reason)
         if self._all_confirmed:
             return True
         if self.confirm_callback:
@@ -175,24 +175,24 @@ class Engine(ContextMixin, ToolRunnerMixin):
             return result
         return False
 
-    def _auto_confirm(self, tool_name: str, tool_args: dict, reason: str) -> bool:
+    def _auto_decide(self, tool_name: str, tool_args: dict, reason: str) -> bool:
         """AUTO MODE 决策树 v1：灰名单命令自主决策。
 
-        v1 规则（票 A）：
-        - execute_terminal 且整条命令纯读（git status/log/diff/show 等只读子命令，
-          逐段判定）→ 直接放行，写审计事件；
+        v1 规则（票 A-3）：
+        - execute_terminal 且整条命令纯读（git 只读子命令 + classify safe 段，
+          逐段判定，火 4）→ 直接放行，写审计事件；
         - 其余（写命令/非 terminal）→ 票 B 上线前 auto 下仍走 confirm_callback
           弹窗（现有超时默认拒绝 = 安全默认，火 2 天然成立）。
         """
         if tool_name == "execute_terminal":
             command = tool_args.get("command", "")
             if is_auto_readonly_command(command):
-                event_bus.write("auto.decision", {
-                    "session_id": getattr(self, "sid", ""),
+                event_bus.write("auto.decide", {
+                    "sid": getattr(self, "sid", ""),
                     "tool_name": tool_name,
                     "command": command[:120],
-                    "decision": "allow",
-                    "reason": "auto 决策树 v1：纯读 git 命令",
+                    "verdict": "allow",
+                    "reason": "auto 决策树 v1：纯读命令",
                     "auto": True,
                 })
                 return True
@@ -204,11 +204,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 return True
             if not result:
                 # 票 A-4：拒绝也留审计（超时默认拒绝 = 安全默认，火 2）
-                event_bus.write("auto.decision", {
-                    "session_id": getattr(self, "sid", ""),
+                event_bus.write("auto.decide", {
+                    "sid": getattr(self, "sid", ""),
                     "tool_name": tool_name,
                     "command": str(tool_args)[:120],
-                    "decision": "deny",
+                    "verdict": "deny",
                     "reason": f"auto 决策树 v1：写命令未获确认（{reason}）",
                     "auto": True,
                 })

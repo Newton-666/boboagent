@@ -42,6 +42,9 @@ class TestAutoReadonlyCommand:
         "git ls-tree HEAD",
         "git -C /tmp/repo status",   # 全局选项 -C 跳过
         "git --no-pager log -3",     # 全局选项 --no-pager 跳过
+        "git status && echo ok",     # 验收 3：链式但各段只读 → 放行（git 只读 + echo safe）
+        "ls -la",                    # classify safe 段
+        "cat README.md",             # classify safe 段
     ]
     NOT_READONLY = [
         "git commit -m fix",         # 写操作
@@ -54,10 +57,10 @@ class TestAutoReadonlyCommand:
         "git merge feature",
         "git checkout -b new-branch",
         "git branch -d old-branch",
-        "git status && rm -rf x",    # 逐段判定：第二段非纯读 → 整条不放行（火 4）
+        "git status && rm -rf x",    # 验收 3：链式含危险段 → 不放行（火 4）
+        "echo hi && git push",       # echo safe 但 git push 段非只读 → 整条不放行
         "git log; git push",
-        "ls -la",                    # 非 git 命令：不属于 auto 纯读放行范围
-        "echo git status",           # 字符串内容含 git，非真实 git 命令
+        "rm -rf /",                  # 非只读（dangerous）
     ]
 
     @pytest.mark.parametrize("cmd", READONLY)
@@ -159,7 +162,7 @@ class TestAutoOffRegression:
 
 class TestAutoAudit:
     def test_auto_allow_writes_audit_event(self, engine, tmp_path):
-        """auto 放行纯读命令 → events.jsonl 写 auto.decision，带 auto:true。"""
+        """auto 放行纯读命令 → events.jsonl 写 auto.decide，字段对齐票文（verdict/sid）。"""
         from core.event_bus import EventBus
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "test_sid_001"
@@ -168,15 +171,16 @@ class TestAutoAudit:
         assert engine._confirm("execute_terminal", {"command": "git status"}, "gray") is True
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
-        auto_events = [e for e in lines if e.get("type") == "auto.decision"]
-        assert auto_events, "应写入 auto.decision 审计事件"
+        auto_events = [e for e in lines if e.get("type") == "auto.decide"]
+        assert auto_events, "应写入 auto.decide 审计事件"
         # _build_event 把 data 展开成顶层字段（{"ts","type",**_data}）
         assert auto_events[0]["auto"] is True
-        assert auto_events[0]["decision"] == "allow"
-        assert auto_events[0]["session_id"] == "test_sid_001"
+        assert auto_events[0]["verdict"] == "allow"
+        assert auto_events[0]["sid"] == "test_sid_001"
+        assert auto_events[0]["command"] == "git status"
 
     def test_auto_deny_writes_audit_event(self, engine, tmp_path):
-        """auto 拒绝写命令 → events.jsonl 写 auto.decision decision=deny。"""
+        """auto 拒绝写命令 → events.jsonl 写 auto.decide verdict=deny。"""
         from core.event_bus import EventBus
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "test_sid_002"
@@ -185,9 +189,9 @@ class TestAutoAudit:
         assert engine._confirm("execute_terminal", {"command": "git commit -m x"}, "gray") is False
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
-        auto_events = [e for e in lines if e.get("type") == "auto.decision"]
+        auto_events = [e for e in lines if e.get("type") == "auto.decide"]
         assert auto_events, "拒绝也应写入审计事件"
-        assert auto_events[0]["decision"] == "deny"
+        assert auto_events[0]["verdict"] == "deny"
         assert auto_events[0]["auto"] is True
 
 
