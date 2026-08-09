@@ -21,6 +21,36 @@ MAX_MATCHES = 50
 MAX_LINE_LENGTH = 500
 
 
+def _collect_skip_stats(search_dir: Path) -> dict:
+    """统计搜索口径外的被跳过项（.git/ 内部文件、二进制文件数），供头部标注。
+
+    与 rg（--no-ignore-vcs --hidden -g '!.git'）口径对齐。
+    """
+    git_files = 0
+    binary_files = 0
+    try:
+        for file_path in search_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if ".git" in file_path.parts:
+                git_files += 1
+                continue
+            if _is_binary(file_path):
+                binary_files += 1
+    except OSError:
+        pass
+    return {"git_files": git_files, "binary_files": binary_files}
+
+
+def _is_binary(path: Path) -> bool:
+    """与 rg 一致的轻量二进制检测：前 8KB 含 NUL 字节即视为二进制。"""
+    try:
+        with open(path, "rb") as f:
+            return b"\x00" in f.read(8192)
+    except OSError:
+        return True
+
+
 def _search_python(search_dir: Path, pattern: str, file_types: list[str],
                    context: int) -> list[dict]:
     """Python 原生搜索（ripgrep 不可用时的回退方案）。"""
@@ -35,12 +65,11 @@ def _search_python(search_dir: Path, pattern: str, file_types: list[str],
             continue
         if file_types and file_path.suffix not in file_types:
             continue
-        # 审计 #34：只跳过以点开头的文件名（隐藏文件），不再误伤点目录
-        # （如 ~/.bobo/tools/）下的所有正常文件
-        if file_path.name.startswith("."):
-            continue
-        if any(p in ("node_modules", "__pycache__", ".git", ".venv", "venv",
-                     "dist", "build", ".next", "coverage") for p in file_path.parts):
+        # TICKET-G2：对齐 rg（--no-ignore-vcs --hidden）口径——
+        # 不再跳过点开头的文件/目录（隐藏内容可搜），不再跳过依赖/构建目录；
+        # 仅排除 VCS 元目录 .git/（与 rg -g '!.git/**' 一致）。
+        # 二进制/不可读文件由 read_text 异常自然跳过（与 rg 跳二进制一致）。
+        if ".git" in file_path.parts:
             continue
 
         try:
@@ -70,7 +99,13 @@ def _search_ripgrep(search_dir: Path, pattern: str, file_types: list[str],
                     context: int) -> list[dict] | None:
     """使用 ripgrep 搜索。失败返回 None（回退到 Python 搜索）。"""
     try:
-        cmd = ["rg", "--line-number", "--no-heading", "--color", "never"]
+        # TICKET-G2：--no-ignore-vcs 不读 .gitignore（gitignore 区可搜），
+        # --hidden 搜索点开头文件/目录；-g '!.git' 显式排除 VCS 元目录
+        # （实测 rg 15 下 '!.git/**' 不生效、'!.git' 才排除整个子树；
+        # 与 Python 回退 ".git in parts" 口径一致）。
+        # rg 默认仍跳过二进制文件。
+        cmd = ["rg", "--line-number", "--no-heading", "--color", "never",
+               "--no-ignore-vcs", "--hidden", "-g", "!.git"]
         if context:
             cmd.extend(["--context", str(context)])
         if file_types:
@@ -113,7 +148,18 @@ def _search_ripgrep(search_dir: Path, pattern: str, file_types: list[str],
                         "snippet": "\n".join(current_snippet),
                     })
                     current_snippet = []
+                    current_line = 0
                 continue
+            # TICKET-G2：context=0 时 rg 无 '--' 分隔符，必须按文件切换 flush，
+            # 否则跨文件匹配被错误合并成 1 条（曾导致"找到 1 处匹配"的假结论）。
+            if current_snippet and m.get("file") and m["file"] != current_file:
+                results.append({
+                    "file": current_file,
+                    "line": current_line,
+                    "snippet": "\n".join(current_snippet),
+                })
+                current_snippet = []
+                current_line = 0
             current_file = m.get("file") or current_file
             current_line = current_line or m["line"]
             current_snippet.append(f"{m['line']}: {m['content']}")
@@ -155,12 +201,21 @@ def execute(pattern: str, path: str = ".", file_types: str = "",
     types = [ft.strip() for ft in file_types.split(",") if ft.strip()] if file_types else []
 
     # 优先 ripgrep，回退 Python
+    engine = "rg"
     results = _search_ripgrep(search_dir, pattern, types, context)
     if results is None:
+        engine = "python"
         results = _search_python(search_dir, pattern, types, context)
 
+    # TICKET-G2：头部强制标注搜索口径（跳过项统计），杜绝静默漏检
+    stats = _collect_skip_stats(search_dir)
+    scope_line = (
+        f"口径: {engine}（--no-ignore-vcs --hidden，排除 .git/）；"
+        f"跳过 .git/ 内 {stats['git_files']} 个文件、二进制 {stats['binary_files']} 个文件"
+    )
+
     if not results:
-        return f"未找到匹配 '{pattern}' 的内容 ({search_dir})"
+        return f"未找到匹配 '{pattern}' 的内容 ({search_dir})\n{scope_line}"
 
     # 去重：按 (file, line) 去重
     seen = set()
@@ -174,7 +229,9 @@ def execute(pattern: str, path: str = ".", file_types: str = "",
             unique.append(r)
 
     lines = [
-        f"搜索 '{pattern}' 在 {search_dir} 中找到 {len(unique)} 处匹配:\n"
+        f"搜索 '{pattern}' 在 {search_dir} 中找到 {len(unique)} 处匹配:",
+        scope_line,
+        "",
     ]
     # 按文件分组
     by_file: dict[str, list] = {}
@@ -192,6 +249,7 @@ def execute(pattern: str, path: str = ".", file_types: str = "",
             break
 
     if len(unique) >= MAX_MATCHES:
+        lines.insert(1, f"⚠ 结果已截断：实际 ≥ {MAX_MATCHES} 条，仅显示前 {MAX_MATCHES} 条")
         lines.append(f"\n(仅显示前 {MAX_MATCHES} 条匹配，请缩小搜索范围)")
 
     return "\n".join(lines)
