@@ -218,7 +218,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
             # external-irreversible（含 pure-read 判定不一致的兜底）：转弹窗
             self._write_auto_audit("escalated", tool_name, command[:120],
-                                   "auto 模式：外部不可逆操作，转人工确认",
+                                   f"auto 模式：外部不可逆操作，转人工确认（{side_reason}）",
                                    level if level in ("pure-read", "local-reversible", "external-irreversible") else "external-irreversible",
                                    None)
 

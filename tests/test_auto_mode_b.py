@@ -218,6 +218,47 @@ class TestOrderNotBroken:
         assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is True
 
 
+# ── 8. 危险黑名单最高优先级：命令替换注入钉死 ──
+
+class TestDangerousHighestPriority:
+    """命令替换注入（$( / 反引号）在任何模式下都不得 pure-read 放行。"""
+    INJECTIONS = [
+        "echo $(rm -rf x)",      # echo 白名单 + 命令替换注入
+        "echo `id`",             # echo 白名单 + 反引号注入
+        "cat $(whoami)",         # cat 白名单 + 命令替换注入
+        "cat `ls /etc`",         # cat 白名单 + 反引号注入
+        "git status && echo $(rm -rf x)",  # 链式：首段只读但注入段非只读
+    ]
+
+    @pytest.mark.parametrize("cmd", INJECTIONS)
+    def test_classify_side_effect_never_pure_read(self, cmd):
+        """classify_side_effect：注入命令不得判 pure-read，必须 external-irreversible。"""
+        level, reason = classify_side_effect(cmd)
+        assert level == "external-irreversible", f"{cmd} 必须转弹窗，实得 {level}（{reason}）"
+        assert "危险黑名单" in reason, f"{cmd} 原因应指向危险黑名单"
+
+    @pytest.mark.parametrize("cmd", INJECTIONS)
+    def test_is_auto_readonly_command_never_allow(self, cmd):
+        """is_auto_readonly_command：注入命令不得 pure-read 放行。"""
+        from core.command_safety import is_auto_readonly_command
+        assert is_auto_readonly_command(cmd) is False, f"{cmd} 不得 pure-read 放行"
+
+    def test_engine_confirm_escalates_injection(self, engine, tmp_path):
+        """engine 级：auto 下注入命令转弹窗，不留 allow。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_inject"
+        engine._auto_mode_getter = lambda: True
+        engine.confirm_callback = lambda *a: False
+        assert engine._confirm("execute_terminal", {"command": "echo $(rm -rf x)"}, "gray") is False
+
+        lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
+        events = [e for e in lines if e.get("type") == "auto.decide"]
+        assert events, "注入命令也应留审计"
+        assert all(e["verdict"] != "allow" for e in events), "注入命令不得 allow"
+        escalated = [e for e in events if e.get("verdict") == "escalated"]
+        assert escalated and "危险黑名单" in escalated[0]["reason"]
+
+
 # ── 7. 审计四新字段齐全（B-4） ──
 
 class TestAuditFieldsB:

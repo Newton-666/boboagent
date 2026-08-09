@@ -487,15 +487,23 @@ _AUTO_READONLY_GIT_SUBCOMMANDS = frozenset({
 })
 
 
+# 命令替换注入（$( 或反引号）绝不视为纯读——可在参数位置执行任意命令
+_CMD_SUBSTITUTION_RE = _re.compile(r'\$\(|`[^`]*`')
+
+
 def is_auto_readonly_command(command: str) -> bool:
     """auto 决策树 v1：整条命令是否纯读（逐段判定，火 4）。
 
     只读集合 v1（票 A-3）：git 只读子命令（status/log/diff/show/blame/
-    ls-files/ls-tree，范围不限 self-repo）+ classify_command 已判 safe 的段。
+    ls-files/ls-tree，范围不限 self-repo）+ 纯读白名单子集段。
     split_shell_segments 已按 | && ; 分段，任何一段非只读 → 整条不放行
     （防 `git status && rm -rf x` 借首段放行整链；`git status && echo ok`
     各段只读 → 放行）。解析失败 / 空命令 → 不放行（保守，安全默认）。
+    命令替换注入（$( / 反引号）一律不放行——`echo $(rm -rf x)`、
+    `echo \`id\`` 不得借 echo/cat 白名单放行（危险黑名单最高优先级）。
     """
+    if _CMD_SUBSTITUTION_RE.search(command):
+        return False
     segments = split_shell_segments(command.strip())
     if not segments:
         return False
@@ -575,12 +583,20 @@ def classify_side_effect(command: str) -> tuple[str, str]:
     - local-reversible：改本地状态可回滚 → 先快照后放行（B-2）
     - external-irreversible：改外部/远程不可回滚 → auto 下仍弹窗（B-3）
 
-    逐段判定（复用 split_shell_segments，防 `git commit && git push` 整链误放）：
-    任何一段 external-irreversible → 整条 external-irreversible；
+    危险黑名单最高优先级：整条命令 split 前先过 DANGEROUS_PATTERNS，
+    命中一律 external-irreversible（任何模式下不放行；split 后 `$ (` 会
+    被 shlex 拆开导致 `\$\(` 失配，故必须在原始字符串上检查）。
+    再逐段判定（复用 split_shell_segments，防 `git commit && git push`
+    整链误放）：任何一段 external-irreversible → 整条 external-irreversible；
     否则任何一段 local-reversible → 整条 local-reversible；
     全段 pure-read → pure-read。
     空命令 / 解析失败 → external-irreversible（保守弹窗，安全默认）。
     """
+    # 危险黑名单最高优先级：任何模式下命中一律转弹窗
+    for pattern, reason in DANGEROUS_PATTERNS:
+        if _re.search(pattern, command):
+            return ("external-irreversible", f"危险黑名单命中 — {reason}")
+
     segments = split_shell_segments(command.strip())
     if not segments:
         return ("external-irreversible", "空命令或解析失败，保守弹窗")
@@ -599,8 +615,15 @@ def classify_side_effect(command: str) -> tuple[str, str]:
 
 
 def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
-    """单段副作用判定：git 子命令族 → 三级；非 git → 复用 classify safe 判定。"""
-    # 外部不可逆模式优先（含 git push / curl 写 / scp 等）
+    """单段副作用判定。危险黑名单在任何模式下都是最高优先级。"""
+    # 危险黑名单最高优先级：命中一律 external-irreversible 转弹窗
+    # （含命令替换注入 $( / 反引号——`echo $(rm -rf x)`、`echo \`id\`` 不得
+    #  借 echo/cat 纯读白名单误判 pure-read）
+    for pattern, reason in DANGEROUS_PATTERNS:
+        if _re.search(pattern, cmd):
+            return ("external-irreversible", f"危险黑名单命中 — {reason}")
+
+    # 外部不可逆模式（含 git push / curl 写 / scp 等）
     for pattern, reason in _EXTERNAL_IRREVERSIBLE_PATTERNS:
         if _re.search(pattern, cmd):
             return ("external-irreversible", reason)
