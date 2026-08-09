@@ -120,6 +120,7 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
             lambda: _get_llm_caller(ctx.engine_cache), get_context_length,
             lambda t: register_engine_thread(t, ctx.active_engine_threads, ctx.engine_threads_lock),
             ctx.pending_confirm, ctx.pending_confirm_result, ctx.confirm_lock,
+            ctx.auto_mode,
             ctx.current_engines, ctx.current_engines_lock,
             ctx.session_usage, ctx.session_usage_lock,
             ctx.save_session_to_disk,
@@ -138,7 +139,7 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单"})
+        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转"})
     elif command == "clear":
         emit("session.cleared", sid, {"session_id": sid})
         return ok(rid, {"output": ""})
@@ -203,6 +204,18 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
             f"配置文件位置: {BOBO_DATA_DIR}/.env",
         ]
         return ok(rid, {"output": "\n".join(lines)})
+    elif command == "auto" or command.startswith("auto "):
+        # 票 A：/auto [on|off] — 翻转会话级 AUTO MODE 开关（不打断工作管线）
+        arg = command[5:].strip().lower()
+        auto_mode = ctx.auto_mode
+        if arg == "on":
+            auto_mode[sid] = True
+        elif arg == "off":
+            auto_mode[sid] = False
+        else:
+            auto_mode[sid] = not auto_mode.get(sid, False)
+        state = "开启" if auto_mode.get(sid, False) else "关闭"
+        return ok(rid, {"output": f"AUTO MODE 已{state}（会话级）"})
     elif command == "memory-consolidate":
         """后台合并：识别重复/相似记忆，合并内容，归档低分草稿。从不删除。"""
         try:
@@ -420,6 +433,7 @@ _COMMANDS = {
         "/sessions": "/sessions",
         "/duo": "/duo",
         "/provider": "/provider",
+        "/auto": "/auto",
     }
 }
 
