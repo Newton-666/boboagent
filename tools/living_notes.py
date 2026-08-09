@@ -569,6 +569,18 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call,
         # 4. index.md 幂等重生成
         _rebuild_index()
 
+        # 5. 单向镜像：主库 → Obsidian vault 展示层（失败静默降级，纪律同 E4a）
+        #    R2b 铁律：挂钩永远不许传 allow_mass_delete（闸 2 熔断在自动场景常开）；
+        #    闸 1/闸 2 触发 blocked 时降级记 notes.error，不阻塞主流程。
+        try:
+            from tools.library_mirror import sync_library_to_obsidian
+            result = sync_library_to_obsidian(sid=sid, allow_mass_delete=False)
+            if result.get("blocked"):
+                _emit("notes.error", {"error": f"mirror_blocked: {result['blocked']}"})
+        except Exception as e:
+            logger.warning("library mirror sync failed (silent degrade): %s", e)
+            _emit("notes.error", {"error": f"mirror_sync: {e}"})
+
         # notes.written / notes.updated 已在 _write_new_note / _rewrite_note 内部发射（带 sid）
         return {"written": True, "path": str(path), "is_new": is_new, "error": None}
     except Exception as e:
