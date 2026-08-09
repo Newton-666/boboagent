@@ -99,10 +99,11 @@ class TestExecute:
         # main.py 和 utils.js 都有 def/function
         assert "找到" in result
 
-    def test_hidden_files_excluded_by_default(self, sample_tree):
-        '''.hidden.py 的匹配不应出现在结果中'''
+    def test_hidden_files_searched(self, sample_tree):
+        '''TICKET-G2：新口径（--hidden）下点开头文件可被搜到'''
         result = execute("hidden", path=str(sample_tree))
-        assert "未找到" in result or "hidden" not in result
+        assert ".hidden.py" in result
+        assert "hidden = True" in result
 
 
 class TestSearchPython:
