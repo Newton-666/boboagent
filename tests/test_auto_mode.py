@@ -99,10 +99,11 @@ class TestConfirmDecisionTree:
         assert engine._confirm("execute_terminal", {"command": "git status"}, "gray") is True
 
     def test_auto_write_command_goes_to_callback(self, engine):
-        """auto 开 + 写命令 → 走 confirm_callback（票 B 上线前弹窗）。"""
+        """auto 开 + external-irreversible 写命令 → 走 confirm_callback（票 B 弹窗）。"""
         engine._auto_mode_getter = lambda: True
         engine.confirm_callback = lambda *a: False
-        assert engine._confirm("execute_terminal", {"command": "git commit -m x"}, "gray") is False
+        # git commit 自票 B 起为 local-reversible 快照放行；git push（外部不可逆）才弹窗
+        assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is False
 
     def test_auto_chain_with_destructive_tail_not_allowed(self, engine):
         """auto 开 + git status && rm -rf x → 逐段判定不放行，走 callback。"""
@@ -185,14 +186,15 @@ class TestAutoAudit:
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "test_sid_002"
         engine._auto_mode_getter = lambda: True
-        engine.confirm_callback = lambda *a: False  # 弹窗被拒
-        assert engine._confirm("execute_terminal", {"command": "git commit -m x"}, "gray") is False
+        engine.confirm_callback = lambda *a: False  # 弹窗被拒（external-irreversible）
+        assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is False
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
         auto_events = [e for e in lines if e.get("type") == "auto.decide"]
         assert auto_events, "拒绝也应写入审计事件"
-        assert auto_events[0]["verdict"] == "deny"
-        assert auto_events[0]["auto"] is True
+        # 顺序：先 escalated（转交弹窗留痕），后 deny（拒绝留痕）
+        denied = [e for e in auto_events if e.get("verdict") == "deny"]
+        assert denied and denied[0]["auto"] is True
 
 
 # ── 5. /auto slash 命令（gateway 层） ──

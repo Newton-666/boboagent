@@ -514,10 +514,114 @@ def _is_auto_readonly_git_segment(cmd: str) -> bool:
     return subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS
 
 
-def _is_auto_safe_segment(cmd: str) -> bool:
-    """单段判定：classify_command 判 safe（echo/cat/ls 等白名单只读常用命令）。
+# 白名单中的明确纯读子集（票 B 语义收紧：SAFE_COMMANDS 含 mkdir/cp/mv/pip/npm
+# 等写命令，classify safe ≠ 只读。只有这些命令段才算 pure-read）
+_PURE_READ_COMMANDS = frozenset({
+    "ls", "cat", "echo", "pwd", "grep", "find", "head", "tail", "wc", "du",
+    "df", "whoami", "date", "env", "which", "man", "diff", "sort", "uniq",
+    "file", "stat", "less", "more", "clear", "history", "type", "uname",
+    "hostname", "ps", "top", "tree", "awk", "tr", "pgrep", "pytest",
+    "mdfind", "mdls", "sw_vers", "system_profiler", "sysctl", "nettop",
+    "plutil", "pmset", "diskutil", "hdiutil", "say", "pbcopy", "pbpaste",
+    "screencapture", "sips", "security", "codesign",
+})
 
-    只认 safe 级；gray（未知命令）与 dangerous 均不放行。
+
+def _first_token(cmd: str) -> str:
+    """取命令段的首 token（命令名）。解析失败退化为空格 split。"""
+    try:
+        return _shlex.split(cmd)[0]
+    except Exception:
+        parts = cmd.split()
+        return parts[0] if parts else ""
+
+
+def _is_auto_safe_segment(cmd: str) -> bool:
+    """单段判定：段首命令在纯读白名单子集（ls/cat/grep 等明确只读）。
+
+    注意：不能直接用 classify_command 的 safe 级——SAFE_COMMANDS 白名单含
+    mkdir/cp/mv/pip/npm 等写命令，safe 不等于只读（票 B 语义收紧）。
     """
+    return _first_token(cmd) in _PURE_READ_COMMANDS
+
+
+# ── 票 B：副作用三级分类（B-1，按命令族 × 子命令） ──
+
+# 本地可回滚的 git 子命令（改本地状态，可 reset/revert 回滚）
+_LOCAL_REVERSIBLE_GIT_SUBCOMMANDS = frozenset({
+    "add", "commit", "branch", "checkout", "stash", "tag", "merge",
+    "config", "remote", "fetch", "mv", "rm",
+})
+
+# 外部不可逆命令模式（改外部/远程状态，不可回滚）
+_EXTERNAL_IRREVERSIBLE_PATTERNS = [
+    (r'\bgit\s+(push|push\s+.*--force)\b', "git push（外部远程）"),
+    (r'\bnpm\s+publish\b', "npm publish（外部 registry）"),
+    (r'\bpip\s+(publish|upload)\b', "pip upload（外部）"),
+    (r'\bbrew\s+upgrade\b', "brew upgrade（外部）"),
+    (r'\bscp\b', "scp（远程传输）"),
+    (r'\bcurl\s+.*\s-([XTP]|request)\s+(POST|PUT|DELETE|PATCH)', "curl 写请求（POST/PUT/DELETE）"),
+    (r'\bcurl\s+-[XTP]\s+(POST|PUT|DELETE|PATCH)', "curl 写请求（POST/PUT/DELETE）"),
+    (r'\bcurl\s+-(X|request)\s+(POST|PUT|DELETE|PATCH)', "curl 写请求（POST/PUT/DELETE）"),
+    (r'\bwget\s+.*\s-O', "wget 下载覆盖文件"),
+]
+
+
+def classify_side_effect(command: str) -> tuple[str, str]:
+    """票 B-1：命令副作用三级分类，按命令族 × 子命令逐段判定。
+
+    返回 (level, reason)：
+    - pure-read：纯读零副作用 → auto 直接放行（票 A 归口复用）
+    - local-reversible：改本地状态可回滚 → 先快照后放行（B-2）
+    - external-irreversible：改外部/远程不可回滚 → auto 下仍弹窗（B-3）
+
+    逐段判定（复用 split_shell_segments，防 `git commit && git push` 整链误放）：
+    任何一段 external-irreversible → 整条 external-irreversible；
+    否则任何一段 local-reversible → 整条 local-reversible；
+    全段 pure-read → pure-read。
+    空命令 / 解析失败 → external-irreversible（保守弹窗，安全默认）。
+    """
+    segments = split_shell_segments(command.strip())
+    if not segments:
+        return ("external-irreversible", "空命令或解析失败，保守弹窗")
+
+    overall = "pure-read"
+    for tokens in segments:
+        seg_cmd = " ".join(tokens)
+        level, _reason = _classify_segment_side_effect(seg_cmd)
+        if level == "external-irreversible":
+            return ("external-irreversible", _reason)
+        if level == "local-reversible":
+            overall = "local-reversible"
+    if overall == "local-reversible":
+        return ("local-reversible", "含本地可回滚写操作")
+    return ("pure-read", "全段纯读")
+
+
+def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
+    """单段副作用判定：git 子命令族 → 三级；非 git → 复用 classify safe 判定。"""
+    # 外部不可逆模式优先（含 git push / curl 写 / scp 等）
+    for pattern, reason in _EXTERNAL_IRREVERSIBLE_PATTERNS:
+        if _re.search(pattern, cmd):
+            return ("external-irreversible", reason)
+
+    # git 命令：按子命令分 local-reversible / pure-read
+    if _has_real_git_command(cmd):
+        subcommand = _find_git_subcommand(cmd)
+        if subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS:
+            return ("pure-read", f"git {subcommand}（只读）")
+        if subcommand in _LOCAL_REVERSIBLE_GIT_SUBCOMMANDS:
+            return ("local-reversible", f"git {subcommand}（本地可回滚）")
+        # 其他 git 子命令（reset --hard / clean 等）保守视为外部不可逆级（弹窗）
+        return ("external-irreversible", f"git {subcommand}（无法确认可回滚）")
+
+    # 非 git：纯读白名单子集 → pure-read；白名单写命令/gray → local-reversible；
+    # dangerous → external-irreversible（保守弹窗）。
+    # 注意不能用 classify safe 当只读——SAFE_COMMANDS 含 mkdir/cp/mv/pip 等写命令。
+    base_cmd = _first_token(cmd)
+    if base_cmd in _PURE_READ_COMMANDS:
+        return ("pure-read", f"{base_cmd}（白名单纯读）")
     level, _reason = classify_command(cmd)
-    return level == "safe"
+    if level == "dangerous":
+        return ("external-irreversible", f"classify dangerous（{_reason}）")
+    return ("local-reversible", f"{base_cmd or '?'}（本地操作，可回滚）")

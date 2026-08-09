@@ -22,7 +22,8 @@ from core.event_bus import event_bus
 from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
-from core.command_safety import classify_command, is_high_risk_tool, is_auto_readonly_command
+from core.command_safety import (classify_command, is_high_risk_tool, is_auto_readonly_command,
+                                 classify_side_effect, _has_real_git_command)
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
@@ -176,44 +177,112 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return False
 
     def _auto_decide(self, tool_name: str, tool_args: dict, reason: str) -> bool:
-        """AUTO MODE 决策树 v1：灰名单命令自主决策。
+        """AUTO MODE 决策树 v2（票 B）：副作用三级分类 + 快照 + 审计字段扩展。
 
-        v1 规则（票 A-3）：
-        - execute_terminal 且整条命令纯读（git 只读子命令 + classify safe 段，
-          逐段判定，火 4）→ 直接放行，写审计事件；
-        - 其余（写命令/非 terminal）→ 票 B 上线前 auto 下仍走 confirm_callback
-          弹窗（现有超时默认拒绝 = 安全默认，火 2 天然成立）。
+        v2 规则（票 B-1/B-2/B-3）：
+        - execute_terminal 按 classify_side_effect 逐段分级：
+          * pure-read（git 只读子命令 / classify safe 段）→ 直接放行；
+          * local-reversible（git 本地写 / gray 本地命令）→ 决策时刻快照（B-2，
+            串行完成，禁止挪到执行线程）后放行；
+          * external-irreversible（git push / curl 写 / scp / npm publish 等）
+            → 转弹窗（B-3），超时无人应答默认 deny（安全默认，火 2）；
+        - 非 terminal 文件工具（edit_file/file_operation 等）→ 快照（复用
+          file_writer checkpoint）后放行。
+        每次决策写 auto.decide 审计，字段含 side_effect_level / snapshot_ref /
+        rollback_path（B-4）。
         """
+        # 非 terminal 文件工具：快照（复用 file_writer checkpoint 自动备份）后放行
+        if tool_name in ("edit_file", "file_operation", "delete_file"):
+            snapshot = self._snapshot_for_rollback(f"file:{tool_name}")
+            self._write_auto_audit("allow", tool_name, "auto 决策树 v2：文件工具（file_writer checkpoint）",
+                                   "local-reversible", snapshot)
+            return True
+
         if tool_name == "execute_terminal":
             command = tool_args.get("command", "")
-            if is_auto_readonly_command(command):
-                event_bus.write("auto.decide", {
-                    "sid": getattr(self, "sid", ""),
-                    "tool_name": tool_name,
-                    "command": command[:120],
-                    "verdict": "allow",
-                    "reason": "auto 决策树 v1：纯读命令",
-                    "auto": True,
-                })
+            level, side_reason = classify_side_effect(command)
+            if level == "pure-read":
+                # 双保险：仍要求逐段只读（classify_side_effect 与票 A 判定同源，
+                # 理论一致；不一致时保守转弹窗）
+                if is_auto_readonly_command(command):
+                    self._write_auto_audit("allow", tool_name, command[:120],
+                                           f"auto 决策树 v2：纯读命令（{side_reason}）",
+                                           "pure-read", None)
+                    return True
+            elif level == "local-reversible":
+                snapshot = self._snapshot_for_rollback(command)
+                self._write_auto_audit("allow", tool_name, command[:120],
+                                       f"auto 决策树 v2：本地可回滚（{side_reason}）",
+                                       "local-reversible", snapshot)
                 return True
-        # 写命令 / 非 terminal：v1 阶段 auto 下仍弹窗（票 B 上线前保守）
+
+            # external-irreversible（含 pure-read 判定不一致的兜底）：转弹窗
+            self._write_auto_audit("escalated", tool_name, command[:120],
+                                   "auto 模式：外部不可逆操作，转人工确认",
+                                   level if level in ("pure-read", "local-reversible", "external-irreversible") else "external-irreversible",
+                                   None)
+
+        # 写命令 / 非 terminal 灰名单：走弹窗（票 B-3 超时默认 deny）
         if self.confirm_callback:
             result = self.confirm_callback(tool_name, tool_args, reason)
             if result == "all":
                 self._all_confirmed = True
                 return True
             if not result:
-                # 票 A-4：拒绝也留审计（超时默认拒绝 = 安全默认，火 2）
-                event_bus.write("auto.decide", {
-                    "sid": getattr(self, "sid", ""),
-                    "tool_name": tool_name,
-                    "command": str(tool_args)[:120],
-                    "verdict": "deny",
-                    "reason": f"auto 决策树 v1：写命令未获确认（{reason}）",
-                    "auto": True,
-                })
+                # 拒绝留痕（含超时无人应答 → 安全默认 deny，火 2）
+                self._write_auto_audit("deny", tool_name, str(tool_args)[:120],
+                                       "auto 模式：外部不可逆操作未获确认，已安全拒绝",
+                                       "external-irreversible", None)
             return result
         return False
+
+    def _snapshot_for_rollback(self, command: str) -> dict:
+        """票 B-2：决策时刻为 local-reversible 命令生成快照引用（phase 1 串行）。
+
+        不做真·回滚执行器（票 B 边界）：只记录快照引用与回滚路径描述。
+        - git 类：subprocess 只读取 HEAD + dirty 摘要（2s 超时，失败兜底描述）；
+        - 文件类：复用 file_writer checkpoint（data/trash 自动备份）；
+        - 包管理类：记录 before 状态描述；
+        - 其他：generic 描述。
+        """
+        cmd = command.strip()
+        if cmd.startswith("file:"):
+            return {"kind": "file", "ref": "file_writer 自动备份（data/trash checkpoint）",
+                    "rollback": "restore_checkpoint 恢复"}
+        if _has_real_git_command(cmd):
+            try:
+                import subprocess as _sp
+                head = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=2)
+                head_sha = head.stdout.strip() if head.returncode == 0 else "(unknown)"
+                status = _sp.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=2)
+                dirty = sum(1 for _l in status.stdout.splitlines() if _l) if status.returncode == 0 else -1
+                return {"kind": "git", "ref": f"HEAD={head_sha[:12]}, dirty_files={dirty}",
+                        "rollback": f"git reset --hard {head_sha[:12]}（或按 dirty 情况 git revert）"}
+            except Exception as e:
+                return {"kind": "git-failed", "ref": f"快照失败: {e}", "rollback": "快照不可用，回滚需人工"}
+        if re.search(r'\b(pip|pip3|npm)\s+install\b', cmd):
+            return {"kind": "pkg", "ref": "安装前状态（pip list --format=freeze / package.json）",
+                    "rollback": "pip/npm uninstall 并装回原版本"}
+        return {"kind": "generic", "ref": "本地写命令（shell）",
+                "rollback": "按命令类型人工回滚（无自动执行器，票 B 边界）"}
+
+    def _write_auto_audit(self, verdict: str, tool_name: str, command: str, reason: str,
+                          side_effect_level: str, snapshot: dict | None) -> None:
+        """票 B-4：auto.decide 审计统一出口（字段扩展：side_effect_level /
+        snapshot_ref / rollback_path）。"""
+        event = {
+            "sid": getattr(self, "sid", ""),
+            "tool_name": tool_name,
+            "command": command,
+            "verdict": verdict,
+            "reason": reason,
+            "auto": True,
+            "side_effect_level": side_effect_level,
+        }
+        if snapshot:
+            event["snapshot_ref"] = snapshot.get("ref", "")
+            event["rollback_path"] = snapshot.get("rollback", "")
+        event_bus.write("auto.decide", event)
 
     def _build_system_prompt(self) -> str:
         return """你是 Bobo，一个专业的个人智能助手。
