@@ -22,7 +22,7 @@ from core.event_bus import event_bus
 from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
-from core.command_safety import classify_command, is_high_risk_tool
+from core.command_safety import classify_command, is_high_risk_tool, is_auto_readonly_command
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
@@ -73,12 +73,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
     MAX_STEPS = int(os.environ.get("BOBO_MAX_STEPS", 500))
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
-                 confirm_callback: Callable = None, test_mode: bool = False):
+                 confirm_callback: Callable = None, test_mode: bool = False,
+                 auto_mode_getter: Callable[[], bool] = None):
         self.llm_caller = llm_caller
         self.tool_executor = tool_executor or execute_tool
         self.callback = callback
         self.confirm_callback = confirm_callback
         self.test_mode = test_mode or ('pytest' in sys.modules)
+        self._auto_mode_getter = auto_mode_getter  # 票 A：会话级 AUTO MODE 开关读取器（放 ctx，engine 只读）
         self.history = []
         # 会话标识：gateway 在 open_session 中设 self.sid；无会话时走时间戳兜底
         _now = time.time()
@@ -159,6 +161,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def _confirm(self, tool_name: str, tool_args: dict, reason: str) -> bool:
         if self.test_mode:
             return True
+        # 票 A：AUTO MODE 决策树——必须排在 _all_confirmed 之前（火 A-2：
+        # 否则用户点过 always 后灰名单会绕过 auto 风险评估直接放行）
+        if self._auto_mode_getter is not None and self._auto_mode_getter():
+            return self._auto_confirm(tool_name, tool_args, reason)
         if self._all_confirmed:
             return True
         if self.confirm_callback:
@@ -166,6 +172,46 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if result == "all":
                 self._all_confirmed = True
                 return True
+            return result
+        return False
+
+    def _auto_confirm(self, tool_name: str, tool_args: dict, reason: str) -> bool:
+        """AUTO MODE 决策树 v1：灰名单命令自主决策。
+
+        v1 规则（票 A）：
+        - execute_terminal 且整条命令纯读（git status/log/diff/show 等只读子命令，
+          逐段判定）→ 直接放行，写审计事件；
+        - 其余（写命令/非 terminal）→ 票 B 上线前 auto 下仍走 confirm_callback
+          弹窗（现有超时默认拒绝 = 安全默认，火 2 天然成立）。
+        """
+        if tool_name == "execute_terminal":
+            command = tool_args.get("command", "")
+            if is_auto_readonly_command(command):
+                event_bus.write("auto.decision", {
+                    "session_id": getattr(self, "sid", ""),
+                    "tool_name": tool_name,
+                    "command": command[:120],
+                    "decision": "allow",
+                    "reason": "auto 决策树 v1：纯读 git 命令",
+                    "auto": True,
+                })
+                return True
+        # 写命令 / 非 terminal：v1 阶段 auto 下仍弹窗（票 B 上线前保守）
+        if self.confirm_callback:
+            result = self.confirm_callback(tool_name, tool_args, reason)
+            if result == "all":
+                self._all_confirmed = True
+                return True
+            if not result:
+                # 票 A-4：拒绝也留审计（超时默认拒绝 = 安全默认，火 2）
+                event_bus.write("auto.decision", {
+                    "session_id": getattr(self, "sid", ""),
+                    "tool_name": tool_name,
+                    "command": str(tool_args)[:120],
+                    "decision": "deny",
+                    "reason": f"auto 决策树 v1：写命令未获确认（{reason}）",
+                    "auto": True,
+                })
             return result
         return False
 

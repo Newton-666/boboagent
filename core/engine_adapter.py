@@ -43,6 +43,7 @@ def run_engine(
     pending_confirm: dict,
     pending_confirm_result: dict,
     confirm_lock: threading.Lock,
+    auto_mode: dict,  # 票 A：会话级 AUTO MODE 开关（/auto 翻转，放 ctx）
     current_engines: dict,
     current_engines_lock: threading.Lock,
     session_usage: dict,
@@ -213,7 +214,8 @@ def run_engine(
         except Exception:
             pass
 
-        engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback)
+        engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback,
+                        auto_mode_getter=lambda: auto_mode.get(sid, False))
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
         engine.sid = sid

@@ -478,3 +478,39 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         return True, f"执行终端命令: {command[:60]}"
 
     return False, ""
+
+
+# ── 票 A：AUTO MODE auto 决策树 v1 —— 纯读 git 命令判定 ──
+
+_AUTO_READONLY_GIT_SUBCOMMANDS = frozenset({
+    "status", "log", "diff", "show", "blame", "ls-files", "ls-tree",
+})
+
+
+def is_auto_readonly_command(command: str) -> bool:
+    """auto 决策树 v1：整条命令是否纯读（逐段判定，火 4）。
+
+    只放行 git 只读子命令（status/log/diff/show/blame/ls-files/ls-tree）。
+    split_shell_segments 已按 | && ; 分段，任何一段非纯读 → 整条不放行
+    （防 `git status && rm -rf x` 借首段放行整链）。
+
+    只读子命令本身不含破坏性操作，参数（--grep=push 等）不影响只读性，
+    故不做 _GIT_DESTRUCTIVE_OPTION_PATTERNS 检查（避免 `git log --grep=push`
+    这类合法只读命令被误伤）。解析失败 → 不放行（保守，安全默认）。
+    """
+    segments = split_shell_segments(command.strip())
+    if not segments:  # 空命令 / 解析失败 → 不放行（保守，安全默认）
+        return False
+    for tokens in segments:
+        seg_cmd = " ".join(tokens)
+        if not _is_auto_readonly_git_segment(seg_cmd):
+            return False
+    return True
+
+
+def _is_auto_readonly_git_segment(cmd: str) -> bool:
+    """单段判定：段首是真实 git 命令且子命令在只读集合内。"""
+    if not _has_real_git_command(cmd):
+        return False
+    subcommand = _find_git_subcommand(cmd)
+    return subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS
