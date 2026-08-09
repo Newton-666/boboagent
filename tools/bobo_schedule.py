@@ -9,7 +9,12 @@ import subprocess
 import sys
 
 TOOL_NAME = "bobo_schedule"
-SCHEDULE_FILE = str(BOBO_DATA_DIR / "schedules.json")
+def _schedule_file() -> str:
+    """定时任务文件路径：调用时从 BOBO_DATA_DIR 动态解析（TICKET-D2）。
+
+    废除 import 时快照 SCHEDULE_FILE——快照在测试 patch 目录后裂脑。
+    """
+    return str(BOBO_DATA_DIR / "schedules.json")
 
 # 任务名会写入 crontab 的注释行和 shell 命令，必须严格限制字符集
 # （允许中文，禁止空格/引号/换行/shell 元字符，防 cron 注入）
@@ -20,18 +25,18 @@ _ALLOWED_REPEAT = {"daily", "weekdays", "hourly"}
 
 
 def _load_schedules() -> list:
-    if not os.path.exists(SCHEDULE_FILE):
+    if not os.path.exists(_schedule_file()):
         return []
     try:
-        with open(SCHEDULE_FILE) as f:
+        with open(_schedule_file()) as f:
             return json.load(f)
     except Exception:
         return []
 
 
 def _save_schedules(schedules: list):
-    os.makedirs(os.path.dirname(SCHEDULE_FILE), exist_ok=True)
-    with open(SCHEDULE_FILE, "w") as f:
+    os.makedirs(os.path.dirname(_schedule_file()), exist_ok=True)
+    with open(_schedule_file(), "w") as f:
         json.dump(schedules, f, ensure_ascii=False, indent=2)
 
 

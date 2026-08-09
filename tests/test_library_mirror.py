@@ -391,7 +391,6 @@ class TestLivingNotesHook:
         # 隔离 library 路径（闸 3 铁律：绝不碰真实主库）
         library = tmp_path / "library"
         monkeypatch.setattr(ln, "LIBRARY_DIR", library)
-        monkeypatch.setattr(ln, "INDEX_PATH", library / "index.md")
 
         calls = {"n": 0}
         def fake_llm(messages, use_tools=False, **kw):

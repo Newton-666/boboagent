@@ -45,11 +45,11 @@ def mirror_env(tmp_path, monkeypatch):
     bak = tmp_path / "knowledge_base.json.bak"
     mirror = tmp_path / "library" / "MEMORY.md"
 
-    monkeypatch.setattr(vm, "MEMORY_DB", str(db))
-    monkeypatch.setattr(vm, "_MEMORY_BACKUP", str(bak))
-    monkeypatch.setattr(mm, "MEMORY_DB", str(db))
-    monkeypatch.setattr(mm, "_MEMORY_BACKUP", str(bak))
-    monkeypatch.setattr(mm, "MIRROR_PATH", mirror)
+    monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(vm, "_memory_backup", lambda: str(bak))
+    monkeypatch.setattr(mm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(mm, "_memory_backup", lambda: str(bak))
+    monkeypatch.setattr(mm, "_mirror_path", lambda: mirror)
     monkeypatch.setattr(mm, "LIBRARY_DIR", mirror.parent)
     return {"db": db, "bak": bak, "mirror": mirror}
 

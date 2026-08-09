@@ -101,8 +101,8 @@ def isolated_memory(tmp_path, monkeypatch):
     import tools.v5_memory as v5
     kb = tmp_path / "kb.json"
     kb.write_text(json.dumps({"entries": [], "folders": []}), encoding="utf-8")
-    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
-    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+    monkeypatch.setattr(v5, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(v5, "_memory_backup", lambda: str(kb) + ".bak")
 
 
 @pytest.fixture
@@ -219,8 +219,8 @@ def test_guarantee_floor_golden(library, no_skills, monkeypatch, tmp_path):
     kb = tmp_path / "kb_big.json"
     kb.write_text(json.dumps({"entries": entries, "folders": []}),
                   encoding="utf-8")
-    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
-    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+    monkeypatch.setattr(v5, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(v5, "_memory_backup", lambda: str(kb) + ".bak")
 
     _write_note(library, "技术研究", "矩阵B构造", sid="sid-abc")
     engine = MockEngine(user_input="帮我处理一下任务")
@@ -253,8 +253,8 @@ def test_memory_evicts_low_signal(library, no_skills, monkeypatch, tmp_path):
     kb = tmp_path / "kb_signal.json"
     kb.write_text(json.dumps({"entries": entries, "folders": []}),
                   encoding="utf-8")
-    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
-    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+    monkeypatch.setattr(v5, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(v5, "_memory_backup", lambda: str(kb) + ".bak")
 
     injector = PromptInjector(MockEngine())
     msgs = _build(injector, user_input="hello", session_id="sid-x")
@@ -274,8 +274,8 @@ def test_isolated_memory_not_touching_real_db(library, no_skills, tmp_path):
     import tools.v5_memory as v5
     from config import BOBO_DATA_DIR
     # 隔离生效：v5_memory 指向 tmp 隔离库，而非真实数据目录
-    assert str(BOBO_DATA_DIR / "knowledge_base.json") != v5.MEMORY_DB
-    assert tmp_path in __import__("pathlib").Path(v5.MEMORY_DB).parents
+    assert str(BOBO_DATA_DIR / "knowledge_base.json") != v5._memory_db()
+    assert tmp_path in __import__("pathlib").Path(v5._memory_db()).parents
     injector = PromptInjector(MockEngine())
     msgs = _build(injector, user_input="hello", session_id="sid-x")
     contents = _all_content(msgs)

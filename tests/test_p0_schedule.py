@@ -20,7 +20,7 @@ import tools.bobo_schedule as sched
 @pytest.fixture
 def fake_schedule_file(tmp_path, monkeypatch):
     f = tmp_path / "schedules.json"
-    monkeypatch.setattr(sched, "SCHEDULE_FILE", str(f))
+    monkeypatch.setattr(sched, "_schedule_file", lambda: str(f))
     return f
 
 

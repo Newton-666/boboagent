@@ -20,7 +20,13 @@ from core.code_checks import py_compile_check
 from config import BOBO_DATA_DIR
 
 
-TRASH_DIR = BOBO_DATA_DIR / "trash"
+def _trash_dir() -> Path:
+    """回收站路径：调用时从 BOBO_DATA_DIR 动态解析（TICKET-D2）。
+
+    废除 import 时快照 TRASH_DIR——快照在测试 patch 目录后
+    备份写进真实回收站（test_p0_trash_restore 被迫逐模块 patch 的根因）。
+    """
+    return BOBO_DATA_DIR / "trash"
 
 
 def _backup(file_path: Path) -> str | None:
@@ -28,10 +34,10 @@ def _backup(file_path: Path) -> str | None:
     if not file_path.exists():
         return None
     try:
-        TRASH_DIR.mkdir(parents=True, exist_ok=True)
+        _trash_dir().mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         backup_name = f"{file_path.name}_{timestamp}"
-        backup_path = TRASH_DIR / backup_name
+        backup_path = _trash_dir() / backup_name
         backup_path.write_text(file_path.read_text(encoding="utf-8"), encoding="utf-8")
         return backup_name
     except Exception:

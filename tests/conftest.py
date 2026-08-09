@@ -92,8 +92,14 @@ def isolated_memory_db(tmp_path, monkeypatch):
         "folders": [],
     }, ensure_ascii=False)
     kb.write_text(payload, encoding="utf-8")
-    monkeypatch.setattr(v5, "MEMORY_DB", str(kb))
-    monkeypatch.setattr(v5, "_MEMORY_BACKUP", str(kb) + ".bak")
+    monkeypatch.setattr(v5, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(v5, "_memory_backup", lambda: str(kb) + ".bak")
+    # 双通道隔离（TICKET-D2）：v5._save → sync_mirror 走 memory_mirror 自身路径，
+    # 只 patch v5 侧会读真实 knowledge_base.json、写真实 library/MEMORY.md。
+    import tools.memory_mirror as mm
+    monkeypatch.setattr(mm, "_memory_db", lambda: str(kb))
+    monkeypatch.setattr(mm, "_memory_backup", lambda: str(kb) + ".bak")
+    monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
     return kb
 
 

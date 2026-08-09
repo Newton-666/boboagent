@@ -111,7 +111,6 @@ class TestIntegrationWithLivingNotes:
         library = tmp_path / "library"
         library.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(ln, "LIBRARY_DIR", library)
-        monkeypatch.setattr(ln, "INDEX_PATH", library / "index.md")
         git_init(library)  # tmp 库带独立 .git
 
         # 镜像 stub（真实 vault 零触碰）
@@ -168,7 +167,6 @@ class TestIntegrationWithLivingNotes:
         library = tmp_path / "library"
         library.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(ln, "LIBRARY_DIR", library)
-        monkeypatch.setattr(ln, "INDEX_PATH", library / "index.md")
         git_init(library)
         monkeypatch.setattr(lm, "sync_library_to_obsidian",
                             lambda **kw: {"ok": True, "synced": [], "removed": [],

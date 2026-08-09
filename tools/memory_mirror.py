@@ -32,15 +32,32 @@ from config import BOBO_DATA_DIR
 
 logger = logging.getLogger("bobo.memory_mirror")
 
-# ── 路径 ──
-# JSON 真源（与 tools/v5_memory.py 的 MEMORY_DB 保持一致）
-MEMORY_DB = str(BOBO_DATA_DIR / "knowledge_base.json")
-_MEMORY_BACKUP = MEMORY_DB + ".bak"
+# ── 路径（TICKET-D2：全部调用时动态解析，废除 import 时快照）──
+# JSON 真源（与 tools/v5_memory.py 的 _memory_db() 保持一致：均从 BOBO_DATA_DIR 派生）
+
+
+def _memory_db() -> str:
+    """记忆库 JSON 路径：调用时从 BOBO_DATA_DIR 动态解析。"""
+    return str(BOBO_DATA_DIR / "knowledge_base.json")
+
+
+def _memory_backup() -> str:
+    """记忆库备份路径：随 _memory_db() 动态派生。"""
+    return _memory_db() + ".bak"
+
 
 # 镜像库址：项目根一级（用户铁律）
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 LIBRARY_DIR = _REPO_ROOT / "library"
-MIRROR_PATH = LIBRARY_DIR / "MEMORY.md"
+
+
+def _mirror_path() -> Path:
+    """MEMORY.md 镜像路径：调用时从当前 LIBRARY_DIR 动态解析。
+
+    废除 import 时快照 MIRROR_PATH——测试 patch LIBRARY_DIR 后
+    读 tmp 却写真实 MEMORY.md（同 INDEX_PATH 裂脑模式）。
+    """
+    return LIBRARY_DIR / "MEMORY.md"
 
 _IMPORT_LOCK = threading.Lock()
 
@@ -217,14 +234,14 @@ def _apply_changes(data: dict, changes: list) -> int:
 
 def _write_json(data: dict):
     """原子写 JSON（导入专用，不调 v5_memory._save，避免嵌套 sync_mirror）。"""
-    dirname = os.path.dirname(MEMORY_DB)
+    dirname = os.path.dirname(_memory_db())
     if dirname:
         os.makedirs(dirname, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=dirname or ".", suffix=".tmp", prefix=".mir_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        shutil.move(tmp_path, MEMORY_DB)
+        shutil.move(tmp_path, _memory_db())
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -239,9 +256,9 @@ def _align_mtime():
     防止下次启动时 md 仍比 JSON 新 → 重复导入（幂等前提：镜像收敛）。
     """
     try:
-        if os.path.exists(MEMORY_DB) and MIRROR_PATH.exists():
-            t = os.stat(MEMORY_DB).st_mtime
-            os.utime(MIRROR_PATH, (t, t))
+        if os.path.exists(_memory_db()) and _mirror_path().exists():
+            t = os.stat(_memory_db()).st_mtime
+            os.utime(_mirror_path(), (t, t))
     except Exception:
         pass
 
@@ -265,19 +282,19 @@ def sync_mirror() -> bool:
     返回 True=写入成功或内容未变；False=降级失败。
     """
     try:
-        if not os.path.exists(MEMORY_DB):
+        if not os.path.exists(_memory_db()):
             return True
-        with open(MEMORY_DB, "r", encoding="utf-8") as f:
+        with open(_memory_db(), "r", encoding="utf-8") as f:
             data = json.load(f)
         content = _render_md(data)
         LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-        if MIRROR_PATH.exists():
+        if _mirror_path().exists():
             try:
-                if MIRROR_PATH.read_text(encoding="utf-8") == content:
+                if _mirror_path().read_text(encoding="utf-8") == content:
                     return True  # 幂等：内容相同不刷新 mtime
             except Exception:
                 pass
-        MIRROR_PATH.write_text(content, encoding="utf-8")
+        _mirror_path().write_text(content, encoding="utf-8")
         active = [e for e in data.get("entries", []) if not e.get("archived", False)]
         _emit("memory.mirror_write", {"entry_count": len(active)})
         return True
@@ -299,23 +316,23 @@ def import_from_md() -> int:
     """
     with _IMPORT_LOCK:
         try:
-            if not MIRROR_PATH.exists():
+            if not _mirror_path().exists():
                 return 0
-            md_mtime = MIRROR_PATH.stat().st_mtime
-            if os.path.exists(MEMORY_DB):
-                json_mtime = os.stat(MEMORY_DB).st_mtime
+            md_mtime = _mirror_path().stat().st_mtime
+            if os.path.exists(_memory_db()):
+                json_mtime = os.stat(_memory_db()).st_mtime
                 if md_mtime <= json_mtime:
                     return 0  # md 不比 JSON 新 → 无用户手改
             # 导入前自动备份（保留最近一次）
-            if os.path.exists(MEMORY_DB):
+            if os.path.exists(_memory_db()):
                 try:
-                    shutil.copy2(MEMORY_DB, _MEMORY_BACKUP)
+                    shutil.copy2(_memory_db(), _memory_backup())
                 except Exception:
                     pass
-            with open(MEMORY_DB, "r", encoding="utf-8") as f:
+            with open(_memory_db(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             try:
-                with open(MIRROR_PATH, "r", encoding="utf-8") as f:
+                with open(_mirror_path(), "r", encoding="utf-8") as f:
                     changes = _parse_md(f.read())
             except ValueError:
                 logger.warning(

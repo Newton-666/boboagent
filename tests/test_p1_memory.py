@@ -26,8 +26,14 @@ def memory_db(tmp_path, monkeypatch):
     bak = tmp_path / "knowledge_base.json.bak"
     # Monkeypatch 必须在 tools.v5_memory 模块 import 之后、每个测试调用前生效
     import tools.v5_memory as vm
-    monkeypatch.setattr(vm, "MEMORY_DB", str(db))
-    monkeypatch.setattr(vm, "_MEMORY_BACKUP", str(bak))
+    monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(vm, "_memory_backup", lambda: str(bak))
+    # 双通道隔离（TICKET-D2）：vm._save → sync_mirror 走 memory_mirror 自身路径，
+    # 只 patch v5 侧会读真实 knowledge_base.json、写真实 library/MEMORY.md。
+    import tools.memory_mirror as mm
+    monkeypatch.setattr(mm, "_memory_db", lambda: str(db))
+    monkeypatch.setattr(mm, "_memory_backup", lambda: str(bak))
+    monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
     # 清掉 import 级别的锁（跨测试不受影响）
     return db
 
@@ -48,7 +54,7 @@ class TestCorruptionRecovery:
         import tools.v5_memory as vm
         # 先写正常数据 + 备份
         valid = '{"entries": [{"id": 99, "text": "recovered"}, {"id": 100, "text": "ok2"}]}'
-        monkeypatch.setattr(vm, "_MEMORY_BACKUP", str(memory_db.parent / "kb.json.bak"))
+        monkeypatch.setattr(vm, "_memory_backup", lambda: str(memory_db.parent / "kb.json.bak"))
         bak = memory_db.parent / "kb.json.bak"
         bak.write_text(valid, encoding="utf-8")
         # 主文件损坏
@@ -91,7 +97,7 @@ class TestSortKey:
             ]
         }
         db.write_text(json.dumps(data), encoding="utf-8")
-        monkeypatch.setattr(vm, "MEMORY_DB", str(db))
+        monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
         result = vm.format_all_memory(max_chars=10000)
         # "new" 应该排在 "old" 前面（newest first）
         assert result.index("new") < result.index("old")
@@ -103,7 +109,12 @@ class TestProfileRouting:
         db = tmp_path / "kb.json"
         data = {"entries": [], "profile": {}}
         db.write_text(json.dumps(data), encoding="utf-8")
-        monkeypatch.setattr(vm, "MEMORY_DB", str(db))
+        monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
+        # 双通道隔离（TICKET-D2）：save_to_knowledge_base 触发 _save → sync_mirror
+        import tools.memory_mirror as mm
+        monkeypatch.setattr(mm, "_memory_db", lambda: str(db))
+        monkeypatch.setattr(mm, "_memory_backup", lambda: str(tmp_path / "kb.json.bak"))
+        monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
         result = vm.save_to_knowledge_base("Newton", target="profile", memory_type="name")
         assert "用户资料已更新" in result
         profile = vm.get_user_profile()
@@ -115,8 +126,13 @@ class TestConcurrentWrites:
         import tools.v5_memory as vm
         db = tmp_path / "kb.json"
         db.write_text('{"entries": []}', encoding="utf-8")
-        monkeypatch.setattr(vm, "MEMORY_DB", str(db))
-        monkeypatch.setattr(vm, "_MEMORY_BACKUP", str(tmp_path / "kb.json.bak"))
+        monkeypatch.setattr(vm, "_memory_db", lambda: str(db))
+        monkeypatch.setattr(vm, "_memory_backup", lambda: str(tmp_path / "kb.json.bak"))
+        # 双通道隔离（TICKET-D2）：save_to_knowledge_base 触发 _save → sync_mirror
+        import tools.memory_mirror as mm
+        monkeypatch.setattr(mm, "_memory_db", lambda: str(db))
+        monkeypatch.setattr(mm, "_memory_backup", lambda: str(tmp_path / "kb.json.bak"))
+        monkeypatch.setattr(mm, "_mirror_path", lambda: tmp_path / "MEMORY.md")
         count = 10
         errors = []
         threads = []

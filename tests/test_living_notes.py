@@ -60,7 +60,6 @@ def ln_env(tmp_path, monkeypatch):
     """隔离的 library 环境（monkeypatch 掉真实库址）。"""
     library = tmp_path / "library"
     monkeypatch.setattr(ln, "LIBRARY_DIR", library)
-    monkeypatch.setattr(ln, "INDEX_PATH", library / "index.md")
     return library
 
 
@@ -305,3 +304,44 @@ def test_unparseable_judge_noop(ln_env):
     # 没有建任何笔记（index 除外）
     notes = [p for p in ln_env.rglob("*.md") if p.name != "index.md"]
     assert notes == []
+
+
+# ── TICKET-D2：INDEX_PATH 裂脑回归——测试绝不写真实 index.md ──
+
+def test_never_writes_real_index(tmp_path, monkeypatch):
+    """TICKET-D2 回归：patch LIBRARY_DIR=tmp 下跑全流程，真实 index.md 零改动。
+
+    修复前：INDEX_PATH 是 import 时快照常量，_rebuild_index() 扫描打补丁后的
+    LIBRARY_DIR（tmp），写出却用未打补丁的 INDEX_PATH（真实 index.md）——测试
+    内容反复覆盖真实索引（案发 08-09 08:53 / 18:34，镜像同步再双库污染）。
+    修复后：_index_path() 调用时从当前 LIBRARY_DIR 解析，扫描与写出同源。
+    """
+    real_index = ln._index_path()  # patch 前的真实路径
+    assert real_index.exists(), "真实 index.md 应存在（本测试锚定真实库）"
+    before_mtime = real_index.stat().st_mtime_ns
+    before_text = real_index.read_text(encoding="utf-8")
+
+    library = tmp_path / "library"
+    monkeypatch.setattr(ln, "LIBRARY_DIR", library)
+
+    llm = _stage_llm(
+        {
+            "topic": "回归主题", "domain": "agent开发",
+            "section": "- 回归要点", "match": None,
+        },
+        _skeleton_body("回归主题", "agent开发", sid="sid-d2",
+                       content="回归要点"),
+    )
+    result = ln.write_living_notes(["回归要点"], "消息", "sid-d2", llm)
+    assert result["written"] is True
+
+    # 真实 index.md 必须零改动（mtime 纳秒级 + 内容双断言）
+    after_mtime = real_index.stat().st_mtime_ns
+    after_text = real_index.read_text(encoding="utf-8")
+    assert after_mtime == before_mtime, "真实 index.md mtime 被改动（裂脑复发）"
+    assert after_text == before_text, "真实 index.md 内容被污染（裂脑复发）"
+
+    # tmp 库的 index.md 正常生成（隔离生效）
+    tmp_index = library / "index.md"
+    assert tmp_index.exists(), "tmp 库 index.md 应生成"
+    assert "回归主题" in tmp_index.read_text(encoding="utf-8")

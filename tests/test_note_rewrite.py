@@ -30,7 +30,6 @@ def ln_env(tmp_path, monkeypatch):
     """隔离的 library 环境。"""
     library = tmp_path / "library"
     monkeypatch.setattr(ln, "LIBRARY_DIR", library)
-    monkeypatch.setattr(ln, "INDEX_PATH", library / "index.md")
     return library
 
 
