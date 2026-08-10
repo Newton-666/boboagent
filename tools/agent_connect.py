@@ -363,10 +363,60 @@ def clean_pi_output(text: str) -> str:
     return "\n".join(out).strip()
 
 
-def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None, engine_runner=None):
-    """bobo(自己) ↔ target 互传 N 轮。运行在 gateway 进程内的 daemon 线程。
+# ── TICKET-SCAN-L4-1：轮次自主（按话题复杂度评估，硬上限 5）──
+MAX_ROUNDS = 5
+
+# 简单问答：是否/确认/数字/短句
+_SIMPLE_MARKERS = (
+    "吗", "是不是", "能不能", "会不会", "可不可以", "等于", "多少",
+    "是/否", "确认", "同意", "对吗", "对么", "yes", "no", "是", "否",
+)
+# 复杂设计/辩论/实现类
+_COMPLEX_MARKERS = (
+    "设计", "架构", "方案", "辩论", "对比", "分析", "评估", "实现",
+    "如何", "为什么", "权衡", "选型", "优化", "重构", "迁移", "规划",
+)
+# 提前收敛信号（双方达成共识/无新观点）
+_CONVERGE_MARKERS = (
+    "达成共识", "达成一致", "无新观点", "讨论结束", "讨论完毕",
+    "没有更多内容", "无需继续", "已解决", "不必再讨论",
+)
+
+
+def estimate_rounds(topic: str, user_specified=None) -> int:
+    """轮次评估：用户明确指定轮数从用户（硬上限 MAX_ROUNDS）；否则按复杂度。
+
+    - 简单问答（是否/确认/数字类）→ 2 轮
+    - 观点讨论 → 3-4 轮
+    - 复杂设计/辩论 → 5 轮（上限）
+    """
+    if user_specified is not None:
+        try:
+            n = int(user_specified)
+        except (TypeError, ValueError):
+            n = 5
+        return max(1, min(MAX_ROUNDS, n))
+    t = (topic or "").strip()
+    if not t:
+        return 1
+    if len(t) <= 20 and any(m in t for m in _SIMPLE_MARKERS):
+        return 2
+    if any(m in t for m in _COMPLEX_MARKERS):
+        return MAX_ROUNDS
+    return 3
+
+
+def should_converge(text: str) -> bool:
+    """提前收敛判定：双方达成共识/无新观点时允许提前结束（省 token）。"""
+    return any(m in text for m in _CONVERGE_MARKERS)
+
+
+def run_relay_thread(sid: str, target: dict, rounds, emit, log_fn=None, engine_runner=None):
+    """bobo(自己) ↔ target 互传。运行在 gateway 进程内的 daemon 线程。
 
     - target: agent_scan 扫描结果的候选 dict（已验证身份）
+    - rounds: 互传轮数。API 直采模式下 None=轮次自主（L4-1 按话题复杂度评估，
+      上限 MAX_ROUNDS=5；用户显式指定则从用户）；pane 模式 None 时默认 5。
     - emit: server_utils.emit 事件发射（进度推送 TUI）
     - log_fn: 可选日志回调（默认 print）
     - engine_runner: 可选回调 runner(text)->str，API 直采模式下 relay 线程
@@ -382,6 +432,12 @@ def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None, eng
       Bug1 用户输入只进 relay（prompt.submit 路由闸），开场直发 target，不进 bobo 大脑；
       Bug2 bobo 回复转发前 strip_thinking 剥思考段；
       Bug3 pi 回复 clean_pi_output 净化后再显示/转发。
+
+    TICKET-SCAN-L4 交互裁决：
+      L4-1 轮次自主：API 直采按话题复杂度评估轮数（硬上限 5），开屏明示
+           '预计 N 轮（上限 5）'；用户显式指定从用户；共识/无新观点提前收敛。
+      L4-3 持久多模式：API 直采连接常驻，每个新话题触发一轮"评估→互传→显示"，
+           /disconnect 才退出；话题间上下文经 session.history 保留。
     """
     def _log(msg):
         if log_fn:
@@ -432,24 +488,8 @@ def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None, eng
     try:
         # ── 阶段 0：等用户话题（L3c：API 直采直发 target，不进 bobo 大脑）──
         if api_mode:
-            user_topic = relay_hooks.poll_user_input(sid, 600)
-            if user_topic is None:
-                _emit("⏹ 10 分钟内未检测到输入，已停止")
-                return
-            _log("API 直采：收到用户话题，直发 target")
-            msg_u2t = relay_msg_line("USER", target_label, time.strftime("%H:%M:%S"), user_topic)
-            _emit(msg_u2t)
-            _log_line(strip_ansi(msg_u2t))
-            try:
-                send_safe(target_pane, user_topic, target)
-            except RuntimeError as e:
-                _emit(f"❌ {e}")
-                return
-            p_after = wait_pi_finished(target_pane, 300)
-            _log(f"开场：{target_label} 回复完成")
-            p_base = cap(target_pane)
-            p_before = p_base
-            # ── API 直采循环：rounds 次 bobo 接话（engine_runner）→ target；每次后等 pi 回复 ──
+            # L4-3 持久多模式：连接常驻，每个话题一轮"评估→互传→显示"循环，
+            # /disconnect 才退出；话题间 bobo 上下文经 session.history 自然保留。
             def _show_pi(new_pi_raw: str) -> str:
                 """净化显示 pi 回复；净化后为空显示占位（宁保守不倒垃圾）。返回净化文本。"""
                 pi_text = clean_pi_output(new_pi_raw)
@@ -461,33 +501,65 @@ def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None, eng
                     _log_line(strip_ansi(relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), "[pi 输出解析中]")))
                 return pi_text
 
-            pi_clean = _show_pi(diff_new(p_base, p_after))
-            for r in range(1, rounds + 1):
-                if engine_runner is None:
-                    _log(f"轮{r}：engine_runner 未注入，无法 bobo 接话，停止")
+            while True:
+                user_topic = relay_hooks.poll_user_input(sid, 600)
+                if user_topic is None:
+                    _emit("⏹ 10 分钟内未检测到输入，已停止")
                     break
-                bobo_input = pi_clean or "（pi 无新内容，请继续讨论）"
-                _log(f"轮 {r}/{rounds}：调引擎（输入={target_label} 回复）…")
-                bobo_reply = engine_runner(bobo_input)
-                new = strip_thinking(bobo_reply)
-                if not new:
-                    _log(f"轮{r}：bobo 回复为空，跳过")
-                    continue
-                _log(f"── 轮 {r}/{rounds}：bobo 回复 → {target_label} ──")
-                msg_b2t = relay_msg_line("BOBO", target_label, time.strftime("%H:%M:%S"), new)
-                _emit(msg_b2t)
-                _log_line(strip_ansi(msg_b2t))
+                _log("API 直采：收到用户话题，直发 target（不进 bobo 大脑）")
+                # L4-1 轮次自主：用户显式指定轮数从用户；否则按话题复杂度评估
+                est = estimate_rounds(user_topic, rounds)
+                _emit(f"▸ 本话题预计 {est} 轮（上限 {MAX_ROUNDS}），开始互传")
+                msg_u2t = relay_msg_line("USER", target_label, time.strftime("%H:%M:%S"), user_topic)
+                _emit(msg_u2t)
+                _log_line(strip_ansi(msg_u2t))
                 try:
-                    send_safe(target_pane, new, target)  # 发送前复核（补丁③）
+                    send_safe(target_pane, user_topic, target)
                 except RuntimeError as e:
                     _emit(f"❌ {e}")
-                    return
+                    break
                 p_after = wait_pi_finished(target_pane, 300)
-                _log(f"轮 {r}：{target_label} 回复完成")
+                _log(f"开场：{target_label} 回复完成")
                 p_base = cap(target_pane)
+                p_before = p_base
                 pi_clean = _show_pi(diff_new(p_base, p_after))
+                converged = False
+                for r in range(1, est + 1):
+                    if engine_runner is None:
+                        _log(f"轮{r}：engine_runner 未注入，无法 bobo 接话，停止")
+                        break
+                    bobo_input = pi_clean or "（pi 无新内容，请继续讨论）"
+                    _log(f"轮 {r}/{est}：调引擎（输入={target_label} 回复）…")
+                    bobo_reply = engine_runner(bobo_input)
+                    new = strip_thinking(bobo_reply)
+                    if not new:
+                        _log(f"轮{r}：bobo 回复为空，跳过")
+                        continue
+                    _log(f"── 轮 {r}/{est}：bobo 回复 → {target_label} ──")
+                    msg_b2t = relay_msg_line("BOBO", target_label, time.strftime("%H:%M:%S"), new)
+                    _emit(msg_b2t)
+                    _log_line(strip_ansi(msg_b2t))
+                    try:
+                        send_safe(target_pane, new, target)  # 发送前复核（补丁③）
+                    except RuntimeError as e:
+                        _emit(f"❌ {e}")
+                        break
+                    p_after = wait_pi_finished(target_pane, 300)
+                    _log(f"轮 {r}：{target_label} 回复完成")
+                    p_base = cap(target_pane)
+                    pi_clean = _show_pi(diff_new(p_base, p_after))
+                    # L4-1 提前收敛：达成共识/无新观点 → 提前结束（省 token，不算失败）
+                    if should_converge(new):
+                        _log(f"轮 {r}：检测到共识信号，提前收敛")
+                        _emit(f"▸ 双方已达成共识/无新观点，提前结束（第 {r} 轮，未跑满 {est} 轮）")
+                        converged = True
+                        break
+                _suffix = "（提前收敛）" if converged else f"（{est} 轮）"
+                _emit(f"## 话题「{user_topic[:20]}{'…' if len(user_topic) > 20 else ''}」互传结束{_suffix}")
+                _emit("▸ 连接保持中：可继续输入新话题，或 /disconnect 断开")
         else:
-            # pane 模式：等屏幕新行（"> xxx"）
+            # pane 模式：等屏幕新行（"> xxx"）（L4-1：None 时默认 5 轮，不评估）
+            rounds = rounds or 5
             b_base = cap(bobo_pane)
             b_before = b_base
             t0 = time.time()

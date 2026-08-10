@@ -224,8 +224,13 @@ class TestRelayFlowL3c:
             while not relay_hooks.is_active(sid) and time.monotonic() < deadline:
                 time.sleep(0.02)
             relay_hooks.push_user_input(sid, "你觉得这个话题怎么样")
-            t.join(timeout=30)
-            assert not t.is_alive(), "relay 线程应在轮数用完后退出"
+            # L4-3 持久多模式：relay 常驻，等"话题互传结束"信号（线程不自然退出）
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if any("互传结束" in e for e in emitted):
+                    break
+                time.sleep(0.02)
+            assert any("互传结束" in e for e in emitted), "话题互传应结束（relay 常驻等待下一话题）"
 
             # 发送序列：话题 + 2 次 bobo 接话（剥思考后）
             assert len(sent) == 3, f"发送序列={sent}"
@@ -277,7 +282,12 @@ class TestRelayFlowL3c:
             while not relay_hooks.is_active(sid) and time.monotonic() < deadline:
                 time.sleep(0.02)
             relay_hooks.push_user_input(sid, "话题")
-            t.join(timeout=30)
+            # L4-3 持久多模式：relay 常驻，等占位/结束信号
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if any("互传结束" in e or "[pi 输出解析中]" in e for e in emitted):
+                    break
+                time.sleep(0.02)
             stream = "\n".join(emitted)
             assert "[pi 输出解析中]" in stream, "全噪音必须显示占位"
             assert "$ echo x" not in stream and "⠹" not in stream, "噪音不得倒进对话流"

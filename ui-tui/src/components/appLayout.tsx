@@ -265,6 +265,7 @@ const ComposerPane = memo(function ComposerPane({
           onNewLiveSession={actions.newLiveSession}
           onNewPromptSession={actions.newPromptSession}
           onResumeSelect={actions.resumeById}
+          onScanConnect={actions.onScanConnect}
           pagerPageSize={composer.pagerPageSize}
         />
 

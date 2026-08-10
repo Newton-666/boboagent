@@ -141,14 +141,15 @@ class TestConnect:
         assert args[1] == cand
         assert args[2] == 3
 
-    def test_connect_default_rounds_5(self):
+    def test_connect_default_rounds_auto(self):
+        """L4 语义：不带轮数 → None（relay 内按话题复杂度自主评估），不再默认 5 轮"""
         ctx = make_ctx()
         ctx.scan_candidates["s1"] = [fake_candidate()]
         fake_thread = mock.MagicMock()
         with mock.patch("tools.agent_connect.verify_pane_identity", return_value=(True, "")), \
              mock.patch("threading.Thread", return_value=fake_thread) as m_thread:
             prompts.handle_slash_exec({"command": "connect 1", "session_id": "s1"}, "r1", ctx)
-        assert m_thread.call_args.kwargs["args"][2] == 5
+        assert m_thread.call_args.kwargs["args"][2] is None
 
     def test_connect_no_args_lists_hint(self):
         ctx = make_ctx()

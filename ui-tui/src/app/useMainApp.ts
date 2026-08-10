@@ -923,6 +923,13 @@ export function useMainApp(gw: GatewayClient) {
     slashRef.current(`/model ${value}`)
   }, [])
 
+  // TICKET-SCAN-L4-2：/scan 端点选中即连。轮数不传（None）→ 后端 L4-1
+  // 按话题复杂度自主评估，用户无需手动输轮数。
+  const onScanConnect = useCallback((n: number) => {
+    patchOverlayState({ scanPicker: false })
+    slashRef.current(`/connect ${n}`)
+  }, [])
+
   const closeLiveSession = useCallback(
     async (id: string) => {
       patchUiState({ status: 'closing session…' })
@@ -1026,6 +1033,7 @@ export function useMainApp(gw: GatewayClient) {
       newLiveSession: () => session.newLiveSession(),
       newPromptSession,
       onModelSelect,
+      onScanConnect,
       // Resuming a cold session from the overlay CLOSES the current one, so it
       // must respect the busy guard just like the `/resume` slash path.
       // (Switching between live sessions and `+ new` keep the current session
@@ -1048,6 +1056,7 @@ export function useMainApp(gw: GatewayClient) {
       closeLiveSession,
       newPromptSession,
       onModelSelect,
+      onScanConnect,
       session.activateLiveSession,
       session.guardBusySessionSwitch,
       session.newLiveSession,

@@ -95,6 +95,8 @@ export interface OverlayState {
   confirm: ConfirmReq | null
   modelPicker: boolean
   pager: null | PagerState
+  /** TICKET-SCAN-L4-2：/scan 端点选择器（↑/↓ 选端点，Enter 即连） */
+  scanPicker: boolean
   pluginsHub: boolean
   secret: null | SecretReq
   sessions: boolean
@@ -345,6 +347,8 @@ export interface AppLayoutActions {
   newLiveSession: () => void
   newPromptSession: (prompt: string, modelArg?: string) => void
   onModelSelect: (value: string) => void
+  /** TICKET-SCAN-L4-2：/scan 端点选中即连 */
+  onScanConnect: (index: number) => void
   resumeById: (id: string, onFail?: () => void) => void
   setStickyPrompt: (value: string) => void
 }
@@ -407,6 +411,8 @@ export interface AppOverlaysProps {
   onModelSelect: (value: string) => void
   onNewLiveSession: () => void
   onNewPromptSession: (prompt: string, modelArg?: string) => void
+  /** TICKET-SCAN-L4-2：/scan 端点选中即连（自动 /connect <编号>，轮数交给后端自主评估） */
+  onScanConnect: (index: number) => void
   onResumeSelect: (sessionId: string) => void
   onSecretSubmit: (value: string) => void
   onSudoSubmit: (pw: string) => void

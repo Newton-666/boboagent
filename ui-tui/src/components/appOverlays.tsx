@@ -13,6 +13,7 @@ import { ModelPicker } from './modelPicker.js'
 import { OverlayHint } from './overlayControls.js'
 import { PluginsHub } from './pluginsHub.js'
 import { ApprovalPrompt, ClarifyPrompt, ConfirmPrompt } from './prompts.js'
+import { ScanPicker } from './scanPicker.js'
 import { SkillsHub } from './skillsHub.js'
 
 const COMPLETION_WINDOW = 16
@@ -99,6 +100,7 @@ export function FloatingOverlays({
   onNewLiveSession,
   onNewPromptSession,
   onResumeSelect,
+  onScanConnect,
   pagerPageSize
 }: Pick<
   AppOverlaysProps,
@@ -111,6 +113,7 @@ export function FloatingOverlays({
   | 'onNewLiveSession'
   | 'onNewPromptSession'
   | 'onResumeSelect'
+  | 'onScanConnect'
   | 'pagerPageSize'
 >) {
   const { gw } = useGateway()
@@ -121,6 +124,7 @@ export function FloatingOverlays({
   const hasAny =
     overlay.modelPicker ||
     overlay.pager ||
+    overlay.scanPicker ||
     overlay.sessions ||
     overlay.skillsHub ||
     overlay.pluginsHub ||
@@ -170,6 +174,17 @@ export function FloatingOverlays({
       {overlay.skillsHub && (
         <FloatBox color={theme.color.border}>
           <SkillsHub gw={gw} onClose={() => patchOverlayState({ skillsHub: false })} t={theme} />
+        </FloatBox>
+      )}
+
+      {overlay.scanPicker && (
+        <FloatBox color={theme.color.border}>
+          <ScanPicker
+            onCancel={() => patchOverlayState({ scanPicker: false })}
+            onConnect={onScanConnect}
+            sessionId={sid}
+            t={theme}
+          />
         </FloatBox>
       )}
 

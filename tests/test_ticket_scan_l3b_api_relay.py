@@ -117,8 +117,13 @@ class TestApiRelay:
             topic1 = "帮我总结一下这个项目"
             relay_hooks.push_user_input(sid, topic1)
 
-            t.join(timeout=30)
-            assert not t.is_alive(), "relay 线程应在 2 轮后自然退出"
+            # L4-3 持久多模式：relay 常驻，等"话题互传结束"信号（线程不自然退出）
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if any("互传结束" in e for e in emitted):
+                    break
+                time.sleep(0.02)
+            assert any("互传结束" in e for e in emitted), "话题互传应结束（relay 常驻等待下一话题）"
 
             # 对方侧：话题直发 + 2 轮 bobo 回复（发送前复核路径保留）
             assert len(sent) == 3, f"应发送 3 次（话题+2 轮回复），实际 {len(sent)}: {sent}"
@@ -137,8 +142,8 @@ class TestApiRelay:
             assert "\x1b[38;2;154;160;166m" in stream, "分隔线必须莫兰迪灰 (#9AA0A6)"
             assert "BOBO → PI" in stream and "PI → BOBO" in stream
 
-            # hooks 已释放
-            assert not relay_hooks.is_active(sid), "线程结束应 unregister hooks"
+            # L4-3 持久多模式：relay 常驻，hooks 保持 active（连接保持等下一话题）
+            assert relay_hooks.is_active(sid), "常驻语义下 hooks 应保持注册（连接未断开）"
         finally:
             t.join(timeout=5)
             stop_patches(patches)
