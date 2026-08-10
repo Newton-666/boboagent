@@ -185,7 +185,9 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
         lines = ["📋 任务台账:"]
         for i, entry in enumerate(_ledger, 1):
             icon = {"pending": "⬜", "in_progress": "🔄", "done": "✅"}.get(entry["status"], "⬜")
-            lines.append(f"  {i}. {icon} [{entry['id']}] {entry['title'][:40]} ({entry['status']})")
+            v = "V" if (entry.get("verify") or "").strip() else "v-"
+            e = "E" if (entry.get("evidence") or "").strip() else "e-"
+            lines.append(f"  {i}. {icon} [{entry['id']}] {entry['title'][:40]} ({entry['status']}) [{v}|{e}]")
 
         done_count = sum(1 for e in _ledger if e["status"] == "done")
         lines.append(f"--- {done_count}/{len(_ledger)} done ---")
