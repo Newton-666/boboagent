@@ -90,6 +90,8 @@ export interface OverlayState {
   agentsInitialHistoryIndex: number
   approval: ApprovalReq | null
   clarify: ClarifyReq | null
+  /** 票 AUTO-E E-2：clarify 是否处于自定义输入态（ESC 时回退选择 vs 取消） */
+  clarifyTyping: boolean
   confirm: ConfirmReq | null
   modelPicker: boolean
   pager: null | PagerState

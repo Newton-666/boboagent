@@ -7,6 +7,7 @@ const buildOverlayState = (): OverlayState => ({
   agentsInitialHistoryIndex: 0,
   approval: null,
   clarify: null,
+  clarifyTyping: false,
   confirm: null,
   modelPicker: false,
   pager: null,

@@ -43,11 +43,9 @@ export function PromptZone({
       req.onConfirm()
     }
 
-    const onCancel = () => patchOverlayState({ confirm: null })
-
     return (
       <Box flexDirection="column" flexShrink={0} paddingX={1} paddingY={1}>
-        <ConfirmPrompt onCancel={onCancel} onConfirm={onConfirm} req={req} t={theme} />
+        <ConfirmPrompt onConfirm={onConfirm} req={req} t={theme} />
       </Box>
     )
   }
@@ -58,7 +56,6 @@ export function PromptZone({
         <ClarifyPrompt
           cols={cols}
           onAnswer={onClarifyAnswer}
-          onCancel={() => onClarifyAnswer('')}
           req={overlay.clarify}
           t={theme}
         />

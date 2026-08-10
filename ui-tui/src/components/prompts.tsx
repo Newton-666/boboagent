@@ -1,10 +1,12 @@
 import { Box, Text, useInput } from '@hermes/ink'
+import { useStore } from '@nanostores/react'
 import { useState } from 'react'
 
 import { isMac } from '../lib/platform.js'
 import type { Theme } from '../theme.js'
 import type { ApprovalReq, ClarifyReq, ConfirmReq } from '../types.js'
 
+import { $overlayState, patchOverlayState } from '../app/overlayStore.js'
 import { TextInput } from './textInput.js'
 
 const OPTS = ['once', 'session', 'always', 'deny'] as const
@@ -70,6 +72,12 @@ export function ApprovalPrompt({ onChoice, req, t }: ApprovalPromptProps) {
 
   // 仍然保留 useInput 作为后备，但全局 handler 会先处理
   useInput((ch, key) => {
+    if (key.escape) {
+      // 票 AUTO-E E-2：ESC 由全局 useInputHandlers 统一处理（deny），
+      // 组件跳过避免双 RPC；approvalAction 的 ESC 语义仍由单测钉死。
+      return
+    }
+
     const action = approvalAction(ch, key, sel)
 
     if (action.kind === 'choose') {
@@ -119,10 +127,13 @@ export function ApprovalPrompt({ onChoice, req, t }: ApprovalPromptProps) {
   )
 }
 
-export function ClarifyPrompt({ cols = 80, onAnswer, onCancel, req, t }: ClarifyPromptProps) {
+export function ClarifyPrompt({ cols = 80, onAnswer, req, t }: ClarifyPromptProps) {
   const [sel, setSel] = useState(0)
   const [custom, setCustom] = useState('')
-  const [typing, setTyping] = useState(false)
+  // 票 AUTO-E E-2：typing（自定义输入态）提升到 overlay store ——
+  // 全局 ESC 统一入口需要知道"回退选择 vs 取消"；组件只读写该字段。
+  const typing = useStore($overlayState).clarifyTyping
+  const setTyping = (v: boolean) => patchOverlayState({ clarifyTyping: v })
   const choices = req.choices ?? []
 
   const heading = (
@@ -134,8 +145,7 @@ export function ClarifyPrompt({ cols = 80, onAnswer, onCancel, req, t }: Clarify
 
   useInput((ch, key) => {
     if (key.escape) {
-      typing && choices.length ? setTyping(false) : onCancel()
-
+      // 票 AUTO-E E-2：ESC 由全局 useInputHandlers 统一处理（typing→回退 / 取消）
       return
     }
 
@@ -201,14 +211,15 @@ export function ClarifyPrompt({ cols = 80, onAnswer, onCancel, req, t }: Clarify
   )
 }
 
-export function ConfirmPrompt({ onCancel, onConfirm, req, t }: ConfirmPromptProps) {
+export function ConfirmPrompt({ onConfirm, req, t }: ConfirmPromptProps) {
   useInput((ch, key) => {
-    if (key.return) {
-      onConfirm()
+    if (key.escape) {
+      // 票 AUTO-E E-2：ESC 由全局 useInputHandlers 统一处理（关闭 confirm）
+      return
     }
 
-    if (key.escape) {
-      onCancel()
+    if (key.return) {
+      onConfirm()
     }
   })
 
@@ -232,13 +243,11 @@ interface ApprovalPromptProps {
 interface ClarifyPromptProps {
   cols?: number
   onAnswer: (answer: string) => void
-  onCancel: () => void
   req: ClarifyReq
   t: Theme
 }
 
 interface ConfirmPromptProps {
-  onCancel: () => void
   onConfirm: () => void
   req: ConfirmReq
   t: Theme

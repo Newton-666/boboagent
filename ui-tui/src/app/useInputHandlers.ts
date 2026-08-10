@@ -15,7 +15,7 @@ import { computePrecisionWheelStep, initPrecisionWheel } from '../lib/precisionW
 import { computeWheelStep, initWheelAccelForHost } from '../lib/wheelAccel.js'
 
 import { getInputSelection } from './inputSelectionStore.js'
-import type { InputHandlerContext, InputHandlerResult } from './interfaces.js'
+import type { InputHandlerContext, InputHandlerResult, OverlayState } from './interfaces.js'
 import { $isBlocked, $overlayState, patchOverlayState } from './overlayStore.js'
 import { turnController } from './turnController.js'
 import { patchTurnState } from './turnStore.js'
@@ -57,6 +57,80 @@ export function shouldFallThroughForScroll(key: {
   }
 
   return false
+}
+
+/**
+ * 票 AUTO-E E-2：ESC 焦点栈判定（纯函数，测试钉死）。
+ * 与 useInput 里 ESC 单一入口的 3-4 层一一对应：
+ *   approval > clarify > confirm > pager（最顶层 prompt overlay）
+ *   > panel（sessions/sudo/secret，全局关闭）
+ *   > componentOwned（modelPicker/skillsHub/pluginsHub/agents —— 组件级
+ *     useInput 处理，内部 mode/stage/filter 内聚，全局跳过避免双处理）
+ *   > none（无活跃层 → 调用方决定 busy 中断 / idle 无操作）
+ */
+export type EscTopTarget =
+  | { kind: 'approval' }
+  | { kind: 'clarify' }
+  | { kind: 'confirm' }
+  | { kind: 'pager' }
+  | { kind: 'panel' }
+  | { kind: 'componentOwned' }
+  | { kind: 'none' }
+
+export function escTopTarget(overlay: OverlayState): EscTopTarget {
+  if (overlay.approval) {
+    return { kind: 'approval' }
+  }
+
+  if (overlay.clarify) {
+    return { kind: 'clarify' }
+  }
+
+  if (overlay.confirm) {
+    return { kind: 'confirm' }
+  }
+
+  if (overlay.pager) {
+    return { kind: 'pager' }
+  }
+
+  if (overlay.sessions || overlay.sudo || overlay.secret) {
+    return { kind: 'panel' }
+  }
+
+  if (overlay.modelPicker || overlay.skillsHub || overlay.pluginsHub || overlay.agents) {
+    return { kind: 'componentOwned' }
+  }
+
+  return { kind: 'none' }
+}
+
+/**
+ * 票 AUTO-E E-2：ESC 无活跃层时的兜底判定（纯函数，测试钉死）。
+ * busy（引擎跑活中）→ interruptTurn；idle → 无操作（绝不清空 composer）。
+ */
+export const escTail = (target: EscTopTarget, busy: boolean, sid: string): 'interrupt' | 'noop' => {
+  if (target.kind === 'none' && busy && sid) {
+    return 'interrupt'
+  }
+
+  return 'noop'
+}
+
+/**
+ * 票 AUTO-E E-3：Ctrl+C 三态判定（纯函数，测试钉死，与 v0.7 裁决一致）：
+ * busy → 中断回合；有输入 → 清空输入；否则 → 退出。中断归中断、退出归退出。
+ */
+export const ctrlCDecision = (busy: boolean, hasInput: boolean): 'interrupt' | 'clearInput' | 'die' => {
+  if (busy) {
+    return 'interrupt'
+  }
+
+  if (hasInput) {
+    return 'clearInput'
+  }
+
+  return 'die'
 }
 
 export function applyVoiceRecordResponse(
@@ -263,10 +337,83 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
   useInput((ch, key) => {
     const live = getUiState()
 
-    // ── 优先处理 approval 弹窗的按键 ──
+    // ── 票 AUTO-E E-2：ESC 单一入口（焦点优先级链） ──
+    // 1. voice 组合键（ctrl/alt/super+escape）——最高，永远响应
+    // 2. 输入编辑态：queue-edit cancel > selection clear
+    // 3-4. overlay 焦点栈（escTopTarget）：approval deny > clarify
+    //      （typing 回退 / 取消）> confirm 关闭 > pager 关闭 > panel
+    //      （sessions/sudo/secret 全局关闭）> componentOwned（组件级处理）
+    // 5. 无活跃层：busy → 全局中断回合；idle → 无操作（绝不清空 composer）
+    if (key.escape) {
+      if (isVoiceToggleKey(key, ch, voice.recordKey)) {
+        return voiceRecordToggle()
+      }
+
+      if (cState.queueEditIdx !== null) {
+        return cActions.clearIn()
+      }
+
+      if (terminal.hasSelection) {
+        return clearSelection()
+      }
+
+      const target = escTopTarget(overlay)
+
+      if (target.kind === 'approval') {
+        gateway
+          .rpc<ApprovalRespondResponse>('approval.respond', { choice: 'deny', session_id: live.sid })
+          .then(r => r && (patchOverlayState({ approval: null }), patchTurnState({ outcome: 'denied' })))
+        return
+      }
+
+      if (target.kind === 'clarify') {
+        // typing（自定义输入态）→ 回退到选择列表；否则取消（持久化问题+选项）
+        if (overlay.clarifyTyping) {
+          patchOverlayState({ clarifyTyping: false })
+        } else {
+          actions.answerClarify('')
+        }
+        return
+      }
+
+      if (target.kind === 'confirm') {
+        patchOverlayState({ confirm: null })
+        return
+      }
+
+      if (target.kind === 'pager') {
+        patchOverlayState({ pager: null })
+        return
+      }
+
+      if (target.kind === 'panel') {
+        // sessions/sudo/secret：cancelOverlayFromCtrlC 内部按 sudo > secret > sessions 关闭
+        cancelOverlayFromCtrlC()
+        return
+      }
+
+      if (target.kind === 'componentOwned') {
+        // modelPicker/skillsHub/pluginsHub/agents：组件级 useInput 处理，全局跳过
+        return
+      }
+
+      // none（无活跃层）：busy → 中断；idle → 无操作（escTail 判定，测试钉死）
+      if (escTail(target, Boolean(live.busy && live.sid), live.sid) === 'interrupt') {
+        return turnController.interruptTurn({
+          appendMessage: actions.appendMessage,
+          gw: gateway.gw,
+          sid: live.sid,
+          sys: actions.sys
+        })
+      }
+
+      return
+    }
+
+    // ── 优先处理 approval 弹窗的按键（ESC 已在上方单一入口处理）──
     if (overlay.approval) {
-      if (isCtrl(key, ch, 'c') || key.escape) {
-        // Ctrl+C 或 Esc → 拒绝
+      if (isCtrl(key, ch, 'c')) {
+        // Ctrl+C → 拒绝
         gateway
           .rpc<ApprovalRespondResponse>('approval.respond', { choice: 'deny', session_id: live.sid })
           .then(r => r && (patchOverlayState({ approval: null }), patchTurnState({ outcome: 'denied' })))
@@ -326,6 +473,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
         if (isCtrl(key, ch, 'c')) {
           cancelOverlayFromCtrlC()
         }
+        // ESC 已由上方单一入口处理（clarify typing 回退 / 取消、confirm 关闭）
 
         return
       }
@@ -392,9 +540,8 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
 
       if (isCtrl(key, ch, 'c')) {
         cancelOverlayFromCtrlC()
-      } else if (key.escape && overlay.sessions) {
-        patchOverlayState({ sessions: false })
       }
+      // ESC 已由上方单一入口处理（panel 关闭 / componentOwned 跳过）
 
       // When a prompt overlay is up and the user pressed a scroll key, fall
       // through to the global scroll handlers below instead of returning.
@@ -459,38 +606,13 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       return scrollTranscript(key.pageUp ? -step : step)
     }
 
-    // Escape-based voice bindings (ctrl/alt/super+escape) must win before the
-    // generic Esc handlers below; otherwise queue-edit cancel / selection-clear
-    // would swallow the chord and /voice would advertise a shortcut that never
-    // actually toggles recording in those UI states.
-    if (key.escape && isVoiceToggleKey(key, ch, voice.recordKey)) {
-      return voiceRecordToggle()
-    }
-
-    // Queue-edit cancel beats selection-clear for plain Esc: the queue header
-    // explicitly promises "Esc cancel", so honoring it takes priority over the
-    // implicit selection-dismissal convention. Without an active edit, fall through.
-    if (key.escape && cState.queueEditIdx !== null) {
-      return cActions.clearIn()
-    }
-
-    if (key.escape && terminal.hasSelection) {
-      return clearSelection()
-    }
+    // Escape 相关分支已全部收敛到上方单一入口（票 AUTO-E E-2）：
+    // voice 组合键 > queue-edit cancel > selection clear > overlay 焦点栈 > busy 中断 / idle 无操作。
 
     // Ctrl+K：清空当前输入行（终端/browser 标准行为，零学习成本）
     if ((key.ctrl || key.meta) && ch === 'k') {
       cActions.setInput('')
       return
-    }
-
-    if (key.escape) {
-      // Esc 兜底：关闭所有可关闭的弹窗（sessions、agents 等）
-      const dismissible = overlay.sessions || overlay.agents
-      if (dismissible) {
-        patchOverlayState({ sessions: false, agents: false })
-        return
-      }
     }
 
     if (key.upArrow && !cState.inputBuf.length) {
@@ -550,7 +672,10 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
     }
 
     if (key.ctrl && ch.toLowerCase() === 'c') {
-      if (live.busy && live.sid) {
+      // 票 AUTO-E E-3：Ctrl+C 三态（ctrlCDecision 判定，测试钉死）
+      const decision = ctrlCDecision(Boolean(live.busy && live.sid), Boolean(cState.input || cState.inputBuf.length))
+
+      if (decision === 'interrupt') {
         return turnController.interruptTurn({
           appendMessage: actions.appendMessage,
           gw: gateway.gw,
@@ -559,7 +684,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
         })
       }
 
-      if (cState.input || cState.inputBuf.length) {
+      if (decision === 'clearInput') {
         return cActions.clearIn()
       }
 

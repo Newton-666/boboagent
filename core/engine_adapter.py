@@ -282,9 +282,11 @@ def run_engine(
             except Exception:
                 pass
 
-        # 中断后直接退出，不写 stdout、不存 session
-        if interrupt_event and interrupt_event.is_set():
-            return
+        # ── 票 AUTO-E E-1：中断保进度 ──
+        # 旧行为：中断即 return，checkpoints/history/ledger 回写 + save_session_to_disk
+        # + message.complete 全部跳过 → 本次回合进度（写文件记录/台账/对话）全丢。
+        # 新行为：中断与正常完成走同一条回写路径，进度必落盘；仅 final_text 标注。
+        _interrupted = bool(interrupt_event and interrupt_event.is_set())
 
         session["checkpoints"] = engine.checkpoint_mgr.checkpoints
 
@@ -298,14 +300,15 @@ def run_engine(
 
         save_session_to_disk(sid)
 
-        # 无论成功或失败，都要发射 message.complete 给 TUI。
+        # 无论成功或失败，都要发射 message.complete 给 TUI（票 AUTO-E Q1 裁决：
+        # 中断也发——回合必有一个结束事件；TUI 已有 interrupted 抑制逻辑，发安全）。
         # 此前 STATE_ERROR 时跳过了这个事件，TUI 的回合生命周期依赖
         # message.complete / error / interrupt 三者之一来解除 busy 状态。
         # gateway.error 事件在 Hermes fork 的 TUI 中没有处理器，被丢弃，
         # 导致 busy 永不解锁 → Bobo 用户看到的"不回复"其实是 TUI 死锁。
         emit("message.complete", sid, {
             "session_id": sid,
-            "final_text": result_text[0],
+            "final_text": result_text[0] if not _interrupted else f"{result_text[0]}\n\n*[已中断]*",
             "usage": last_usage[0],
         })
 
