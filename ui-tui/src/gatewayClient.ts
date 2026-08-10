@@ -312,6 +312,10 @@ export class GatewayClient extends EventEmitter {
     const pyPath = env.PYTHONPATH?.trim()
 
     env.PYTHONPATH = pyPath ? `${root}${delimiter}${pyPath}` : root
+    // 修复：直接运行 TUI（如 npx tsx src/entry.tsx）时环境可能没有 BOBO_BACKEND，
+    // 不设置会导致 gateway child 走进 entry.py main() 的 CLI 分支（去启动 node TUI）
+    // 形成递归 → gateway 秒退 exit 0 → crash loop。这里显式标记为后端进程。
+    env.BOBO_BACKEND = '1'
     // TICKET-018：socket 模式——让 python 自己 bind/listen，node 仅作连接方
     const sockPath = this.socketDisabled ? null : join(tmpdir(), `bobo-gw-${process.pid}-${Date.now()}.sock`)
     if (sockPath) {
