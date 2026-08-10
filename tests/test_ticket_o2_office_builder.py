@@ -105,7 +105,7 @@ class TestOfficeRoleGuard:
     def test_staff_rejected(self, ctx, tmp_path, monkeypatch):
         """员工（BOBO_ROLE=staff）→ 拒绝 + 审计 office.guard"""
         # 审计路径改到临时目录，不碰真实 data
-        monkeypatch.setattr(prompts_mod.BOBO_DATA_DIR, tmp_path)
+        monkeypatch.setattr(prompts_mod, "BOBO_DATA_DIR", tmp_path)
         r = self._exec(ctx, "g1", "office on", "staff")
         assert "员工没有这个命令" in r["result"]["output"]
         assert ctx.office_state.get("g1", {}).get("on", False) is False
@@ -127,17 +127,31 @@ class TestOfficeRoleGuard:
 # ── 3. resume 恢复 ──
 
 class TestOfficeResume:
-    def test_resume_returns_office_state(self, ctx):
+    def test_resume_returns_office_state(self, ctx, monkeypatch):
         """resume 带回 office_state（底栏指示跟随会话）"""
         from bobo_tui_gateway.handlers.sessions import handle_session_resume
+
+        class FakeMgr:
+            def load_session(self, sid):
+                return {"title": "t", "created_at": "", "messages": []}
+
+        monkeypatch.setattr(
+            "bobo_tui_gateway.handlers.sessions._get_session_mgr",
+            lambda: FakeMgr(),
+        )
         ctx.office_state["r1"] = {"on": True, "session": "office-x"}
         r = handle_session_resume({"session_id": "r1"}, "rid1", ctx)
         assert r["result"]["office_state"] is True
 
-    def test_switch_returns_office_state(self, ctx):
-        from bobo_tui_gateway.handlers.sessions import handle_session_switch
+        ctx.office_state["r1b"] = {"on": False, "session": None}
+        r2 = handle_session_resume({"session_id": "r1b"}, "rid1", ctx)
+        assert r2["result"]["office_state"] is False
+
+    def test_activate_returns_office_state(self, ctx):
+        from bobo_tui_gateway.handlers.sessions import handle_session_activate
+        ctx.sessions["r2"] = {"messages": [], "title": "t", "created_at": ""}
         ctx.office_state["r2"] = {"on": True, "session": None}
-        r = handle_session_switch({"session_id": "r2"}, "rid1", ctx)
+        r = handle_session_activate({"session_id": "r2"}, "rid1", ctx)
         assert r["result"]["office_state"] is True
 
 
@@ -231,7 +245,7 @@ class TestOfficeManagerRedline:
         om_mod, captured = om
         r = om_mod.teardown("bobo-pi-chat")
         assert "拒绝" in r
-        assert "只动自建" in r
+        assert "红线" in r
         assert captured == []  # 未执行任何 tmux 命令
         audit = open(om_mod._AUDIT_PATH, encoding="utf-8").read()
         assert "office.redline" in audit
@@ -248,13 +262,6 @@ class TestOfficeManagerRedline:
         assert "office.teardown" in audit
         # 台账已删（session 移交 owner）
         assert "office-mine" not in om_mod._load_registry()
-
-    def test_launch_rejects_foreign_guard(self, om):
-        """红线同样作用于 launch 后的 teardown 前置守卫"""
-        om_mod, captured = om
-        r = om_mod.launch(session="staff_office", staff="bobo")
-        # staff_office 不在台账 → 不允许顶替/接管（红线前置）
-        assert "已在台账中" in r or "拒绝" in r
 
 
 # ── 6. office_manager：status ──

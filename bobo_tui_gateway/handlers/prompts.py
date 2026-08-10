@@ -270,7 +270,7 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         # "/office 全世界只存在于 owner 终端"（票 O-2 最高原则 2）。
         role = os.environ.get("BOBO_ROLE", "").strip().lower()
         if role in ("staff", "dispatcher"):
-            _audit_office("guard", f"BOBO_ROLE={role} 尝试执行 /office 被拒（员工无此命令）")
+            _audit_office("office.guard", f"BOBO_ROLE={role} 尝试执行 /office 被拒（员工无此命令）")
             return ok(rid, {"output": "员工没有这个命令（/office 仅限 owner；"
                                       f"当前环境已注入 BOBO_ROLE={role}）"})
         arg = command[7:].strip().lower()
@@ -645,6 +645,7 @@ _COMMANDS = {
         "/duo": "/duo",
         "/provider": "/provider",
         "/auto": "/auto",
+        "/office": "/office",  # TICKET-O2：老板专用 OFFICE 开关
         "/scan": "/scan",
         "/connect": "/connect <编号> [轮数]",
         "/disconnect": "/disconnect",

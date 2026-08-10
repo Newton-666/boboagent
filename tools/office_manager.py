@@ -220,7 +220,7 @@ def status(session: str = "") -> str:
         lines.append(f"[{s}] {'🟢 存活' if alive else '🔴 不在'} 创建于 {info.get('created_at', '?')} "
                      f"staff={info.get('staff', [])} layout={info.get('layout', '?')}")
         if alive:
-            r = _sh(f"tmux list-panes -t {s}:0 -F '#{{pane_index}} #{pane_current_command}'", timeout=15)
+            r = _sh(f"tmux list-panes -t {s}:0 -F '#{{pane_index}} #{{pane_current_command}}'", timeout=15)
             for line in r.splitlines():
                 line = line.strip()
                 if line:

@@ -286,3 +286,34 @@ describe('StatusRule AUTO ON indicator (TICKET-AUTO-F)', () => {
     expect(rendered).toContain('AUTO ON')
   })
 })
+
+describe('StatusRule OFFICE indicator (TICKET-O2)', () => {
+  it('shows OFFICE next to the model when office is on', () => {
+    const element = StatusRule({ ...baseProps, officeOn: true })
+    const rendered = textContent(element)
+
+    expect(rendered).toContain('OFFICE')
+
+    // Rendered with warn (Morandi-family second hue) so it reads as a state badge.
+    const officeNode = findElementWithText(element, 'OFFICE')
+    expect(officeNode?.props.color).toBe(DEFAULT_THEME.color.warn)
+  })
+
+  it('hides OFFICE entirely when office is off (no slot occupied)', () => {
+    const element = StatusRule({ ...baseProps, officeOn: false })
+    expect(textContent(element)).not.toContain('OFFICE')
+  })
+
+  it('keeps OFFICE alongside AUTO ON when both are on', () => {
+    const element = StatusRule({ ...baseProps, autoOn: true, officeOn: true })
+    const rendered = textContent(element)
+
+    expect(rendered).toContain('AUTO ON')
+    expect(rendered).toContain('OFFICE')
+  })
+
+  it('does not show OFFICE in ordinary mode (default off)', () => {
+    const element = StatusRule({ ...baseProps })
+    expect(textContent(element)).not.toContain('OFFICE')
+  })
+})
