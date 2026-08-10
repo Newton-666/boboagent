@@ -59,6 +59,18 @@ describe('createGatewayEventHandler', () => {
     patchUiState({ showReasoning: true })
   })
 
+  it('flips the bottom-bar AUTO ON indicator on session.auto_state events', () => {
+    const onEvent = createGatewayEventHandler(buildCtx([]))
+
+    expect(getUiState().autoOn).toBe(false)
+
+    onEvent({ payload: { on: true }, session_id: 's1', type: 'session.auto_state' } as any)
+    expect(getUiState().autoOn).toBe(true)
+
+    onEvent({ payload: { on: false }, session_id: 's1', type: 'session.auto_state' } as any)
+    expect(getUiState().autoOn).toBe(false)
+  })
+
   it('archives incomplete todos into transcript flow at end of turn so they scroll up', () => {
     const appended: Msg[] = []
 

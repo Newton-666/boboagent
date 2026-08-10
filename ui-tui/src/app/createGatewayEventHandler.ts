@@ -453,6 +453,13 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
       }
 
+      case 'session.auto_state': {
+        // 票 AUTO-F：底栏 AUTO ON 指示实时跟随会话开关
+        patchUiState(state => ({ ...state, autoOn: Boolean(ev.payload?.on) }))
+
+        return
+      }
+
       case 'thinking.delta': {
         if (!getUiState().busy) {
           return

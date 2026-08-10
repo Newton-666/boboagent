@@ -202,6 +202,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         "info": _build_session_info(sid, ctx),
         "status": "idle",
         "resumed": sid,
+        # 票 AUTO-F：resume 时带回 auto 状态，前端底栏指示不丢
+        "auto_state": bool(ctx.auto_mode.get(sid, False)),
     })
 
 
@@ -286,6 +288,8 @@ def handle_session_activate(params: dict, rid: str, ctx) -> dict:
         "message_count": len(transcript),
         "info": _build_session_info(sid, ctx),
         "status": "idle",
+        # 票 AUTO-F：切换会话时带回 auto 状态，底栏指示跟随该会话
+        "auto_state": bool(ctx.auto_mode.get(sid, False)),
     })
 
 

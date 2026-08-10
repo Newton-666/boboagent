@@ -215,6 +215,9 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         else:
             auto_mode[sid] = not auto_mode.get(sid, False)
         state = "开启" if auto_mode.get(sid, False) else "关闭"
+        # 票 AUTO-F：AUTO ON 指示走 TUI 底部状态栏（session.auto_state 实时推送），
+        # 不再依赖对话流内的大段状态文本；slash 返回保留简短确认。
+        emit("session.auto_state", sid, {"session_id": sid, "on": bool(auto_mode.get(sid, False))})
         return ok(rid, {"output": f"AUTO MODE 已{state}（会话级）"})
     elif command == "memory-consolidate":
         """后台合并：识别重复/相似记忆，合并内容，归档低分草稿。从不删除。"""

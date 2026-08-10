@@ -388,6 +388,7 @@ export function GoodVibesHeart({ tick, t }: { tick: number; t: Theme }) {
 }
 
 export function StatusRule({
+  autoOn = false,
   cwdLabel,
   cols,
   busy,
@@ -448,11 +449,13 @@ export function StatusRule({
       ? noticeReserve
       : stringWidth(status)
 
+  const autoOnLabel = 'AUTO ON'
   const essentialWidth =
     stringWidth('─ ') +
     slotWidth +
     stringWidth(' │ ') +
     stringWidth(modelText) +
+    (autoOn ? stringWidth(' │ ') + stringWidth(autoOnLabel) : 0) +
     (ctxLabel ? stringWidth(' │ ') + stringWidth(ctxLabel) : 0)
 
   const { leftWidth, rightWidth, separatorWidth } = statusRuleWidths(cols, cwdLabel, essentialWidth)
@@ -551,6 +554,12 @@ export function StatusRule({
             {' │ '}
             {modelText}
           </Text>
+          {autoOn ? (
+            <Text color={t.color.accent} wrap="truncate-end">
+              {' │ '}
+              {autoOnLabel}
+            </Text>
+          ) : null}
           {ctxLabel ? (
             <Text color={t.color.muted} wrap="truncate-end">
               {' │ '}
@@ -727,6 +736,7 @@ export function TranscriptScrollbar({ scrollRef, t }: TranscriptScrollbarProps) 
 }
 
 interface StatusRuleProps {
+  autoOn?: boolean
   bgCount: number
   liveSessionCount: number
   busy: boolean

@@ -242,3 +242,48 @@ class TestAutoSlashCommand:
     def test_auto_registered_in_catalog(self):
         from bobo_tui_gateway.handlers.prompts import _COMMANDS
         assert "/auto" in _COMMANDS["canon"]
+
+    def test_auto_emits_state_event_on(self, ctx, monkeypatch):
+        """票 AUTO-F：/auto 开启时推送 session.auto_state 事件（含 sid 与 on 状态）。"""
+        emitted = []
+        monkeypatch.setattr(
+            "bobo_tui_gateway.handlers.prompts.emit",
+            lambda event, sid, payload=None: emitted.append((event, sid, payload)),
+        )
+        sid = "s7"
+        self._exec(ctx, sid, "auto on")
+        assert ctx.auto_mode.get(sid) is True
+        assert emitted == [("session.auto_state", "s7", {"session_id": "s7", "on": True})]
+
+    def test_auto_emits_state_event_off(self, ctx, monkeypatch):
+        """票 AUTO-F：/auto 关闭时推送 on=False 事件。"""
+        emitted = []
+        monkeypatch.setattr(
+            "bobo_tui_gateway.handlers.prompts.emit",
+            lambda event, sid, payload=None: emitted.append((event, sid, payload)),
+        )
+        sid = "s8"
+        ctx.auto_mode[sid] = True
+        self._exec(ctx, sid, "auto off")
+        assert ctx.auto_mode.get(sid) is False
+        assert emitted == [("session.auto_state", "s8", {"session_id": "s8", "on": False})]
+
+    def test_auto_state_survives_resume(self, ctx, monkeypatch):
+        """票 AUTO-F：resume 会话时返回 auto_state，前端底栏指示不丢。"""
+        from bobo_tui_gateway.handlers.sessions import handle_session_resume
+
+        class FakeMgr:
+            def load_session(self, sid):
+                return {"title": "t", "created_at": "", "messages": []}
+
+        monkeypatch.setattr(
+            "bobo_tui_gateway.handlers.sessions._get_session_mgr",
+            lambda: FakeMgr(),
+        )
+        ctx.auto_mode["s9"] = True
+        r = handle_session_resume({"session_id": "s9"}, "rid1", ctx)
+        assert r["result"]["auto_state"] is True
+
+        ctx.auto_mode["s10"] = False
+        r2 = handle_session_resume({"session_id": "s10"}, "rid1", ctx)
+        assert r2["result"]["auto_state"] is False

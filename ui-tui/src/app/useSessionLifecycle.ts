@@ -272,6 +272,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           setHistoryItems(info ? [introMsg(info), ...transcript] : transcript)
           writeActiveSessionFile(r.session_key ?? r.session_id)
           patchUiState({
+            autoOn: Boolean(r.auto_state),
             busy: running,
             info,
             sid: r.session_id,
@@ -326,6 +327,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             setHistoryItems(info ? [introMsg(info), ...resumed] : resumed)
             writeActiveSessionFile(r.resumed ?? r.session_id)
             patchUiState({
+              autoOn: Boolean(r.auto_state),
               busy: running,
               info,
               sid: r.session_id,
