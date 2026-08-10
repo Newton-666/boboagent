@@ -6,6 +6,8 @@
 import re as _re
 import shlex as _shlex
 import os as _os
+import json as _json
+import fnmatch as _fnmatch
 from typing import Tuple
 from core.file_safety import is_write_denied
 
@@ -661,3 +663,60 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
     if level == "dangerous":
         return ("external-irreversible", f"classify dangerous（{_reason}）")
     return ("local-reversible", f"{base_cmd or '?'}（本地操作，可回滚）")
+
+
+# ── 票 O-1：OFFICE MODE 受保护清单 ──────────────────────────────────────────
+
+def load_protected_paths(path: str | None = None) -> list[str]:
+    """票 O-1：读取受保护清单（glob 表达式列表，相对项目根）。
+
+    - 默认读 data/protected_paths.json（相对仓库根，不依赖 CWD）；
+    - 缺失 / JSON 损坏 / 字段非法 → 返回空清单（不炸：office 裁决
+      仍按角色与票据判定，清单纯属防御纵深）；
+    - 返回的 globs 已去空白、去空串。
+    """
+    if path is None:
+        path = _os.path.join(_BOBO_REPO_ROOT, "data", "protected_paths.json")
+    try:
+        with open(path, "r", encoding="utf-8") as _f:
+            _data = _json.load(_f)
+        _globs = _data.get("globs", [])
+        if not isinstance(_globs, list):
+            return []
+        return [g.strip() for g in _globs if isinstance(g, str) and g.strip()]
+    except Exception:
+        return []
+
+
+def is_protected(path: str, globs: list[str] | None = None) -> bool:
+    """票 O-1：路径是否命中受保护清单（glob / 目录前缀匹配，相对项目根）。
+
+    - 相对路径按原样匹配；绝对路径先转相对仓库根再匹配；
+    - glob 命中（fnmatch）或目录前缀命中（`core/` 命中 `core/engine.py`）；
+    - globs 为空（清单缺失）→ False（无清单即无保护，裁决不依赖它）。
+    """
+    if globs is None:
+        globs = load_protected_paths()
+    if not globs or not path:
+        return False
+    p = path.strip().lstrip("./")
+    if p.startswith("/"):
+        try:
+            p = _os.path.relpath(p, _BOBO_REPO_ROOT)
+        except Exception:
+            pass
+    for g in globs:
+        g = g.strip().rstrip("/")
+        if not g:
+            continue
+        if _fnmatch.fnmatch(p, g) or p.startswith(g + "/"):
+            return True
+    return False
+
+
+def is_git_readonly_subcommand(subcommand: str | None) -> bool:
+    """票 O-1：git 子命令是否只读（status/log/diff/show/blame/ls-files/ls-tree）。
+
+    office 执法用：不在只读集合的 git 子命令一律视为写操作 → 员工全禁。
+    """
+    return subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS

@@ -44,6 +44,8 @@ dist/
 data/
 !data/skill-standards/
 !data/tickets/
+!data/protected_paths.json
+!data/office_roles.json
 data/logs/
 
 # ── 票 LN-1：活体知识库镜像（用户可读写入口，不进 git）──
