@@ -460,6 +460,13 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
       }
 
+      case 'session.office_state': {
+        // TICKET-O2：底栏 OFFICE 指示实时跟随会话开关
+        patchUiState(state => ({ ...state, officeOn: Boolean(ev.payload?.on) }))
+
+        return
+      }
+
       case 'thinking.delta': {
         if (!getUiState().busy) {
           return

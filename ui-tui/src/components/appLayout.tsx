@@ -366,6 +366,7 @@ const StatusRulePane = memo(function StatusRulePane({
       <Box marginTop={at === 'top' ? 1 : 0}>
         <StatusRule
           autoOn={ui.autoOn}
+          officeOn={ui.officeOn} // TICKET-O2：底栏 OFFICE 指示
           bgCount={ui.bgTasks.size}
           busy={ui.busy}
           cols={composer.cols}

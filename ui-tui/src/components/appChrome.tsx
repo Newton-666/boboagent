@@ -389,6 +389,7 @@ export function GoodVibesHeart({ tick, t }: { tick: number; t: Theme }) {
 
 export function StatusRule({
   autoOn = false,
+  officeOn = false, // TICKET-O2：OFFICE 指示（莫兰迪另一色）
   cwdLabel,
   cols,
   busy,
@@ -558,6 +559,12 @@ export function StatusRule({
             <Text color={t.color.accent} wrap="truncate-end">
               {' │ '}
               {autoOnLabel}
+            </Text>
+          ) : null}
+          {officeOn ? (
+            <Text color={t.color.warn} wrap="truncate-end">
+              {' │ '}
+              {'OFFICE'}
             </Text>
           ) : null}
           {ctxLabel ? (
@@ -737,6 +744,8 @@ export function TranscriptScrollbar({ scrollRef, t }: TranscriptScrollbarProps) 
 
 interface StatusRuleProps {
   autoOn?: boolean
+  /** TICKET-O2：OFFICE 指示（底栏显示 OFFICE） */
+  officeOn?: boolean
   bgCount: number
   liveSessionCount: number
   busy: boolean
