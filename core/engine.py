@@ -23,7 +23,7 @@ from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
 from core.command_safety import (classify_command, is_high_risk_tool, is_auto_readonly_command,
-                                 classify_side_effect, _has_real_git_command)
+                                 classify_side_effect, _has_real_git_command, is_blacklisted)
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
@@ -200,10 +200,20 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         if tool_name == "execute_terminal":
             command = tool_args.get("command", "")
+            # ── 票 AUTO-D D-1：黑名单硬锁——auto 下最高优先级，即时拒绝 ──
+            # is_blacklisted 独立于 classify_side_effect（后者把黑名单并入
+            # external-irreversible，无法区分两档审计 reason）。
+            black_hit, black_reason = is_blacklisted(command)
+            if black_hit:
+                self._write_auto_audit("deny", tool_name, command[:120],
+                                       f"危险黑名单硬锁：auto 即时拒绝（{black_reason}）",
+                                       "external-irreversible", None)
+                return False
+
             level, side_reason = classify_side_effect(command)
             if level == "pure-read":
                 # 双保险：仍要求逐段只读（classify_side_effect 与票 A 判定同源，
-                # 理论一致；不一致时保守转弹窗）
+                # 理论一致；不一致时保守拒绝）
                 if is_auto_readonly_command(command):
                     self._write_auto_audit("allow", tool_name, command[:120],
                                            f"auto 决策树 v2：纯读命令（{side_reason}）",
@@ -216,24 +226,19 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                        "local-reversible", snapshot)
                 return True
 
-            # external-irreversible（含 pure-read 判定不一致的兜底）：转弹窗
-            self._write_auto_audit("escalated", tool_name, command[:120],
-                                   f"auto 模式：外部不可逆操作，转人工确认（{side_reason}）",
-                                   level if level in ("pure-read", "local-reversible", "external-irreversible") else "external-irreversible",
-                                   None)
+            # ── 票 AUTO-D D-1：外部不可逆灰名单——auto 下不弹窗（弹窗=卡死），
+            # 即时拒绝 + 留痕 + 收工时输出待人工执行清单（v0.7 裁决一）──
+            self._write_auto_audit("deny", tool_name, command[:120],
+                                   f"auto 模式：外部不可逆操作，拒绝并记入待人工执行清单（{side_reason}）",
+                                   "external-irreversible", None)
+            return False
 
-        # 写命令 / 非 terminal 灰名单：走弹窗（票 B-3 超时默认 deny）
-        if self.confirm_callback:
-            result = self.confirm_callback(tool_name, tool_args, reason)
-            if result == "all":
-                self._all_confirmed = True
-                return True
-            if not result:
-                # 拒绝留痕（含超时无人应答 → 安全默认 deny，火 2）
-                self._write_auto_audit("deny", tool_name, str(tool_args)[:120],
-                                       "auto 模式：外部不可逆操作未获确认，已安全拒绝",
-                                       "external-irreversible", None)
-            return result
+        # ── 票 AUTO-D D-1（Q1 裁决）：非 terminal 灰名单意外落入兜底 → 统一 deny ──
+        # auto 不弹窗是铁律：任何意外落入兜底的未分类操作即时拒绝+留痕，
+        # 不留 120s 卡死路径（原 confirm_callback 弹窗在 auto 下废除）。
+        self._write_auto_audit("deny", tool_name, str(tool_args)[:120],
+                               f"auto 模式：未分类操作落入兜底，即时拒绝（{reason}）",
+                               "external-irreversible", None)
         return False
 
     def _snapshot_for_rollback(self, command: str) -> dict:
@@ -283,6 +288,53 @@ class Engine(ContextMixin, ToolRunnerMixin):
             event["snapshot_ref"] = snapshot.get("ref", "")
             event["rollback_path"] = snapshot.get("rollback", "")
         event_bus.write("auto.decide", event)
+
+    def _build_handoff_list(self) -> str:
+        """票 AUTO-D D-2：收工交接清单——从 events.jsonl 现查本会话 auto 拒绝记录。
+
+        过滤 type=="auto.decide" and sid==self.sid and verdict=="deny"，
+        同命令去重（按 command 首次出现），黑名单与外部不可逆分节渲染。
+        正常模式不写 auto.decide（无清单）；清单为空返回 ""。
+        读失败 / 行解析失败 → 静默跳过，绝不阻塞收工（事件总线铁律）。
+        """
+        try:
+            with open(event_bus.filepath, "r", encoding="utf-8") as _f:
+                _lines = _f.readlines()
+        except Exception:
+            return ""
+        _sid = getattr(self, "sid", "")
+        blacklisted: dict[str, str] = {}    # command -> reason
+        irreversible: dict[str, str] = {}   # command -> reason
+        for _line in _lines:
+            _line = _line.strip()
+            if not _line:
+                continue
+            try:
+                _ev = json.loads(_line)
+            except Exception:
+                continue
+            if _ev.get("type") != "auto.decide" or _ev.get("sid") != _sid:
+                continue
+            if _ev.get("verdict") != "deny":
+                continue
+            _cmd = (_ev.get("command") or "").strip()
+            _reason = _ev.get("reason") or ""
+            if not _cmd:
+                continue
+            if _reason.startswith("危险黑名单硬锁"):
+                blacklisted.setdefault(_cmd, _reason)
+            else:
+                irreversible.setdefault(_cmd, _reason)
+        _parts: list[str] = []
+        if blacklisted:
+            _parts.append("【危险黑名单（系统硬锁，禁止任何途径执行）】")
+            _parts += [f"- {c}：{r}" for c, r in blacklisted.items()]
+        if irreversible:
+            _parts.append("【外部不可逆（需人工确认后执行）】")
+            _parts += [f"- {c}：{r}" for c, r in irreversible.items()]
+        if not _parts:
+            return ""
+        return "\n\n📋 待人工执行清单\n" + "\n".join(_parts)
 
     def _build_system_prompt(self) -> str:
         return """你是 Bobo，一个专业的个人智能助手。
@@ -1251,6 +1303,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
                     total = len(self.task_ledger)
                     self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
+                # ── 票 AUTO-D D-2：收工交接清单（auto 拒绝记录，从 events 现查） ──
+                # 仅 auto 模式有 auto.decide deny 事件；清单空则零影响（正常模式天然空）。
+                _handoff = self._build_handoff_list()
+                if _handoff:
+                    self._pending_content = (self._pending_content or "") + _handoff
                 content = self._format_final_output(self._pending_content)
                 # ── 票 P 降级展示：reasoning 思考块（仅展示层，历史在上方已落账，零污染） ──
                 if self._last_reasoning:

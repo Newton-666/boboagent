@@ -61,6 +61,19 @@ DANGEROUS_PATTERNS = [
 ]
 
 
+def is_blacklisted(command: str) -> tuple[bool, str]:
+    """黑名单硬锁判定：复用 DANGEROUS_PATTERNS，split 前整条原始串检查。
+
+    返回 (hit: bool, reason: str)。命中 → (True, "递归删除文件" 等黑名单原因)。
+    必须在 split 前查原始串——shlex punctuation_chars 会把 `$(` 拆成
+    `$` + `(`（中间带空格），段级 `\$\(` 失配（46cd0e3 教训）。
+    """
+    for pattern, reason in DANGEROUS_PATTERNS:
+        if _re.search(pattern, command):
+            return True, reason
+    return False, ""
+
+
 def split_shell_segments(cmd_clean: str) -> list | None:
     """用 shlex 按控制操作符（| && || ;）把命令切成若干段。
 

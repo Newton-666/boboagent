@@ -113,19 +113,20 @@ class TestConfirmDecisionTree:
 
     def test_auto_branch_before_all_confirmed(self, engine):
         """火 A-2：auto 分支必须排在 _all_confirmed 之前——
-        用户点过 always 后，auto 下写命令仍必须走风险评估（callback），
-        不能因 _all_confirmed=True 直接放行。"""
+        用户点过 always 后，auto 下写命令仍必须走风险评估（票 AUTO-D：
+        git push 外部不可逆 → 即时 deny，不经 _all_confirmed 放行）。"""
         engine._auto_mode_getter = lambda: True
         engine._all_confirmed = True  # 模拟用户之前点过 always
         engine.confirm_callback = lambda *a: False  # 弹窗被拒
-        # 写命令：若 _all_confirmed 优先会直接 True，这里必须走 callback → False
+        # 写命令：若 _all_confirmed 优先会直接 True，这里必须走 auto 决策树 → deny
         assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is False
 
-    def test_non_terminal_tool_in_auto_goes_to_callback(self, engine):
-        """auto 开 + 非 terminal 灰名单工具（如 delete_note）→ 走 callback。"""
+    def test_non_terminal_tool_in_auto_goes_to_deny(self, engine):
+        """票 AUTO-D（Q1 裁决）：auto 开 + 非 terminal 灰名单意外落入兜底
+        → 统一即时 deny，不弹窗（auto 不弹窗是铁律）。"""
         engine._auto_mode_getter = lambda: True
-        engine.confirm_callback = lambda *a: True
-        assert engine._confirm("delete_note", {"filename": "x.md"}, "文件操作") is True
+        engine.confirm_callback = lambda *a: True  # 若走 callback 会 True
+        assert engine._confirm("delete_note", {"filename": "x.md"}, "文件操作") is False
 
 
 # ── 3. auto 关闭时行为零变化（回归断言，v0.6 验收纪律） ──
