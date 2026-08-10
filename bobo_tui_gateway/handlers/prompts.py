@@ -90,6 +90,28 @@ def handle_approval_respond(params: dict, rid: str, ctx) -> dict:
     return ok(rid, {"responded": True})
 
 
+def _cancel_engine_and_wait(sid: str, timeout: float = 3.0) -> bool:
+    """中断 sid 的 engine 并轮询等待其退出（最长 timeout 秒）。
+
+    TICKET-AUTO-G3：E-1 中断保进度让引擎退出从"立即 return"变为"先落盘再退出"
+    （1-2s），原 0.3s 单次检查窗口配不上新退出时长 → 改为 100ms 轮询，
+    引擎消失立即放行；超过 timeout 仍运行 → 返回 False（调用方保留原报错兜底）。
+    引擎本来没在运行 → 不进等待逻辑，立即返回 True（零回归路径）。
+    """
+    import time as _time
+    from core.engine_adapter import is_running, cancel
+
+    if not is_running(sid):
+        return True
+    cancel(sid)
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if not is_running(sid):
+            return True
+        _time.sleep(0.1)
+    return not is_running(sid)
+
+
 def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     sid = params.get("session_id", "")
     text = params.get("text", "")
@@ -102,13 +124,8 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
         return err(rid, -32000, "会话不存在")
 
     # 审计 #12：上一个请求的 engine 仍在跑时，先中断它，再接受新请求。
-    from core.engine_adapter import is_running, cancel
-    if is_running(sid):
-        cancel(sid)
-        import time as _time
-        _time.sleep(0.3)
-        if is_running(sid):
-            return err(rid, -32000, "无法取消上一个请求，请稍后重试")
+    if not _cancel_engine_and_wait(sid):
+        return err(rid, -32000, "无法取消上一个请求，请稍后重试")
 
     # 在后台线程中运行引擎，主线程继续处理 stdin
     from core.engine_adapter import run_engine as _run_engine_adapter
@@ -387,13 +404,8 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
                 session = ctx.sessions.get(sid)
             if not session:
                 return err(rid, -32000, "会话不存在")
-            from core.engine_adapter import is_running, cancel
-            if is_running(sid):
-                cancel(sid)
-                import time as _time
-                _time.sleep(0.3)
-                if is_running(sid):
-                    return err(rid, -32000, "无法取消上一个请求，请稍后重试")
+            if not _cancel_engine_and_wait(sid):
+                return err(rid, -32000, "无法取消上一个请求，请稍后重试")
 
             from core.duo_orchestrator import run_deliberation
             t = threading.Thread(
