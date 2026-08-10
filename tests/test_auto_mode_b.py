@@ -111,22 +111,22 @@ class TestAutoDecideV2:
         assert ev["rollback_path"], "回滚路径必须在决策时刻写入审计"
         assert ev["snapshot_ref"].startswith("HEAD="), "git 快照应记录 HEAD 摘要"
 
-    def test_git_push_escalates_popup(self, engine, tmp_path):
-        """验收 1：git push → 转弹窗（escalated 留痕），弹窗拒绝 → deny 留痕。"""
+    def test_git_push_immediate_deny(self, engine, tmp_path):
+        """票 AUTO-D 验收 2：auto 下 git push → 即时 deny（不弹窗、零 callback 调用），
+        audit 含"记入待人工执行清单"。"""
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "b_sid_push"
         engine._auto_mode_getter = lambda: True
-        engine.confirm_callback = lambda *a: False  # 模拟无人应答/拒绝
+        calls = []
+        engine.confirm_callback = lambda *a: calls.append(a) or False
         assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is False
+        assert not calls, "auto 下外部不可逆不得走 confirm_callback（零调用）"
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
-        events = [e for e in lines if e.get("type") == "auto.decide"]
-        escalated = [e for e in events if e.get("verdict") == "escalated"]
-        denied = [e for e in events if e.get("verdict") == "deny"]
-        assert escalated, "弹窗转交必须留痕 verdict=escalated"
-        assert escalated[0]["side_effect_level"] == "external-irreversible"
-        assert denied, "拒绝必须留痕 verdict=deny"
-        assert "外部不可逆" in denied[0]["reason"]
+        denied = [e for e in lines if e.get("type") == "auto.decide" and e.get("verdict") == "deny"]
+        assert denied, "即时 deny 必须留痕"
+        assert "记入待人工执行清单" in denied[0]["reason"]
+        assert denied[0]["side_effect_level"] == "external-irreversible"
 
     def test_snapshot_not_in_execution_thread(self, engine, monkeypatch):
         """验收 3 强化：快照调用发生在决策路径内（_confirm 返回前完成，无执行线程介入）。"""
@@ -154,17 +154,20 @@ class TestTimeoutDeny:
         event.set()
         assert _wait_for_confirmation(event, timeout=0.01) is True
 
-    def test_timeout_deny_leaves_audit(self, engine, tmp_path):
-        """验收 4：超时拒绝留痕（reason 明示外部不可逆未获确认）。"""
+    def test_auto_immediate_deny_no_timeout(self, engine, tmp_path):
+        """票 AUTO-D：auto 下外部不可逆即时 deny——不经过 120s 超时等待
+        （弹窗=卡死），confirm_callback 零调用即返回 False。"""
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "b_sid_timeout"
         engine._auto_mode_getter = lambda: True
-        engine.confirm_callback = lambda *a: False  # 模拟 _wait_for_confirmation 超时 → False
+        calls = []
+        engine.confirm_callback = lambda *a: calls.append(a) or True  # 若被调用会返回 True（放行）
         assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is False
+        assert not calls, "auto 下不得走 confirm_callback（零调用，无 120s 卡死）"
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
         denied = [e for e in lines if e.get("type") == "auto.decide" and e.get("verdict") == "deny"]
-        assert denied and "未获确认" in denied[0]["reason"]
+        assert denied and "记入待人工执行清单" in denied[0]["reason"]
 
 
 # ── 5. auto 关闭零变化回归（强制） ──
@@ -243,20 +246,23 @@ class TestDangerousHighestPriority:
         from core.command_safety import is_auto_readonly_command
         assert is_auto_readonly_command(cmd) is False, f"{cmd} 不得 pure-read 放行"
 
-    def test_engine_confirm_escalates_injection(self, engine, tmp_path):
-        """engine 级：auto 下注入命令转弹窗，不留 allow。"""
+    def test_engine_confirm_denies_injection(self, engine, tmp_path):
+        """票 AUTO-D 验收 1：auto 下注入命令（$( / 反引号）→ 黑名单硬锁即时 deny，
+        零 callback 调用，reason 含"危险黑名单硬锁"。"""
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "b_sid_inject"
         engine._auto_mode_getter = lambda: True
-        engine.confirm_callback = lambda *a: False
+        calls = []
+        engine.confirm_callback = lambda *a: calls.append(a) or False
         assert engine._confirm("execute_terminal", {"command": "echo $(rm -rf x)"}, "gray") is False
+        assert not calls, "auto 下黑名单不得走 confirm_callback（零调用）"
 
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
         events = [e for e in lines if e.get("type") == "auto.decide"]
         assert events, "注入命令也应留审计"
         assert all(e["verdict"] != "allow" for e in events), "注入命令不得 allow"
-        escalated = [e for e in events if e.get("verdict") == "escalated"]
-        assert escalated and "危险黑名单" in escalated[0]["reason"]
+        denied = [e for e in events if e.get("verdict") == "deny"]
+        assert denied and "危险黑名单硬锁" in denied[0]["reason"]
 
 
 # ── 7. 审计四新字段齐全（B-4） ──
@@ -275,13 +281,79 @@ class TestAuditFieldsB:
         for field in ("side_effect_level", "snapshot_ref", "rollback_path"):
             assert field in ev, f"审计缺字段 {field}"
 
-    def test_audit_escalated_verdict(self, engine, tmp_path):
-        """验收 7：弹窗转交留痕 verdict=escalated + side_effect_level。"""
+    def test_audit_deny_verdict(self, engine, tmp_path):
+        """票 AUTO-D：deny 审计含 side_effect_level（external-irreversible）。"""
         EventBus.reset(log_dir=str(tmp_path))
         engine.sid = "b_sid_esc"
         engine._auto_mode_getter = lambda: True
         engine.confirm_callback = lambda *a: False
         engine._confirm("execute_terminal", {"command": "git push"}, "gray")
         lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
-        escalated = [e for e in lines if e.get("type") == "auto.decide" and e.get("verdict") == "escalated"]
-        assert escalated and escalated[0]["side_effect_level"] == "external-irreversible"
+        denied = [e for e in lines if e.get("type") == "auto.decide" and e.get("verdict") == "deny"]
+        assert denied and denied[0]["side_effect_level"] == "external-irreversible"
+
+
+# ── 9. 票 AUTO-D：黑名单硬锁 + 收工交接清单 ──
+
+class TestAutoDBlacklistHardlock:
+    def test_blacklist_immediate_deny_no_callback(self, engine, tmp_path):
+        """验收 1：auto 下 rm -rf 直连 → 黑名单硬锁即时 deny，零 callback 调用。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_bl"
+        engine._auto_mode_getter = lambda: True
+        calls = []
+        engine.confirm_callback = lambda *a: calls.append(a) or True
+        assert engine._confirm("execute_terminal", {"command": "rm -rf x"}, "gray") is False
+        assert not calls, "黑名单硬锁不得走 confirm_callback（零调用）"
+        lines = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
+        denied = [e for e in lines if e.get("type") == "auto.decide" and e.get("verdict") == "deny"]
+        assert denied and "危险黑名单硬锁" in denied[0]["reason"]
+
+    def test_blacklist_chain_tail_deny(self, engine, tmp_path):
+        """验收 1：链式命令尾段黑名单（git status && rm -rf x）→ 整条硬锁 deny。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_chain"
+        engine._auto_mode_getter = lambda: True
+        calls = []
+        engine.confirm_callback = lambda *a: calls.append(a) or True
+        assert engine._confirm("execute_terminal", {"command": "git status && rm -rf x"}, "gray") is False
+        assert not calls, "链式尾段黑名单不得走 confirm_callback"
+
+
+class TestAutoDHandoffList:
+    def test_handoff_list_sections_and_dedup(self, engine, tmp_path):
+        """验收 3：收工清单含被拒命令，黑名单/外部不可逆分节，同命令去重。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_handoff"
+        engine._auto_mode_getter = lambda: True
+        # 同一条黑名单命令拒绝两次 → 去重为 1 条；外部不可逆 1 条
+        for _ in range(2):
+            engine._confirm("execute_terminal", {"command": "rm -rf x"}, "gray")
+        engine._confirm("execute_terminal", {"command": "git push"}, "gray")
+        text = engine._build_handoff_list()
+        assert "待人工执行清单" in text
+        assert "【危险黑名单（系统硬锁，禁止任何途径执行）】" in text
+        assert "【外部不可逆（需人工确认后执行）】" in text
+        assert text.count("rm -rf x") == 1, "同命令必须去重"
+        assert "git push" in text
+        assert "危险黑名单硬锁" in text
+        assert "记入待人工执行清单" in text
+
+    def test_handoff_empty_when_auto_off(self, engine, tmp_path):
+        """验收 4：auto 关 → 不产生 auto.decide deny → 清单为空（正常模式零影响）。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_clean"
+        engine._auto_mode_getter = None  # auto 关
+        engine.confirm_callback = lambda *a: True
+        assert engine._confirm("execute_terminal", {"command": "git push"}, "gray") is True
+        assert engine._build_handoff_list() == ""
+
+    def test_handoff_empty_when_only_allow(self, engine, tmp_path):
+        """对照：auto 下纯放行（git status / git commit）→ 清单为空（allow 不进清单）。"""
+        EventBus.reset(log_dir=str(tmp_path))
+        engine.sid = "b_sid_allow"
+        engine._auto_mode_getter = lambda: True
+        engine.confirm_callback = lambda *a: pytest.fail("不应弹窗")
+        assert engine._confirm("execute_terminal", {"command": "git status"}, "gray") is True
+        assert engine._confirm("execute_terminal", {"command": "git commit -m x"}, "gray") is True
+        assert engine._build_handoff_list() == ""
