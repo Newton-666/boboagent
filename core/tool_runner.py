@@ -318,6 +318,11 @@ class ToolRunnerMixin:
             if tool_name == "task_ledger":
                 exec_args = dict(tool_args)
                 exec_args["_engine"] = self
+            elif tool_name in ("execute_terminal", "spawn_worker"):
+                # 票 AUTO-E2：运行中的命令/Worker 可被 ESC 硬中断——
+                # 注入中断事件，工具内部轮询到即中断（2s 内）
+                exec_args = dict(tool_args)
+                exec_args["_interrupt_event"] = getattr(self, '_interrupt_event', None)
             future = executor.submit(_execute_tool, tool_name, exec_args)
             future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)

@@ -8,6 +8,7 @@ Worker 有独立上下文，不会污染主 Engine 的对话。
 import hashlib
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 TOOL_NAME = "spawn_worker"
@@ -114,18 +115,44 @@ def _get_llm_caller():
     return _llm_caller_cache
 
 
-def _run_worker_with_timeout(worker, worker_input: str, timeout: int) -> tuple[str, bool]:
-    """在独立线程中运行 Worker，返回 (result, timed_out)。"""
+def _run_worker_with_timeout(worker, worker_input: str, timeout: int, interrupt_event=None) -> tuple[str, bool, bool]:
+    """在独立线程中运行 Worker，返回 (result, timed_out, interrupted)。
+
+    票 AUTO-E2：轮询 interrupt_event（主引擎 ESC 硬中断），
+    set 后立即中断 Worker（复用 worker._interrupt_event 通道，与超时同机制）；
+    中断与超时语义分开——中断绝不触发自动重试。
+    """
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
         future = pool.submit(worker.run, worker_input)
-        try:
-            future.result(timeout=timeout)
-            return ("", False)  # 正常完成，result 由调用方通过 _extract_worker_result 获取
-        except _FutTimeout:
-            if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
-                worker._interrupt_event.set()
-            return ("", True)
+        interrupted = False
+        deadline = time.time() + timeout
+        while True:
+            # 主引擎 ESC 硬中断 → 立即中断 Worker（不重试）
+            if interrupt_event is not None and interrupt_event.is_set():
+                interrupted = True
+                if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
+                    worker._interrupt_event.set()
+                return ("", False, True)
+            # 整体超时 → 中断 Worker（原语义：timed_out=True）
+            if time.time() > deadline:
+                if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
+                    worker._interrupt_event.set()
+                return ("", True, False)
+            try:
+                future.result(timeout=0.15)
+                return ("", False, False)  # 正常完成，result 由调用方通过 _extract_worker_result 获取
+            except _FutTimeout:
+                continue  # 未完成，继续轮询
+    except _FutTimeout:
+        if hasattr(worker, "_interrupt_event") and worker._interrupt_event:
+            worker._interrupt_event.set()
+        return ("", True, False)
+    finally:
+        # 中断/超时场景 worker 可能仍在收束——不阻塞等待（wait=False），
+        # worker 收到 interrupt_event 后自行收束退出
+        pool.shutdown(wait=False)
 
 
 def _extract_worker_result(history: list) -> str:
@@ -186,7 +213,8 @@ def _extract_tool_log(history: list) -> str:
 
 
 def execute(instruction: str = "", name: str = "", context: str = "",
-            task: str = "", allow_tools: bool = True, timeout: int = None) -> str:
+            task: str = "", allow_tools: bool = True, timeout: int = None,
+            _interrupt_event=None) -> str:
     # task 是 instruction 的别名——LLM 常常猜 task 而不知道参数名是 instruction
     instruction = instruction or task
     """执行子任务并返回轻量标记，完整结果可通过 read_worker_result 获取。"""
@@ -238,7 +266,15 @@ def execute(instruction: str = "", name: str = "", context: str = "",
         _timeout = timeout if timeout is not None else _WORKER_TIMEOUT
 
         # ── 在独立线程中运行 Worker ──
-        result, timed_out = _run_worker_with_timeout(worker, worker_input, _timeout)
+        result, timed_out, interrupted = _run_worker_with_timeout(
+            worker, worker_input, _timeout, interrupt_event=_interrupt_event)
+
+        if interrupted:
+            # 票 AUTO-E2：ESC 硬中断 → 立即返回中断标注，绝不自动重试
+            return (
+                "⛔ 已被用户中断（ESC）\n"
+                "Worker 执行已中断，进度已保留，说\"继续\"可接上。"
+            )
 
         if timed_out:
             # 如果调用方传了明确的 timeout，不重试——超时即失败
@@ -255,7 +291,9 @@ def execute(instruction: str = "", name: str = "", context: str = "",
                 )
                 worker2.system_prompt = worker_prompt
                 _worker_depth.depth = getattr(_worker_depth, "depth", 0) + 1
-                result2, _ = _run_worker_with_timeout(worker2, worker_input, _WORKER_RETRY_TIMEOUT)
+                result2, _, _ = _run_worker_with_timeout(
+                    worker2, worker_input, _WORKER_RETRY_TIMEOUT,
+                    interrupt_event=_interrupt_event)
                 _worker_depth.depth = max(0, getattr(_worker_depth, "depth", 0) - 1)
                 return result2
             else:
