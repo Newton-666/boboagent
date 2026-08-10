@@ -156,7 +156,7 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转"})
+        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto, /scan, /connect, /disconnect\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转\n/scan — 侦查 tmux 内活着的 bobo/pi 并列出候选\n/connect <编号> [轮数] — 连接 /scan 候选对象，建立互传通道（默认 5 轮）\n/disconnect — 断开当前会话的互传通道"})
     elif command == "clear":
         emit("session.cleared", sid, {"session_id": sid})
         return ok(rid, {"output": ""})
@@ -236,6 +236,93 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         # 不再依赖对话流内的大段状态文本；slash 返回保留简短确认。
         emit("session.auto_state", sid, {"session_id": sid, "on": bool(auto_mode.get(sid, False))})
         return ok(rid, {"output": f"AUTO MODE 已{state}（会话级）"})
+    elif command == "scan":
+        """TICKET-SCAN-L3-1: /scan — 侦查 tmux 内活着的 bobo/pi，列出候选。
+
+        复用 tools/agent_scan.py 的识别逻辑（不复制代码）；unknown 一律不列为
+        候选（保守策略，误报率=0 红线延续）。候选暂存 ctx.scan_candidates[sid]
+        供 /connect 使用。
+        """
+        try:
+            from tools.agent_scan import scan as _agent_scan
+            results = _agent_scan()
+        except Exception as e:
+            return ok(rid, {"output": f"/scan 执行失败: {e}"})
+        cands = [r for r in results if r["kind"] in ("bobo", "pi")]
+        if not cands:
+            return ok(rid, {"output": "未发现可对话对象（tmux 内无 bobo/pi）"})
+        ctx.scan_candidates[sid] = cands
+        lines = ["检测到以下可对话对象：", ""]
+        for i, c in enumerate(cands, 1):
+            cwd = c.get("cwd") or "?"
+            lstart = c.get("lstart") or "?"
+            lines.append(f"{i}. [{c['kind'].upper()}] {c['pane']}")
+            lines.append(f"   工作目录: {cwd}")
+            lines.append(f"   启动时间: {lstart}")
+        lines.append("")
+        lines.append("连接: /connect <编号> [轮数]   （如 /connect 1 5，默认 5 轮）")
+        return ok(rid, {"output": "\n".join(lines)})
+    elif command == "connect" or command.startswith("connect "):
+        """TICKET-SCAN-L3-2/3/4: /connect <编号> — 确认后建互传通道。
+
+        - 发送前复核（Kimi 补丁③）：verify_pane_identity 重新核验目标 pane，
+          身份变化则拒绝并报错；
+        - 安全闸：仅向已确认候选 pane 发送（unknown 永不成为目标）；
+        - 复用 tools/agent_connect.py 的 relay 线程（pi_relay.py 范式）。
+        """
+        parts = command.split()
+        if len(parts) < 2:
+            cands = ctx.scan_candidates.get(sid, [])
+            if not cands:
+                return ok(rid, {"output": "用法: /connect <编号> [轮数]，请先运行 /scan 获取候选列表"})
+            hint = "用法: /connect <编号> [轮数]，候选：" + "、".join(
+                f"{i}.{c['kind']}@{c['pane']}" for i, c in enumerate(cands, 1))
+            return ok(rid, {"output": hint})
+        num = parts[1]
+        rounds = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 5
+        cands = ctx.scan_candidates.get(sid, [])
+        if not cands:
+            return ok(rid, {"output": "请先运行 /scan 获取候选列表"})
+        if not num.isdigit():
+            return ok(rid, {"output": "编号必须是数字，如 /connect 1"})
+        idx = int(num) - 1
+        if idx < 0 or idx >= len(cands):
+            return ok(rid, {"output": f"编号超出范围（1-{len(cands)}）"})
+        target = cands[idx]
+
+        # 同一会话已有连接在跑 → 拒绝重复连接
+        if ctx.relay_links.get(sid):
+            return ok(rid, {"output": "本会话已有互传通道在运行，先 /disconnect 断开"})
+
+        # Kimi 补丁③：发送前复核（现在复核一次，发送时 send_safe 还会再复核）
+        from tools.agent_connect import verify_pane_identity
+        ok_verify, reason = verify_pane_identity(target)
+        if not ok_verify:
+            return ok(rid, {"output": f"目标 pane 身份已变化，已中止：{reason}"})
+
+        # 建互传通道（后台线程，daemon）
+        import threading as _th
+        from tools.agent_connect import run_relay_thread
+        t = _th.Thread(
+            target=run_relay_thread,
+            args=(sid, target, rounds, emit),
+            name=f"scan-connect-{sid}",
+            daemon=True,
+        )
+        ctx.relay_links[sid] = {
+            "target_pane": target["pane"],
+            "target_kind": target["kind"],
+            "thread": t,
+            "started": datetime.now().isoformat(timespec="seconds"),
+        }
+        t.start()
+        return ok(rid, {"output": f"已连接 {target['kind']}（{target['pane']}），启动 {rounds} 轮互传。在输入框输入话题即可开始。"})
+    elif command == "disconnect":
+        """TICKET-SCAN-L3: /disconnect — 断开当前会话的互传通道（守护线程无法强杀，标记停止）。"""
+        link = ctx.relay_links.pop(sid, None)
+        if not link:
+            return ok(rid, {"output": "本会话没有活动的互传通道"})
+        return ok(rid, {"output": f"已断开与 {link.get('target_kind')}（{link.get('target_pane')}）的互传（线程将在下一轮循环自然退出）"})
     elif command == "memory-consolidate":
         """后台合并：识别重复/相似记忆，合并内容，归档低分草稿。从不删除。"""
         try:
@@ -449,6 +536,9 @@ _COMMANDS = {
         "/duo": "/duo",
         "/provider": "/provider",
         "/auto": "/auto",
+        "/scan": "/scan",
+        "/connect": "/connect <编号> [轮数]",
+        "/disconnect": "/disconnect",
     }
 }
 
