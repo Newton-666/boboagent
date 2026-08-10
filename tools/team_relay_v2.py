@@ -185,13 +185,18 @@ def write_inbox(agent: str, content: str) -> int:
 
 
 def read_new_inbox(agent: str, last_seq: int) -> list:
-    """读 inbox/{agent}/ 中序号 > last_seq 的所有发言，按序返回 [(seq, text)]。"""
+    """读 inbox/{agent}/ 中序号 > last_seq 的所有发言，按序返回 [(seq, text)]。
+
+    按数字序号排序（TICKET-R2-P1）：字符串排序在 seq >= 10 时乱序
+    （"0010.md" < "0002.md"），转发会丢序。
+    """
     d = _agent_inbox(agent)
     if not os.path.isdir(d):
         return []
     files = sorted(
-        fn for fn in os.listdir(d)
-        if fn.endswith(".md") and not fn.endswith(".tmp")
+        (fn for fn in os.listdir(d)
+         if fn.endswith(".md") and not fn.endswith(".tmp")),
+        key=_seq_of,
     )
     out = []
     for fn in files:
@@ -493,6 +498,7 @@ def main() -> int:
     idle_prev = {name: pane_idle_fn(name)(base[name]) for name in ORDER}
     pre_busy_base = {}                          # 票 R2-P2：idle→busy 转变时保存的"发言前屏幕"
     spoken = {name: 0 for name in ORDER}        # 已摘录条数
+    forwarded = {name: 0 for name in ORDER}   # 本次运行实际转发条数（轮次上限用）
     forwarded_count = 0
     t_start = time.time()
     hard_timeout = 3600  # 1 小时硬上限
@@ -551,12 +557,18 @@ def main() -> int:
             idle_prev[name] = idle_now
             prev_screen[name] = cur
 
-        # ── 阶段 2：转发（轮询 inbox 新文件 → 下一位空闲时转发）──
+        # ── 阶段 2：转发（通道驱动：inbox 新序号文件 → 下一位空闲时转发）──
+        # TICKET-R2-P1：触发只看通道（文件序号 vs state），不依赖摘录计数。
+        # 旧实现用 spoken（本次运行摘录计数）与 state（跨运行持久序号）互比：
+        # 残留高位 state（封口 999 / 上次运行遗留）→ 永不触发 = 23:30 零转发；
+        # inbox 非 1 起始序号 → 计数追不上 → 转 1 条即停 = 23:05 停摆。
+        state = sanitize_state(state)  # 自愈：通道清理/封口残留不阻塞转发
         for name in ORDER:
-            if spoken[name] <= state.get(name, 0):
-                continue  # 无新发言
-            if spoken[name] > rounds:
-                continue  # 已达轮次上限，不再转发
+            if forwarded[name] >= rounds:
+                continue  # 该 agent 本轮转发已达上限
+            msgs = read_new_inbox(name, state.get(name, 0))
+            if not msgs:
+                continue  # 无新发言（触发只看通道）
             next_name = ORDER[(ORDER.index(name) + 1) % len(ORDER)]
             # 票 R1：发送前复核目标 pane 身份（unknown 永不通过复核，L3 铁律沿用）
             ok, reason, next_screen = verify_target_pane(next_name)
@@ -566,15 +578,22 @@ def main() -> int:
             if not pane_idle_fn(next_name)(next_screen):
                 log(f"  {next_name} 忙碌，暂缓转发 {name} 的发言（下次重试）")
                 continue  # 不更新 state，下轮重试
-            msgs = read_new_inbox(name, state.get(name, 0))
             for seq, content in msgs:
+                if forwarded[name] >= rounds:
+                    break
                 msg = f"{INJECT_PREFIX} {name} 的发言】\n{content}\n\n{READONLY_RULE}"
                 send(PANES[next_name], msg)
                 state[name] = seq
+                forwarded[name] += 1
                 forwarded_count += 1
                 log(f"  {name} 发言 → {next_name} [第{seq}条]")
+                # 注入后重设目标基线：注入消息已入对方历史，下次摘录只取
+                # 新回复，防把注入内容当发言回声转发（TICKET-R2-P1）
+                time.sleep(0.8)
+                base[next_name] = cap(PANES[next_name])
+                idle_prev[next_name] = pane_idle_fn(next_name)(base[next_name])
+                save_state(state)  # 逐条持久化，缩小崩溃丢状态窗口
                 if forwarded_count >= rounds * len(ORDER):
-                    save_state(state)
                     return finish(f"{DONE_LABEL}：共转发 {forwarded_count} 次")
 
         state["pid"] = os.getpid()  # 心跳：续写 pid，防 state 被误判为陈旧
