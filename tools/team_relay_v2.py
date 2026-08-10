@@ -103,6 +103,62 @@ def save_state(state: dict):
     os.replace(tmp, STATE_PATH)
 
 
+# ── 单实例锁（票 R2-P3：relay.state 记录的 pid 存活检查为唯一事实源）──
+
+
+def _pid_alive(pid: int) -> bool:
+    """pid 是否为存活进程（Unix kill(pid,0) 探活）。"""
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 进程存在但无权限发信号，视为存活
+    except OSError:
+        return False
+
+
+def _state_pid() -> int:
+    """relay.state 中记录的 relay 进程 pid（无/损坏返回 0）。"""
+    try:
+        return int(load_state().get("pid", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _pgrep_relay() -> list:
+    """pgrep 兜底扫描：同类 relay 进程（旧版未写 state 的 relay 也能拦住）。"""
+    try:
+        out = subprocess.run(["pgrep", "-f", "team_relay_v2.py"],
+                             capture_output=True, text=True, timeout=10).stdout
+        return [p for p in out.split() if p.isdigit()]
+    except Exception:
+        return []
+
+
+def _acquire_single_instance() -> bool:
+    """单实例锁（票 R2-P3）：启动前查 relay.state 存活进程。
+
+    病历（23:22）：同一 office 重复启动 4 次 relay、双实例并发——v1 的
+    pgrep 全扫在 cmdline 变体（绝对路径/不同解释器/不同参数）下漏判。
+    修复：relay.state 的 pid 字段是唯一事实源——pid 存活 → 已有人持锁，
+    退出；pid 失效/缺失 → 本进程接管（写入自己 pid）。pgrep 仅作兜底
+    （拦旧版未写 state 的 relay）。返回 True=获得锁，False=已有实例。
+    """
+    pid = _state_pid()
+    if _pid_alive(pid):
+        print(f"已有 relay 在运行（relay.state pid={pid} 存活），本次退出", file=sys.stderr)
+        return False
+    for pid_str in _pgrep_relay():
+        if int(pid_str) != os.getpid():
+            print(f"已有 team_relay_v2 在运行（pgrep pid={pid_str}），本次退出", file=sys.stderr)
+            return False
+    return True
+
+
 def write_inbox(agent: str, content: str) -> int:
     """把完整发言原子写入 inbox/{agent}/{seq:04d}.md，返回序号。
 
@@ -408,17 +464,15 @@ def main() -> int:
     rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     interval = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
 
-    # 单实例锁（与 v1 相同，防双 relay 竞争）
+    # 单实例锁（票 R2-P3：state 记录的 pid 存活检查为唯一事实源，pgrep 兜底）
     me = os.getpid()
-    try:
-        procs = subprocess.run(["pgrep", "-f", "team_relay_v2.py"],
-                               capture_output=True, text=True, timeout=10).stdout.split()
-    except Exception:
-        procs = []
-    for pid_str in procs:
-        if pid_str.isdigit() and int(pid_str) != me:
-            print(f"已有 team_relay_v2 在运行（pid {pid_str}），本次退出", file=sys.stderr)
-            return 0
+    if not _acquire_single_instance():
+        return 0
+    # 接管：把本进程 pid 写入 relay.state（心跳在轮询循环里续写，防误判崩溃）
+    st = load_state()
+    st["pid"] = me
+    st["started_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    save_state(st)
 
     log_path = os.path.join(ROOT, "data", "team_relay_v2.log")
     logf = open(log_path, "a", encoding="utf-8")
@@ -456,6 +510,9 @@ def main() -> int:
             log(f"已生成 Obsidian 汇总：{fname}")
         except Exception as e:
             log(f"生成 Obsidian 汇总失败：{e}")
+        # 收尾（票 R2-P3）：正常退出释放单实例锁（清 pid），防陈旧 state 占锁
+        state["pid"] = None
+        save_state(state)
         logf.close()
         return 0
 
@@ -520,6 +577,7 @@ def main() -> int:
                     save_state(state)
                     return finish(f"{DONE_LABEL}：共转发 {forwarded_count} 次")
 
+        state["pid"] = os.getpid()  # 心跳：续写 pid，防 state 被误判为陈旧
         save_state(state)
         time.sleep(interval)
 
