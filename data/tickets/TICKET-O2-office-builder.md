@@ -37,6 +37,8 @@ owner 亲手按下的第一个开关。O-1 造好了镣铐，R1 造好了总线�
 
 ### O2-2 搭建器（新工具 tools/office_manager.py）
 
+**流程铁律（owner 2026-08-10 21:54 裁决）：/office 打开瞬间零 tmux 副作用**——只翻状态+亮底栏+回引导语，不建任何 session。owner 自然语言说配置 → 老板先出布局方案（session/pane/角色/启动命令清单）→ owner 确认 → 才调 launch。无默认配置、无自动搭建。
+
 工具 `office_manager`，actions：`status` / `launch` / `teardown`。纪律全部内置在工具里，不靠 LLM 自觉：
 
 - `launch`（参数：staff 数量、分工描述、session 名、窗口布局）：
@@ -75,6 +77,7 @@ owner 亲手按下的第一个开关。O-1 造好了镣铐，R1 造好了总线�
 1. O2-5 测试全过 + 全量零回归（基线 1850 passed / 2 skipped）
 2. 员工环境 /office 拒绝实测
 3. 红线实测：teardown 指向非自建 session → 拒绝 + 审计
+4. **零副作用实测**：/office 开 + 未说配置前，tmux list-sessions 前后对比零新增
 4. 前端 build 产物双份一致（md5）
 5. 真实库三文件 md5 闸门
 6. 五查汇报附测试原始输出
