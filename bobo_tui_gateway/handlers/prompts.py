@@ -303,7 +303,8 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
                 f"{i}.{c['kind']}@{c['pane']}" for i, c in enumerate(cands, 1))
             return ok(rid, {"output": hint})
         num = parts[1]
-        rounds = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 5
+        # TICKET-SCAN-L4-1：显式指定轮数从用户；不带轮数 → None（relay 内按话题复杂度自主评估）
+        rounds = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
         cands = ctx.scan_candidates.get(sid, [])
         if not cands:
             return ok(rid, {"output": "请先运行 /scan 获取候选列表"})
