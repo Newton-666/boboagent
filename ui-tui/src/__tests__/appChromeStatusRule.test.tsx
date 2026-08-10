@@ -260,3 +260,29 @@ describe('StatusRule credits notice render priority', () => {
     expect(textContent(element)).toContain('opus 4.8')
   })
 })
+
+describe('StatusRule AUTO ON indicator (TICKET-AUTO-F)', () => {
+  it('shows a highlighted AUTO ON next to the model when auto is on', () => {
+    const element = StatusRule({ ...baseProps, autoOn: true })
+    const rendered = textContent(element)
+
+    expect(rendered).toContain('AUTO ON')
+
+    // Rendered with the theme accent colour so it reads as a state badge.
+    const autoNode = findElementWithText(element, 'AUTO ON')
+    expect(autoNode?.props.color).toBe(DEFAULT_THEME.color.accent)
+  })
+
+  it('hides AUTO ON entirely when auto is off (no slot occupied)', () => {
+    const element = StatusRule({ ...baseProps, autoOn: false })
+    expect(textContent(element)).not.toContain('AUTO ON')
+  })
+
+  it('keeps AUTO ON visible alongside the pinned model label', () => {
+    const element = StatusRule({ ...baseProps, autoOn: true })
+    const rendered = textContent(element)
+
+    expect(rendered).toContain('opus 4.8')
+    expect(rendered).toContain('AUTO ON')
+  })
+})

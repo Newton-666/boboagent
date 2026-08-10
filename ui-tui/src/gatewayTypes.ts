@@ -124,6 +124,7 @@ export interface SessionCreateResponse {
 }
 
 export interface SessionResumeResponse {
+  auto_state?: boolean
   inflight?: null | SessionInflightTurn
   info?: SessionInfo
   message_count?: number
@@ -161,6 +162,7 @@ export interface SessionInflightTurn {
 }
 
 export interface SessionActivateResponse {
+  auto_state?: boolean
   inflight?: null | SessionInflightTurn
   info?: SessionInfo
   message_count?: number
@@ -512,6 +514,7 @@ export type GatewayEvent =
   | { payload?: { skin?: GatewaySkin }; session_id?: string; type: 'gateway.ready' }
   | { payload?: GatewaySkin; session_id?: string; type: 'skin.changed' }
   | { payload: SessionInfo; session_id?: string; type: 'session.info' }
+  | { payload: { on: boolean }; session_id?: string; type: 'session.auto_state' }
   | { payload?: { text?: string }; session_id?: string; type: 'thinking.delta' }
   | { payload?: undefined; session_id?: string; type: 'message.start' }
   | { payload?: { kind?: string; text?: string }; session_id?: string; type: 'status.update' }

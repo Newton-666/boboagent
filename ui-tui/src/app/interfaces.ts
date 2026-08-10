@@ -115,6 +115,7 @@ export interface TranscriptRow {
 }
 
 export interface UiState {
+  autoOn: boolean
   bgTasks: Set<string>
   busy: boolean
   busyInputMode: BusyInputMode
