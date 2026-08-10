@@ -117,6 +117,8 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
                 "id": item["id"],
                 "title": item["title"],
                 "status": item.get("status", "pending"),
+                "verify": item.get("verify", ""),
+                "evidence": item.get("evidence", ""),
             }
             _ledger.append(entry)
             _write_event("create", entry["id"], entry["title"], entry["status"])
@@ -149,6 +151,10 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
                 if entry["id"] == item_id:
                     old_status = entry["status"]
                     entry["status"] = new_status
+                    if "verify" in item and item.get("verify"):
+                        entry["verify"] = item["verify"]
+                    if "evidence" in item and item.get("evidence"):
+                        entry["evidence"] = item["evidence"]
                     _write_event("update", entry["id"], entry["title"], entry["status"])
                     updated.append(f'{entry["title"][:20]}: {old_status} → {new_status}')
                     found = True
@@ -174,7 +180,7 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
     elif action == "list":
         _ledger = _current_ledger(_engine)
         if not _ledger:
-            return "📋 台账为空"
+            return "📋 台账为空 V2-ENGINE-CHECK"
 
         lines = ["📋 任务台账:"]
         for i, entry in enumerate(_ledger, 1):
