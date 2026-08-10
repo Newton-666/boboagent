@@ -139,6 +139,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # ── 票 K v2：任务台账（收工闸核心） ──
         self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]
         self._ledger_reinject_count: int = 0  # 连续回注计数（硬熔断 2 次）
+        self._ledger_field_deny_count: int = 0  # 票 C：台账缺字段 deny 计数（独立，无熔断上限）
         self._last_reasoning: str = ""  # 票 P：上一轮 reasoning 思考过程（展示用，不进历史）
         self._interrupt_event: threading.Event | None = None
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
@@ -483,6 +484,24 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if line.startswith(key + ":"):
                 return line.split(":", 1)[1].strip().strip('"').strip("'")
         return ""
+
+    def _ledger_field_issues(self) -> list[dict]:
+        """票 C：台账字段质量扫描（收工闸 auto 硬拦的判定内核）。
+
+        返回缺字段项列表 [{id, missing: [字段名, ...]}]；全合规 → []。
+        规则：每项必须有非空 verify；status==done 还必须有非空 evidence。
+        老格式台账（无新字段）→ 一律视同缺字段（裁决 1，无迁移豁免）。
+        """
+        issues = []
+        for e in self.task_ledger:
+            missing = []
+            if not (e.get("verify") or "").strip():
+                missing.append("verify")
+            if e.get("status") == "done" and not (e.get("evidence") or "").strip():
+                missing.append("evidence")
+            if missing:
+                issues.append({"id": e.get("id", "?"), "missing": missing})
+        return issues
 
     @staticmethod
     def _parse_frontmatter_list(text: str, key: str) -> list[str]:
@@ -1440,6 +1459,34 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                     })
                                     warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
                                     self._pending_content = (self._pending_content or "") + warning
+                # ── 票 C 收工闸 auto 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
+                # auto off → 整段物理跳过，普通模式连判定都不经过（零影响铁律）。
+                if self._auto_mode_getter is not None and self._auto_mode_getter():
+                    field_issues = self._ledger_field_issues()
+                    if field_issues:
+                        # 缺字段 → deny 收工：不回注（独立计数）、不放行、无熔断上限。
+                        self._ledger_field_deny_count += 1
+                        _parts = "; ".join(
+                            f'{i["id"]} 缺 {", ".join(i["missing"])}' for i in field_issues
+                        )
+                        rej_msg = (
+                            f"AUTO MODE 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
+                            "缺字段不设熔断，唯一出路是补齐或删除。请用 task_ledger update "
+                            "补齐 verify（怎么算做完/怎么验证）与 done 项的 evidence（完成证据），"
+                            "或删除该项，然后继续。不要说明、不要道歉，直接做。"
+                        )
+                        self._append_to_history("user", rej_msg)
+                        self._pending_content = None
+                        self._pending_tool_calls = None
+                        self.current_depth += 1
+                        event_bus.write("goal_gate.deny", {
+                            "session_id": getattr(self, "sid", ""),
+                            "reason": "ledger_field_missing",
+                            "field_issues": field_issues,
+                            "deny_count": self._ledger_field_deny_count,
+                        })
+                        self._emit_state_change(self.STATE_THINKING, "ledger field deny")
+                        return
                 # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
                 pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
                 if pending_items:

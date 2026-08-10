@@ -212,6 +212,8 @@ TOOL_SCHEMA = {
                             "id": {"type": "string", "description": "唯一标识"},
                             "title": {"type": "string", "description": "任务标题"},
                             "status": {"type": "string", "enum": ["pending", "in_progress", "done"], "description": "状态"},
+                            "verify": {"type": "string", "description": "票 C（可选）：这项怎么算做完、怎么验证（创建时填）。AUTO MODE 下收工闸硬性要求"},
+                            "evidence": {"type": "string", "description": "票 C（可选）：完成证据（标 done 时填）。AUTO MODE 下收工闸硬性要求"},
                         },
                         "required": ["id", "title"],
                     },
