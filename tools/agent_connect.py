@@ -302,18 +302,86 @@ def strip_ansi(text: str) -> str:
     return _re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
-def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None):
+# ── TICKET-SCAN-L3c：转发净化（Bug 2 思考剥离 + Bug 3 pi 输出净化）──
+_THINKING_BLOCK_RE = None  # 惰性编译
+
+
+def strip_thinking(text: str) -> str:
+    """剥离 bobo 回复中的思考段（票 P 降级展示块），只留最终回复正文。
+
+    格式：'──  思考过程 ──\n...\n── 思考结束 ──'（engine.py 票 P 追加）。
+    只剥离块本身；块前后正文原样保留。
+    """
+    global _THINKING_BLOCK_RE
+    if _THINKING_BLOCK_RE is None:
+        import re as _re
+        # 非贪婪匹配到首个 '── 思考结束 ──' 行；不跨多块（一次消费一块）。
+        _THINKING_BLOCK_RE = _re.compile(
+            r"\n*──\s*💭\s*思考过程\s*──.*?──\s*思考结束\s*──\s*", _re.S
+        )
+    if not text or "💭" not in text:
+        return text
+    cleaned = _THINKING_BLOCK_RE.sub("", text).strip()
+    return cleaned
+
+
+_PI_NOISE_LINE = None  # 惰性编译
+
+
+def clean_pi_output(text: str) -> str:
+    """净化 pi 侧 capture-pane 抓取的回复：去命令回显/工具噪音/提示符/spinner。
+
+    宁保守：净化后为空返回 ""（调用方决定占位文案，如 '[pi 输出解析中]'）。
+    只做噪音过滤，不改写正文内容（透明原则）。
+    """
+    global _PI_NOISE_LINE
+    if not text:
+        return ""
+    if _PI_NOISE_LINE is None:
+        import re as _re
+        # 行级噪音：命令回显 / Took Xs / ctrl+o expand / 行数省略 / Loading / 提示符 / spinner
+        _PI_NOISE_LINE = _re.compile(
+            r"^\s*("
+            r"\$.*"                                    # 命令回显（$ 开头整行）
+            r"|Took\s+[\d.]+s\s*$"                     # 工具耗时
+            r"|.*ctrl\+o.*expand.*"                    # 编辑提示
+            r"|.*lines?\s+omitted.*"                   # 行数省略
+            r"|^\(\d+ lines?\)$"                       # 折叠计数
+            r"|Loading\s+.*"                           # 加载提示
+            r"|[\w.-]+@[\w.-]+:[^\s]*[\$#~]?\s*$"      # shell 提示符（user@host:path）
+            r"|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷].*"      # spinner 帧开头整行
+            r")\s*$"
+        )
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if _PI_NOISE_LINE.match(line) or _PI_NOISE_LINE.match(s):
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None, engine_runner=None):
     """bobo(自己) ↔ target 互传 N 轮。运行在 gateway 进程内的 daemon 线程。
 
     - target: agent_scan 扫描结果的候选 dict（已验证身份）
     - emit: server_utils.emit 事件发射（进度推送 TUI）
     - log_fn: 可选日志回调（默认 print）
+    - engine_runner: 可选回调 runner(text)->str，API 直采模式下 relay 线程
+      显式调引擎（输入=pi 回复）拿 bobo 回复；由 gateway 闭包注入。
 
     TICKET-SCAN-L3b 双模式：
       pane 模式  —— 自己侧用 capture-pane 看屏幕（兼容 SCAN-L3 原路径）
       API 直采   —— 自己侧从 relay_hooks 内部数据通道取（用户话题 ← prompt.submit，
-                     bobo 回复 ← engine complete 事件）；bobo 不在 tmux 也能连。
+                     bobo 回复 ← engine_runner 显式调引擎）；bobo 不在 tmux 也能连。
     对方侧不变：仍走 capture-pane + send-keys + 发送前复核。
+
+    TICKET-SCAN-L3c 路由三修：
+      Bug1 用户输入只进 relay（prompt.submit 路由闸），开场直发 target，不进 bobo 大脑；
+      Bug2 bobo 回复转发前 strip_thinking 剥思考段；
+      Bug3 pi 回复 clean_pi_output 净化后再显示/转发。
     """
     def _log(msg):
         if log_fn:
@@ -362,20 +430,62 @@ def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None):
     _log_line(strip_ansi(block_head))
 
     try:
-        # ── 阶段 0：等用户话题 + 首次 bobo 回复 ──
+        # ── 阶段 0：等用户话题（L3c：API 直采直发 target，不进 bobo 大脑）──
         if api_mode:
             user_topic = relay_hooks.poll_user_input(sid, 600)
             if user_topic is None:
                 _emit("⏹ 10 分钟内未检测到输入，已停止")
                 return
-            _log("API 直采：收到用户话题")
-            bobo_reply = relay_hooks.poll_bobo_reply(sid, 300)
-            if bobo_reply is None:
-                _emit("⏹ 等待 bobo 回复超时（300s），已停止")
+            _log("API 直采：收到用户话题，直发 target")
+            msg_u2t = relay_msg_line("USER", target_label, time.strftime("%H:%M:%S"), user_topic)
+            _emit(msg_u2t)
+            _log_line(strip_ansi(msg_u2t))
+            try:
+                send_safe(target_pane, user_topic, target)
+            except RuntimeError as e:
+                _emit(f"❌ {e}")
                 return
-            _log("API 直采：bobo 回复完成")
-            b_before_text = user_topic
-            b_after_text = bobo_reply
+            p_after = wait_pi_finished(target_pane, 300)
+            _log(f"开场：{target_label} 回复完成")
+            p_base = cap(target_pane)
+            p_before = p_base
+            # ── API 直采循环：rounds 次 bobo 接话（engine_runner）→ target；每次后等 pi 回复 ──
+            def _show_pi(new_pi_raw: str) -> str:
+                """净化显示 pi 回复；净化后为空显示占位（宁保守不倒垃圾）。返回净化文本。"""
+                pi_text = clean_pi_output(new_pi_raw)
+                if pi_text:
+                    _emit(relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), pi_text))
+                    _log_line(strip_ansi(relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), pi_text)))
+                elif new_pi_raw:
+                    _emit(relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), "[pi 输出解析中]"))
+                    _log_line(strip_ansi(relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), "[pi 输出解析中]")))
+                return pi_text
+
+            pi_clean = _show_pi(diff_new(p_base, p_after))
+            for r in range(1, rounds + 1):
+                if engine_runner is None:
+                    _log(f"轮{r}：engine_runner 未注入，无法 bobo 接话，停止")
+                    break
+                bobo_input = pi_clean or "（pi 无新内容，请继续讨论）"
+                _log(f"轮 {r}/{rounds}：调引擎（输入={target_label} 回复）…")
+                bobo_reply = engine_runner(bobo_input)
+                new = strip_thinking(bobo_reply)
+                if not new:
+                    _log(f"轮{r}：bobo 回复为空，跳过")
+                    continue
+                _log(f"── 轮 {r}/{rounds}：bobo 回复 → {target_label} ──")
+                msg_b2t = relay_msg_line("BOBO", target_label, time.strftime("%H:%M:%S"), new)
+                _emit(msg_b2t)
+                _log_line(strip_ansi(msg_b2t))
+                try:
+                    send_safe(target_pane, new, target)  # 发送前复核（补丁③）
+                except RuntimeError as e:
+                    _emit(f"❌ {e}")
+                    return
+                p_after = wait_pi_finished(target_pane, 300)
+                _log(f"轮 {r}：{target_label} 回复完成")
+                p_base = cap(target_pane)
+                pi_clean = _show_pi(diff_new(p_base, p_after))
         else:
             # pane 模式：等屏幕新行（"> xxx"）
             b_base = cap(bobo_pane)
@@ -399,72 +509,52 @@ def run_relay_thread(sid: str, target: dict, rounds: int, emit, log_fn=None):
             wait_bobo_busy(bobo_pane, 120)
             b_after = wait_bobo_ready(bobo_pane, 300)
             _log("bobo 首次回复完成")
+            p_base = cap(target_pane)
+            p_before = p_base
 
-        p_base = cap(target_pane)
-        p_before = p_base
-
-        for r in range(1, rounds + 1):
-            # ── bobo → target ──
-            if api_mode:
-                new = b_after_text
-            else:
+            for r in range(1, rounds + 1):
+                # ── bobo → target ──
                 new = diff_new(b_before, b_after)
-            if not new:
-                _log(f"轮{r}：bobo 回复为空，跳过")
-                if api_mode:
-                    b_before_text, b_after_text = "", ""
-                else:
+                if not new:
+                    _log(f"轮{r}：bobo 回复为空，跳过")
                     b_before = b_after
-                continue
-            _log(f"── 轮 {r}/{rounds}：bobo 回复 → {target_label} ──")
-            # 全透明显示：BOBO → PI 全文（ANSI 蓝加粗头部 + 正文不染）
-            msg_b2t = relay_msg_line("BOBO", target_label, time.strftime("%H:%M:%S"), new)
-            _emit(msg_b2t)
-            _log_line(strip_ansi(msg_b2t))
-            try:
-                send_safe(target_pane, new, target)  # 发送前复核（补丁③）
-            except RuntimeError as e:
-                _emit(f"❌ {e}")
-                return
-            p_after = wait_pi_finished(target_pane, 300)
-            _log(f"轮 {r}：{target_label} 回复完成")
+                    continue
+                _log(f"── 轮 {r}/{rounds}：bobo 回复 → {target_label} ──")
+                # 全透明显示：BOBO → PI 全文（ANSI 蓝加粗头部 + 正文不染）
+                msg_b2t = relay_msg_line("BOBO", target_label, time.strftime("%H:%M:%S"), new)
+                _emit(msg_b2t)
+                _log_line(strip_ansi(msg_b2t))
+                try:
+                    send_safe(target_pane, new, target)  # 发送前复核（补丁③）
+                except RuntimeError as e:
+                    _emit(f"❌ {e}")
+                    return
+                p_after = wait_pi_finished(target_pane, 300)
+                _log(f"轮 {r}：{target_label} 回复完成")
 
-            # ── 显示 pi 回复（全透明）──
-            if api_mode:
-                new_pi = diff_new(p_base, p_after)
-            else:
+                # ── 显示 pi 回复（L3c Bug3：净化后显示，不倒噪音）──
                 new_pi = diff_new(p_before, p_after)
-            if new_pi:
-                msg_t2b = relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), new_pi)
-                _emit(msg_t2b)
-                _log_line(strip_ansi(msg_t2b))
+                pi_clean = clean_pi_output(new_pi)
+                if pi_clean:
+                    msg_t2b = relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), pi_clean)
+                    _emit(msg_t2b)
+                    _log_line(strip_ansi(msg_t2b))
+                elif new_pi:
+                    msg_t2b = relay_msg_line(target_label, "BOBO", time.strftime("%H:%M:%S"), "[pi 输出解析中]")
+                    _emit(msg_t2b)
+                    _log_line(strip_ansi(msg_t2b))
 
-            if r == rounds:
-                break
+                if r == rounds:
+                    break
 
-            # ── target → bobo（下一轮）──
-            if api_mode:
-                # bobo 不在 tmux：pi 回复已显示在对话流，等用户新话题作为下一轮输入
-                _log(f"轮 {r}：等用户下一轮输入 …")
-                user_topic = relay_hooks.poll_user_input(sid, 600)
-                if user_topic is None:
-                    _emit("⏹ 等用户下一轮输入超时，已停止")
-                    break
-                bobo_reply = relay_hooks.poll_bobo_reply(sid, 300)
-                if bobo_reply is None:
-                    _emit("⏹ 等待 bobo 回复超时，已停止")
-                    break
-                b_before_text = user_topic
-                b_after_text = bobo_reply
-            else:
-                new_pi = diff_new(p_before, p_after)
-                if not new_pi:
-                    _log(f"轮{r}：{target_label} 回复为空，跳过")
+                # ── target → bobo（L3c Bug3：净化后转发）──
+                if not pi_clean:
+                    _log(f"轮{r}：{target_label} 回复净化后为空，跳过")
                     p_before = p_after
                     continue
                 _log(f"轮 {r}：{target_label} 回复 → bobo")
                 try:
-                    send_safe(bobo_pane, new_pi, {"pane": bobo_pane, "kind": "bobo"})
+                    send_safe(bobo_pane, pi_clean, {"pane": bobo_pane, "kind": "bobo"})
                 except RuntimeError as e:
                     _emit(f"❌ {e}")
                     return

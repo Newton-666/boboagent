@@ -128,12 +128,15 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
         return err(rid, -32000, "无法取消上一个请求，请稍后重试")
 
     # TICKET-SCAN-L3b：API 直采 —— relay 在等用户话题时，直取本输入
+    # TICKET-SCAN-L3c：路由闸 —— 多模式下用户输入 = 发给 pi 的消息，只进 relay，
+    # 不启动引擎（bobo 不抢答）。bobo 的回复由 relay 线程显式调引擎产生。
     try:
         from tools.relay_hooks import is_active as _relay_active
         from tools.relay_hooks import push_user_input as _relay_push_user
 
         if _relay_active(sid):
             _relay_push_user(sid, text)
+            return ok(rid, {"ok": True, "relay": True})
     except Exception:
         pass
 
@@ -324,9 +327,34 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         # 建互传通道（后台线程，daemon）
         import threading as _th
         from tools.agent_connect import run_relay_thread
+
+        # TICKET-SCAN-L3c：relay 线程的引擎注入——bobo 接话时显式调引擎
+        # （输入=pi 净化回复），用户输入只进 relay，不允许直通引擎。
+        def _make_engine_runner(sid, session):
+            def _runner(text: str) -> str:
+                from core.engine_adapter import run_engine as _run_engine_adapter
+                from tools.relay_hooks import poll_bobo_reply as _poll_bobo_reply
+                _run_engine_adapter(
+                    sid, session, text, emit,
+                    lambda: _get_llm_caller(ctx.engine_cache), get_context_length,
+                    lambda t: register_engine_thread(t, ctx.active_engine_threads, ctx.engine_threads_lock),
+                    ctx.pending_confirm, ctx.pending_confirm_result, ctx.confirm_lock,
+                    ctx.auto_mode,
+                    ctx.current_engines, ctx.current_engines_lock,
+                    ctx.session_usage, ctx.session_usage_lock,
+                    ctx.save_session_to_disk,
+                )
+                # run_engine 跑完时 complete 事件已 push_bobo_reply（relay active），
+                # 这里同步取回作为 bobo 回复。
+                return _poll_bobo_reply(sid, 0.5) or ""
+            return _runner
+
+        session = ctx.sessions.get(sid)
+        engine_runner = _make_engine_runner(sid, session) if session else None
         t = _th.Thread(
             target=run_relay_thread,
             args=(sid, target, rounds, emit),
+            kwargs={"engine_runner": engine_runner},
             name=f"scan-connect-{sid}",
             daemon=True,
         )

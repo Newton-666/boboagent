@@ -56,7 +56,7 @@ def fake_candidate(pane="x:0.1", kind="pi", cwd="/tmp", lstart="Aug 10 13:00"):
             "match_cmd": "pi", "lstart": lstart, "cwd": cwd}
 
 
-def run_relay_api(sid, target, rounds, emit, cap_value="", pi_reply="pi 的完整回复"):
+def run_relay_api(sid, target, rounds, emit, cap_value="", pi_reply="pi 的完整回复", engine_runner=None):
     """以 API 直采模式启动 relay 线程（find_own_pane=None），返回线程 + 记录器。
 
     注意：mock 必须在线程存活期间保持（线程在后台跑，with 块退出即失效），
@@ -75,6 +75,7 @@ def run_relay_api(sid, target, rounds, emit, cap_value="", pi_reply="pi 的完�
     t = threading.Thread(
         target=agent_connect.run_relay_thread,
         args=(sid, target, rounds, emit),
+        kwargs={"engine_runner": engine_runner},
         daemon=True,
     )
     t.start()
@@ -90,13 +91,20 @@ def stop_patches(patches):
 
 class TestApiRelay:
     def test_api_mode_full_flow(self):
-        """find_own_pane=None → 不中止；话题/回复经内部通道收发，发给对方。"""
+        """L3c 语义：用户话题直发 target（不进 bobo 大脑）；bobo 由 engine_runner 接话。
+
+        发送序列 = [话题, bobo回复1, bobo回复2]（rounds=2 两次 bobo 接话）。
+        """
         emitted = []
         sid, rounds = "s1", 2
         target = fake_candidate()
+        _replies = iter(["bobo 回复一：" + "内容", "bobo 回复二：" + "内容"])
+        def _engine_runner(text: str) -> str:
+            return next(_replies)
         # emit 签名：emit(event_type, sid, data)；取 data["text"] 进对话流
         t, sent, patches = run_relay_api(sid, target, rounds,
-                                         lambda ev, s, d: emitted.append(d.get("text", "")))
+                                         lambda ev, s, d: emitted.append(d.get("text", "")),
+                                         engine_runner=_engine_runner)
         try:
             # 等线程 register 完成（API 模式入口）
             deadline = time.monotonic() + 5
@@ -105,36 +113,24 @@ class TestApiRelay:
 
             assert relay_hooks.is_active(sid), "API 模式应注册 hooks（不因无 pane 中止）"
 
-            # 用户话题 + bobo 回复（模拟 prompt.submit 与 engine complete 直取）
+            # 用户话题（模拟 prompt.submit 直取）；bobo 接话由 engine_runner 驱动
             topic1 = "帮我总结一下这个项目"
-            reply1 = "项目总结：这是一个多 Agent 互传系统。" * 3  # 足够长的全文
             relay_hooks.push_user_input(sid, topic1)
-            relay_hooks.push_bobo_reply(sid, reply1)
-            # 第二轮
-            topic2 = "第二轮话题"
-            reply2 = "第二轮回复：" + "内容".join(str(i) for i in range(20))
-            deadline = time.monotonic() + 20
-            # 等线程已发送第一轮（进入第二轮等用户输入）再 push
-            while time.monotonic() < deadline:
-                if len(sent) >= 1:
-                    break
-                time.sleep(0.02)
-            assert len(sent) >= 1, "第一轮应在超时前发出"
-            relay_hooks.push_user_input(sid, topic2)
-            relay_hooks.push_bobo_reply(sid, reply2)
 
             t.join(timeout=30)
             assert not t.is_alive(), "relay 线程应在 2 轮后自然退出"
 
-            # 对方侧：两轮 bobo 回复都经 send_safe 发给 pi（发送前复核路径保留）
-            assert len(sent) == 2, f"应发送 2 轮，实际 {len(sent)}"
-            assert sent[0][0] == target["pane"] and sent[0][1] == reply1
-            assert sent[1][0] == target["pane"] and sent[1][1] == reply2
+            # 对方侧：话题直发 + 2 轮 bobo 回复（发送前复核路径保留）
+            assert len(sent) == 3, f"应发送 3 次（话题+2 轮回复），实际 {len(sent)}: {sent}"
+            assert sent[0][0] == target["pane"] and sent[0][1] == topic1, "话题必须直发 target"
+            assert sent[1][0] == target["pane"] and sent[1][1].startswith("bobo 回复一")
+            assert sent[2][0] == target["pane"] and sent[2][1].startswith("bobo 回复二")
 
             # 对话流：全文不裁剪 + 双色加粗 + 零表情
             stream = "\n".join(emitted)
-            assert reply1 in stream, "bobo 回复全文必须出现在对话流（不裁剪）"
-            assert reply2 in stream, "第二轮回复全文必须出现"
+            assert topic1 in stream, "用户话题必须出现在对话流"
+            assert "bobo 回复一" in stream, "bobo 回复全文必须出现在对话流（不裁剪）"
+            assert "bobo 回复二" in stream, "第二轮回复全文必须出现"
             assert "pi 的完整回复" in stream, "pi 回复全文必须出现"
             assert "\x1b[1;38;2;124;147;168m" in stream, "BOBO 行必须莫兰迪蓝加粗 (#7C93A8)"
             assert "\x1b[1;38;2;182;154;148m" in stream, "PI 行必须莫兰迪粉加粗 (#B69A94)"
