@@ -97,6 +97,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._write_office_audit("role", f"BOBO_ROLE={_raw_role!r} 非法（仅 staff/dispatcher），按无角色普通模式处理")
         elif self.office_role is not None:
             self._write_office_audit("role", f"BOBO_ROLE={self.office_role} 注入生效")
+        # ── 票 O-1：当前会话票据 = BOBO_TICKET（启动注入，同 BOBO_ROLE 一并由
+        # 搭建器注入）。豁免只看这一张票；未设置 → 无豁免。
+        _raw_ticket = os.environ.get("BOBO_TICKET", "").strip()
+        self.office_ticket = _raw_ticket or None
+        if self.office_ticket is not None:
+            self._write_office_audit("ticket", f"BOBO_TICKET={self.office_ticket} 注入生效")
         self.system_prompt = self._build_system_prompt()
 
         self.teaching_mode = False
@@ -422,8 +428,19 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return ("deny", f"staff 无授权：禁止写 {path}（票据 authorized_paths 为唯一豁免通道）")
 
     def _office_ticket_allows(self, path: str) -> bool:
-        """票 O-1：票据授权书——data/tickets/*.md frontmatter authorized_paths
-        （glob 列表）命中即豁免。解析失败静默跳过（事件总线铁律：不阻塞）。"""
+        """票 O-1：票据授权书——只看 BOBO_TICKET 指定的当前会话票据。
+
+        当前会话票据 = 环境变量 BOBO_TICKET（启动注入）。豁免判定：
+        路径命中 该票据 frontmatter authorized_paths → staff 放行
+        （dispatcher 无此通道，见 _office_path_write_rule）。
+        未设置 BOBO_TICKET / 票据不存在 / 路径未列出 → 一律无豁免。
+        绝不扫描全部 data/tickets/*.md（否则任何一张常驻票据都会变成
+        永久豁免后门——TICKET-O1 自身 authorized_paths 含 core/engine.py，
+        扫全目录等于让 staff 永远能写核心文件）。
+        """
+        ticket_id = getattr(self, "office_ticket", None)
+        if not ticket_id:
+            return False
         p = path.strip().lstrip("./")
         if p.startswith("/"):
             try:
@@ -439,6 +456,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         text = _f.read()
                 except Exception:
                     continue
+                # 只认 frontmatter ticket 字段 == BOBO_TICKET 的那一张
+                if self._parse_frontmatter_value(text, "ticket") != ticket_id:
+                    continue
                 for a in self._parse_frontmatter_list(text, "authorized_paths"):
                     a = a.strip().lstrip("./")
                     if not a:
@@ -450,6 +470,19 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             return False
         return False
+
+    @staticmethod
+    def _parse_frontmatter_value(text: str, key: str) -> str:
+        """极简 frontmatter 标量字段解析（`key: value`），损坏/缺失 → ""。"""
+        if not text.startswith("---"):
+            return ""
+        end = text.find("\n---", 3)
+        block = text[3:end] if end > 0 else text[3:]
+        for line in block.splitlines():
+            line = line.strip()
+            if line.startswith(key + ":"):
+                return line.split(":", 1)[1].strip().strip('"').strip("'")
+        return ""
 
     @staticmethod
     def _parse_frontmatter_list(text: str, key: str) -> list[str]:

@@ -169,17 +169,24 @@ class TestOutOfTicketWrites:
 # ── 6/7. 票据授权书豁免 / dispatcher 无豁免 ──
 
 class TestTicketAuthorization:
-    def _make_ticket_dir(self, eng, tmp_path, authorized):
+    def _make_ticket_dir(self, eng, tmp_path, authorized,
+                         ticket_id="TICKET-O1-TEST", inject=True):
+        """写临时票据目录；inject=True 模拟 BOBO_TICKET 启动注入
+        （engine 启动时从环境变量读入 self.office_ticket）。"""
         import os
         d = tmp_path / "tickets"
         d.mkdir()
-        (d / "TICKET-O1-TEST.md").write_text(
-            "---\nauthorized_paths:\n" + "".join(f"  - {a}\n" for a in authorized) + "---\n# t\n",
+        (d / f"{ticket_id}.md").write_text(
+            "---\nticket: " + ticket_id + "\nauthorized_paths:\n"
+            + "".join(f"  - {a}\n" for a in authorized) + "---\n# t\n",
             encoding="utf-8",
         )
         eng._TICKETS_DIR = str(d)
+        if inject:
+            eng.office_ticket = ticket_id
 
     def test_staff_ticket_exemption_allows(self, tmp_path):
+        """有票豁免：BOBO_TICKET 指向的票据 authorized_paths 命中 → 放行"""
         eng = make_engine("staff")
         self._make_ticket_dir(eng, tmp_path, ["notes_work/**", "data/tickets/**"])
         verdict, _ = eng._office_decide("file_operation",
@@ -189,11 +196,43 @@ class TestTicketAuthorization:
                                         {"action": "write", "path": "data/tickets/TICKET-9.md"}, "r")
         assert verdict == "allow"
 
-    def test_staff_exemption_not_covering_protected(self, tmp_path):
+    def test_staff_no_ticket_denies_despite_resident_ticket(self, tmp_path):
+        """后门回归：无 BOBO_TICKET 时，即使常驻票据授权 core/engine.py
+        也一律拒绝——豁免只认当前会话票据，绝不扫全部 data/tickets/*.md"""
+        eng = make_engine("staff")
+        # 模拟 TICKET-O1 常驻票：authorized_paths 含 core/engine.py，但
+        # 不注入 BOBO_TICKET（inject=False）→ 该票不应产生任何豁免
+        self._make_ticket_dir(eng, tmp_path, ["core/engine.py"], inject=False)
+        for tool, args in [
+            ("edit_file", {"file_path": "core/engine.py"}),
+            ("file_operation", {"action": "write", "path": "core/engine.py"}),
+        ]:
+            verdict, _ = eng._office_decide(tool, args, "r")
+            assert verdict == "deny", f"{tool}: 无 BOBO_TICKET 不得豁免"
+
+    def test_staff_ticket_not_found_denies(self, tmp_path):
+        """票不存在：BOBO_TICKET 指向的票据文件缺失 → 无豁免"""
+        eng = make_engine("staff")
+        self._make_ticket_dir(eng, tmp_path, ["notes_work/**"], inject=False)
+        eng.office_ticket = "TICKET-NOPE"  # 目录里只有 TICKET-O1-TEST
+        verdict, _ = eng._office_decide("file_operation",
+                                        {"action": "write", "path": "notes_work/a.md"}, "r")
+        assert verdict == "deny"
+
+    def test_staff_ticket_path_not_listed_denies(self, tmp_path):
+        """路径未列出：票据存在但 authorized_paths 不含该路径 → 拒绝"""
         eng = make_engine("staff")
         self._make_ticket_dir(eng, tmp_path, ["notes_work/**"])
         verdict, _ = eng._office_decide("edit_file", {"file_path": "core/engine.py"}, "r")
-        assert verdict == "deny"  # 票据未豁免受保护路径
+        assert verdict == "deny"
+
+    def test_bo_ticket_env_injected_at_startup(self, monkeypatch, tmp_path):
+        """BOBO_TICKET 环境变量启动注入：__init__ 读 env 存入 office_ticket"""
+        monkeypatch.setenv("BOBO_ROLE", "staff")
+        monkeypatch.setenv("BOBO_TICKET", "TICKET-O1")
+        eng = make_engine(None)
+        assert eng.office_role == "staff"
+        assert eng.office_ticket == "TICKET-O1"
 
     def test_dispatcher_no_exemption(self, tmp_path):
         eng = make_engine("dispatcher")
