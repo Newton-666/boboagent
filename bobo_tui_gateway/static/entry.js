@@ -57672,6 +57672,7 @@ var init_overlayStore = __esm({
       modelPicker: false,
       pager: null,
       pluginsHub: false,
+      scanPicker: false,
       secret: null,
       sessions: false,
       skillsHub: false,
@@ -57680,8 +57681,8 @@ var init_overlayStore = __esm({
     $overlayState = atom(buildOverlayState());
     $isBlocked = computed(
       $overlayState,
-      ({ agents, approval, clarify, confirm, modelPicker, pager, pluginsHub, secret, sessions, skillsHub, sudo }) => Boolean(
-        agents || approval || clarify || confirm || modelPicker || pager || pluginsHub || secret || sessions || skillsHub || sudo
+      ({ agents, approval, clarify, confirm, modelPicker, pager, pluginsHub, scanPicker, secret, sessions, skillsHub, sudo }) => Boolean(
+        agents || approval || clarify || confirm || modelPicker || pager || pluginsHub || scanPicker || secret || sessions || skillsHub || sudo
       )
     );
     getOverlayState = () => $overlayState.get();
@@ -57692,6 +57693,7 @@ var init_overlayStore = __esm({
       agentsInitialHistoryIndex: $overlayState.get().agentsInitialHistoryIndex,
       modelPicker: $overlayState.get().modelPicker,
       pluginsHub: $overlayState.get().pluginsHub,
+      scanPicker: $overlayState.get().scanPicker,
       sessions: $overlayState.get().sessions,
       skillsHub: $overlayState.get().skillsHub
     });
@@ -60556,6 +60558,24 @@ ${body}` : body;
   }
 });
 
+// src/app/slash/commands/scan.ts
+var scanCommands;
+var init_scan = __esm({
+  "src/app/slash/commands/scan.ts"() {
+    "use strict";
+    init_overlayStore();
+    scanCommands = [
+      {
+        help: "pick a peer endpoint to chat with (\u2191/\u2193 select, Enter connect)",
+        name: "scan",
+        run: () => {
+          patchOverlayState({ scanPicker: true });
+        }
+      }
+    ];
+  }
+});
+
 // src/app/slash/commands/session.ts
 var TUI_SESSION_MODEL_RE, TUI_SESSION_STRIP_RE, stripTuiSessionFlag, modelValueForConfigSet, sessionCommands;
 var init_session = __esm({
@@ -61075,12 +61095,14 @@ var init_registry = __esm({
     await init_core();
     init_debug2();
     init_ops();
+    init_scan();
     init_session();
     await init_setup2();
     SLASH_COMMANDS = [
       ...coreCommands,
       ...sessionCommands,
       ...opsCommands,
+      ...scanCommands,
       ...setupCommands,
       ...debugCommands
     ];
@@ -62168,7 +62190,7 @@ function escTopTarget(overlay) {
   if (overlay.sessions || overlay.sudo || overlay.secret) {
     return { kind: "panel" };
   }
-  if (overlay.modelPicker || overlay.skillsHub || overlay.pluginsHub || overlay.agents) {
+  if (overlay.modelPicker || overlay.skillsHub || overlay.pluginsHub || overlay.agents || overlay.scanPicker) {
     return { kind: "componentOwned" };
   }
   return { kind: "none" };
@@ -63888,6 +63910,10 @@ function useMainApp(gw2) {
     patchOverlayState({ modelPicker: false });
     slashRef.current(`/model ${value}`);
   }, []);
+  const onScanConnect = (0, import_react73.useCallback)((n) => {
+    patchOverlayState({ scanPicker: false });
+    slashRef.current(`/connect ${n}`);
+  }, []);
   const closeLiveSession = (0, import_react73.useCallback)(
     async (id) => {
       patchUiState({ status: "closing session\u2026" });
@@ -63953,6 +63979,7 @@ function useMainApp(gw2) {
       newLiveSession: () => session.newLiveSession(),
       newPromptSession,
       onModelSelect,
+      onScanConnect,
       // Resuming a cold session from the overlay CLOSES the current one, so it
       // must respect the busy guard just like the `/resume` slash path.
       // (Switching between live sessions and `+ new` keep the current session
@@ -63974,6 +64001,7 @@ function useMainApp(gw2) {
       closeLiveSession,
       newPromptSession,
       onModelSelect,
+      onScanConnect,
       session.activateLiveSession,
       session.guardBusySessionSwitch,
       session.newLiveSession,
@@ -68326,20 +68354,143 @@ var init_prompts = __esm({
   }
 });
 
-// src/components/skillsHub.tsx
-function SkillsHub({ gw: gw2, onClose, t }) {
-  const [skillsByCat, setSkillsByCat] = (0, import_react87.useState)({});
-  const [selectedCat, setSelectedCat] = (0, import_react87.useState)("");
-  const [catIdx, setCatIdx] = (0, import_react87.useState)(0);
-  const [skillIdx, setSkillIdx] = (0, import_react87.useState)(0);
-  const [stage, setStage] = (0, import_react87.useState)("category");
-  const [info, setInfo] = (0, import_react87.useState)(null);
-  const [installing, setInstalling] = (0, import_react87.useState)(false);
+// src/components/scanPicker.tsx
+function ScanPicker({ onCancel, onConnect, sessionId, t }) {
+  const { gw: gw2 } = useGateway();
+  const [cands, setCands] = (0, import_react87.useState)([]);
+  const [connecting, setConnecting] = (0, import_react87.useState)(false);
   const [err, setErr] = (0, import_react87.useState)("");
   const [loading, setLoading] = (0, import_react87.useState)(true);
+  const [idx, setIdx] = (0, import_react87.useState)(0);
   const { stdout } = useStdout();
   const width = Math.max(MIN_WIDTH4, Math.min(MAX_WIDTH4, (stdout?.columns ?? 80) - 6));
   (0, import_react87.useEffect)(() => {
+    gw2.request("slash.exec", { command: "scan", session_id: sessionId ?? "" }).then((raw) => {
+      const r = asRpcResult(raw);
+      if (!r) {
+        setErr("invalid response: scan");
+        setLoading(false);
+        return;
+      }
+      setCands(parseCandidates(r.output ?? ""));
+      setLoading(false);
+    }).catch((e) => {
+      setErr(rpcErrorMessage(e));
+      setLoading(false);
+    });
+  }, [gw2, sessionId]);
+  useOverlayKeys({ onBack: onCancel, onClose: onCancel });
+  use_input_default((_ch, key) => {
+    if (connecting) {
+      return;
+    }
+    if (key.upArrow && idx > 0) {
+      setIdx((v) => v - 1);
+      return;
+    }
+    if (key.downArrow && idx < cands.length - 1) {
+      setIdx((v) => v + 1);
+      return;
+    }
+    if (key.return && cands[idx]) {
+      setConnecting(true);
+      onConnect(cands[idx].n);
+      return;
+    }
+  });
+  const { items, offset } = (0, import_react87.useMemo)(() => windowItems(cands, idx, VISIBLE4), [cands, idx]);
+  if (loading) {
+    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "scanning tmux for peers\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "Esc cancel" })
+    ] });
+  }
+  if (err) {
+    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.label, children: [
+        "error: ",
+        err
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
+    ] });
+  }
+  if (!cands.length) {
+    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "no peers found (run /scan in tmux? none alive)" }),
+      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
+    ] });
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { bold: true, color: t.color.accent, wrap: "truncate-end", children: "Select peer to connect" }),
+    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: " " }),
+    items.map((c, i) => {
+      const active = offset + i === idx;
+      const label = KIND_LABELS[c.kind] ?? c.kind;
+      return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "row", width: "100%", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Box_default, { backgroundColor: active ? t.color.completionCurrentBg : void 0, flexShrink: 0, children: /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { bold: true, color: active ? t.color.label : t.color.muted, children: [
+          " ",
+          active ? "\u25B8 " : "  ",
+          c.n,
+          "."
+        ] }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Box_default, { backgroundColor: active ? t.color.completionCurrentBg : void 0, children: /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: active ? t.color.text : t.color.muted, wrap: "truncate-end", children: [
+          " ",
+          "[",
+          label,
+          "] ",
+          c.pane
+        ] }) })
+      ] }, c.n);
+    }),
+    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: " " }),
+    connecting ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: "connecting\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: `\u2191/\u2193 select \xB7 Enter connect \xB7 Esc/q cancel${cands.length > VISIBLE4 ? ` (${idx + 1}/${cands.length})` : ""}` })
+  ] });
+}
+var import_react87, import_jsx_runtime27, VISIBLE4, MIN_WIDTH4, MAX_WIDTH4, KIND_LABELS, parseCandidates;
+var init_scanPicker = __esm({
+  async "src/components/scanPicker.tsx"() {
+    "use strict";
+    await init_entry_exports();
+    import_react87 = __toESM(require_react(), 1);
+    init_gatewayContext();
+    init_rpc();
+    await init_overlayControls();
+    import_jsx_runtime27 = __toESM(require_jsx_runtime(), 1);
+    VISIBLE4 = 8;
+    MIN_WIDTH4 = 40;
+    MAX_WIDTH4 = 70;
+    KIND_LABELS = {
+      BOBO: "BOBO",
+      CLAUDE: "Claude",
+      KIMI: "Kimi",
+      PI: "PI"
+    };
+    parseCandidates = (output) => {
+      const out = [];
+      const re = /^\s*(\d+)\.\s*\[([A-Z]+)\]\s+(\S+)/gm;
+      let m;
+      while (m = re.exec(output)) {
+        out.push({ kind: m[2], n: Number(m[1]), pane: m[3] });
+      }
+      return out;
+    };
+  }
+});
+
+// src/components/skillsHub.tsx
+function SkillsHub({ gw: gw2, onClose, t }) {
+  const [skillsByCat, setSkillsByCat] = (0, import_react88.useState)({});
+  const [selectedCat, setSelectedCat] = (0, import_react88.useState)("");
+  const [catIdx, setCatIdx] = (0, import_react88.useState)(0);
+  const [skillIdx, setSkillIdx] = (0, import_react88.useState)(0);
+  const [stage, setStage] = (0, import_react88.useState)("category");
+  const [info, setInfo] = (0, import_react88.useState)(null);
+  const [installing, setInstalling] = (0, import_react88.useState)(false);
+  const [err, setErr] = (0, import_react88.useState)("");
+  const [loading, setLoading] = (0, import_react88.useState)(true);
+  const { stdout } = useStdout();
+  const width = Math.max(MIN_WIDTH5, Math.min(MAX_WIDTH5, (stdout?.columns ?? 80) - 6));
+  (0, import_react88.useEffect)(() => {
     gw2.request("skills.manage", { action: "list" }).then((r) => {
       setSkillsByCat(r?.skills ?? {});
       setErr("");
@@ -68428,7 +68579,7 @@ function SkillsHub({ gw: gw2, onClose, t }) {
     }
     const n = ch === "0" ? 10 : parseInt(ch, 10);
     if (!Number.isNaN(n) && n >= 1 && n <= Math.min(10, count)) {
-      const next = windowOffset(count, sel, VISIBLE4) + n - 1;
+      const next = windowOffset(count, sel, VISIBLE5) + n - 1;
       if (stage === "category") {
         const cat = cats[next];
         if (cat) {
@@ -68448,37 +68599,37 @@ function SkillsHub({ gw: gw2, onClose, t }) {
     }
   });
   if (loading) {
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "loading skills\u2026" });
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: "loading skills\u2026" });
   }
   if (err && stage === "category") {
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.label, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.label, children: [
         "error: ",
         err
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
     ] });
   }
   if (!cats.length) {
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "no skills available" }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: "no skills available" }),
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t, children: "Esc/q cancel" })
     ] });
   }
   if (stage === "category") {
     const rows = cats.map((c) => `${c} \xB7 ${skillsByCat[c]?.length ?? 0} skills`);
-    const { items, offset } = windowItems(rows, catIdx, VISIBLE4);
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { bold: true, color: t.color.accent, children: "Skills Hub" }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "select a category" }),
-      offset > 0 && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+    const { items, offset } = windowItems(rows, catIdx, VISIBLE5);
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { bold: true, color: t.color.accent, children: "Skills Hub" }),
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: "select a category" }),
+      offset > 0 && /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
         " \u2191 ",
         offset,
         " more"
       ] }),
       items.map((row, i) => {
         const idx = offset + i;
-        return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(
+        return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
           Text,
           {
             bold: catIdx === idx,
@@ -68495,31 +68646,31 @@ function SkillsHub({ gw: gw2, onClose, t }) {
           row
         );
       }),
-      offset + VISIBLE4 < rows.length && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+      offset + VISIBLE5 < rows.length && /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
         " \u2193 ",
-        rows.length - offset - VISIBLE4,
+        rows.length - offset - VISIBLE5,
         " more"
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "\u2191/\u2193 select \xB7 Enter open \xB7 1-9,0 quick \xB7 Esc/q cancel" })
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t, children: "\u2191/\u2193 select \xB7 Enter open \xB7 1-9,0 quick \xB7 Esc/q cancel" })
     ] });
   }
   if (stage === "skill") {
-    const { items, offset } = windowItems(skills, skillIdx, VISIBLE4);
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { bold: true, color: t.color.accent, children: selectedCat }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+    const { items, offset } = windowItems(skills, skillIdx, VISIBLE5);
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", width, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { bold: true, color: t.color.accent, children: selectedCat }),
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
         skills.length,
         " skill(s)"
       ] }),
-      !skills.length ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "no skills in this category" }) : null,
-      offset > 0 && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+      !skills.length ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: "no skills in this category" }) : null,
+      offset > 0 && /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
         " \u2191 ",
         offset,
         " more"
       ] }),
       items.map((row, i) => {
         const idx = offset + i;
-        return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(
+        return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
           Text,
           {
             bold: skillIdx === idx,
@@ -68536,43 +68687,43 @@ function SkillsHub({ gw: gw2, onClose, t }) {
           row
         );
       }),
-      offset + VISIBLE4 < skills.length && /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+      offset + VISIBLE5 < skills.length && /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
         " \u2193 ",
-        skills.length - offset - VISIBLE4,
+        skills.length - offset - VISIBLE5,
         " more"
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: skills.length ? "\u2191/\u2193 select \xB7 Enter open \xB7 1-9,0 quick \xB7 Esc back \xB7 q close" : "Esc back \xB7 q close" })
+      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t, children: skills.length ? "\u2191/\u2193 select \xB7 Enter open \xB7 1-9,0 quick \xB7 Esc back \xB7 q close" : "Esc back \xB7 q close" })
     ] });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Box_default, { flexDirection: "column", width, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { bold: true, color: t.color.accent, children: info?.name ?? skillName }),
-    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: info?.category ?? selectedCat }),
-    info?.description ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.text, children: info.description }) : null,
-    info?.path ? /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.muted, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", width, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { bold: true, color: t.color.accent, children: info?.name ?? skillName }),
+    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: info?.category ?? selectedCat }),
+    info?.description ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.text, children: info.description }) : null,
+    info?.path ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.muted, children: [
       "path: ",
       info.path
     ] }) : null,
-    !info && !err ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.muted, children: "loading\u2026" }) : null,
-    err ? /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(Text, { color: t.color.label, children: [
+    !info && !err ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.muted, children: "loading\u2026" }) : null,
+    err ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { color: t.color.label, children: [
       "error: ",
       err
     ] }) : null,
-    installing ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Text, { color: t.color.accent, children: "installing\u2026" }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(OverlayHint, { t, children: "i reinspect \xB7 x reinstall \xB7 Enter/Esc back \xB7 q close" })
+    installing ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { color: t.color.accent, children: "installing\u2026" }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t, children: "i reinspect \xB7 x reinstall \xB7 Enter/Esc back \xB7 q close" })
   ] });
 }
-var import_react87, import_jsx_runtime27, VISIBLE4, MIN_WIDTH4, MAX_WIDTH4;
+var import_react88, import_jsx_runtime28, VISIBLE5, MIN_WIDTH5, MAX_WIDTH5;
 var init_skillsHub = __esm({
   async "src/components/skillsHub.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react87 = __toESM(require_react(), 1);
+    import_react88 = __toESM(require_react(), 1);
     init_rpc();
     await init_overlayControls();
-    import_jsx_runtime27 = __toESM(require_jsx_runtime(), 1);
-    VISIBLE4 = 12;
-    MIN_WIDTH4 = 40;
-    MAX_WIDTH4 = 90;
+    import_jsx_runtime28 = __toESM(require_jsx_runtime(), 1);
+    VISIBLE5 = 12;
+    MIN_WIDTH5 = 40;
+    MAX_WIDTH5 = 90;
   }
 });
 
@@ -68587,7 +68738,7 @@ function PromptZone({
   const overlay = useStore($overlayState);
   const theme = useStore($uiTheme);
   if (overlay.approval) {
-    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ApprovalPrompt, { onChoice: onApprovalChoice, req: overlay.approval, t: theme }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(ApprovalPrompt, { onChoice: onApprovalChoice, req: overlay.approval, t: theme }) });
   }
   if (overlay.confirm) {
     const req = overlay.confirm;
@@ -68595,10 +68746,10 @@ function PromptZone({
       patchOverlayState({ confirm: null });
       req.onConfirm();
     };
-    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ConfirmPrompt, { onConfirm, req, t: theme }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(ConfirmPrompt, { onConfirm, req, t: theme }) });
   }
   if (overlay.clarify) {
-    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       ClarifyPrompt,
       {
         cols,
@@ -68609,10 +68760,10 @@ function PromptZone({
     ) });
   }
   if (overlay.sudo) {
-    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(MaskedPrompt, { cols, icon: "\u{1F510}", label: "sudo password required", onSubmit: onSudoSubmit, t: theme }) });
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(MaskedPrompt, { cols, icon: "\u{1F510}", label: "sudo password required", onSubmit: onSudoSubmit, t: theme }) });
   }
   if (overlay.secret) {
-    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", flexShrink: 0, paddingX: 1, paddingY: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       MaskedPrompt,
       {
         cols,
@@ -68636,20 +68787,21 @@ function FloatingOverlays({
   onNewLiveSession,
   onNewPromptSession,
   onResumeSelect,
+  onScanConnect,
   pagerPageSize
 }) {
   const { gw: gw2 } = useGateway();
   const overlay = useStore($overlayState);
   const sid = useStore($uiSessionId);
   const theme = useStore($uiTheme);
-  const hasAny = overlay.modelPicker || overlay.pager || overlay.sessions || overlay.skillsHub || overlay.pluginsHub || completions.length;
+  const hasAny = overlay.modelPicker || overlay.pager || overlay.scanPicker || overlay.sessions || overlay.skillsHub || overlay.pluginsHub || completions.length;
   if (!hasAny) {
     return null;
   }
   const viewportSize = Math.min(COMPLETION_WINDOW, completions.length);
   const start = Math.max(0, Math.min(compIdx - Math.floor(COMPLETION_WINDOW / 2), completions.length - viewportSize));
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: [
-    overlay.sessions && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: [
+    overlay.sessions && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       ActiveSessionSwitcher,
       {
         currentSessionId: sid,
@@ -68663,7 +68815,7 @@ function FloatingOverlays({
         t: theme
       }
     ) }),
-    overlay.modelPicker && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+    overlay.modelPicker && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       ModelPicker,
       {
         gw: gw2,
@@ -68673,27 +68825,36 @@ function FloatingOverlays({
         t: theme
       }
     ) }),
-    overlay.skillsHub && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SkillsHub, { gw: gw2, onClose: () => patchOverlayState({ skillsHub: false }), t: theme }) }),
-    overlay.pluginsHub && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(PluginsHub, { gw: gw2, onClose: () => patchOverlayState({ pluginsHub: false }), t: theme }) }),
-    overlay.pager && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Box_default, { flexDirection: "column", paddingX: 1, paddingY: 1, children: [
-      overlay.pager.title && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { bold: true, color: theme.color.primary, children: overlay.pager.title }) }),
-      overlay.pager.lines.slice(overlay.pager.offset, overlay.pager.offset + pagerPageSize).map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Text, { children: line }, i)),
-      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(OverlayHint, { t: theme, children: overlay.pager.offset + pagerPageSize < overlay.pager.lines.length ? `\u2191\u2193/jk line \xB7 Enter/Space/PgDn page \xB7 b/PgUp back \xB7 g/G top/bottom \xB7 Esc/q close (${Math.min(overlay.pager.offset + pagerPageSize, overlay.pager.lines.length)}/${overlay.pager.lines.length})` : `end \xB7 \u2191\u2193/jk \xB7 b/PgUp back \xB7 g top \xB7 Esc/q close (${overlay.pager.lines.length} lines)` }) })
+    overlay.skillsHub && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(SkillsHub, { gw: gw2, onClose: () => patchOverlayState({ skillsHub: false }), t: theme }) }),
+    overlay.scanPicker && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+      ScanPicker,
+      {
+        onCancel: () => patchOverlayState({ scanPicker: false }),
+        onConnect: onScanConnect,
+        sessionId: sid,
+        t: theme
+      }
+    ) }),
+    overlay.pluginsHub && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(PluginsHub, { gw: gw2, onClose: () => patchOverlayState({ pluginsHub: false }), t: theme }) }),
+    overlay.pager && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.border, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", paddingX: 1, paddingY: 1, children: [
+      overlay.pager.title && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: theme.color.primary, children: overlay.pager.title }) }),
+      overlay.pager.lines.slice(overlay.pager.offset, overlay.pager.offset + pagerPageSize).map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { children: line }, i)),
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(OverlayHint, { t: theme, children: overlay.pager.offset + pagerPageSize < overlay.pager.lines.length ? `\u2191\u2193/jk line \xB7 Enter/Space/PgDn page \xB7 b/PgUp back \xB7 g/G top/bottom \xB7 Esc/q close (${Math.min(overlay.pager.offset + pagerPageSize, overlay.pager.lines.length)}/${overlay.pager.lines.length})` : `end \xB7 \u2191\u2193/jk \xB7 b/PgUp back \xB7 g top \xB7 Esc/q close (${overlay.pager.lines.length} lines)` }) })
     ] }) }),
-    !!completions.length && /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(FloatBox, { color: theme.color.primary, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexDirection: "column", width: Math.max(28, cols - 6), children: completions.slice(start, start + viewportSize).map((item, i) => {
+    !!completions.length && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(FloatBox, { color: theme.color.primary, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", width: Math.max(28, cols - 6), children: completions.slice(start, start + viewportSize).map((item, i) => {
       const active = start + i === compIdx;
-      return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
+      return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
         Box_default,
         {
           backgroundColor: active ? theme.color.completionCurrentBg : theme.color.completionBg,
           flexDirection: "row",
           width: "100%",
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Box_default, { flexShrink: 0, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(Text, { bold: true, color: theme.color.label, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexShrink: 0, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { bold: true, color: theme.color.label, children: [
               " ",
               item.display
             ] }) }),
-            item.meta ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
+            item.meta ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
               Text,
               {
                 backgroundColor: active ? theme.color.completionMetaCurrentBg : theme.color.completionMetaBg,
@@ -68711,7 +68872,7 @@ function FloatingOverlays({
     }) }) })
   ] });
 }
-var import_jsx_runtime28, COMPLETION_WINDOW;
+var import_jsx_runtime29, COMPLETION_WINDOW;
 var init_appOverlays = __esm({
   async "src/components/appOverlays.tsx"() {
     "use strict";
@@ -68727,8 +68888,9 @@ var init_appOverlays = __esm({
     await init_overlayControls();
     await init_pluginsHub();
     await init_prompts();
+    await init_scanPicker();
     await init_skillsHub();
-    import_jsx_runtime28 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime29 = __toESM(require_jsx_runtime(), 1);
     COMPLETION_WINDOW = 16;
   }
 });
@@ -68789,28 +68951,28 @@ var init_banner = __esm({
 
 // src/components/branding.tsx
 function InlineLoader({ label, t }) {
-  const [tick, setTick] = (0, import_react89.useState)(0);
+  const [tick, setTick] = (0, import_react90.useState)(0);
   const spinner = braille_default.braille;
   const frame = spinner.frames[tick % spinner.frames.length] ?? "\u280B";
-  (0, import_react89.useEffect)(() => {
+  (0, import_react90.useEffect)(() => {
     const id = setInterval(() => setTick((n) => n + 1), Math.max(LOADER_TICK_MS, spinner.interval));
     return () => clearInterval(id);
   }, [spinner.interval]);
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, wrap: "truncate", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.accent, children: frame }),
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, wrap: "truncate", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.accent, children: frame }),
     " ",
     label
   ] });
 }
 function ArtLines({ lines }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { flexDirection: "column", height: lines.length, opaque: true, width: artWidth(lines), children: lines.map(([c, text], i) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: c, wrap: "truncate-end", children: text }, i)) });
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Box_default, { flexDirection: "column", height: lines.length, opaque: true, width: artWidth(lines), children: lines.map(([c, text], i) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: c, wrap: "truncate-end", children: text }, i)) });
 }
 function CompactBanner({ cols, t }) {
   const w = Math.max(28, cols - 4);
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", height: 3, marginBottom: 1, opaque: true, width: w, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.primary, children: ruleIn(t.brand.name, w) }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: centerIn(TAG_FULL, w) }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.primary, children: "\u2500".repeat(w) })
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", height: 3, marginBottom: 1, opaque: true, width: w, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.primary, children: ruleIn(t.brand.name, w) }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: centerIn(TAG_FULL, w) }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.primary, children: "\u2500".repeat(w) })
   ] });
 }
 function Banner({ maxWidth, t }) {
@@ -68822,9 +68984,9 @@ function Banner({ maxWidth, t }) {
   const logoLines = logo(t.color, t.bannerLogo || void 0);
   const logoW = t.bannerLogo ? artWidth(logoLines) : LOGO_WIDTH;
   if (cols >= logoW + 2) {
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(ArtLines, { lines: logoLines }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ArtLines, { lines: logoLines }),
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
         t.brand.icon,
         " ",
         TAG_FULL
@@ -68832,17 +68994,17 @@ function Banner({ maxWidth, t }) {
     ] });
   }
   if (cols >= COMPACT_FROM) {
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(CompactBanner, { cols, t });
+    return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(CompactBanner, { cols, t });
   }
   const name = cols >= 52 ? t.brand.name : t.brand.name.split(" ")[0] ?? t.brand.name;
   const tag = cols >= 64 ? TAG_FULL : cols >= 46 ? TAG_MID : TAG_TINY;
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { bold: true, color: t.color.primary, wrap: "truncate-end", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { bold: true, color: t.color.primary, wrap: "truncate-end", children: [
       t.brand.icon,
       " ",
       name
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
       t.brand.icon,
       " ",
       tag
@@ -68857,15 +69019,15 @@ function CollapseToggle({
   title,
   onToggle
 }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { onClick: onToggle, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.accent, children: open ? "\u25BE " : "\u25B8 " }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.accent, children: title }),
-    typeof count === "number" ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { onClick: onToggle, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.accent, children: open ? "\u25BE " : "\u25B8 " }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.accent, children: title }),
+    typeof count === "number" ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
       " (",
       count,
       ")"
     ] }) : null,
-    suffix ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+    suffix ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
       " ",
       suffix
     ] }) : null
@@ -68880,10 +69042,10 @@ function SessionPanel({ info, maxWidth, sid, t }) {
   const w = Math.max(20, wide ? cols - leftW - 14 : cols - 12);
   const lineBudget = Math.max(12, w - 2);
   const strip = (s) => s.endsWith("_tools") ? s.slice(0, -6) : s;
-  const [toolsOpen, setToolsOpen] = (0, import_react89.useState)(true);
-  const [skillsOpen, setSkillsOpen] = (0, import_react89.useState)(false);
-  const [systemOpen, setSystemOpen] = (0, import_react89.useState)(false);
-  const [mcpOpen, setMcpOpen] = (0, import_react89.useState)(false);
+  const [toolsOpen, setToolsOpen] = (0, import_react90.useState)(true);
+  const [skillsOpen, setSkillsOpen] = (0, import_react90.useState)(false);
+  const [systemOpen, setSystemOpen] = (0, import_react90.useState)(false);
+  const [mcpOpen, setMcpOpen] = (0, import_react90.useState)(false);
   const truncLine = (pfx, items) => {
     let line = "";
     let shown = 0;
@@ -68902,19 +69064,19 @@ function SessionPanel({ info, maxWidth, sid, t }) {
   const skillsCatCount = skillEntries.length;
   const skillsBody = () => {
     if (info.lazy && skillEntries.length === 0) {
-      return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(InlineLoader, { label: "scanning skills", t });
+      return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(InlineLoader, { label: "scanning skills", t });
     }
     const shown = skillEntries.slice(0, SKILLS_MAX);
     const overflow = skillEntries.length - SKILLS_MAX;
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(import_jsx_runtime29.Fragment, { children: [
-      shown.map(([k, vs]) => /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { wrap: "truncate", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
+      shown.map(([k, vs]) => /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
           strip(k),
           ": "
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.text, children: truncLine(strip(k) + ": ", vs) })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.text, children: truncLine(strip(k) + ": ", vs) })
       ] }, k)),
-      overflow > 0 && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+      overflow > 0 && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
         "(and ",
         overflow,
         " more categories\u2026)"
@@ -68926,70 +69088,70 @@ function SessionPanel({ info, maxWidth, sid, t }) {
   const toolsBody = () => {
     const shown = toolEntries.slice(0, TOOLSETS_MAX);
     const overflow = toolEntries.length - TOOLSETS_MAX;
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(import_jsx_runtime29.Fragment, { children: [
-      shown.map(([k, vs]) => /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { wrap: "truncate", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(import_jsx_runtime30.Fragment, { children: [
+      shown.map(([k, vs]) => /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
           strip(k),
           ": "
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.text, children: truncLine(strip(k) + ": ", vs) })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.text, children: truncLine(strip(k) + ": ", vs) })
       ] }, k)),
-      overflow > 0 && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.muted, children: [
+      overflow > 0 && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
         "(and ",
         overflow,
         " more toolsets\u2026)"
       ] })
     ] });
   };
-  const mcpBody = () => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(import_jsx_runtime29.Fragment, { children: (info.mcp_servers ?? []).map((s) => /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { wrap: "truncate", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: `  ${s.name} ` }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: `[${s.transport}]` }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: ": " }),
-    s.connected ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.text, children: [
+  const mcpBody = () => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(import_jsx_runtime30.Fragment, { children: (info.mcp_servers ?? []).map((s) => /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: `  ${s.name} ` }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: `[${s.transport}]` }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: ": " }),
+    s.connected ? /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.text, children: [
       s.tools,
       " tool",
       s.tools === 1 ? "" : "s"
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.error, children: "failed" })
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.error, children: "failed" })
   ] }, s.name)) });
   const sysPromptLen = (info.system_prompt ?? "").length;
   const systemBody = () => {
     if (sysPromptLen === 0) {
-      return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: "No system prompt loaded." });
+      return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: "No system prompt loaded." });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: info.system_prompt });
+    return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: info.system_prompt });
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { borderColor: t.color.border, borderStyle: "round", marginBottom: 1, paddingX: 2, paddingY: 1, children: [
-    wide && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginRight: 2, width: leftW, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(ArtLines, { lines: heroLines }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.accent, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { borderColor: t.color.border, borderStyle: "round", marginBottom: 1, paddingX: 2, paddingY: 1, children: [
+    wide && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginRight: 2, width: leftW, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(ArtLines, { lines: heroLines }),
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.accent, children: [
         info.model.split("/").pop(),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
-      sid && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.sessionLabel, children: "Session: " }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.sessionBorder, children: sid })
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
+      sid && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.sessionLabel, children: "Session: " }),
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.sessionBorder, children: sid })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", width: w, children: [
-      wide ? /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { bold: true, color: t.color.primary, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", width: w, children: [
+      wide ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { bold: true, color: t.color.primary, children: [
         t.brand.name,
         info.version ? ` v${info.version}` : "",
         info.release_date ? ` (${info.release_date})` : ""
-      ] }) }) : /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.accent, wrap: "truncate-end", children: [
+      ] }) }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.accent, wrap: "truncate-end", children: [
           info.model.split("/").pop(),
-          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
-        sid && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { wrap: "truncate-end", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.sessionLabel, children: "Session: " }),
-          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.sessionBorder, children: sid })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
+        sid && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate-end", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.sessionLabel, children: "Session: " }),
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.sessionBorder, children: sid })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           CollapseToggle,
           {
             onToggle: () => setToolsOpen((v) => !v),
@@ -69000,8 +69162,8 @@ function SessionPanel({ info, maxWidth, sid, t }) {
         ),
         toolsOpen && toolsBody()
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           CollapseToggle,
           {
             count: skillsTotal,
@@ -69014,8 +69176,8 @@ function SessionPanel({ info, maxWidth, sid, t }) {
         ),
         skillsOpen && skillsBody()
       ] }),
-      sysPromptLen > 0 && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+      sysPromptLen > 0 && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           CollapseToggle,
           {
             onToggle: () => setSystemOpen((v) => !v),
@@ -69027,8 +69189,8 @@ function SessionPanel({ info, maxWidth, sid, t }) {
         ),
         systemOpen && systemBody()
       ] }),
-      info.mcp_servers && info.mcp_servers.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+      info.mcp_servers && info.mcp_servers.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           CollapseToggle,
           {
             count: info.mcp_servers.length,
@@ -69041,8 +69203,8 @@ function SessionPanel({ info, maxWidth, sid, t }) {
         ),
         mcpOpen && mcpBody()
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, {}),
-      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { color: t.color.text, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, {}),
+      /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.text, children: [
         toolsTotal,
         " tools",
         " \xB7 ",
@@ -69050,35 +69212,35 @@ function SessionPanel({ info, maxWidth, sid, t }) {
         " skills",
         info.mcp_servers?.length ? ` \xB7 ${info.mcp_servers.length} MCP` : "",
         " \xB7 ",
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: "/help for commands" })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: "/help for commands" })
       ] })
     ] })
   ] });
 }
 function Panel({ sections, t, title }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { borderColor: t.color.border, borderStyle: "round", flexDirection: "column", paddingX: 2, paddingY: 1, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.primary, children: title }) }),
-    sections.map((sec, si) => /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Box_default, { flexDirection: "column", marginTop: si > 0 ? 1 : 0, children: [
-      sec.title && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.accent, children: sec.title }),
-      sec.rows?.map(([k, v], ri) => /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { wrap: "truncate", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: k.padEnd(20) }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.text, children: v })
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { borderColor: t.color.border, borderStyle: "round", flexDirection: "column", paddingX: 2, paddingY: 1, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.primary, children: title }) }),
+    sections.map((sec, si) => /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginTop: si > 0 ? 1 : 0, children: [
+      sec.title && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.accent, children: sec.title }),
+      sec.rows?.map(([k, v], ri) => /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: k.padEnd(20) }),
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.text, children: v })
       ] }, ri)),
-      sec.items?.map((item, ii) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.text, wrap: "truncate", children: item }, ii)),
-      sec.text && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { color: t.color.muted, children: sec.text })
+      sec.items?.map((item, ii) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.text, wrap: "truncate", children: item }, ii)),
+      sec.text && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: sec.text })
     ] }, si))
   ] });
 }
-var import_react89, import_jsx_runtime29, LOADER_TICK_MS, TAG_FULL, TAG_MID, TAG_TINY, HIDE_BELOW, COMPACT_FROM, clip, centerIn, ruleIn, SKILLS_MAX, TOOLSETS_MAX;
+var import_react90, import_jsx_runtime30, LOADER_TICK_MS, TAG_FULL, TAG_MID, TAG_TINY, HIDE_BELOW, COMPACT_FROM, clip, centerIn, ruleIn, SKILLS_MAX, TOOLSETS_MAX;
 var init_branding = __esm({
   async "src/components/branding.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react89 = __toESM(require_react(), 1);
+    import_react90 = __toESM(require_react(), 1);
     init_dist5();
     init_banner();
     init_text();
-    import_jsx_runtime29 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime30 = __toESM(require_jsx_runtime(), 1);
     LOADER_TICK_MS = 120;
     TAG_FULL = "Bobo Agent \xB7 Your Personal AI Assistant";
     TAG_MID = "Bobo Agent";
@@ -69145,11 +69307,11 @@ function FpsOverlay({ t }) {
   if (!SHOW_FPS) {
     return null;
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(FpsOverlayInner, { t });
+  return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(FpsOverlayInner, { t });
 }
 function FpsOverlayInner({ t }) {
   const { fps, lastDurationMs, totalFrames: totalFrames2 } = useStore($fpsState);
-  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: fpsColor(fps, t), children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(Text, { color: fpsColor(fps, t), children: [
     fps.toFixed(1).padStart(5),
     "fps \xB7 ",
     lastDurationMs.toFixed(1).padStart(5),
@@ -69157,7 +69319,7 @@ function FpsOverlayInner({ t }) {
     totalFrames2
   ] });
 }
-var import_jsx_runtime30, fpsColor;
+var import_jsx_runtime31, fpsColor;
 var init_fpsOverlay = __esm({
   async "src/components/fpsOverlay.tsx"() {
     "use strict";
@@ -69165,7 +69327,7 @@ var init_fpsOverlay = __esm({
     init_react();
     init_env();
     init_fpsStore();
-    import_jsx_runtime30 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime31 = __toESM(require_jsx_runtime(), 1);
     fpsColor = (fps, t) => fps >= 50 ? t.color.statusGood : fps >= 30 ? t.color.statusWarn : t.color.error;
   }
 });
@@ -69177,7 +69339,7 @@ function HelpHint({ t }) {
     ...HOTKEY_PREVIEW.map(([k]) => k.length)
   );
   const pad = (s) => s + " ".repeat(Math.max(0, labelW - s.length + 2));
-  return /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { alignItems: "flex-start", bottom: "100%", flexDirection: "column", left: 0, position: "absolute", right: 0, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
     Box_default,
     {
       alignSelf: "flex-start",
@@ -69188,31 +69350,31 @@ function HelpHint({ t }) {
       opaque: true,
       paddingX: 1,
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(Text, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { bold: true, color: t.color.primary, children: "? quick help" }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { color: t.color.muted, children: "  \xB7  type /help for the full panel  \xB7  backspace to dismiss" })
+        /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.primary, children: "? quick help" }),
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: "  \xB7  type /help for the full panel  \xB7  backspace to dismiss" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { bold: true, color: t.color.accent, children: "Common commands" }) }),
-        COMMON_COMMANDS.map(([k, v]) => /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(Text, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { color: t.color.label, children: pad(k) }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { color: t.color.muted, children: v })
+        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.accent, children: "Common commands" }) }),
+        COMMON_COMMANDS.map(([k, v]) => /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.label, children: pad(k) }),
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: v })
         ] }, k)),
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { bold: true, color: t.color.accent, children: "Hotkeys" }) }),
-        HOTKEY_PREVIEW.map(([k, v]) => /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(Text, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { color: t.color.label, children: pad(k) }),
-          /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(Text, { color: t.color.muted, children: v })
+        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.accent, children: "Hotkeys" }) }),
+        HOTKEY_PREVIEW.map(([k, v]) => /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.label, children: pad(k) }),
+          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: v })
         ] }, k))
       ]
     }
   ) });
 }
-var import_jsx_runtime31, COMMON_COMMANDS, HOTKEY_PREVIEW;
+var import_jsx_runtime32, COMMON_COMMANDS, HOTKEY_PREVIEW;
 var init_helpHint = __esm({
   async "src/components/helpHint.tsx"() {
     "use strict";
     await init_entry_exports();
     init_hotkeys();
-    import_jsx_runtime31 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime32 = __toESM(require_jsx_runtime(), 1);
     COMMON_COMMANDS = [
       ["/help", "full list of commands + hotkeys"],
       ["/clear", "start a new session"],
@@ -69637,10 +69799,10 @@ function fetchLinkTitle(url) {
   return promise;
 }
 function useLinkTitle(url) {
-  const normalizedUrl = (0, import_react91.useMemo)(() => url ? normalizeExternalUrl(url) : "", [url]);
-  const key = (0, import_react91.useMemo)(() => normalizedUrl ? titleCacheKey(normalizedUrl) : "", [normalizedUrl]);
-  const [title, setTitle] = (0, import_react91.useState)(() => key ? titleCache.get(key) ?? "" : "");
-  (0, import_react91.useEffect)(() => {
+  const normalizedUrl = (0, import_react92.useMemo)(() => url ? normalizeExternalUrl(url) : "", [url]);
+  const key = (0, import_react92.useMemo)(() => normalizedUrl ? titleCacheKey(normalizedUrl) : "", [normalizedUrl]);
+  const [title, setTitle] = (0, import_react92.useState)(() => key ? titleCache.get(key) ?? "" : "");
+  (0, import_react92.useEffect)(() => {
     setTitle(key ? titleCache.get(key) ?? "" : "");
     if (!key || !isTitleFetchable(normalizedUrl)) {
       return;
@@ -69658,11 +69820,11 @@ function useLinkTitle(url) {
   }, [key, normalizedUrl]);
   return title;
 }
-var import_react91, titleCache, titleInflight, titleSubs, TITLE_CACHE_LIMIT, TITLE_MAX_LENGTH, TITLE_BYTE_BUDGET, TITLE_TIMEOUT_MS, TITLE_USER_AGENT, TITLE_ERROR_RE, DOMAIN_RE, SKIP_PROTO_RE, LOCAL_HOSTNAME_RE, LOCAL_HOST_SUFFIXES, STATUS_PERMALINK_HOST_RE, STATUS_PERMALINK_PATH_RE, HTML_ENTITIES;
+var import_react92, titleCache, titleInflight, titleSubs, TITLE_CACHE_LIMIT, TITLE_MAX_LENGTH, TITLE_BYTE_BUDGET, TITLE_TIMEOUT_MS, TITLE_USER_AGENT, TITLE_ERROR_RE, DOMAIN_RE, SKIP_PROTO_RE, LOCAL_HOSTNAME_RE, LOCAL_HOST_SUFFIXES, STATUS_PERMALINK_HOST_RE, STATUS_PERMALINK_PATH_RE, HTML_ENTITIES;
 var init_externalLink = __esm({
   "src/lib/externalLink.ts"() {
     "use strict";
-    import_react91 = __toESM(require_react(), 1);
+    import_react92 = __toESM(require_react(), 1);
     titleCache = /* @__PURE__ */ new Map();
     titleInflight = /* @__PURE__ */ new Map();
     titleSubs = /* @__PURE__ */ new Map();
@@ -70356,7 +70518,7 @@ var init_syntax = __esm({
 function ResolvedLink({ fallbackLabel, t, url }) {
   const fetched = useLinkTitle(url);
   const display = fetched || fallbackLabel || defaultLinkLabel(url);
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Link, { url, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, underline: true, children: display }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Link, { url, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, underline: true, children: display }) });
 }
 function MdInline({ t, text }) {
   const parts = [];
@@ -70365,11 +70527,11 @@ function MdInline({ t, text }) {
     const i = m.index ?? 0;
     const k = parts.length;
     if (i > last) {
-      parts.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: text.slice(last, i) }, k));
+      parts.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: text.slice(last, i) }, k));
     }
     if (m[1] && m[2]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
           "[image: ",
           m[1],
           "] ",
@@ -70382,27 +70544,27 @@ function MdInline({ t, text }) {
       parts.push(renderResolvedLink(parts.length, t, autolinkUrl(m[5]), m[5].replace(/^mailto:/, "")));
     } else if (m[6]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { strikethrough: true, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: m[6] }) }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { strikethrough: true, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: m[6] }) }, parts.length)
       );
     } else if (m[7]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, dimColor: true, children: m[7] }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, dimColor: true, children: m[7] }, parts.length)
       );
     } else if (m[8] ?? m[9]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: m[8] ?? m[9] }) }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { bold: true, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: m[8] ?? m[9] }) }, parts.length)
       );
     } else if (m[10] ?? m[11]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { italic: true, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: m[10] ?? m[11] }) }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { italic: true, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: m[10] ?? m[11] }) }, parts.length)
       );
     } else if (m[12]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { backgroundColor: t.color.diffAdded, color: t.color.diffAddedWord, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: m[12] }) }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { backgroundColor: t.color.diffAdded, color: t.color.diffAddedWord, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: m[12] }) }, parts.length)
       );
     } else if (m[13]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
           "[",
           m[13],
           "]"
@@ -70410,14 +70572,14 @@ function MdInline({ t, text }) {
       );
     } else if (m[14]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
           "^",
           m[14]
         ] }, parts.length)
       );
     } else if (m[15]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
           "_",
           m[15]
         ] }, parts.length)
@@ -70426,22 +70588,22 @@ function MdInline({ t, text }) {
       const url = m[16].replace(/[),.;:!?]+$/g, "");
       parts.push(renderResolvedLink(parts.length, t, url));
       if (url.length < m[16].length) {
-        parts.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: m[16].slice(url.length) }, parts.length));
+        parts.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: m[16].slice(url.length) }, parts.length));
       }
     } else if (m[17] ?? m[18]) {
       parts.push(
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, italic: true, children: renderMath(texToUnicode(m[17] ?? m[18])) }, parts.length)
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, italic: true, children: renderMath(texToUnicode(m[17] ?? m[18])) }, parts.length)
       );
     }
     last = i + m[0].length;
   }
   if (last < text.length) {
-    parts.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: text.slice(last) }, parts.length));
+    parts.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: text.slice(last) }, parts.length));
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { wrap: "wrap-trim", children: parts.length ? parts : text });
+  return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { wrap: "wrap-trim", children: parts.length ? parts : text });
 }
 function MdImpl({ cols, compact, t, text }) {
-  const nodes = (0, import_react92.useMemo)(() => {
+  const nodes = (0, import_react93.useMemo)(() => {
     const bucket = cacheBucket(t);
     const cacheKey = `${compact ? "1" : "0"}|${cols ?? ""}|${text}`;
     const cached = cacheGet(bucket, cacheKey);
@@ -70454,7 +70616,7 @@ function MdImpl({ cols, compact, t, text }) {
     let i = 0;
     const gap = () => {
       if (nodes2.length && prevKind !== "blank") {
-        nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: " " }, `gap-${nodes2.length}`));
+        nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: " " }, `gap-${nodes2.length}`));
         prevKind = "blank";
       }
     };
@@ -70482,9 +70644,9 @@ function MdImpl({ cols, compact, t, text }) {
       if (media) {
         start("paragraph");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
             "\u25B8 ",
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Link, { url: /^(?:\/|[a-z]:[\\/])/i.test(media) ? `file://${media}` : media, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, underline: true, children: media }) })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Link, { url: /^(?:\/|[a-z]:[\\/])/i.test(media) ? `file://${media}` : media, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, underline: true, children: media }) })
           ] }, key)
         );
         i++;
@@ -70508,7 +70670,7 @@ function MdImpl({ cols, compact, t, text }) {
         }
         if (["md", "markdown"].includes(lang)) {
           start("paragraph");
-          nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Md, { cols, compact, t, text: block.join("\n") }, key));
+          nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Md, { cols, compact, t, text: block.join("\n") }, key));
           continue;
         }
         start("code");
@@ -70538,9 +70700,9 @@ function MdImpl({ cols, compact, t, text }) {
           const maxLine = Math.max(...diffRows.map((r) => Math.max(r.oldN || 0, r.newN || 0)), 1);
           const gutterW = String(maxLine).length;
           nodes2.push(
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", children: diffRows.map((row, j) => {
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", children: diffRows.map((row, j) => {
               if (row.type === "hdr") {
-                return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: row.text }, j);
+                return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, children: row.text }, j);
               }
               const bg = row.type === "add" ? row.empty ? t.color.diffAddedEmpty : t.color.diffAdded : row.type === "del" ? row.empty ? t.color.diffRemovedEmpty : t.color.diffRemoved : void 0;
               const fg = row.type === "add" ? t.color.diffAddedWord : row.type === "del" ? t.color.diffRemovedWord : void 0;
@@ -70548,30 +70710,30 @@ function MdImpl({ cols, compact, t, text }) {
               const sign = row.type === "add" ? "+" : row.type === "del" ? "-" : " ";
               const numStr = String(num).padStart(gutterW);
               const codeColor = row.type === "ctx" ? t.color.muted : void 0;
-              return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Box_default, { width: "100%", backgroundColor: bg, flexDirection: "row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: codeColor || fg || t.color.muted, children: [
+              return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Box_default, { width: "100%", backgroundColor: bg, flexDirection: "row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: codeColor || fg || t.color.muted, children: [
                   numStr,
                   " ",
                   sign,
                   " "
                 ] }),
-                highlighted && diffLang ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: highlightLine(row.text, diffLang, t).map(
-                  ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: fg || void 0, children: text2 }, kk)
-                ) }) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: fg || codeColor, children: row.text })
+                highlighted && diffLang ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: highlightLine(row.text, diffLang, t).map(
+                  ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: fg || void 0, children: text2 }, kk)
+                ) }) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: fg || codeColor, children: row.text })
               ] }, j);
             }) }, key)
           );
         } else {
           nodes2.push(
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Box_default, { flexDirection: "column", paddingLeft: 2, children: [
-              lang && !isDiff && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: "\u2500 " + lang }),
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Box_default, { flexDirection: "column", paddingLeft: 2, children: [
+              lang && !isDiff && /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, children: "\u2500 " + lang }),
               block.map((l, j) => {
                 if (highlighted) {
-                  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: highlightLine(l, lang, t).map(
-                    ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: text2 }, kk)
+                  return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: highlightLine(l, lang, t).map(
+                    ([color, text2], kk) => color ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color, children: text2 }, kk) : /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: text2 }, kk)
                   ) }, j);
                 }
-                return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { children: l }, j);
+                return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { children: l }, j);
               })
             ] }, key)
           );
@@ -70589,7 +70751,7 @@ function MdImpl({ cols, compact, t, text }) {
           const inner = sameLineClose[1].trim();
           start("code");
           nodes2.push(
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: 2, children: inner ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, children: renderMath(texToUnicode(inner)) }) : null }, key)
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: 2, children: inner ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, children: renderMath(texToUnicode(inner)) }) : null }, key)
           );
           i++;
           continue;
@@ -70603,7 +70765,7 @@ function MdImpl({ cols, compact, t, text }) {
         }
         if (closeIdx < 0) {
           start("paragraph");
-          nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: line }, key));
+          nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: line }, key));
           i++;
           continue;
         }
@@ -70619,7 +70781,7 @@ function MdImpl({ cols, compact, t, text }) {
         }
         start("code");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: 2, children: block.map((l, j) => /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.accent, children: renderMath(texToUnicode(l)) }, j)) }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: 2, children: block.map((l, j) => /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.accent, children: renderMath(texToUnicode(l)) }, j)) }, key)
         );
         i = closeIdx + 1;
         continue;
@@ -70628,7 +70790,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (heading) {
         start("heading");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: heading }) }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: heading }) }, key)
         );
         i++;
         continue;
@@ -70636,7 +70798,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (i + 1 < lines.length && SETEXT_RE.test(lines[i + 1])) {
         start("heading");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: line.trim() }) }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: line.trim() }) }, key)
         );
         i += 2;
         continue;
@@ -70644,7 +70806,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (HR_RE.test(line)) {
         start("rule");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: "\u2500".repeat(36) }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, children: "\u2500".repeat(36) }, key)
         );
         i++;
         continue;
@@ -70653,17 +70815,17 @@ function MdImpl({ cols, compact, t, text }) {
       if (footnote) {
         start("list");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
             "[",
             footnote[1],
             "] ",
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: footnote[2] ?? "" })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: footnote[2] ?? "" })
           ] }, key)
         );
         i++;
         while (i < lines.length && /^\s{2,}\S/.test(lines[i])) {
           nodes2.push(
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { paddingLeft: 2, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: lines[i].trim() }) }) }, `${key}-cont-${i}`)
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { paddingLeft: 2, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, wrap: "wrap-trim", children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: lines[i].trim() }) }) }, `${key}-cont-${i}`)
           );
           i++;
         }
@@ -70672,7 +70834,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (i + 1 < lines.length && DEF_RE.test(lines[i + 1])) {
         start("list");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, wrap: "wrap-trim", children: line.trim() }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { bold: true, wrap: "wrap-trim", children: line.trim() }, key)
         );
         i++;
         while (i < lines.length) {
@@ -70681,9 +70843,9 @@ function MdImpl({ cols, compact, t, text }) {
             break;
           }
           nodes2.push(
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { wrap: "wrap-trim", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, children: " \xB7 " }),
-              /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: def })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { wrap: "wrap-trim", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, children: " \xB7 " }),
+              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: def })
             ] }, `${key}-def-${i}`)
           );
           i++;
@@ -70696,12 +70858,12 @@ function MdImpl({ cols, compact, t, text }) {
         const task = bullet[2].match(TASK_RE);
         const marker = task ? task[1].toLowerCase() === "x" ? "\u2611" : "\u2610" : "\u2022";
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { paddingLeft: indentDepth(bullet[1]) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { wrap: "wrap-trim", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { paddingLeft: indentDepth(bullet[1]) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { wrap: "wrap-trim", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
               marker,
               " "
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: task ? task[2] : bullet[2] })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: task ? task[2] : bullet[2] })
           ] }) }, key)
         );
         i++;
@@ -70711,12 +70873,12 @@ function MdImpl({ cols, compact, t, text }) {
       if (numbered) {
         start("list");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { paddingLeft: indentDepth(numbered[1]) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { wrap: "wrap-trim", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { paddingLeft: indentDepth(numbered[1]) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { wrap: "wrap-trim", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, children: [
               numbered[2],
               ". "
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: numbered[3] })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: numbered[3] })
           ] }) }, key)
         );
         i++;
@@ -70731,9 +70893,9 @@ function MdImpl({ cols, compact, t, text }) {
           i++;
         }
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", children: quoteLines.map((ql, qi) => /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { paddingLeft: Math.max(0, ql.depth - 1) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", children: quoteLines.map((ql, qi) => /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { paddingLeft: Math.max(0, ql.depth - 1) * 2, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
             "\u2502 ",
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: ql.text })
+            /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: ql.text })
           ] }) }, qi)) }, key)
         );
         continue;
@@ -70755,7 +70917,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (summary) {
         start("paragraph");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
             "\u25B6 ",
             summary
           ] }, key)
@@ -70766,7 +70928,7 @@ function MdImpl({ cols, compact, t, text }) {
       if (/^<\/?[^>]+>$/.test(line.trim())) {
         start("paragraph");
         nodes2.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, wrap: "wrap-trim", children: line.trim() }, key)
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, wrap: "wrap-trim", children: line.trim() }, key)
         );
         i++;
         continue;
@@ -70787,25 +70949,25 @@ function MdImpl({ cols, compact, t, text }) {
         continue;
       }
       start("paragraph");
-      nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime32.jsx)(MdInline, { t, text: line }, key));
+      nodes2.push(/* @__PURE__ */ (0, import_jsx_runtime33.jsx)(MdInline, { t, text: line }, key));
       i++;
     }
     cacheSet(bucket, cacheKey, nodes2);
     return nodes2;
   }, [cols, compact, t, text]);
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", children: nodes });
+  return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", children: nodes });
 }
-var import_react92, import_jsx_runtime32, renderMath, FENCE_RE, FENCE_CLOSE_RE, HR_RE, HEADING_RE, SETEXT_RE, FOOTNOTE_RE, DEF_RE, BULLET_RE, TASK_RE, NUMBERED_RE, QUOTE_RE, TABLE_DIVIDER_CELL_RE, MD_URL_RE, MD_IDENTIFIER_RE, MD_DUNDER_IDENTIFIER_RE, MD_UNDERSCORE_BOLD_RE, MD_UNDERSCORE_ITALIC_RE, STRIP_UNDERSCORE_BOLD_RE, STRIP_UNDERSCORE_ITALIC_RE, MATH_BLOCK_OPEN_RE, MATH_BLOCK_CLOSE_DOLLAR_RE, MATH_BLOCK_CLOSE_BRACKET_RE, MEDIA_LINE_RE, AUDIO_DIRECTIVE_RE, INLINE_RE, indentDepth, splitRow, isTableDivider, autolinkUrl, defaultLinkLabel, pickFallbackLabel, renderResolvedLink, stripInlineMarkup, SAFETY_MARGIN, MIN_COL_WIDTH, COL_GAP, TABLE_PADDING_LEFT, renderTable, MD_CACHE_LIMIT, mdCache, cacheBucket, cacheGet, cacheSet, Md;
+var import_react93, import_jsx_runtime33, renderMath, FENCE_RE, FENCE_CLOSE_RE, HR_RE, HEADING_RE, SETEXT_RE, FOOTNOTE_RE, DEF_RE, BULLET_RE, TASK_RE, NUMBERED_RE, QUOTE_RE, TABLE_DIVIDER_CELL_RE, MD_URL_RE, MD_IDENTIFIER_RE, MD_DUNDER_IDENTIFIER_RE, MD_UNDERSCORE_BOLD_RE, MD_UNDERSCORE_ITALIC_RE, STRIP_UNDERSCORE_BOLD_RE, STRIP_UNDERSCORE_ITALIC_RE, MATH_BLOCK_OPEN_RE, MATH_BLOCK_CLOSE_DOLLAR_RE, MATH_BLOCK_CLOSE_BRACKET_RE, MEDIA_LINE_RE, AUDIO_DIRECTIVE_RE, INLINE_RE, indentDepth, splitRow, isTableDivider, autolinkUrl, defaultLinkLabel, pickFallbackLabel, renderResolvedLink, stripInlineMarkup, SAFETY_MARGIN, MIN_COL_WIDTH, COL_GAP, TABLE_PADDING_LEFT, renderTable, MD_CACHE_LIMIT, mdCache, cacheBucket, cacheGet, cacheSet, Md;
 var init_markdown = __esm({
   async "src/components/markdown.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react92 = __toESM(require_react(), 1);
+    import_react93 = __toESM(require_react(), 1);
     init_emoji();
     init_externalLink();
     init_mathUnicode();
     init_syntax();
-    import_jsx_runtime32 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime33 = __toESM(require_jsx_runtime(), 1);
     renderMath = (text) => {
       if (!text.includes(BOX_OPEN)) {
         return text;
@@ -70828,7 +70990,7 @@ var init_markdown = __esm({
           break;
         }
         out.push(
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { bold: true, inverse: true, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { bold: true, inverse: true, children: [
             " ",
             text.slice(start + 1, end),
             " "
@@ -70920,7 +71082,7 @@ var init_markdown = __esm({
     };
     renderResolvedLink = (k, t, rawUrl, label) => {
       const target = normalizeExternalUrl(rawUrl);
-      return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(ResolvedLink, { fallbackLabel: pickFallbackLabel(label, target), t, url: target }, k);
+      return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(ResolvedLink, { fallbackLabel: pickFallbackLabel(label, target), t, url: target }, k);
     };
     stripInlineMarkup = (v) => v.replace(/!\[(.*?)\]\(((?:[^\s()]|\([^\s()]*\))+?)\)/g, "[image: $1] $2").replace(/\[(.+?)\]\(((?:[^\s()]|\([^\s()]*\))+?)\)/g, "$1").replace(/<((?:https?:\/\/|mailto:)[^>\s]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>/g, "$1").replace(/~~(.+?)~~/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\*\*(.+?)\*\*/g, "$1").replace(STRIP_UNDERSCORE_BOLD_RE, "$1").replace(/\*(.+?)\*/g, "$1").replace(STRIP_UNDERSCORE_ITALIC_RE, "$1").replace(/==(.+?)==/g, "$1").replace(/\[\^([^\]]+)\]/g, "[$1]").replace(/\^([^^\s][^^]*?)\^/g, "^$1").replace(/~([A-Za-z0-9]{1,8})~/g, "_$1").replace(/(?<!\$)\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\$)/g, "$1").replace(/\\\(([^\n]+?)\\\)/g, "$1");
     SAFETY_MARGIN = 4;
@@ -71037,8 +71199,8 @@ var init_markdown = __esm({
           const gap = ci < numCols - 1 ? "  " : "";
           return text + pad + gap;
         }).join("");
-        return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: normalizedRows.map((row, ri) => /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(import_react92.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+        return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: normalizedRows.map((row, ri) => /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(import_react93.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
             Text,
             {
               bold: ri === 0,
@@ -71047,7 +71209,7 @@ var init_markdown = __esm({
               children: buildRowString(row)
             }
           ),
-          ri === 0 && normalizedRows.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, dimColor: true, wrap: "truncate-end", children: sep }) : null
+          ri === 0 && normalizedRows.length > 1 ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, dimColor: true, wrap: "truncate-end", children: sep }) : null
         ] }, ri)) }, k);
       }
       const buildRowLines = (row) => {
@@ -71086,18 +71248,18 @@ var init_markdown = __esm({
       const useVertical = tallestBodyRow > maxRowLinesThreshold || safetyOverflow;
       if (useVertical) {
         if (normalizedRows.length <= 1) {
-          return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: normalizedRows[0].map((h) => stripInlineMarkup(h)).join(" \xB7 ") }) }, k);
+          return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { bold: true, color: t.color.accent, wrap: "wrap-trim", children: normalizedRows[0].map((h) => stripInlineMarkup(h)).join(" \xB7 ") }) }, k);
         }
         const headers = normalizedRows[0];
         const dataRows = normalizedRows.slice(1);
         const sepWidth = Math.max(1, cols ? Math.min(cols - TABLE_PADDING_LEFT - 1, 40) : 40);
-        return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: dataRows.map((row, ri) => /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(import_react92.Fragment, { children: [
-          ri > 0 ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Text, { color: t.color.muted, dimColor: true, children: "\u2500".repeat(sepWidth) }) : null,
+        return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: dataRows.map((row, ri) => /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(import_react93.Fragment, { children: [
+          ri > 0 ? /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Text, { color: t.color.muted, dimColor: true, children: "\u2500".repeat(sepWidth) }) : null,
           headers.map((header, ci) => {
             const cell = row[ci] ?? "";
             const label = stripInlineMarkup(header) || `Col ${ci + 1}`;
-            return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { wrap: "wrap-trim", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(Text, { bold: true, color: t.color.accent, children: [
+            return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { wrap: "wrap-trim", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Text, { bold: true, color: t.color.accent, children: [
                 label,
                 ":"
               ] }),
@@ -71107,7 +71269,7 @@ var init_markdown = __esm({
           })
         ] }, ri)) }, k);
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: allEntries.map((entry, i) => /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Box_default, { flexDirection: "column", paddingLeft: TABLE_PADDING_LEFT, children: allEntries.map((entry, i) => /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
         Text,
         {
           bold: entry.kind === "header",
@@ -71144,19 +71306,19 @@ var init_markdown = __esm({
         b.delete(b.keys().next().value);
       }
     };
-    Md = (0, import_react92.memo)(MdImpl);
+    Md = (0, import_react93.memo)(MdImpl);
   }
 });
 
 // src/components/streamingMarkdown.tsx
-var import_react93, import_jsx_runtime33, fenceOpenAt, findStableBoundary, StreamingMd;
+var import_react94, import_jsx_runtime34, fenceOpenAt, findStableBoundary, StreamingMd;
 var init_streamingMarkdown = __esm({
   async "src/components/streamingMarkdown.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react93 = __toESM(require_react(), 1);
+    import_react94 = __toESM(require_react(), 1);
     await init_markdown();
-    import_jsx_runtime33 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime34 = __toESM(require_jsx_runtime(), 1);
     fenceOpenAt = (s, end) => {
       let codeOpen = false;
       let mathOpen = false;
@@ -71211,8 +71373,8 @@ var init_streamingMarkdown = __esm({
       }
       return -1;
     };
-    StreamingMd = (0, import_react93.memo)(function StreamingMd2({ cols, compact, t, text }) {
-      const stablePrefixRef = (0, import_react93.useRef)("");
+    StreamingMd = (0, import_react94.memo)(function StreamingMd2({ cols, compact, t, text }) {
+      const stablePrefixRef = (0, import_react94.useRef)("");
       if (!text.startsWith(stablePrefixRef.current)) {
         stablePrefixRef.current = "";
       }
@@ -71223,14 +71385,14 @@ var init_streamingMarkdown = __esm({
       const stablePrefix = stablePrefixRef.current;
       const unstableSuffix = text.slice(stablePrefix.length);
       if (!stablePrefix) {
-        return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Md, { cols, compact, t, text: unstableSuffix });
+        return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Md, { cols, compact, t, text: unstableSuffix });
       }
       if (!unstableSuffix) {
-        return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Md, { cols, compact, t, text: stablePrefix });
+        return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Md, { cols, compact, t, text: stablePrefix });
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(Box_default, { flexDirection: "column", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Md, { cols, compact, t, text: stablePrefix }),
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(Md, { cols, compact, t, text: unstableSuffix })
+      return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Box_default, { flexDirection: "column", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Md, { cols, compact, t, text: stablePrefix }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Md, { cols, compact, t, text: unstableSuffix })
       ] });
     });
   }
@@ -71246,9 +71408,9 @@ function TreeRow({
   t
 }) {
   const lead = treeLead(rails, branch);
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Box_default, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: lead.length, children: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: stemColor ?? t.color.muted, dim: stemDim, children: lead }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", flexGrow: 1, children })
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Box_default, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: lead.length, children: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: stemColor ?? t.color.muted, dim: stemDim, children: lead }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", flexGrow: 1, children })
   ] });
 }
 function TreeTextRow({
@@ -71260,8 +71422,8 @@ function TreeTextRow({
   t,
   wrap = "wrap-trim"
 }) {
-  const text = dimColor ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color, dim: true, wrap, children: content }) : /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color, wrap, children: content });
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(TreeRow, { branch, rails, t, children: text });
+  const text = dimColor ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color, dim: true, wrap, children: content }) : /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color, wrap, children: content });
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(TreeRow, { branch, rails, t, children: text });
 }
 function TreeNode({
   branch,
@@ -71273,25 +71435,25 @@ function TreeNode({
   stemDim,
   t
 }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Box_default, { flexDirection: "column", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(TreeRow, { branch, rails, stemColor, stemDim, t, children: header }),
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Box_default, { flexDirection: "column", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(TreeRow, { branch, rails, stemColor, stemDim, t, children: header }),
     open ? children?.(nextTreeRails(rails, branch)) : null
   ] });
 }
 function Spinner({ color, variant = "think" }) {
-  const spin = (0, import_react94.useMemo)(() => {
+  const spin = (0, import_react95.useMemo)(() => {
     const raw = braille_default[pick(variant === "tool" ? TOOL : THINK)];
     return { ...raw, frames: raw.frames.map((f) => [...f][0] ?? "\u2800") };
   }, [variant]);
-  const [frame, setFrame] = (0, import_react94.useState)(0);
-  (0, import_react94.useEffect)(() => {
+  const [frame, setFrame] = (0, import_react95.useState)(0);
+  (0, import_react95.useEffect)(() => {
     setFrame(0);
   }, [spin]);
-  (0, import_react94.useEffect)(() => {
+  (0, import_react95.useEffect)(() => {
     const id = setInterval(() => setFrame((f) => (f + 1) % spin.frames.length), spin.interval);
     return () => clearInterval(id);
   }, [spin]);
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color, children: spin.frames[frame] });
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color, children: spin.frames[frame] });
 }
 function Detail2({
   branch = "last",
@@ -71301,7 +71463,7 @@ function Detail2({
   rails = [],
   t
 }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(TreeTextRow, { branch, color, content, dimColor, rails, t });
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(TreeTextRow, { branch, color, content, dimColor, rails, t });
 }
 function StreamCursor({
   color,
@@ -71309,8 +71471,8 @@ function StreamCursor({
   streaming = false,
   visible = false
 }) {
-  const [on2, setOn] = (0, import_react94.useState)(true);
-  (0, import_react94.useEffect)(() => {
+  const [on2, setOn] = (0, import_react95.useState)(true);
+  (0, import_react95.useEffect)(() => {
     if (!visible || !streaming) {
       setOn(true);
       return;
@@ -71321,7 +71483,7 @@ function StreamCursor({
   if (!visible) {
     return null;
   }
-  return dimColor ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color, dim: true, children: streaming && on2 ? "\u258D" : " " }) : /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color, children: streaming && on2 ? "\u258D" : " " });
+  return dimColor ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color, dim: true, children: streaming && on2 ? "\u258D" : " " }) : /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color, children: streaming && on2 ? "\u258D" : " " });
 }
 function Chevron({
   count,
@@ -71333,11 +71495,11 @@ function Chevron({
   tone = "dim"
 }) {
   const color = tone === "error" ? t.color.error : tone === "warn" ? t.color.warn : t.color.muted;
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { onClick: (e) => onClick(!!e?.shiftKey || !!e?.ctrlKey), children: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color, dim: tone === "dim", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.accent, children: open ? "\u25BE " : "\u25B8 " }),
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { onClick: (e) => onClick(!!e?.shiftKey || !!e?.ctrlKey), children: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color, dim: tone === "dim", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: open ? "\u25BE " : "\u25B8 " }),
     title,
     typeof count === "number" ? ` (${count})` : "",
-    suffix ? /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
+    suffix ? /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
       "  ",
       suffix
     ] }) : null
@@ -71359,13 +71521,13 @@ function SubagentAccordion({
   rails = [],
   t
 }) {
-  const [open, setOpen] = (0, import_react94.useState)(expanded);
-  const [deep, setDeep] = (0, import_react94.useState)(expanded);
-  const [openThinking, setOpenThinking] = (0, import_react94.useState)(expanded);
-  const [openTools, setOpenTools] = (0, import_react94.useState)(expanded);
-  const [openNotes, setOpenNotes] = (0, import_react94.useState)(expanded);
-  const [openKids, setOpenKids] = (0, import_react94.useState)(expanded);
-  (0, import_react94.useEffect)(() => {
+  const [open, setOpen] = (0, import_react95.useState)(expanded);
+  const [deep, setDeep] = (0, import_react95.useState)(expanded);
+  const [openThinking, setOpenThinking] = (0, import_react95.useState)(expanded);
+  const [openTools, setOpenTools] = (0, import_react95.useState)(expanded);
+  const [openNotes, setOpenNotes] = (0, import_react95.useState)(expanded);
+  const [openKids, setOpenKids] = (0, import_react95.useState)(expanded);
+  (0, import_react95.useEffect)(() => {
     if (!expanded) {
       return;
     }
@@ -71437,7 +71599,7 @@ function SubagentAccordion({
   const sections = [];
   if (hasThinking) {
     sections.push({
-      header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Chevron,
         {
           count: item.thinking.length,
@@ -71455,7 +71617,7 @@ function SubagentAccordion({
       ),
       key: "thinking",
       open: openThinking,
-      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Thinking,
         {
           active: item.status === "running",
@@ -71471,7 +71633,7 @@ function SubagentAccordion({
   }
   if (hasTools) {
     sections.push({
-      header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Chevron,
         {
           count: item.tools.length,
@@ -71489,13 +71651,13 @@ function SubagentAccordion({
       ),
       key: "tools",
       open: openTools,
-      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: item.tools.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: item.tools.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         TreeTextRow,
         {
           branch: index === item.tools.length - 1 ? "last" : "mid",
           color: t.color.text,
-          content: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.accent, children: "\u25CF " }),
+          content: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: "\u25CF " }),
             line
           ] }),
           rails: childRails,
@@ -71507,7 +71669,7 @@ function SubagentAccordion({
   }
   if (hasNotes) {
     sections.push({
-      header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Chevron,
         {
           count: noteRows.length,
@@ -71526,7 +71688,7 @@ function SubagentAccordion({
       ),
       key: "notes",
       open: openNotes,
-      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: noteRows.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: noteRows.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         TreeTextRow,
         {
           branch: index === noteRows.length - 1 ? "last" : "mid",
@@ -71542,7 +71704,7 @@ function SubagentAccordion({
   }
   if (children.length > 0) {
     sections.push({
-      header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Chevron,
         {
           count: children.length,
@@ -71561,7 +71723,7 @@ function SubagentAccordion({
       ),
       key: "subagents",
       open: openKids,
-      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: children.map((child, i) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      render: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: children.map((child, i) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         SubagentAccordion,
         {
           branch: i === children.length - 1 ? "last" : "mid",
@@ -71576,11 +71738,11 @@ function SubagentAccordion({
     });
   }
   const stem = heatColor(node, peak, t);
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
     TreeNode,
     {
       branch,
-      header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         Chevron,
         {
           onClick: (shift) => {
@@ -71607,7 +71769,7 @@ function SubagentAccordion({
       stemColor: stem,
       stemDim: stem == null,
       t,
-      children: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: sections.map((section, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      children: (childRails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: sections.map((section, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         TreeNode,
         {
           branch: index === sections.length - 1 ? "last" : "mid",
@@ -71622,19 +71784,19 @@ function SubagentAccordion({
     }
   );
 }
-var import_react94, import_jsx_runtime34, import_react95, THINK, TOOL, fmtElapsed, nextTreeRails, treeLead, Thinking, ToolTrail;
+var import_react95, import_jsx_runtime35, import_react96, THINK, TOOL, fmtElapsed, nextTreeRails, treeLead, Thinking, ToolTrail;
 var init_thinking = __esm({
   async "src/components/thinking.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react94 = __toESM(require_react(), 1);
+    import_react95 = __toESM(require_react(), 1);
     init_dist5();
     init_limits();
     init_details();
     init_subagentTree();
     init_text();
-    import_jsx_runtime34 = __toESM(require_jsx_runtime(), 1);
-    import_react95 = __toESM(require_react(), 1);
+    import_jsx_runtime35 = __toESM(require_jsx_runtime(), 1);
+    import_react96 = __toESM(require_react(), 1);
     THINK = ["helix", "breathe", "orbit", "dna", "waverows", "snake", "pulse"];
     TOOL = ["cascade", "scan", "diagswipe", "fillsweep", "rain", "columns", "sparkle"];
     fmtElapsed = (ms) => {
@@ -71643,7 +71805,7 @@ var init_thinking = __esm({
     };
     nextTreeRails = (rails, branch) => [...rails, branch === "mid"];
     treeLead = (rails, branch) => `${rails.map((on2) => on2 ? "\u2502 " : "  ").join("")}${branch === "mid" ? "\u251C\u2500 " : "\u2514\u2500 "}`;
-    Thinking = (0, import_react94.memo)(function Thinking2({
+    Thinking = (0, import_react95.memo)(function Thinking2({
       active = false,
       branch = "last",
       mode = "truncated",
@@ -71652,23 +71814,23 @@ var init_thinking = __esm({
       streaming = false,
       t
     }) {
-      const preview = (0, import_react94.useMemo)(() => {
+      const preview = (0, import_react95.useMemo)(() => {
         const raw = thinkingPreview(reasoning, mode, THINKING_COT_MAX);
         return mode === "full" ? boundedLiveRenderText(raw) : raw;
       }, [mode, reasoning]);
-      const lines = (0, import_react94.useMemo)(() => preview.split("\n").map((line) => line.replace(/\t/g, "  ")), [preview]);
+      const lines = (0, import_react95.useMemo)(() => preview.split("\n").map((line) => line.replace(/\t/g, "  ")), [preview]);
       if (!preview && !active) {
         return null;
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(TreeRow, { branch, rails, t, children: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", flexGrow: 1, children: preview ? mode === "full" ? lines.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
+      return /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(TreeRow, { branch, rails, t, children: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", flexGrow: 1, children: preview ? mode === "full" ? lines.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, wrap: "wrap-trim", children: [
         line || " ",
-        index === lines.length - 1 ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active }) : null
-      ] }, index)) : /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
+        index === lines.length - 1 ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active }) : null
+      ] }, index)) : /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
         preview,
-        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.muted, children: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active }) }) }) });
+        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.muted, children: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(StreamCursor, { color: t.color.muted, streaming, visible: active }) }) }) });
     });
-    ToolTrail = (0, import_react94.memo)(function ToolTrail2({
+    ToolTrail = (0, import_react95.memo)(function ToolTrail2({
       busy = false,
       commandOverride = false,
       detailsMode = "collapsed",
@@ -71685,7 +71847,7 @@ var init_thinking = __esm({
       trail = [],
       activity = []
     }) {
-      const visible = (0, import_react94.useMemo)(
+      const visible = (0, import_react95.useMemo)(
         () => ({
           thinking: sectionMode("thinking", detailsMode, sections, commandOverride),
           tools: sectionMode("tools", detailsMode, sections, commandOverride),
@@ -71694,32 +71856,32 @@ var init_thinking = __esm({
         }),
         [commandOverride, detailsMode, sections]
       );
-      const [now2, setNow] = (0, import_react94.useState)(() => Date.now());
-      const [openThinking, setOpenThinking] = (0, import_react94.useState)(visible.thinking === "expanded");
-      const [openTools, setOpenTools] = (0, import_react94.useState)(visible.tools === "expanded");
-      const [openSubagents, setOpenSubagents] = (0, import_react94.useState)(visible.subagents === "expanded");
-      const [deepSubagents, setDeepSubagents] = (0, import_react94.useState)(visible.subagents === "expanded");
-      const [openMeta, setOpenMeta] = (0, import_react94.useState)(visible.activity === "expanded");
-      (0, import_react94.useEffect)(() => {
+      const [now2, setNow] = (0, import_react95.useState)(() => Date.now());
+      const [openThinking, setOpenThinking] = (0, import_react95.useState)(visible.thinking === "expanded");
+      const [openTools, setOpenTools] = (0, import_react95.useState)(visible.tools === "expanded");
+      const [openSubagents, setOpenSubagents] = (0, import_react95.useState)(visible.subagents === "expanded");
+      const [deepSubagents, setDeepSubagents] = (0, import_react95.useState)(visible.subagents === "expanded");
+      const [openMeta, setOpenMeta] = (0, import_react95.useState)(visible.activity === "expanded");
+      (0, import_react95.useEffect)(() => {
         if (!tools.length || visible.tools !== "expanded" && !openTools) {
           return;
         }
         const id = setInterval(() => setNow(Date.now()), 500);
         return () => clearInterval(id);
       }, [openTools, tools.length, visible.tools]);
-      (0, import_react94.useEffect)(() => {
+      (0, import_react95.useEffect)(() => {
         setOpenThinking(visible.thinking === "expanded");
         setOpenTools(visible.tools === "expanded");
         setOpenSubagents(visible.subagents === "expanded");
         setOpenMeta(visible.activity === "expanded");
       }, [visible]);
-      const cot = (0, import_react94.useMemo)(() => thinkingPreview(reasoning, "full", THINKING_COT_MAX), [reasoning]);
-      const spawnTree = (0, import_react94.useMemo)(() => buildSubagentTree(subagents), [subagents]);
-      const spawnPeak = (0, import_react94.useMemo)(() => peakHotness(spawnTree), [spawnTree]);
-      const spawnTotals = (0, import_react94.useMemo)(() => treeTotals(spawnTree), [spawnTree]);
-      const spawnWidths = (0, import_react94.useMemo)(() => widthByDepth(spawnTree), [spawnTree]);
-      const spawnSpark = (0, import_react94.useMemo)(() => sparkline(spawnWidths), [spawnWidths]);
-      const spawnSummaryLabel = (0, import_react94.useMemo)(() => formatSummary(spawnTotals), [spawnTotals]);
+      const cot = (0, import_react95.useMemo)(() => thinkingPreview(reasoning, "full", THINKING_COT_MAX), [reasoning]);
+      const spawnTree = (0, import_react95.useMemo)(() => buildSubagentTree(subagents), [subagents]);
+      const spawnPeak = (0, import_react95.useMemo)(() => peakHotness(spawnTree), [spawnTree]);
+      const spawnTotals = (0, import_react95.useMemo)(() => treeTotals(spawnTree), [spawnTree]);
+      const spawnWidths = (0, import_react95.useMemo)(() => widthByDepth(spawnTree), [spawnTree]);
+      const spawnSpark = (0, import_react95.useMemo)(() => sparkline(spawnWidths), [spawnWidths]);
+      const spawnSummaryLabel = (0, import_react95.useMemo)(() => formatSummary(spawnTotals), [spawnTotals]);
       if (!busy && !trail.length && !tools.length && !subagents.length && !activity.length && !cot && !reasoningActive && !outcome) {
         return null;
       }
@@ -71762,8 +71924,8 @@ var init_thinking = __esm({
             color: t.color.muted,
             dimColor: true,
             key: `tr-${i}`,
-            content: groups.length ? /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Spinner, { color: t.color.accent, variant: "think" }),
+            content: groups.length ? /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Spinner, { color: t.color.accent, variant: "think" }),
               " ",
               line
             ] }) : line
@@ -71787,8 +71949,8 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
               key: `${tool.id}-args`
             }
           ] : [],
-          content: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Spinner, { color: t.color.accent, variant: "tool" }),
+          content: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Spinner, { color: t.color.accent, variant: "tool" }),
             " ",
             label,
             tool.startedAt ? ` (${fmtElapsed(now2 - tool.startedAt)})` : ""
@@ -71815,15 +71977,15 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
       const inlineDelegateKey = hasSubagents && delegateGroups.length === 1 ? delegateGroups[0].key : null;
       const toolLabel = (group) => {
         const { duration, label } = splitToolDuration(String(group.content));
-        return duration ? /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
+        return duration ? /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
           label,
-          /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.statusFg, dim: true, children: duration })
+          /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.statusFg, dim: true, children: duration })
         ] }) : group.content;
       };
       const allHidden = visible.thinking === "hidden" && visible.tools === "hidden" && visible.subagents === "hidden" && visible.activity === "hidden";
       if (allHidden) {
         const alerts = activity.filter((i) => i.tone !== "info").slice(-2);
-        return alerts.length ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: alerts.map((i) => /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: i.tone === "error" ? t.color.error : t.color.warn, children: [
+        return alerts.length ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: alerts.map((i) => /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: i.tone === "error" ? t.color.error : t.color.warn, children: [
           i.tone === "error" ? "\u2717" : "!",
           " ",
           i.text
@@ -71845,7 +72007,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
         }
       };
       const metaTone = activity.some((i) => i.tone === "error") ? "error" : activity.some((i) => i.tone === "warn") ? "warn" : "dim";
-      const renderSubagentList = (rails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: spawnTree.map((node, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      const renderSubagentList = (rails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: spawnTree.map((node, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
         SubagentAccordion,
         {
           branch: index === spawnTree.length - 1 ? "last" : "mid",
@@ -71860,7 +72022,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
       const panels = [];
       if (hasThinking && visible.thinking !== "hidden") {
         panels.push({
-          header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             Box_default,
             {
               onClick: (e) => {
@@ -71870,10 +72032,10 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
                   setOpenThinking((v) => !v);
                 }
               },
-              children: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.muted, dim: !thinkingLive, children: [
-                /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.accent, children: openThinking ? "\u25BE " : "\u25B8 " }),
-                thinkingLive ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { bold: true, color: t.color.text, children: "Thinking" }) : /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.muted, dim: true, children: "Thinking" }),
-                thinkingTokensLabel ? /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
+              children: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, dim: !thinkingLive, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: openThinking ? "\u25BE " : "\u25B8 " }),
+                thinkingLive ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { bold: true, color: t.color.text, children: "Thinking" }) : /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.muted, dim: true, children: "Thinking" }),
+                thinkingTokensLabel ? /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
                   "  ",
                   thinkingTokensLabel
                 ] }) : null
@@ -71882,7 +72044,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
           ),
           key: "thinking",
           open: openThinking,
-          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             Thinking,
             {
               active: reasoningActive,
@@ -71898,7 +72060,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
       }
       if (hasTools && visible.tools !== "hidden") {
         panels.push({
-          header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             Chevron,
             {
               count: groups.length,
@@ -71917,27 +72079,27 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
           ),
           key: "tools",
           open: openTools,
-          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: groups.map((group, index) => {
+          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: groups.map((group, index) => {
             const branch = index === groups.length - 1 ? "last" : "mid";
             const childRails = nextTreeRails(rails, branch);
             const hasInlineSubagents = inlineDelegateKey === group.key;
             const isDelegateGroup = group.label.startsWith("Delegate Task");
-            return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Box_default, { flexDirection: "column", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+            return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Box_default, { flexDirection: "column", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
                 TreeTextRow,
                 {
                   branch,
                   color: group.color,
-                  content: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.accent, children: "\u25CF " }),
+                  content: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: "\u25CF " }),
                     toolLabel(group),
-                    isDelegateGroup ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.statusFg, dim: true, children: "  (/agents to monitor)" }) : null
+                    isDelegateGroup ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.statusFg, dim: true, children: "  (/agents to monitor)" }) : null
                   ] }),
                   rails,
                   t
                 }
               ),
-              group.details.map((detail, detailIndex) => /* @__PURE__ */ (0, import_react95.createElement)(
+              group.details.map((detail, detailIndex) => /* @__PURE__ */ (0, import_react96.createElement)(
                 Detail2,
                 {
                   ...detail,
@@ -71955,7 +72117,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
       if (hasSubagents && !inlineDelegateKey && visible.subagents !== "hidden") {
         const suffix = spawnSpark ? `${spawnSummaryLabel}  ${spawnSpark}  (/agents)` : `${spawnSummaryLabel}  (/agents)`;
         panels.push({
-          header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             Chevron,
             {
               count: spawnTotals.descendantCount,
@@ -71981,7 +72143,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
       }
       if (hasMeta && visible.activity !== "hidden") {
         panels.push({
-          header: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          header: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             Chevron,
             {
               count: meta.length,
@@ -72000,7 +72162,7 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
           ),
           key: "meta",
           open: openMeta,
-          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { flexDirection: "column", children: meta.map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+          render: (rails) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", children: meta.map((row, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             TreeTextRow,
             {
               branch: index === meta.length - 1 ? "last" : "mid",
@@ -72015,8 +72177,8 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
         });
       }
       const topCount = panels.length + (totalTokensLabel ? 1 : 0);
-      return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Box_default, { flexDirection: "column", children: [
-        panels.map((panel, index) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Box_default, { flexDirection: "column", children: [
+        panels.map((panel, index) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
           TreeNode,
           {
             branch: index === topCount - 1 ? "last" : "mid",
@@ -72027,20 +72189,20 @@ ${boundedLiveRenderText(tool.verboseArgs)}`,
           },
           panel.key
         )),
-        totalTokensLabel ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
+        totalTokensLabel ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
           TreeTextRow,
           {
             branch: "last",
             color: t.color.statusFg,
-            content: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(import_jsx_runtime34.Fragment, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Text, { color: t.color.accent, children: "\u03A3 " }),
+            content: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: "\u03A3 " }),
               totalTokensLabel
             ] }),
             dimColor: true,
             t
           }
         ) : null,
-        outcome ? /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(Text, { color: t.color.muted, dim: true, children: [
+        outcome ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, dim: true, children: [
           "\xB7 ",
           outcome
         ] }) }) : null
@@ -72060,20 +72222,20 @@ var init_todo = __esm({
 });
 
 // src/components/todoPanel.tsx
-var import_react96, import_jsx_runtime35, rowColor, TodoPanel;
+var import_react97, import_jsx_runtime36, rowColor, TodoPanel;
 var init_todoPanel = __esm({
   async "src/components/todoPanel.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react96 = __toESM(require_react(), 1);
+    import_react97 = __toESM(require_react(), 1);
     init_liveProgress();
     init_todo();
-    import_jsx_runtime35 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime36 = __toESM(require_jsx_runtime(), 1);
     rowColor = (t, status) => {
       const tone = todoTone(status);
       return tone === "active" ? t.color.text : tone === "body" ? t.color.statusFg : t.color.muted;
     };
-    TodoPanel = (0, import_react96.memo)(function TodoPanel2({
+    TodoPanel = (0, import_react97.memo)(function TodoPanel2({
       collapsed,
       defaultCollapsed = false,
       incomplete = false,
@@ -72081,7 +72243,7 @@ var init_todoPanel = __esm({
       t,
       todos
     }) {
-      const [localCollapsed, setLocalCollapsed] = (0, import_react96.useState)(defaultCollapsed);
+      const [localCollapsed, setLocalCollapsed] = (0, import_react97.useState)(defaultCollapsed);
       const isControlled = typeof collapsed === "boolean";
       const effectiveCollapsed = isControlled ? collapsed : localCollapsed;
       const handleToggle = () => {
@@ -72098,19 +72260,19 @@ var init_todoPanel = __esm({
       }
       const done = todos.filter((todo) => todo.status === "completed").length;
       const pending = countPendingTodos(todos);
-      return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { onClick: handleToggle, children: /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { color: t.color.accent, children: effectiveCollapsed ? "\u25B8 " : "\u25BE " }),
-          /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Text, { bold: true, color: t.color.text, children: "Todo" }),
+      return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { onClick: handleToggle, children: /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color: t.color.muted, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.accent, children: effectiveCollapsed ? "\u25B8 " : "\u25BE " }),
+          /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { bold: true, color: t.color.text, children: "Todo" }),
           " ",
-          /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color: t.color.statusFg, dim: true, children: [
             "(",
             done,
             "/",
             todos.length,
             ")"
           ] }),
-          incomplete && pending > 0 && /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color: t.color.muted, dim: true, children: [
+          incomplete && pending > 0 && /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color: t.color.muted, dim: true, children: [
             " ",
             "\xB7 incomplete \xB7 ",
             pending,
@@ -72118,11 +72280,11 @@ var init_todoPanel = __esm({
             pending === 1 ? "pending" : "pending/in_progress"
           ] })
         ] }) }),
-        !effectiveCollapsed && /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(Box_default, { flexDirection: "column", marginLeft: 2, children: todos.map((todo) => {
+        !effectiveCollapsed && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { flexDirection: "column", marginLeft: 2, children: todos.map((todo) => {
           const tone = todoTone(todo.status);
           const color = rowColor(t, todo.status);
-          return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color, dim: tone === "dim", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(Text, { color, children: [
+          return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color, dim: tone === "dim", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color, children: [
               todoGlyph(todo.status),
               " "
             ] }),
@@ -72135,12 +72297,12 @@ var init_todoPanel = __esm({
 });
 
 // src/components/messageLine.tsx
-var import_react97, import_jsx_runtime36, SYSTEM_COLLAPSE_CHARS, MessageLine, shouldShowResponseSeparator;
+var import_react98, import_jsx_runtime37, SYSTEM_COLLAPSE_CHARS, MessageLine, shouldShowResponseSeparator;
 var init_messageLine = __esm({
   async "src/components/messageLine.tsx"() {
     "use strict";
     await init_entry_exports();
-    import_react97 = __toESM(require_react(), 1);
+    import_react98 = __toESM(require_react(), 1);
     init_env();
     init_limits();
     init_blockLayout();
@@ -72153,9 +72315,9 @@ var init_messageLine = __esm({
     await init_streamingMarkdown();
     await init_thinking();
     await init_todoPanel();
-    import_jsx_runtime36 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime37 = __toESM(require_jsx_runtime(), 1);
     SYSTEM_COLLAPSE_CHARS = 400;
-    MessageLine = (0, import_react97.memo)(function MessageLine2({
+    MessageLine = (0, import_react98.memo)(function MessageLine2({
       cols,
       compact,
       detailsMode = "collapsed",
@@ -72173,9 +72335,9 @@ var init_messageLine = __esm({
       const thinking = msg.thinking?.trim() ?? "";
       const leadGap = hasLeadGap(prev, msg);
       const systemIsLong = msg.role === "system" && msg.text.length > SYSTEM_COLLAPSE_CHARS;
-      const [systemOpen, setSystemOpen] = (0, import_react97.useState)(false);
+      const [systemOpen, setSystemOpen] = (0, import_react98.useState)(false);
       if (msg.kind === "trail" && msg.todos?.length) {
-        return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+        return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
           TodoPanel,
           {
             defaultCollapsed: msg.todoCollapsedByDefault,
@@ -72186,7 +72348,7 @@ var init_messageLine = __esm({
         );
       }
       if (msg.kind === "trail" && (msg.tools?.length || tools.length || thinking)) {
-        return thinkingMode !== "hidden" || toolsMode !== "hidden" || activityMode !== "hidden" ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { flexDirection: "column", marginTop: leadGap ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+        return thinkingMode !== "hidden" || toolsMode !== "hidden" || activityMode !== "hidden" ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Box_default, { flexDirection: "column", marginTop: leadGap ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
           ToolTrail,
           {
             commandOverride: detailsModeCommandOverride,
@@ -72209,7 +72371,7 @@ var init_messageLine = __esm({
         const stripped = hasAnsi(msg.text) ? stripAnsi2(msg.text) : msg.text;
         const safeAnsi = hasAnsi(msg.text) ? sanitizeAnsiForRender(msg.text) : msg.text;
         const preview = compactPreview(stripped, maxChars) || "(empty tool result)";
-        return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { alignSelf: "flex-start", borderColor: t.color.muted, borderStyle: "round", marginLeft: 3, paddingX: 1, children: hasAnsi(msg.text) ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { wrap: "truncate-end", children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Ansi, { children: safeAnsi }) }) : /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: preview }) });
+        return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Box_default, { alignSelf: "flex-start", borderColor: t.color.muted, borderStyle: "round", marginLeft: 3, paddingX: 1, children: hasAnsi(msg.text) ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { wrap: "truncate-end", children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Ansi, { children: safeAnsi }) }) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: preview }) });
       }
       const { body, glyph, prefix } = ROLE[msg.role](t);
       const gutterWidth = transcriptGutterWidth(msg.role, t.brand.prompt);
@@ -72217,25 +72379,25 @@ var init_messageLine = __esm({
       const showResponseSeparator = shouldShowResponseSeparator(msg, showDetails);
       const content = (() => {
         if (msg.kind === "slash") {
-          return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.muted, children: msg.text });
+          return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, children: msg.text });
         }
         if (systemIsLong) {
           const firstLine = (msg.text.split("\n")[0] ?? "").trim().slice(0, 120) || "(system message)";
-          return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Box_default, { flexDirection: "column", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Box_default, { onClick: () => setSystemOpen((v) => !v), children: [
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.accent, children: systemOpen ? "\u25BE " : "\u25B8 " }),
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.muted, children: firstLine }),
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
+          return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Box_default, { flexDirection: "column", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Box_default, { onClick: () => setSystemOpen((v) => !v), children: [
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.accent, children: systemOpen ? "\u25BE " : "\u25B8 " }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, children: firstLine }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
                 " \u2014 ",
                 msg.text.length.toLocaleString(),
                 " chars"
               ] })
             ] }),
-            systemOpen && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Ansi, { children: sanitizeAnsiForRender(msg.text) })
+            systemOpen && /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Ansi, { children: sanitizeAnsiForRender(msg.text) })
           ] });
         }
         if (msg.role !== "user" && hasAnsi(msg.text)) {
-          return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Ansi, { children: sanitizeAnsiForRender(msg.text) });
+          return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Ansi, { children: sanitizeAnsiForRender(msg.text) });
         }
         if (msg.role === "assistant") {
           const bodyWidth = transcriptBodyWidth(cols, msg.role, t.brand.prompt, TERMUX_TUI_MODE);
@@ -72243,28 +72405,28 @@ var init_messageLine = __esm({
             // Incremental markdown: split at the last stable block boundary so
             // only the in-flight tail re-tokenizes per delta. See
             // streamingMarkdown.tsx for the cost model.
-            /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(StreamingMd, { cols: bodyWidth, compact, t, text: boundedLiveRenderText(msg.text) })
-          ) : /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Md, { cols: bodyWidth, compact, t, text: msg.text });
+            /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(StreamingMd, { cols: bodyWidth, compact, t, text: boundedLiveRenderText(msg.text) })
+          ) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Md, { cols: bodyWidth, compact, t, text: msg.text });
         }
         if (msg.role === "user" && msg.text.length > LONG_MSG && isPasteBackedText(msg.text)) {
           const [head, ...rest] = userDisplay(msg.text).split("[long message]");
-          return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { color: body, children: [
+          return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { color: body, children: [
             head,
-            /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.muted, dimColor: true, children: "[long message]" }),
+            /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, dimColor: true, children: "[long message]" }),
             rest.join("")
           ] });
         }
-        return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { ...body ? { color: body } : {}, children: msg.text });
+        return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { ...body ? { color: body } : {}, children: msg.text });
       })();
       const isDiffSegment = msg.kind === "diff";
-      return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
+      return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
         Box_default,
         {
           flexDirection: "column",
           marginBottom: msg.role === "user" || isDiffSegment ? 1 : 0,
           marginTop: msg.role === "user" || msg.kind === "slash" || isDiffSegment || leadGap ? 1 : 0,
           children: [
-            showDetails && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { flexDirection: "column", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+            showDetails && /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Box_default, { flexDirection: "column", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
               ToolTrail,
               {
                 commandOverride: detailsModeCommandOverride,
@@ -72277,16 +72439,16 @@ var init_messageLine = __esm({
                 trail: msg.tools
               }
             ) }),
-            showResponseSeparator && /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Box_default, { marginBottom: 1, children: [
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: gutterWidth, children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.border, children: "\u2514\u2500 " }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Text, { color: t.color.muted, dim: true, children: "Response" })
+            showResponseSeparator && /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Box_default, { marginBottom: 1, children: [
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: gutterWidth, children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.border, children: "\u2514\u2500 " }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, dim: true, children: "Response" })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Box_default, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: gutterWidth, children: /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(Text, { bold: msg.role === "user", color: prefix, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Box_default, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(NoSelect, { flexShrink: 0, fromLeftEdge: true, width: gutterWidth, children: /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { bold: msg.role === "user", color: prefix, children: [
                 glyph,
                 " "
               ] }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(Box_default, { width: transcriptBodyWidth(cols, msg.role, t.brand.prompt, TERMUX_TUI_MODE), children: content })
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Box_default, { width: transcriptBodyWidth(cols, msg.role, t.brand.prompt, TERMUX_TUI_MODE), children: content })
             ] })
           ]
         }
@@ -72307,16 +72469,16 @@ function QueuedMessages({ cols, queueEditIdx, queued, t }) {
     return null;
   }
   const q = getQueueWindow(queued.length, queueEditIdx);
-  return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(Text, { color: t.color.muted, dimColor: true, children: `queued (${queued.length})${queueEditIdx !== null ? ` \xB7 editing ${queueEditIdx + 1} \xB7 Ctrl+X delete \xB7 Esc cancel` : ""}` }),
-    q.showLead && /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(Box_default, { flexDirection: "column", marginTop: 1, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(Text, { color: t.color.muted, dimColor: true, children: `queued (${queued.length})${queueEditIdx !== null ? ` \xB7 editing ${queueEditIdx + 1} \xB7 Ctrl+X delete \xB7 Esc cancel` : ""}` }),
+    q.showLead && /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
       " ",
       "\u2026"
     ] }),
     queued.slice(q.start, q.end).map((item, i) => {
       const idx = q.start + i;
       const active = queueEditIdx === idx;
-      return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { color: active ? t.color.accent : t.color.muted, dimColor: true, children: [
+      return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(Text, { color: active ? t.color.accent : t.color.muted, dimColor: true, children: [
         active ? "\u25B8" : " ",
         " ",
         idx + 1,
@@ -72324,7 +72486,7 @@ function QueuedMessages({ cols, queueEditIdx, queued, t }) {
         compactPreview(item, Math.max(16, cols - 10))
       ] }, `${idx}-${item.slice(0, 16)}`);
     }),
-    q.showTail && /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
+    q.showTail && /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(Text, { color: t.color.muted, dimColor: true, children: [
       "  ",
       "\u2026and ",
       queued.length - q.end,
@@ -72332,33 +72494,33 @@ function QueuedMessages({ cols, queueEditIdx, queued, t }) {
     ] })
   ] });
 }
-var import_jsx_runtime37, QUEUE_WINDOW;
+var import_jsx_runtime38, QUEUE_WINDOW;
 var init_queuedMessages = __esm({
   async "src/components/queuedMessages.tsx"() {
     "use strict";
     await init_entry_exports();
     init_text();
-    import_jsx_runtime37 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime38 = __toESM(require_jsx_runtime(), 1);
     QUEUE_WINDOW = 3;
   }
 });
 
 // src/components/streamingAssistant.tsx
-var import_react99, import_jsx_runtime38, groupedSegments, StreamingAssistant, LiveTodoPanel;
+var import_react100, import_jsx_runtime39, groupedSegments, StreamingAssistant, LiveTodoPanel;
 var init_streamingAssistant = __esm({
   async "src/components/streamingAssistant.tsx"() {
     "use strict";
     init_react();
-    import_react99 = __toESM(require_react(), 1);
+    import_react100 = __toESM(require_react(), 1);
     init_turnStore();
     init_uiStore();
     init_blockLayout();
     init_liveProgress();
     await init_messageLine();
     await init_todoPanel();
-    import_jsx_runtime38 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
     groupedSegments = (segments) => segments.reduce((acc, msg) => appendToolShelfMessage(acc, msg), []);
-    StreamingAssistant = (0, import_react99.memo)(function StreamingAssistant2({
+    StreamingAssistant = (0, import_react100.memo)(function StreamingAssistant2({
       cols,
       compact,
       detailsMode,
@@ -72391,8 +72553,8 @@ var init_streamingAssistant = __esm({
       }
       const detailsCtx = { commandOverride: detailsModeCommandOverride, detailsMode, sections };
       let prev = prevMsg;
-      return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(import_jsx_runtime38.Fragment, { children: blocks.map((block) => {
-        const node = /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(import_jsx_runtime39.Fragment, { children: blocks.map((block) => {
+        const node = /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
           MessageLine,
           {
             cols,
@@ -72415,23 +72577,23 @@ var init_streamingAssistant = __esm({
         return node;
       }) });
     });
-    LiveTodoPanel = (0, import_react99.memo)(function LiveTodoPanel2() {
+    LiveTodoPanel = (0, import_react100.memo)(function LiveTodoPanel2() {
       const ui = useStore($uiState);
       const todos = useTurnSelector((state) => state.todos);
       const collapsed = useTurnSelector((state) => state.todoCollapsed);
-      return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(TodoPanel, { collapsed, onToggle: toggleTodoCollapsed, t: ui.theme, todos });
+      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(TodoPanel, { collapsed, onToggle: toggleTodoCollapsed, t: ui.theme, todos });
     });
   }
 });
 
 // src/components/appLayout.tsx
-var import_react101, import_jsx_runtime39, PromptPrefix, TranscriptPane, ComposerPane, AgentsOverlayPane, StatusRulePane, AppLayout;
+var import_react102, import_jsx_runtime40, PromptPrefix, TranscriptPane, ComposerPane, AgentsOverlayPane, StatusRulePane, AppLayout;
 var init_appLayout = __esm({
   async "src/components/appLayout.tsx"() {
     "use strict";
     await init_entry_exports();
     init_react();
-    import_react101 = __toESM(require_react(), 1);
+    import_react102 = __toESM(require_react(), 1);
     init_gatewayContext();
     init_overlayStore();
     init_uiStore();
@@ -72451,27 +72613,27 @@ var init_appLayout = __esm({
     await init_queuedMessages();
     await init_streamingAssistant();
     await init_textInput();
-    import_jsx_runtime39 = __toESM(require_jsx_runtime(), 1);
-    PromptPrefix = (0, import_react101.memo)(function PromptPrefix2({
+    import_jsx_runtime40 = __toESM(require_jsx_runtime(), 1);
+    PromptPrefix = (0, import_react102.memo)(function PromptPrefix2({
       bold = false,
       color,
       promptText,
       width
     }) {
       const glyphWidth = Math.max(1, width - COMPOSER_PROMPT_GAP_WIDTH);
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { width, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { width: glyphWidth, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { bold, color, children: promptText }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { width: COMPOSER_PROMPT_GAP_WIDTH })
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { width, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { width: glyphWidth, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { bold, color, children: promptText }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { width: COMPOSER_PROMPT_GAP_WIDTH })
       ] });
     });
-    TranscriptPane = (0, import_react101.memo)(function TranscriptPane2({
+    TranscriptPane = (0, import_react102.memo)(function TranscriptPane2({
       actions,
       composer,
       progress,
       transcript
     }) {
       const ui = useStore($uiState);
-      const lastUserIdx = (0, import_react101.useMemo)(() => {
+      const lastUserIdx = (0, import_react102.useMemo)(() => {
         const items = transcript.historyItems;
         for (let i = items.length - 1; i >= 0; i--) {
           if (items[i].role === "user") {
@@ -72480,12 +72642,12 @@ var init_appLayout = __esm({
         }
         return -1;
       }, [transcript.historyItems]);
-      const firstUserIdx = (0, import_react101.useMemo)(
+      const firstUserIdx = (0, import_react102.useMemo)(
         () => transcript.historyItems.findIndex((m) => m.role === "user"),
         [transcript.historyItems]
       );
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(import_jsx_runtime39.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
           ScrollBox_default,
           {
             flexDirection: "column",
@@ -72498,14 +72660,14 @@ var init_appLayout = __esm({
             },
             ref: transcript.scrollRef,
             stickyScroll: true,
-            children: /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", paddingX: 1, children: [
-              transcript.virtualHistory.topSpacer > 0 ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: transcript.virtualHistory.topSpacer }) : null,
-              transcript.virtualRows.slice(transcript.virtualHistory.start, transcript.virtualHistory.end).map((row) => /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", ref: transcript.virtualHistory.measureRef(row.key), children: [
-                row.msg.role === "user" && firstUserIdx >= 0 && row.index > firstUserIdx && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.border, children: "\u2500\u2500\u2500" }) }),
-                row.msg.kind === "intro" ? /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", paddingTop: 1, children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Banner, { maxWidth: Math.max(1, composer.cols - 2), t: ui.theme }),
-                  row.msg.info && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(SessionPanel, { info: row.msg.info, maxWidth: Math.max(1, composer.cols - 2), sid: ui.sid, t: ui.theme })
-                ] }) : row.msg.kind === "panel" && row.msg.panelData ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Panel, { sections: row.msg.panelData.sections, t: ui.theme, title: row.msg.panelData.title }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { flexDirection: "column", paddingX: 1, children: [
+              transcript.virtualHistory.topSpacer > 0 ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { height: transcript.virtualHistory.topSpacer }) : null,
+              transcript.virtualRows.slice(transcript.virtualHistory.start, transcript.virtualHistory.end).map((row) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { flexDirection: "column", ref: transcript.virtualHistory.measureRef(row.key), children: [
+                row.msg.role === "user" && firstUserIdx >= 0 && row.index > firstUserIdx && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { marginTop: 1, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.border, children: "\u2500\u2500\u2500" }) }),
+                row.msg.kind === "intro" ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { flexDirection: "column", paddingTop: 1, children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Banner, { maxWidth: Math.max(1, composer.cols - 2), t: ui.theme }),
+                  row.msg.info && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(SessionPanel, { info: row.msg.info, maxWidth: Math.max(1, composer.cols - 2), sid: ui.sid, t: ui.theme })
+                ] }) : row.msg.kind === "panel" && row.msg.panelData ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Panel, { sections: row.msg.panelData.sections, t: ui.theme, title: row.msg.panelData.title }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
                   MessageLine,
                   {
                     cols: composer.cols,
@@ -72522,10 +72684,10 @@ var init_appLayout = __esm({
                     t: ui.theme
                   }
                 ),
-                row.index === lastUserIdx && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(LiveTodoPanel, {})
+                row.index === lastUserIdx && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(LiveTodoPanel, {})
               ] }, row.key)),
-              transcript.virtualHistory.bottomSpacer > 0 ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: transcript.virtualHistory.bottomSpacer }) : null,
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+              transcript.virtualHistory.bottomSpacer > 0 ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { height: transcript.virtualHistory.bottomSpacer }) : null,
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
                 StreamingAssistant,
                 {
                   cols: composer.cols,
@@ -72540,8 +72702,8 @@ var init_appLayout = __esm({
             ] })
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(NoSelect, { flexShrink: 0, marginLeft: 1, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(TranscriptScrollbar, { scrollRef: transcript.scrollRef, t: ui.theme }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(NoSelect, { flexShrink: 0, marginLeft: 1, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(TranscriptScrollbar, { scrollRef: transcript.scrollRef, t: ui.theme }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
           StickyPromptTracker,
           {
             messages: transcript.historyItems,
@@ -72552,7 +72714,7 @@ var init_appLayout = __esm({
         )
       ] });
     });
-    ComposerPane = (0, import_react101.memo)(function ComposerPane2({
+    ComposerPane = (0, import_react102.memo)(function ComposerPane2({
       actions,
       composer,
       status
@@ -72565,7 +72727,7 @@ var init_appLayout = __esm({
       const promptBlank = " ".repeat(promptWidth);
       const inputColumns = stableComposerColumns(composer.cols, promptWidth, TERMUX_TUI_MODE);
       const inputHeight = inputVisualHeight(composer.input, inputColumns);
-      const inputMouseRef = (0, import_react101.useRef)(null);
+      const inputMouseRef = (0, import_react102.useRef)(null);
       const captureInputDrag = (e) => {
         if (e.button !== 0) {
           return;
@@ -72588,7 +72750,7 @@ var init_appLayout = __esm({
         inputMouseRef.current?.dragAt(0, (e.localCol ?? 0) - promptWidth);
       };
       const endInputDrag = () => inputMouseRef.current?.end();
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
         NoSelect,
         {
           flexDirection: "column",
@@ -72601,7 +72763,7 @@ var init_appLayout = __esm({
           },
           paddingX: 1,
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
               QueuedMessages,
               {
                 cols: composer.cols,
@@ -72610,19 +72772,19 @@ var init_appLayout = __esm({
                 t: ui.theme
               }
             ),
-            ui.bgTasks.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
+            ui.bgTasks.size > 0 && /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Text, { color: ui.theme.color.muted, children: [
               ui.bgTasks.size,
               " background ",
               ui.bgTasks.size === 1 ? "task" : "tasks",
               " running"
             ] }),
-            status.showStickyPrompt ? /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, wrap: "truncate-end", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.label, children: "\u21B3 " }),
+            status.showStickyPrompt ? /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Text, { color: ui.theme.color.muted, wrap: "truncate-end", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.label, children: "\u21B3 " }),
               status.stickyPrompt
-            ] }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { height: 1, onMouseDown: captureInputDrag, onMouseDrag: dragFromSpacer, onMouseUp: endInputDrag }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "top", composer, status }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", marginTop: ui.statusBar === "top" ? 0 : 1, position: "relative", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+            ] }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { height: 1, onMouseDown: captureInputDrag, onMouseDrag: dragFromSpacer, onMouseUp: endInputDrag }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(StatusRulePane, { at: "top", composer, status }),
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { flexDirection: "column", marginTop: ui.statusBar === "top" ? 0 : 1, position: "relative", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
                 FloatingOverlays,
                 {
                   cols: composer.cols,
@@ -72634,16 +72796,17 @@ var init_appLayout = __esm({
                   onNewLiveSession: actions.newLiveSession,
                   onNewPromptSession: actions.newPromptSession,
                   onResumeSelect: actions.resumeById,
+                  onScanConnect: actions.onScanConnect,
                   pagerPageSize: composer.pagerPageSize
                 }
               ),
-              composer.input === "?" && !composer.inputBuf.length && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(HelpHint, { t: ui.theme }),
-              !isBlocked && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(import_jsx_runtime39.Fragment, { children: [
-                composer.inputBuf.map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { width: promptWidth, children: i === 0 ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PromptPrefix, { color: ui.theme.color.muted, promptText, width: promptWidth }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.muted, children: promptBlank }) }),
-                  /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.text, children: line || " " })
+              composer.input === "?" && !composer.inputBuf.length && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(HelpHint, { t: ui.theme }),
+              !isBlocked && /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
+                composer.inputBuf.map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { width: promptWidth, children: i === 0 ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PromptPrefix, { color: ui.theme.color.muted, promptText, width: promptWidth }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.muted, children: promptBlank }) }),
+                  /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.text, children: line || " " })
                 ] }, i)),
-                /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(
+                /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(
                   Box_default,
                   {
                     onMouseDown: captureInputDrag,
@@ -72652,8 +72815,8 @@ var init_appLayout = __esm({
                     position: "relative",
                     width: Math.max(1, composer.cols - 2),
                     children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { width: promptWidth, children: sh ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PromptPrefix, { color: ui.theme.color.shellDollar, promptText, width: promptWidth }) : composer.inputBuf.length ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.prompt, children: promptBlank }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PromptPrefix, { bold: true, color: ui.theme.color.prompt, promptText, width: promptWidth }) }),
-                      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { flexGrow: 0, flexShrink: 0, height: inputHeight, width: inputColumns, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { width: promptWidth, children: sh ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PromptPrefix, { color: ui.theme.color.shellDollar, promptText, width: promptWidth }) : composer.inputBuf.length ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.prompt, children: promptBlank }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PromptPrefix, { bold: true, color: ui.theme.color.prompt, promptText, width: promptWidth }) }),
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { flexGrow: 0, flexShrink: 0, height: inputHeight, width: inputColumns, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
                         TextInput2,
                         {
                           columns: inputColumns,
@@ -72669,27 +72832,27 @@ var init_appLayout = __esm({
                           voiceRecordKey: composer.voiceRecordKey
                         }
                       ) }),
-                      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { position: "absolute", right: 0, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(GoodVibesHeart, { t: ui.theme, tick: status.goodVibesTick }) })
+                      /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { position: "absolute", right: 0, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(GoodVibesHeart, { t: ui.theme, tick: status.goodVibesTick }) })
                     ]
                   }
                 )
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+              /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
             ] }),
-            !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Text, { color: ui.theme.color.muted, children: [
+            !composer.empty && !ui.sid && /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Text, { color: ui.theme.color.muted, children: [
               "\u2695 ",
               ui.status
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(StatusRulePane, { at: "bottom", composer, status })
+            /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(StatusRulePane, { at: "bottom", composer, status })
           ]
         }
       );
     });
-    AgentsOverlayPane = (0, import_react101.memo)(function AgentsOverlayPane2() {
+    AgentsOverlayPane = (0, import_react102.memo)(function AgentsOverlayPane2() {
       const { gw: gw2 } = useGateway();
       const ui = useStore($uiState);
       const overlay = useStore($overlayState);
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
         AgentsOverlay,
         {
           gw: gw2,
@@ -72699,7 +72862,7 @@ var init_appLayout = __esm({
         }
       );
     });
-    StatusRulePane = (0, import_react101.memo)(function StatusRulePane2({
+    StatusRulePane = (0, import_react102.memo)(function StatusRulePane2({
       at,
       composer,
       status
@@ -72708,8 +72871,8 @@ var init_appLayout = __esm({
       if (ui.statusBar !== at) {
         return null;
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(import_jsx_runtime39.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { marginTop: at === "top" ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { marginTop: at === "top" ? 1 : 0, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
           StatusRule,
           {
             autoOn: ui.autoOn,
@@ -72734,10 +72897,10 @@ var init_appLayout = __esm({
             voiceLabel: status.voiceLabel
           }
         ) }),
-        at === "top" && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
+        at === "top" && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Text, { color: ui.theme.color.shellDollar, children: "\u2500".repeat(Math.max(1, composer.cols - 2)) })
       ] });
     });
-    AppLayout = (0, import_react101.memo)(function AppLayout2({
+    AppLayout = (0, import_react102.memo)(function AppLayout2({
       actions,
       composer,
       mouseTracking,
@@ -72747,12 +72910,12 @@ var init_appLayout = __esm({
     }) {
       const overlay = useStore($overlayState);
       const ui = useStore($uiState);
-      const Shell = INLINE_MODE ? import_react101.Fragment : AlternateScreen;
+      const Shell = INLINE_MODE ? import_react102.Fragment : AlternateScreen;
       const shellProps = INLINE_MODE ? {} : { mouseTracking };
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Shell, { ...shellProps, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(Box_default, { flexDirection: "column", flexGrow: 1, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { flexDirection: "row", flexGrow: 1, children: overlay.agents ? /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PerfPane, { id: "agents", children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(AgentsOverlayPane, {}) }) : /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PerfPane, { id: "transcript", children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(TranscriptPane, { actions, composer, progress, transcript }) }) }),
-        !overlay.agents && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(import_jsx_runtime39.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PerfPane, { id: "prompt", children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Shell, { ...shellProps, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(Box_default, { flexDirection: "column", flexGrow: 1, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { flexDirection: "row", flexGrow: 1, children: overlay.agents ? /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PerfPane, { id: "agents", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(AgentsOverlayPane, {}) }) : /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PerfPane, { id: "transcript", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(TranscriptPane, { actions, composer, progress, transcript }) }) }),
+        !overlay.agents && /* @__PURE__ */ (0, import_jsx_runtime40.jsxs)(import_jsx_runtime40.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PerfPane, { id: "prompt", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
             PromptZone,
             {
               cols: composer.cols,
@@ -72762,8 +72925,8 @@ var init_appLayout = __esm({
               onSudoSubmit: actions.answerSudo
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(PerfPane, { id: "composer", children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(ComposerPane, { actions, composer, status }) }),
-          SHOW_FPS && /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(Box_default, { flexShrink: 0, justifyContent: "flex-end", paddingRight: 1, children: /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(FpsOverlay, { t: ui.theme }) })
+          /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(PerfPane, { id: "composer", children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(ComposerPane, { actions, composer, status }) }),
+          SHOW_FPS && /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(Box_default, { flexShrink: 0, justifyContent: "flex-end", paddingRight: 1, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(FpsOverlay, { t: ui.theme }) })
         ] })
       ] }) });
     });
@@ -72778,7 +72941,7 @@ __export(app_exports, {
 function App3({ gw: gw2 }) {
   const { appActions, appComposer, appProgress, appStatus, appTranscript, gateway } = useMainApp(gw2);
   const { mouseTracking } = useStore($uiState);
-  return /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(GatewayProvider, { value: gateway, children: /* @__PURE__ */ (0, import_jsx_runtime40.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(GatewayProvider, { value: gateway, children: /* @__PURE__ */ (0, import_jsx_runtime41.jsx)(
     AppLayout,
     {
       actions: appActions,
@@ -72790,7 +72953,7 @@ function App3({ gw: gw2 }) {
     }
   ) });
 }
-var import_jsx_runtime40;
+var import_jsx_runtime41;
 var init_app = __esm({
   async "src/app.tsx"() {
     "use strict";
@@ -72799,7 +72962,7 @@ var init_app = __esm({
     init_uiStore();
     await init_useMainApp();
     await init_appLayout();
-    import_jsx_runtime40 = __toESM(require_jsx_runtime(), 1);
+    import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
   }
 });
 
@@ -73876,7 +74039,7 @@ function resetTerminalModes(stream = process.stdout) {
 
 // src/entry.tsx
 init_uiStore();
-var import_jsx_runtime41 = __toESM(require_jsx_runtime(), 1);
+var import_jsx_runtime42 = __toESM(require_jsx_runtime(), 1);
 if (!process.stdin.isTTY) {
   console.log("bobo-tui: no TTY");
   process.exit(0);
@@ -73960,7 +74123,7 @@ var onFrame = logFrameEvent2 || trackFrame2 ? (event) => {
   logFrameEvent2?.(event);
   trackFrame2?.(event.durationMs);
 } : void 0;
-ink2.render(/* @__PURE__ */ (0, import_jsx_runtime41.jsx)(App4, { gw }), {
+ink2.render(/* @__PURE__ */ (0, import_jsx_runtime42.jsx)(App4, { gw }), {
   exitOnCtrlC: false,
   onFrame,
   onHyperlinkClick: (url) => {

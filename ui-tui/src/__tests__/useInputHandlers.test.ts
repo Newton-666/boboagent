@@ -29,6 +29,7 @@ const baseOverlay = (): OverlayState => ({
   modelPicker: false,
   pager: null,
   pluginsHub: false,
+  scanPicker: false,
   secret: null,
   sessions: false,
   skillsHub: false,

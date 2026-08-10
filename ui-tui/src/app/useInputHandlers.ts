@@ -98,7 +98,7 @@ export function escTopTarget(overlay: OverlayState): EscTopTarget {
     return { kind: 'panel' }
   }
 
-  if (overlay.modelPicker || overlay.skillsHub || overlay.pluginsHub || overlay.agents) {
+  if (overlay.modelPicker || overlay.skillsHub || overlay.pluginsHub || overlay.agents || overlay.scanPicker) {
     return { kind: 'componentOwned' }
   }
 
