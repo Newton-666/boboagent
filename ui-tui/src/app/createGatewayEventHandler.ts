@@ -754,7 +754,9 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
 
       case 'clarify.request':
         patchOverlayState({
-          clarify: { choices: ev.payload.choices, question: ev.payload.question, requestId: ev.payload.request_id }
+          clarify: { choices: ev.payload.choices, question: ev.payload.question, requestId: ev.payload.request_id },
+          // 票 AUTO-E E-2：新 clarify 进来重置输入态（上一轮残留的 typing 不继承）
+          clarifyTyping: false
         })
         setStatus('waiting for input…')
 
