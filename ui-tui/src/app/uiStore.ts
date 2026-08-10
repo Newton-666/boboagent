@@ -8,6 +8,7 @@ import { DEFAULT_INDICATOR_STYLE, type UiState } from './interfaces.js'
 
 const buildUiState = (): UiState => ({
   autoOn: false,
+  officeOn: false, // TICKET-O2：底栏 OFFICE 指示初始态
   bgTasks: new Set(),
   busy: false,
   busyInputMode: 'queue',

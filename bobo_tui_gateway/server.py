@@ -30,6 +30,7 @@ _pending_confirm: dict[str, threading.Event] = {}
 _pending_confirm_result: dict[str, bool] = {}
 _confirm_lock = threading.Lock()
 _auto_mode: dict[str, bool] = {}  # 票 A：会话级 AUTO MODE 开关（/auto 翻转）
+_office_state: dict[str, dict] = {}  # TICKET-O2：会话级 OFFICE 状态（/office 翻转，存 {on, session}）
 _session_usage: dict[str, dict] = {}
 _session_usage_lock = threading.Lock()
 _current_engines: dict[str, threading.Event] = {}
@@ -64,6 +65,7 @@ class _ServerContext:
         self.pending_confirm = _pending_confirm
         self.pending_confirm_result = _pending_confirm_result
         self.auto_mode = _auto_mode
+        self.office_state = _office_state  # TICKET-O2：/office 会话级状态（仿 _auto_mode）
         self.current_engines = _current_engines
         self.current_engines_lock = _current_engines_lock
         self.session_usage = _session_usage

@@ -273,6 +273,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           writeActiveSessionFile(r.session_key ?? r.session_id)
           patchUiState({
             autoOn: Boolean(r.auto_state),
+            officeOn: Boolean(r.office_state), // TICKET-O2：resume 恢复 OFFICE 指示
             busy: running,
             info,
             sid: r.session_id,
@@ -328,6 +329,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             writeActiveSessionFile(r.resumed ?? r.session_id)
             patchUiState({
               autoOn: Boolean(r.auto_state),
+              officeOn: Boolean(r.office_state), // TICKET-O2：切换会话恢复 OFFICE 指示
               busy: running,
               info,
               sid: r.session_id,

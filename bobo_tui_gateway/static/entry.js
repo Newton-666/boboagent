@@ -55680,6 +55680,8 @@ var init_uiStore = __esm({
     init_interfaces();
     buildUiState = () => ({
       autoOn: false,
+      officeOn: false,
+      // TICKET-O2：底栏 OFFICE 指示初始态
       bgTasks: /* @__PURE__ */ new Set(),
       busy: false,
       busyInputMode: "queue",
@@ -58844,6 +58846,10 @@ function createGatewayEventHandler(ctx) {
       }
       case "session.auto_state": {
         patchUiState((state) => ({ ...state, autoOn: Boolean(ev.payload?.on) }));
+        return;
+      }
+      case "session.office_state": {
+        patchUiState((state) => ({ ...state, officeOn: Boolean(ev.payload?.on) }));
         return;
       }
       case "thinking.delta": {
@@ -62833,6 +62839,8 @@ function useSessionLifecycle(opts) {
         writeActiveSessionFile(r.session_key ?? r.session_id);
         patchUiState({
           autoOn: Boolean(r.auto_state),
+          officeOn: Boolean(r.office_state),
+          // TICKET-O2：resume 恢复 OFFICE 指示
           busy: running,
           info,
           sid: r.session_id,
@@ -62875,6 +62883,8 @@ function useSessionLifecycle(opts) {
           writeActiveSessionFile(r.resumed ?? r.session_id);
           patchUiState({
             autoOn: Boolean(r.auto_state),
+            officeOn: Boolean(r.office_state),
+            // TICKET-O2：切换会话恢复 OFFICE 指示
             busy: running,
             info,
             sid: r.session_id,
@@ -65638,6 +65648,8 @@ function GoodVibesHeart({ tick, t }) {
 }
 function StatusRule({
   autoOn = false,
+  officeOn = false,
+  // TICKET-O2：OFFICE 指示（莫兰迪另一色）
   cwdLabel,
   cols,
   busy,
@@ -65725,6 +65737,10 @@ function StatusRule({
         autoOn ? /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Text, { color: t.color.accent, wrap: "truncate-end", children: [
           " \u2502 ",
           autoOnLabel
+        ] }) : null,
+        officeOn ? /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Text, { color: t.color.warn, wrap: "truncate-end", children: [
+          " \u2502 ",
+          "OFFICE"
         ] }) : null,
         ctxLabel ? /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
           " \u2502 ",
@@ -72876,6 +72892,7 @@ var init_appLayout = __esm({
           StatusRule,
           {
             autoOn: ui.autoOn,
+            officeOn: ui.officeOn,
             bgCount: ui.bgTasks.size,
             busy: ui.busy,
             cols: composer.cols,

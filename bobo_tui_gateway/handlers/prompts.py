@@ -12,6 +12,21 @@ from bobo_tui_gateway.server_utils import ok, err, emit, write_atomic, get_conte
 from config import BOBO_DATA_DIR
 
 
+# ── 票 O-2：OFFICE 审计（office.guard / office.setup / office.teardown）──
+
+def _audit_office(event: str, detail: str):
+    """写 data/office_audit.jsonl 一行（与 office_manager 同文件，事件可串读）。"""
+    try:
+        import json
+        ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        path = BOBO_DATA_DIR / "office_audit.jsonl"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": ts, "event": event, "detail": detail},
+                               ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 # ── 引擎基础设施（被 handler 和 entry.py 引用）──
 
 def register_engine_thread(t: threading.Thread, active_engine_threads, engine_threads_lock):
@@ -169,7 +184,7 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto, /scan, /connect, /disconnect\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转\n/scan — 侦查 tmux 内活着的 bobo/pi 并列出候选\n/connect <编号> [轮数] — 连接 /scan 候选对象，建立互传通道（默认 5 轮）\n/disconnect — 断开当前会话的互传通道"})
+        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto, /office, /scan, /connect, /disconnect\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转\n/office [on|off] — OFFICE MODE：老板专用开关（员工环境拒绝），搭建/收尾走 office_manager 工具\n/scan — 侦查 tmux 内活着的 bobo/pi 并列出候选\n/connect <编号> [轮数] — 连接 /scan 候选对象，建立互传通道（默认 5 轮）\n/disconnect — 断开当前会话的互传通道"})
     elif command == "clear":
         emit("session.cleared", sid, {"session_id": sid})
         return ok(rid, {"output": ""})
@@ -249,6 +264,44 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         # 不再依赖对话流内的大段状态文本；slash 返回保留简短确认。
         emit("session.auto_state", sid, {"session_id": sid, "on": bool(auto_mode.get(sid, False))})
         return ok(rid, {"output": f"AUTO MODE 已{state}（会话级）"})
+    elif command == "office" or command.startswith("office "):
+        # 票 O-2：/office [on|off] — 会话级 OFFICE MODE 开关（老板专用）。
+        # 角色闸：员工环境（BOBO_ROLE=staff|dispatcher）一律拒绝——
+        # "/office 全世界只存在于 owner 终端"（票 O-2 最高原则 2）。
+        role = os.environ.get("BOBO_ROLE", "").strip().lower()
+        if role in ("staff", "dispatcher"):
+            _audit_office("office.guard", f"BOBO_ROLE={role} 尝试执行 /office 被拒（员工无此命令）")
+            return ok(rid, {"output": "员工没有这个命令（/office 仅限 owner；"
+                                      f"当前环境已注入 BOBO_ROLE={role}）"})
+        arg = command[7:].strip().lower()
+        office_state = ctx.office_state
+        cur = dict(office_state.get(sid, {"on": False, "session": None}))
+        if arg == "on":
+            cur["on"] = True
+        elif arg == "off":
+            cur["on"] = False
+        else:
+            cur["on"] = not cur.get("on", False)
+        office_state[sid] = cur
+        state = "开启" if cur["on"] else "关闭"
+        # 票 O2-4：OFFICE 指示走 TUI 底部状态栏（session.office_state 实时推送）
+        emit("session.office_state", sid, {"session_id": sid, "on": bool(cur["on"]),
+                                           "session": cur.get("session")})
+        if cur["on"]:
+            guide = ("已进入 OFFICE 模式。告诉我需求：几个人配合、分工、"
+                     "几个窗口/几个 office。\n办公室搭建/状态/收尾由 office_manager "
+                     "工具完成（launch/status/teardown）；/office off 关闭并走收尾。")
+        else:
+            # O2-3 收尾：停 relay + 员工 pane 发退出指令 + 审计（session 保留/清理由 owner 决定）
+            teardown_note = ""
+            if cur.get("session"):
+                try:
+                    from tools.office_manager import teardown as _om_teardown
+                    teardown_note = "\n" + _om_teardown(cur["session"], keep=True)
+                except Exception as e:
+                    teardown_note = f"\n（收尾执行失败：{e}）"
+            guide = f"OFFICE MODE 已关闭（会话级）{teardown_note}"
+        return ok(rid, {"output": f"OFFICE MODE 已{state}（会话级）\n{guide}"})
     elif command == "scan":
         """TICKET-SCAN-L3-1: /scan — 侦查 tmux 内活着的 bobo/pi，列出候选。
 
@@ -592,6 +645,7 @@ _COMMANDS = {
         "/duo": "/duo",
         "/provider": "/provider",
         "/auto": "/auto",
+        "/office": "/office",  # TICKET-O2：老板专用 OFFICE 开关
         "/scan": "/scan",
         "/connect": "/connect <编号> [轮数]",
         "/disconnect": "/disconnect",

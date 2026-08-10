@@ -118,6 +118,8 @@ export interface TranscriptRow {
 
 export interface UiState {
   autoOn: boolean
+  /** TICKET-O2：会话级 OFFICE 开关（底栏 OFFICE 指示） */
+  officeOn: boolean
   bgTasks: Set<string>
   busy: boolean
   busyInputMode: BusyInputMode

@@ -204,6 +204,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         "resumed": sid,
         # 票 AUTO-F：resume 时带回 auto 状态，前端底栏指示不丢
         "auto_state": bool(ctx.auto_mode.get(sid, False)),
+        # TICKET-O2：resume 时带回 office 状态（底栏 OFFICE 指示跟随会话）
+        "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
     })
 
 
@@ -290,6 +292,8 @@ def handle_session_activate(params: dict, rid: str, ctx) -> dict:
         "status": "idle",
         # 票 AUTO-F：切换会话时带回 auto 状态，底栏指示跟随该会话
         "auto_state": bool(ctx.auto_mode.get(sid, False)),
+        # TICKET-O2：切换会话时带回 office 状态（底栏 OFFICE 指示跟随该会话）
+        "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
     })
 
 
