@@ -127,6 +127,16 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     if not _cancel_engine_and_wait(sid):
         return err(rid, -32000, "无法取消上一个请求，请稍后重试")
 
+    # TICKET-SCAN-L3b：API 直采 —— relay 在等用户话题时，直取本输入
+    try:
+        from tools.relay_hooks import is_active as _relay_active
+        from tools.relay_hooks import push_user_input as _relay_push_user
+
+        if _relay_active(sid):
+            _relay_push_user(sid, text)
+    except Exception:
+        pass
+
     # 在后台线程中运行引擎，主线程继续处理 stdin
     from core.engine_adapter import run_engine as _run_engine_adapter
 
@@ -260,6 +270,17 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
             lines.append(f"   工作目录: {cwd}")
             lines.append(f"   启动时间: {lstart}")
         lines.append("")
+        # TICKET-SCAN-L3b：自我状态行（API 直采 / pane 模式）
+        try:
+            from tools.agent_connect import find_own_pane as _find_own_pane
+            _own = _find_own_pane()
+            if _own:
+                lines.append(f"当前 bobo：pane 模式（{_own}）")
+            else:
+                lines.append("当前 bobo：API 直采模式 ✓（无需 tmux）")
+        except Exception:
+            lines.append("当前 bobo：API 直采模式 ✓（无需 tmux）")
+        lines.append("")
         lines.append("连接: /connect <编号> [轮数]   （如 /connect 1 5，默认 5 轮）")
         return ok(rid, {"output": "\n".join(lines)})
     elif command == "connect" or command.startswith("connect "):
@@ -322,6 +343,12 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         link = ctx.relay_links.pop(sid, None)
         if not link:
             return ok(rid, {"output": "本会话没有活动的互传通道"})
+        # TICKET-SCAN-L3b：释放 API 直采数据通道（线程在 finally 也会兜底）
+        try:
+            from tools.relay_hooks import unregister as _relay_unregister
+            _relay_unregister(sid)
+        except Exception:
+            pass
         return ok(rid, {"output": f"已断开与 {link.get('target_kind')}（{link.get('target_pane')}）的互传（线程将在下一轮循环自然退出）"})
     elif command == "memory-consolidate":
         """后台合并：识别重复/相似记忆，合并内容，归档低分草稿。从不删除。"""

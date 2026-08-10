@@ -122,6 +122,15 @@ def run_engine(
                 })
             elif event_type == "complete":
                 result_text[0] = data.get("content", "")
+                # TICKET-SCAN-L3b：API 直采 —— relay 在等 bobo 回复时，直取完整输出
+                try:
+                    from tools.relay_hooks import is_active as _relay_active
+                    from tools.relay_hooks import push_bobo_reply as _relay_push_reply
+
+                    if _relay_active(sid):
+                        _relay_push_reply(sid, result_text[0])
+                except Exception:
+                    pass
                 raw = data.get("usage", {})
                 if raw:
                     input_tokens = raw.get("prompt_tokens", 0)
