@@ -149,22 +149,68 @@ def read_new_inbox(agent: str, last_seq: int) -> list:
     return out
 
 
+def _seq_of(filename: str) -> int:
+    """从文件名提取序号：'0003.md' → 3。非预期格式返回 0。"""
+    try:
+        return int(filename[:4])
+    except (ValueError, IndexError):
+        return 0
+
+
+def sanitize_state(state: dict) -> dict:
+    """修复 state 与 inbox 实际内容不一致（票 R2-P2 防御性修复）。
+
+    场景 1：state 记录的序号高于 inbox 实际最大序号（文件被删除/损坏）
+            → 重置为该 agent 的 inbox 实际最大值（防止转发漏跳）。
+    场景 2：state 缺少某 agent → 补 0。
+    场景 3：state 有未知 agent key → 保留（不影响转发逻辑，不越权删数据）。
+
+    返回修复后的 state 副本（不修改原 dict）。
+    """
+    out = {}
+    for name in ORDER:
+        d = _agent_inbox(name)
+        max_seq = 0
+        if os.path.isdir(d):
+            for fn in os.listdir(d):
+                if fn.endswith(".md") and not fn.endswith(".tmp"):
+                    max_seq = max(max_seq, _seq_of(fn))
+        recorded = state.get(name, 0)
+        # state 不应超过 inbox 实际最大值
+        out[name] = recorded if recorded <= max_seq else max_seq
+    return out
+
+
 # ── 各自空闲判定（屏幕 capture 只做这个，不提取内容）──
 def _bottom_lines(screen: str, n: int = 10) -> list:
     return [l for l in screen.splitlines() if l.strip()][-n:]
 
 
 def claude_idle(screen: str) -> bool:
-    """claude 空闲：底部 10 行内有独立 ❯ 提示行，且无进行中标志。
+    """claude (Claude Code) 空闲：底部 3 行内有独立 ❯ 提示行（非内容引用），
+    且无进行中标志。
 
-    注意：'⏺ ' 是后台 agent 的历史标记（agent 结束后仍残留），不代表
-    正在运行，不能作为忙碌标志。真正进行中：Working/Waiting/确认框。
+    Claude Code TUI 特征（我本人最清楚自己的脸）：
+        - 空闲：❯ 提示符独占最后一行（或倒数第 2 行，最后是空行）
+        - 忙碌：❯ 不出现（思考文本填充屏幕）；或出现 "Thinking…"
+        - 工具调用：⏺ 历史标记（结束后残留，0.0s=已完成）≠ 忙碌
+        - 确认框："Do you want to proceed" / "requires approval"
+        - ⏱ (U+23F1) = 活跃计时器（与 hermes 一致，表示 LLM 调用进行中）
+
+    注意：❯ 出现在内容中（如引用命令 ❯ ls -la）不是提示符——
+    提示符特征是独占一行（前后无大量其他内容）。只检查最后 3 行提高精度。
     """
-    bottom = _bottom_lines(screen)
-    has_prompt = any(l.strip().startswith("❯") for l in bottom)
+    bottom = _bottom_lines(screen, n=3)
+    # 空闲提示符：❯ 作为独立行，或 ❯ 开头且后续无大量内容
+    has_prompt = any(
+        l.strip() == "❯" or (l.strip().startswith("❯") and len(l.strip()) < 40)
+        for l in bottom
+    )
     if not has_prompt:
         return False
-    busy = ("Working", "Waiting for", "Do you want to proceed",
+    # 忙碌标志：按出现频率排序（常见先检查）
+    busy = ("Thinking", "Working", "⏱",
+            "Waiting for", "Do you want to proceed",
             "requires approval", "⌛")
     return not any(b in screen for b in busy)
 
@@ -173,18 +219,44 @@ def hermes_idle(screen: str) -> bool:
     """hermes 空闲：底部出现提示符（⚕ ❯ 或独立 ❯ 行）。
 
     注意：hermes 空闲时提示行可能是 "⚕ ❯ msg=interrupt…" 或单独的 "❯"，
-    两种形态都接受。忙碌标志（Initializing/Working/⏳）出现即非空闲。
+    两种形态都接受。忙碌标志出现即非空闲。
+
+    hermes TUI 忙碌/空闲时间标志（2026-08-10 团队启动实测）：
+        - ⏱ (U+23F1 STOPWATCH)：活跃计时器，LLM 调用进行中 → 忙碌
+        - ⏲ (U+23F2 TIMER CLOCK)：等待中计时器，Agent 空闲 → 非忙碌
+        - ⏳ (U+23F3 HOURGLASS)：沙漏，可能为忙碌（启动/等待阶段）
     ⚡ 为工具调用历史标记（同 claude 的 ⏺，任务结束后仍残留，0.0s 耗时
     即已完成记录），不代表正在运行，不能作为忙碌标志——2026-08-10 团队
     启动时实测：hermes 空闲（❯ 提示符 + 状态行 ⏲）却被残留 ⚡ 判忙，
-    relay 转发死锁。忙碌判定只认状态行活跃标志。
+    relay 转发死锁。忙碌判定只认状态行活跃标志与 ⏱ 计时器。
     """
     bottom = _bottom_lines(screen)
     has_prompt = any("⚕ ❯" in l or l.strip() == "❯" or l.strip().startswith("❯ ")
                      for l in bottom)
     if not has_prompt:
         return False
-    busy = ("Initializing agent", "Working", "⏳")
+    # ⏱ = 活跃计时器 = LLM 调用进行中（hermes 状态栏核心忙碌信号）
+    busy = ("Initializing agent", "Working", "⏱", "⏳")
+    return not any(b in screen for b in busy)
+
+
+def pi_idle(screen: str) -> bool:
+    """pi 空闲：token 统计栏可见，且无进行中标志。
+
+    pi TUI 特征（pi_relay.py 判定经验 + 四 Agent 讨论观察）：
+        - 空闲：底部状态栏含 ↑/↓ token 统计 + deepseek 模型名
+        - 忙碌：处理中时可能出现 "Working"、braille spinner、或活跃计时器
+        - **关键缺陷**：pi_finished 检测的 token 统计栏是 pi TUI 的永久
+          状态行——首轮完成后一直存在，不能单独作为空闲判定依据。
+          必须追加忙碌标志检测，否则从第二轮开始 pi 永远被判定为"空闲"。
+        - ⏱ (U+23F1 STOPWATCH)：活跃 LLM 调用计时器（与 hermes 一致）
+    """
+    # 必要条件：token 统计栏存在（pi 至少完成过一次回复，或正在显示状态）
+    if not pi_finished(screen):
+        return False
+    # 充分条件：无忙碌标志（含 braille spinner 12 个字符，pi 思考时用）
+    busy = ("Working", "Thinking", "⏱", "⠋", "⠙", "⠹", "⠸", "⠼",
+            "⠴", "⠦", "⠧", "⠇", "⠏")
     return not any(b in screen for b in busy)
 
 
@@ -207,7 +279,7 @@ def bobo_idle(screen: str) -> bool:
 
 def pane_idle_fn(name: str):
     return {"bobo": bobo_idle, "hermes": hermes_idle,
-            "claude": claude_idle, "pi": pi_finished}[name]
+            "claude": claude_idle, "pi": pi_idle}[name]
 
 
 def _pane_signature(name: str, screen: str) -> bool:
@@ -361,10 +433,12 @@ def main() -> int:
     log(f"team_relay v2 启动：{' → '.join(ORDER)} 轮数={rounds} 间隔={interval}s")
 
     # 初始化：inbox 目录 + 基线 + 各 agent 初始空闲状态
-    state = load_state()
+    state = sanitize_state(load_state())       # 票 R2-P2：防御 state/inbox 不一致
     base = {name: cap(pane) for name, pane in PANES.items()}
+    prev_screen = dict(base)                    # 票 R2-P2：上一轮屏幕，检测 busy 稳定性
     idle_prev = {name: pane_idle_fn(name)(base[name]) for name in ORDER}
-    spoken = {name: 0 for name in ORDER}      # 已摘录条数
+    pre_busy_base = {}                          # 票 R2-P2：idle→busy 转变时保存的"发言前屏幕"
+    spoken = {name: 0 for name in ORDER}        # 已摘录条数
     forwarded_count = 0
     t_start = time.time()
     hard_timeout = 3600  # 1 小时硬上限
@@ -372,6 +446,7 @@ def main() -> int:
     log("建立基线（3s）…")
     time.sleep(3)
     base = {name: cap(pane) for name, pane in PANES.items()}
+    prev_screen = dict(base)
     idle_prev = {name: pane_idle_fn(name)(base[name]) for name in ORDER}
 
     def finish(reason: str) -> int:
@@ -387,20 +462,37 @@ def main() -> int:
     log("开始轮询…")
     while time.time() - t_start < hard_timeout:
         # ── 阶段 1：摘录（busy→idle 转变 = 一轮思考结束，摘完整回复）──
+        # 票 R2-P2 修复：三方发言检测从未触发（hermes/claude/pi）。
+        # 根因：① idle 函数忙碌标志不完整（缺 ⏱/Thinking/spinner）；
+        # ② base[name] 是从 init 时取的（含历史），diff_new 在大量公共行
+        #    上 SequenceMatcher 易漏新内容，且 _capture_reply 的 clean_reply
+        #    过滤注入段后可能 <10 字符被静默丢弃。
+        # 修复：idle→busy 时保存 pre_busy_base[name]（发言前的干净屏幕），
+        # busy→idle 时用 pre_busy_base 做 diff——比 init base 精确得多。
+        # 修复后 diff 范围 = 仅本轮的注入+新回复，clean_reply 再过滤注入段。
         for name in ORDER:
             pane = PANES[name]
             cur = cap(pane)
             idle_now = pane_idle_fn(name)(cur)
-            if (not idle_prev[name]) and idle_now:
-                # 刚结束一轮思考：摘录完整回复写入通道（过渡版，见 _capture_reply）
-                new = _capture_reply(name, base[name], cur)
+
+            if idle_prev[name] and not idle_now:
+                # idle→busy 转变：保存发言前的干净屏幕作为 diff 基线
+                pre_busy_base[name] = prev_screen.get(name, base[name])
+            elif (not idle_prev[name]) and idle_now:
+                # busy→idle 转变：用 pre_busy_base（发言前屏幕）做 diff
+                capture_base = pre_busy_base.pop(name, base[name])
+                new = _capture_reply(name, capture_base, cur)
                 if len(new.strip()) >= 10:
                     seq = write_inbox(name, new)
                     spoken[name] += 1
                     log(f"{name} 发言（{len(new)}字符）写入 inbox {seq:04d} [第{spoken[name]}次]")
-                # 太短（界面波动）不写，但基线照常更新
+                else:
+                    log(f"{name} busy→idle 转变但摘录为空（{len(new.strip())}字符），跳过")
+                # 更新 base 为当前屏幕（下一次同一 agent 发言的备用基线）
                 base[name] = cur
+
             idle_prev[name] = idle_now
+            prev_screen[name] = cur
 
         # ── 阶段 2：转发（轮询 inbox 新文件 → 下一位空闲时转发）──
         for name in ORDER:
