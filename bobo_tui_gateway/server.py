@@ -36,6 +36,8 @@ _current_engines: dict[str, threading.Event] = {}
 _current_engines_lock = threading.Lock()
 _active_engine_threads: list[threading.Thread] = []
 _engine_threads_lock = threading.Lock()
+_scan_candidates: dict[str, list] = {}   # TICKET-SCAN-L3: sid → /scan 候选列表
+_relay_links: dict[str, dict] = {}       # TICKET-SCAN-L3: sid → 已建立的互传通道
 
 
 # ── 方法注册装饰器 ──
@@ -66,6 +68,8 @@ class _ServerContext:
         self.current_engines_lock = _current_engines_lock
         self.session_usage = _session_usage
         self.session_usage_lock = _session_usage_lock
+        self.scan_candidates = _scan_candidates
+        self.relay_links = _relay_links
 
     def get_current_sid(self):
         return _current_sid
