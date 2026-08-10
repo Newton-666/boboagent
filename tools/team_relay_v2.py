@@ -173,14 +173,18 @@ def hermes_idle(screen: str) -> bool:
     """hermes 空闲：底部出现提示符（⚕ ❯ 或独立 ❯ 行）。
 
     注意：hermes 空闲时提示行可能是 "⚕ ❯ msg=interrupt…" 或单独的 "❯"，
-    两种形态都接受。忙碌标志（Initializing/Working/⚡）出现即非空闲。
+    两种形态都接受。忙碌标志（Initializing/Working/⏳）出现即非空闲。
+    ⚡ 为工具调用历史标记（同 claude 的 ⏺，任务结束后仍残留，0.0s 耗时
+    即已完成记录），不代表正在运行，不能作为忙碌标志——2026-08-10 团队
+    启动时实测：hermes 空闲（❯ 提示符 + 状态行 ⏲）却被残留 ⚡ 判忙，
+    relay 转发死锁。忙碌判定只认状态行活跃标志。
     """
     bottom = _bottom_lines(screen)
     has_prompt = any("⚕ ❯" in l or l.strip() == "❯" or l.strip().startswith("❯ ")
                      for l in bottom)
     if not has_prompt:
         return False
-    busy = ("Initializing agent", "Working", "⏳", "⚡")
+    busy = ("Initializing agent", "Working", "⏳")
     return not any(b in screen for b in busy)
 
 
