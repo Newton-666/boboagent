@@ -55496,7 +55496,12 @@ function fromSkin(colors, branding, bannerLogo = "", bannerHero = "", toolPrefix
       diffRemoved: d.color.diffRemoved,
       diffAddedWord: d.color.diffAddedWord,
       diffRemovedWord: d.color.diffRemovedWord,
-      shellDollar: c("shell_dollar") ?? d.color.shellDollar
+      diffAddedEmpty: d.color.diffAddedEmpty,
+      diffRemovedEmpty: d.color.diffRemovedEmpty,
+      shellDollar: c("shell_dollar") ?? d.color.shellDollar,
+      relayBobo: d.color.relayBobo,
+      relayPi: d.color.relayPi,
+      relayMuted: d.color.relayMuted
     },
     brand: {
       name: branding.agent_name ?? d.brand.name,
@@ -55587,7 +55592,11 @@ var init_theme = __esm({
         diffRemovedWord: "#e8e8e8",
         diffAddedEmpty: "rgb(10,36,22)",
         diffRemovedEmpty: "rgb(36,12,12)",
-        shellDollar: "#4dabf7"
+        shellDollar: "#4dabf7",
+        // TICKET-SCAN-L3b：互传莫兰迪双色（owner 逐字确认）——BOBO 蓝 / PI 粉 / 分隔灰
+        relayBobo: "#7C93A8",
+        relayPi: "#B69A94",
+        relayMuted: "#9AA0A6"
       },
       brand: BRAND,
       bannerLogo: "",
@@ -55624,7 +55633,11 @@ var init_theme = __esm({
         diffRemovedWord: "rgb(183,28,28)",
         diffAddedEmpty: "rgb(180,235,180)",
         diffRemovedEmpty: "rgb(235,180,180)",
-        shellDollar: "#1565C0"
+        shellDollar: "#1565C0",
+        // TICKET-SCAN-L3b：互传莫兰迪双色——浅色背景向文字色压暗，保持莫兰迪调性且可读
+        relayBobo: mix("#7C93A8", "#3D2F13", 0.35),
+        relayPi: mix("#B69A94", "#3D2F13", 0.35),
+        relayMuted: mix("#9AA0A6", "#3D2F13", 0.35)
       },
       brand: BRAND,
       bannerLogo: "",
@@ -73142,6 +73155,7 @@ var GatewayClient = class extends EventEmitter {
     const env3 = { ...process.env };
     const pyPath = env3.PYTHONPATH?.trim();
     env3.PYTHONPATH = pyPath ? `${root2}${delimiter}${pyPath}` : root2;
+    env3.BOBO_BACKEND = "1";
     const sockPath = this.socketDisabled ? null : join2(tmpdir(), `bobo-gw-${process.pid}-${Date.now()}.sock`);
     if (sockPath) {
       env3.BOBO_GW_SOCKET = sockPath;
