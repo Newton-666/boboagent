@@ -261,7 +261,7 @@ def claude_idle(screen: str) -> bool:
     注意：❯ 出现在内容中（如引用命令 ❯ ls -la）不是提示符——
     提示符特征是独占一行（前后无大量其他内容）。只检查最后 3 行提高精度。
     """
-    bottom = _bottom_lines(screen, n=5)
+    bottom = _bottom_lines(screen)
     # 空闲提示符（2026-08-11 演练 1 实测补充）：auto mode 下 claude 底部
     # 状态区显示 "auto mode on" 且**无独立 ❯ 提示符**（❯ 只出现在内容
     # 引用里，不能作空闲依据）——auto mode on 行 = 空闲提示的等价形态。
@@ -272,8 +272,11 @@ def claude_idle(screen: str) -> bool:
     )
     if not has_prompt:
         return False
-    # 忙碌标志只在底部 5 行检查（2026-08-11 演练 1 实测：全屏扫描会被
-    # 历史发言文本污染——历史内容引用 "Thinking/Working" 等词 → 误判忙碌）
+    # 忙碌标志只在底部 10 行检查（2026-08-11 演练 1 两次实测校准）：
+    # 全屏扫描被历史发言文本污染（历史引用 Thinking/Working → 误判忙碌）；
+    # 底部 5 行过窄漏捕 busy（claude 忙时 Thinking 在内容区尾部、底部 5 行
+    # 之外 → busy→idle 转变从未被捕获 → 回复漏摘 → 链条断）。10 行是
+    # 内容区尾部（busy 文本出现处）与历史文本（屏幕上方）的折中。
     busy = ("Thinking", "Working", "⏱",
             "Waiting for", "Do you want to proceed",
             "requires approval", "⌛")
