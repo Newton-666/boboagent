@@ -190,16 +190,24 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 票 A：AUTO MODE 决策树——必须排在 _all_confirmed 之前（火 A-2：
         # 否则用户点过 always 后灰名单会绕过 auto 风险评估直接放行）
         if self._auto_mode_getter is not None and self._auto_mode_getter():
-            return self._auto_decide(tool_name, tool_args, reason)
-        if self._all_confirmed:
-            return True
-        if self.confirm_callback:
+            _allow = self._auto_decide(tool_name, tool_args, reason)
+        elif self._all_confirmed:
+            _allow = True
+        elif self.confirm_callback:
             result = self.confirm_callback(tool_name, tool_args, reason)
             if result == "all":
                 self._all_confirmed = True
-                return True
-            return result
-        return False
+                _allow = True
+            else:
+                _allow = result
+        else:
+            _allow = False
+        # ── 票 O3-1：写类工具通过决策链后 → 受保护路径 md5 快照（office 角色会话）。
+        # 只挂 office 角色 + 写工具；普通模式/非写工具零开销零行为变化（对照组铁律）。
+        # 快照是抓漏不是执法：失败静默降级，绝不阻塞工具链。
+        if _allow and self.office_role is not None and tool_name in self._OFFICE_WRITE_TOOLS:
+            self._snapshot_protected_paths()
+        return _allow
 
     def _auto_decide(self, tool_name: str, tool_args: dict, reason: str) -> bool:
         """AUTO MODE 决策树 v2（票 B）：副作用三级分类 + 快照 + 审计字段扩展。
@@ -320,6 +328,100 @@ class Engine(ContextMixin, ToolRunnerMixin):
         "edit_file", "file_writer", "delete_file", "file_operation",
     })
     _TICKETS_DIR = os.path.join("data", "tickets")
+
+    # ── 票 O3-1：受保护路径快照（guardsnap，抓漏不执法） ──────────────────
+    _GUARDSNAP_DIR = "data"
+    _GUARDSNAP_PREFIX = "guardsnap_"
+    _GUARDSNAP_RETENTION_DAYS = 7
+
+    def _guardsnap_path(self) -> str:
+        """票 O3-1：当前会话快照文件路径（sid 维度）。"""
+        return os.path.join(self._GUARDSNAP_DIR, f"{self._GUARDSNAP_PREFIX}{self.sid}.json")
+
+    def _snapshot_protected_paths(self) -> dict | None:
+        """票 O3-1：写类工具通过决策链后，对受保护路径做 md5 快照（sid 维度滚动，7 天）。
+
+        - 展开 data/protected_paths.json 的 globs → 实际文件 → md5 摘要；
+        - 写 data/guardsnap_<sid>.json（含前后缀、时间戳、文件→md5 映射）；
+        - 顺带清理过期快照（> 7 天，sid 维度滚动保留）；
+        - 任何异常静默降级（快照是抓漏，不是执法，绝不阻塞工具链）。
+        """
+        try:
+            import glob as _glob
+            import hashlib as _hash
+            globs = load_protected_paths()
+            if not globs:
+                return None
+            files: set[str] = set()
+            for g in globs:
+                for p in _glob.glob(g, recursive=True):
+                    if os.path.isfile(p):
+                        files.add(p)
+            snap = {}
+            for f in sorted(files):
+                try:
+                    with open(f, "rb") as _fh:
+                        snap[f] = _hash.md5(_fh.read()).hexdigest()
+                except OSError:
+                    continue
+            path = self._guardsnap_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as _fh:
+                json.dump({
+                    "sid": self.sid,
+                    "ts": int(time.time()),
+                    "files": snap,
+                }, _fh, ensure_ascii=False, indent=2)
+            self._prune_guardsnap()
+            return snap
+        except Exception:
+            return None
+
+    def _prune_guardsnap(self) -> None:
+        """票 O3-1：清理超过 7 天的 guardsnap_*.json（sid 维度滚动保留）。"""
+        try:
+            cutoff = time.time() - self._GUARDSNAP_RETENTION_DAYS * 86400
+            for name in os.listdir(self._GUARDSNAP_DIR):
+                if not name.startswith(self._GUARDSNAP_PREFIX) or not name.endswith(".json"):
+                    continue
+                p = os.path.join(self._GUARDSNAP_DIR, name)
+                try:
+                    if os.path.getmtime(p) < cutoff:
+                        os.remove(p)
+                except OSError:
+                    continue
+        except OSError:
+            pass
+
+    def _verify_snapshot(self) -> list[dict]:
+        """票 O3-1：收工时比对快照与当前 md5；不一致 → office.snap 审计（不阻断）。
+
+        返回差异列表 [{"path", "before", "after"}]；无快照/读失败 → 空列表。
+        抓漏不是执法：只写审计 + 由调用方决定告警展示，绝不 deny 收工。
+        """
+        path = self._guardsnap_path()
+        if not os.path.exists(path):
+            return []
+        try:
+            import hashlib as _hash
+            with open(path, "r", encoding="utf-8") as _fh:
+                snap = json.load(_fh)
+            diffs = []
+            for f, old_md5 in (snap.get("files") or {}).items():
+                cur = None
+                if os.path.exists(f):
+                    with open(f, "rb") as _fh:
+                        cur = _hash.md5(_fh.read()).hexdigest()
+                if cur != old_md5:
+                    diffs.append({"path": f, "before": old_md5, "after": cur})
+            for d in diffs:
+                self._write_office_audit(
+                    "snap",
+                    f"受保护路径变更: {d['path']} md5 {d['before']}→{d['after']}",
+                )
+            return diffs
+        except Exception:
+            return []
 
     def _office_decide(self, tool_name: str, tool_args: dict, reason: str) -> tuple:
         """票 O-1：OFFICE MODE 员工能力矩阵硬拦。
@@ -1321,6 +1423,22 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             })
                         logger.debug("extract_takeaways done (pre-gate): %d items",
                                      len(takeaways) if takeaways else 0)
+                    # ── 票 O3-1：收工闸快照比对（抓漏不执法：只审计+告警，不阻断收工）──
+                    # office 角色会话：回合内写类工具通过决策链后已生成 guardsnap，
+                    # 收工比对当前 md5——不一致 → office.snap 审计 + 回复明示告警。
+                    # 普通模式（office_role is None）整段跳过，零开销零行为变化。
+                    if self.office_role is not None and self._pending_content:
+                        _snap_diffs = self._verify_snapshot()
+                        if _snap_diffs:
+                            _snap_paths = "; ".join(
+                                d["path"] for d in _snap_diffs[:3]
+                            ) + ("…" if len(_snap_diffs) > 3 else "")
+                            _snap_warn = (
+                                "\n\n⚠️ OFFICE MODE 快照告警：受保护路径在回合内被改写"
+                                f"（{len(_snap_diffs)} 项：{_snap_paths}）——已写 office.snap"
+                                "审计，属事后抓漏，不阻断收工。"
+                            )
+                            self._pending_content = (self._pending_content or "") + _snap_warn
                     # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
                     if self._pending_content:
                         _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}

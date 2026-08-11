@@ -42,24 +42,49 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from pi_relay import cap, send, clean, diff_new, bobo_state, pi_finished  # noqa: E402
 
 SES = os.environ.get("RELAY_SESSION", "staff_office")
+DEFAULT_ORDER = ["bobo", "hermes", "claude", "pi"]
+VALID_AGENTS = set(DEFAULT_ORDER)
 
 
-def build_panes(session: str) -> dict:
+def _resolve_order() -> list:
+    """票 O-3 豁免：RELAY_ORDER 环境变量（逗号分隔）覆盖轮巡名单。
+
+    默认 bobo,hermes,claude,pi——未设/空/名单非法时回退默认，现行为
+    零变化。例：RELAY_ORDER=bobo,pi → 两人小队轮巡（bobo→pi→bobo）。
+    票 O-3 审查（pi 0006/0007）整改：
+      P1：只过滤空串不校验角色名 → foo,bar 不回退，与票面"空/非法回退
+          默认"不符；补 VALID_AGENTS 白名单校验，任一非法角色整体回退。
+      P2：单角色自环（bobo→bobo）；补 len>=2 校验。
+      补充：重复角色（bobo,bobo）转发链失效，补去重校验。
+    """
+    raw = os.environ.get("RELAY_ORDER", "").strip()
+    order = [n.strip() for n in raw.split(",") if n.strip()] if raw else []
+    if not order:
+        return list(DEFAULT_ORDER)
+    if len(order) < 2:  # P2：单角色自环
+        return list(DEFAULT_ORDER)
+    if any(n not in VALID_AGENTS for n in order):  # P1：非法角色
+        return list(DEFAULT_ORDER)
+    if len(set(order)) != len(order):  # 重复角色
+        return list(DEFAULT_ORDER)
+    return order
+
+
+def build_panes(session: str, order: list = None) -> dict:
     """票 R1-1 评审点 6：会话名参数化——O-2 搭建器传不同 session 名建 pane 映射。
 
-    禁止硬编码会话名：多员工讨论/多会话并存时各 relay 用各自的
-    RELAY_SESSION（env）或显式传参，互不串台。
+    票 O-3 豁免：按 order 名单建 pane 映射（pane 序号 = 名单序号），
+    支持 2 人小队（RELAY_ORDER=bobo,pi → 0.0=bobo / 0.1=pi）。
+    不传 order 时按 RELAY_ORDER/默认名单；禁止硬编码会话名：
+    多员工讨论/多会话并存时各 relay 用各自的 RELAY_SESSION（env）
+    或显式传参，互不串台。
     """
-    return {
-        "bobo": f"{session}:0.0",
-        "hermes": f"{session}:0.1",
-        "claude": f"{session}:0.2",
-        "pi": f"{session}:0.3",
-    }
+    order = order or _resolve_order()
+    return {name: f"{session}:0.{i}" for i, name in enumerate(order)}
 
 
-PANES = build_panes(SES)
-ORDER = ["bobo", "hermes", "claude", "pi"]
+ORDER = _resolve_order()
+PANES = build_panes(SES, ORDER)
 DONE_LABEL = "团队讨论结束"
 
 INBOX_ROOT = os.path.join(ROOT, "data", "relay_v2", "inbox")
@@ -455,12 +480,15 @@ def write_summary(state: dict, spoken: dict) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
     vault_dir = os.path.join(ROOT, "library", "agent开发")
     os.makedirs(vault_dir, exist_ok=True)
-    fname = os.path.join(vault_dir, f"四Agent团队讨论汇总-{ts}.md")
+    # 票 O-3 审查 P3（pi 0007）：标题/文件名不再硬编码"四Agent"，
+    # 按实际 ORDER 名单生成（两人序 → bobo、pi 团队讨论汇总）
+    agent_label = "、".join(ORDER)
+    fname = os.path.join(vault_dir, f"{agent_label}团队讨论汇总-{ts}.md")
     lines = [
-        f"# 四 Agent 团队讨论汇总（{ts}）",
+        f"# {agent_label} 团队讨论汇总（{ts}）",
         "",
-        "> 参与者：bobo / hermes / claude / pi",
-        "> 调度：team_relay v2 结构化通道（bobo→hermes→claude→pi→bobo）",
+        f"> 参与者：{' / '.join(ORDER)}",
+        f"> 调度：team_relay v2 结构化通道（{' → '.join(ORDER)} 轮巡）",
         "> 生成方式：达到轮数上限后由 relay 自动收尾汇总，非人工整理",
         "> 数据源：data/relay_v2/inbox 结构化通道（消息边界=文件边界）",
         "> 规则：全程只读，未修改任何文件",
