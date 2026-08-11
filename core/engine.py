@@ -1252,6 +1252,248 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     self.current_depth += 1
                     self._emit_state_change(self.STATE_THINKING, "tool calls pending")
                 else:
+                    # ── 票 G2-1：收工闸前移（先账后复）──
+                    # 四个闸在进入 RESPONDING 前执行；账不平 → 回注 THINKING（用户只看到 Working）。
+                    # 闸全过才进 RESPONDING（放行路径）。纯聊天快速通道语义保留（tool_round==0 直放）。
+                    # ── 票 G2-E4a：提取/笔记前移到闸前（旧语义对齐）──
+                    # 旧时序：回复文本一生成即进 RESPONDING 提取 takeaways 并写笔记（提取先于闸）。
+                    # G2 把闸前移到 THINKING 后，若提取仍留 RESPONDING，闸回注会先消耗提取用的
+                    # LLM 响应预算（E4a 回归：提取被饿死 → takeaway.extracted 丢失）。
+                    # 故提取+笔记块整体前移到此（闸之前）：事件链 takeaway.extracted → notes.written
+                    # 与旧语义一致，闸只决定"回注不发回复"，不干扰提取。
+                    if self._pending_content and self.proactive.mode != "off":
+                        logger.debug("extract_takeaways start (pre-gate)")
+                        takeaways = self._extract_takeaways(fallback_content=self._pending_content)
+                        if takeaways:
+                            try:
+                                from tools.v5_memory import add_entry, bump_signal
+                                for t in takeaways:
+                                    entry = add_entry(t, entry_type="draft")
+                                    if entry:
+                                        # 草稿记忆：低初始分，写入磁盘
+                                        entry["signal_score"] = 30
+                                        entry["is_draft"] = True
+                                        from tools.v5_memory import _save, _load, _write_lock
+                                        with _write_lock:
+                                            data = _load()
+                                            for e in data.get("entries", []):
+                                                if e.get("id") == entry["id"]:
+                                                    e["signal_score"] = 30
+                                                    e["is_draft"] = True
+                                                    break
+                                            _save(data)
+                            except Exception:
+                                pass
+                        # ── 票 LN-2：主题笔记钩子（takeaways 非空才触发）──
+                        # 逻辑全在 tools/living_notes.py，这里只做 try/except 包裹。
+                        # 内部已保证失败静默降级（WARNING + notes.error），绝不阻塞收工。
+                        try:
+                            from tools.living_notes import write_living_notes
+                            # ── 票 E4a：窗口与 _extract_takeaways 同步（回溯 20 条）──
+                            _ln_user_msgs = [
+                                m.get("content", "") for m in self.history[-20:]
+                                if m.get("role") == "user" and m.get("content")
+                            ]
+                            # ── 票 LN-2S：full_reply = 本轮 assistant 完整回复（不截断）──
+                            # 来源同 _extract_takeaways(fallback_content=...)：
+                            # history 末条 assistant 优先，否则 _pending_content 兜底。
+                            _ln_asst_msgs = [
+                                m.get("content", "") for m in self.history[-4:]
+                                if m.get("role") == "assistant" and m.get("content")
+                            ]
+                            _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
+                                           else (self._pending_content or ""))
+                            write_living_notes(
+                                takeaways,
+                                _ln_user_msgs[-1] if _ln_user_msgs else "",
+                                self.sid,
+                                self.llm_caller,
+                                full_reply=_full_reply,
+                            )
+                        except Exception as _ln_err:
+                            # ── 票 E4a：钩子异常留痕（WARNING + notes.error），不静默吞 ──
+                            logger.warning("living notes hook failed (sid=%s): %s",
+                                           getattr(self, "sid", ""), _ln_err)
+                            event_bus.write("notes.error", {
+                                "session_id": getattr(self, "sid", ""),
+                                "error": str(_ln_err),
+                                "stage": "ln_hook",
+                            })
+                        logger.debug("extract_takeaways done (pre-gate): %d items",
+                                     len(takeaways) if takeaways else 0)
+                    # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
+                    if self._pending_content:
+                        _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}
+                        if not any(w in self._pending_content for w in _COMPLETION_WORDS):
+                            _PROMISE_RE = re.compile(
+                                r'(我将|我会|让我|接下来|下一步|稍后|一会|待会).{0,10}(继续|执行|运行|跑|处理|完成|修复|修改|测试)'
+                                r'|(现在|马上|这就).{0,6}(跑|执行|运行|开始)'
+                            )
+                            if _PROMISE_RE.search(self._pending_content):
+                                _has_pending = any(e.get("status") != "done" for e in self.task_ledger)
+                                if _has_pending or not self.task_ledger:
+                                    event_bus.write("goal_gate.promise_detected", {
+                                        "session_id": getattr(self, "sid", ""),
+                                        "content_snippet": self._pending_content[:100],
+                                    })
+                                    if self._ledger_reinject_count < 2:
+                                        self._ledger_reinject_count += 1
+                                        rej_msg = "检测到未完成的承诺。请继续执行，不要说明、不要道歉，直接继续。"
+                                        self._append_to_history("user", rej_msg)
+                                        self._pending_content = None
+                                        self._pending_tool_calls = None
+                                        self.current_depth += 1
+                                        logger.debug("GATE promise re-injection #%d",
+                                                     self._ledger_reinject_count)
+                                        self._emit_state_change(self.STATE_THINKING, "promise re-injection")
+                                        return
+                                    else:
+                                        event_bus.write("goal_gate.released", {
+                                            "session_id": getattr(self, "sid", ""),
+                                            "reason": "promise_exhausted",
+                                            "reinject_count": self._ledger_reinject_count,
+                                        })
+                                        warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
+                                        self._pending_content = (self._pending_content or "") + warning
+                    # ── 票 C 收工闸 auto 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
+                    # auto off → 整段物理跳过，普通模式连判定都不经过（零影响铁律）。
+                    if self._auto_mode_getter is not None and self._auto_mode_getter():
+                        field_issues = self._ledger_field_issues()
+                        if field_issues:
+                            # ── 票 G2-2：字段闸死锁安全阀（原无熔断上限 → 3 次降级 / 5 次强制放行）──
+                            self._ledger_field_deny_count += 1
+                            _parts = "; ".join(
+                                f'{i["id"]} 缺 {", ".join(i["missing"])}' for i in field_issues
+                            )
+                            if self._ledger_field_deny_count >= 5:
+                                # 第 5 次：强制放行 + 审计事件（含 item 明细/deny 次数），不 deny
+                                event_bus.write("goal_gate.forced_release", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "reason": "ledger_field_missing_exhausted",
+                                    "field_issues": field_issues,
+                                    "deny_count": self._ledger_field_deny_count,
+                                })
+                                _ids = ", ".join(f'{i["id"]}' for i in field_issues)
+                                warning = (
+                                    f"\n\n⚠️ AUTO MODE 字段闸连续 deny {self._ledger_field_deny_count} 次，"
+                                    f"引擎强制放行（审计：item {_ids} 仍缺字段）"
+                                )
+                                self._pending_content = (self._pending_content or "") + warning
+                            elif self._ledger_field_deny_count >= 3:
+                                # 第 3 次起降级：补字段 或 转 pending 交接/上报调度员
+                                rej_msg = (
+                                    f"AUTO MODE 收工拒绝（第 {self._ledger_field_deny_count} 次）："
+                                    f"台账 {len(field_issues)} 项缺字段（{_parts}）。"
+                                    "请用 task_ledger update 补齐 verify（怎么算做完/怎么验证）与 done 项的 "
+                                    "evidence（完成证据），或将该 item update 写明卡点转 pending 交接/上报调度员，"
+                                    "或删除该项，然后继续。不要说明、不要道歉，直接做。"
+                                )
+                                self._append_to_history("user", rej_msg)
+                                self._pending_content = None
+                                self._pending_tool_calls = None
+                                self.current_depth += 1
+                                event_bus.write("goal_gate.deny", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "reason": "ledger_field_missing",
+                                    "field_issues": field_issues,
+                                    "deny_count": self._ledger_field_deny_count,
+                                })
+                                self._emit_state_change(self.STATE_THINKING, "ledger field deny")
+                                return
+                            else:
+                                # 第 1-2 次：原语义 deny（安全阀兜底前）
+                                rej_msg = (
+                                    f"AUTO MODE 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
+                                    "请用 task_ledger update "
+                                    "补齐 verify（怎么算做完/怎么验证）与 done 项的 evidence（完成证据），"
+                                    "或删除该项，然后继续。不要说明、不要道歉，直接做。"
+                                )
+                                self._append_to_history("user", rej_msg)
+                                self._pending_content = None
+                                self._pending_tool_calls = None
+                                self.current_depth += 1
+                                event_bus.write("goal_gate.deny", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "reason": "ledger_field_missing",
+                                    "field_issues": field_issues,
+                                    "deny_count": self._ledger_field_deny_count,
+                                })
+                                self._emit_state_change(self.STATE_THINKING, "ledger field deny")
+                                return
+                    # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
+                    pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
+                    if pending_items:
+                        if self._ledger_reinject_count < 2:
+                            # 回注次数 < 2 → 回注一条 user 消息，回到 THINKING
+                            self._ledger_reinject_count += 1
+                            titles = ", ".join(f'"{e["title"][:30]}"' for e in pending_items)
+                            rej_msg = (
+                                f"任务台账还有 {len(pending_items)} 项未完成：{titles}。"
+                                "请继续执行，不要说明、不要道歉，直接继续。"
+                            )
+                            self._append_to_history("user", rej_msg)
+                            self._pending_content = None
+                            self._pending_tool_calls = None
+                            self.current_depth += 1
+                            logger.debug("GATE ledger re-injection #%d: %d items pending",
+                                         self._ledger_reinject_count, len(pending_items))
+                            self._emit_state_change(self.STATE_THINKING, "ledger re-injection")
+                            return
+                        else:
+                            # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言 + 事件
+                            pending_titles = ", ".join(
+                                f'"{e["title"][:30]}"' for e in pending_items
+                            )
+                            warning = (
+                                f"\n\n⚠️ 台账 {len(pending_items)} 项未销账，引擎放行：{pending_titles}"
+                            )
+                            self._pending_content = (self._pending_content or "") + warning
+                            event_bus.write("goal_gate.released", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "ledger_exhausted",
+                                "reinject_count": self._ledger_reinject_count,
+                                "pending_items": len(pending_items),
+                            })
+                            logger.debug("GATE ledger force-release: %d items still pending",
+                                         len(pending_items))
+                    elif not self.task_ledger:
+                        # ── 票Z v3：无账硬闸 ──
+                        # 不设收束词豁免：收工汇报文化导致几乎所有收尾都会含完成词，
+                        # 豁免等于废掉闸。无台账就是无台账，谁说都不行。
+                        if self.current_tool_round > 0:
+                            # 工作回合无账 → 视同未完成，强制回注
+                            event_bus.write("goal_gate.no_ledger_detected", {
+                                "session_id": getattr(self, "sid", ""),
+                                "tool_round": self.current_tool_round,
+                            })
+                            if self._ledger_reinject_count < 2:
+                                self._ledger_reinject_count += 1
+                                rej_msg = "本回合调用了工具但没有建立任务台账。task_ledger 就在你的可用工具列表中，请直接调用它建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
+                                self._append_to_history("user", rej_msg)
+                                self._pending_content = None
+                                self._pending_tool_calls = None
+                                self.current_depth += 1
+                                logger.debug("GATE no-ledger re-injection #%d",
+                                             self._ledger_reinject_count)
+                                self._emit_state_change(self.STATE_THINKING, "no-ledger re-injection")
+                                return
+                            else:
+                                # 已达 2 次熔断上限 → 放行
+                                event_bus.write("goal_gate.released", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "reason": "no_ledger_exhausted",
+                                    "reinject_count": self._ledger_reinject_count,
+                                    "tool_round": self.current_tool_round,
+                                })
+                                warning = "\n\n⚠️ 工作回合未建台账，引擎放行"
+                                self._pending_content = (self._pending_content or "") + warning
+                        else:
+                            # 纯聊天回合，tool_round == 0 → 直接放行，行为不变
+                            event_bus.write("task.no_ledger", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "no ledger created",
+                            })
+                            logger.debug("GATE no ledger (chat round) — direct done")
                     self._emit_state_change(self.STATE_RESPONDING, "responding")
         elif self.state == self.STATE_EXECUTING:
             # 冲突检测：检查多个编辑操作是否要改同一文件的同一段
@@ -1360,208 +1602,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
         elif self.state == self.STATE_RESPONDING:
             if self._pending_content:
                 # ── 票K/Z 收工闸在前，内容推迟落 history（闸可能回注/修改） ──
-                # 自动草稿记忆：从本轮对话提取关键结论
-                if self.proactive.mode != "off":
-                    logger.debug("RESPONDING extract_takeaways start")
-                    takeaways = self._extract_takeaways(fallback_content=self._pending_content)
-                    if takeaways:
-                        try:
-                            from tools.v5_memory import add_entry, bump_signal
-                            for t in takeaways:
-                                entry = add_entry(t, entry_type="draft")
-                                if entry:
-                                    # 草稿记忆：低初始分，写入磁盘
-                                    entry["signal_score"] = 30
-                                    entry["is_draft"] = True
-                                    from tools.v5_memory import _save, _load, _write_lock
-                                    with _write_lock:
-                                        data = _load()
-                                        for e in data.get("entries", []):
-                                            if e.get("id") == entry["id"]:
-                                                e["signal_score"] = 30
-                                                e["is_draft"] = True
-                                                break
-                                        _save(data)
-                        except Exception:
-                            pass
-                    # ── 票 LN-2：主题笔记钩子（takeaways 非空才触发）──
-                    # 逻辑全在 tools/living_notes.py，这里只做 try/except 包裹。
-                    # 内部已保证失败静默降级（WARNING + notes.error），绝不阻塞收工。
-                    try:
-                        from tools.living_notes import write_living_notes
-                        # ── 票 E4a：窗口与 _extract_takeaways 同步（回溯 20 条）──
-                        _ln_user_msgs = [
-                            m.get("content", "") for m in self.history[-20:]
-                            if m.get("role") == "user" and m.get("content")
-                        ]
-                        # ── 票 LN-2S：full_reply = 本轮 assistant 完整回复（不截断）──
-                        # 来源同 _extract_takeaways(fallback_content=...)：
-                        # history 末条 assistant 优先，否则 _pending_content 兜底。
-                        _ln_asst_msgs = [
-                            m.get("content", "") for m in self.history[-4:]
-                            if m.get("role") == "assistant" and m.get("content")
-                        ]
-                        _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
-                                       else (self._pending_content or ""))
-                        write_living_notes(
-                            takeaways,
-                            _ln_user_msgs[-1] if _ln_user_msgs else "",
-                            self.sid,
-                            self.llm_caller,
-                            full_reply=_full_reply,
-                        )
-                    except Exception as _ln_err:
-                        # ── 票 E4a：钩子异常留痕（WARNING + notes.error），不静默吞 ──
-                        logger.warning("living notes hook failed (sid=%s): %s",
-                                       getattr(self, "sid", ""), _ln_err)
-                        event_bus.write("notes.error", {
-                            "session_id": getattr(self, "sid", ""),
-                            "error": str(_ln_err),
-                            "stage": "ln_hook",
-                        })
-                    logger.debug("RESPONDING extract_takeaways done: %d items", len(takeaways) if takeaways else 0)
+                # 自动草稿记忆 + 笔记钩子已前移到 THINKING 闸前（票 G2-E4a 回归修复：
+                # 提取先于闸执行，闸回注不消耗提取的 LLM 响应预算；事件链
+                # takeaway.extracted → notes.written 与旧语义对齐）。
                 # 自动 skill 发现：检查候选模式并主动提议
                 if self.proactive.mode != "off":
                     logger.debug("RESPONDING maybe_propose_skill start")
                     self.tracker.maybe_propose_skill()
                     logger.debug("RESPONDING maybe_propose_skill done")
-                # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
-                if self._pending_content:
-                    _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}
-                    if not any(w in self._pending_content for w in _COMPLETION_WORDS):
-                        _PROMISE_RE = re.compile(
-                            r'(我将|我会|让我|接下来|下一步|稍后|一会|待会).{0,10}(继续|执行|运行|跑|处理|完成|修复|修改|测试)'
-                            r'|(现在|马上|这就).{0,6}(跑|执行|运行|开始)'
-                        )
-                        if _PROMISE_RE.search(self._pending_content):
-                            _has_pending = any(e.get("status") != "done" for e in self.task_ledger)
-                            if _has_pending or not self.task_ledger:
-                                event_bus.write("goal_gate.promise_detected", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "content_snippet": self._pending_content[:100],
-                                })
-                                if self._ledger_reinject_count < 2:
-                                    self._ledger_reinject_count += 1
-                                    rej_msg = "检测到未完成的承诺。请继续执行，不要说明、不要道歉，直接继续。"
-                                    self._append_to_history("user", rej_msg)
-                                    self._pending_content = None
-                                    self._pending_tool_calls = None
-                                    self.current_depth += 1
-                                    logger.debug("RESPONDING promise re-injection #%d",
-                                                 self._ledger_reinject_count)
-                                    self._emit_state_change(self.STATE_THINKING, "promise re-injection")
-                                    return
-                                else:
-                                    event_bus.write("goal_gate.released", {
-                                        "session_id": getattr(self, "sid", ""),
-                                        "reason": "promise_exhausted",
-                                        "reinject_count": self._ledger_reinject_count,
-                                    })
-                                    warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
-                                    self._pending_content = (self._pending_content or "") + warning
-                # ── 票 C 收工闸 auto 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
-                # auto off → 整段物理跳过，普通模式连判定都不经过（零影响铁律）。
-                if self._auto_mode_getter is not None and self._auto_mode_getter():
-                    field_issues = self._ledger_field_issues()
-                    if field_issues:
-                        # 缺字段 → deny 收工：不回注（独立计数）、不放行、无熔断上限。
-                        self._ledger_field_deny_count += 1
-                        _parts = "; ".join(
-                            f'{i["id"]} 缺 {", ".join(i["missing"])}' for i in field_issues
-                        )
-                        rej_msg = (
-                            f"AUTO MODE 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
-                            "缺字段不设熔断，唯一出路是补齐或删除。请用 task_ledger update "
-                            "补齐 verify（怎么算做完/怎么验证）与 done 项的 evidence（完成证据），"
-                            "或删除该项，然后继续。不要说明、不要道歉，直接做。"
-                        )
-                        self._append_to_history("user", rej_msg)
-                        self._pending_content = None
-                        self._pending_tool_calls = None
-                        self.current_depth += 1
-                        event_bus.write("goal_gate.deny", {
-                            "session_id": getattr(self, "sid", ""),
-                            "reason": "ledger_field_missing",
-                            "field_issues": field_issues,
-                            "deny_count": self._ledger_field_deny_count,
-                        })
-                        self._emit_state_change(self.STATE_THINKING, "ledger field deny")
-                        return
-                # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
-                pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
-                if pending_items:
-                    if self._ledger_reinject_count < 2:
-                        # 回注次数 < 2 → 回注一条 user 消息，回到 THINKING
-                        self._ledger_reinject_count += 1
-                        titles = ", ".join(f'"{e["title"][:30]}"' for e in pending_items)
-                        rej_msg = (
-                            f"任务台账还有 {len(pending_items)} 项未完成：{titles}。"
-                            "请继续执行，不要说明、不要道歉，直接继续。"
-                        )
-                        self._append_to_history("user", rej_msg)
-                        self._pending_content = None
-                        self._pending_tool_calls = None
-                        self.current_depth += 1
-                        logger.debug("RESPONDING ledger re-injection #%d: %d items pending",
-                                     self._ledger_reinject_count, len(pending_items))
-                        self._emit_state_change(self.STATE_THINKING, "ledger re-injection")
-                        return
-                    else:
-                        # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言 + 事件
-                        pending_titles = ", ".join(
-                            f'"{e["title"][:30]}"' for e in pending_items
-                        )
-                        warning = (
-                            f"\n\n⚠️ 台账 {len(pending_items)} 项未销账，引擎放行：{pending_titles}"
-                        )
-                        self._pending_content = (self._pending_content or "") + warning
-                        event_bus.write("goal_gate.released", {
-                            "session_id": getattr(self, "sid", ""),
-                            "reason": "ledger_exhausted",
-                            "reinject_count": self._ledger_reinject_count,
-                            "pending_items": len(pending_items),
-                        })
-                        logger.debug("RESPONDING ledger force-release: %d items still pending",
-                                     len(pending_items))
-                elif not self.task_ledger:
-                    # ── 票Z v3：无账硬闸 ──
-                    # 不设收束词豁免：收工汇报文化导致几乎所有收尾都会含完成词，
-                    # 豁免等于废掉闸。无台账就是无台账，谁说都不行。
-                    if self.current_tool_round > 0:
-                        # 工作回合无账 → 视同未完成，强制回注
-                        event_bus.write("goal_gate.no_ledger_detected", {
-                            "session_id": getattr(self, "sid", ""),
-                            "tool_round": self.current_tool_round,
-                        })
-                        if self._ledger_reinject_count < 2:
-                            self._ledger_reinject_count += 1
-                            rej_msg = "本回合调用了工具但没有建立任务台账。task_ledger 就在你的可用工具列表中，请直接调用它建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
-                            self._append_to_history("user", rej_msg)
-                            self._pending_content = None
-                            self._pending_tool_calls = None
-                            self.current_depth += 1
-                            logger.debug("RESPONDING no-ledger re-injection #%d",
-                                         self._ledger_reinject_count)
-                            self._emit_state_change(self.STATE_THINKING, "no-ledger re-injection")
-                            return
-                        else:
-                            # 已达 2 次熔断上限 → 放行
-                            event_bus.write("goal_gate.released", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "no_ledger_exhausted",
-                                "reinject_count": self._ledger_reinject_count,
-                                "tool_round": self.current_tool_round,
-                            })
-                            warning = "\n\n⚠️ 工作回合未建台账，引擎放行"
-                            self._pending_content = (self._pending_content or "") + warning
-                    else:
-                        # 纯聊天回合，tool_round == 0 → 直接放行，行为不变
-                        event_bus.write("task.no_ledger", {
-                            "session_id": getattr(self, "sid", ""),
-                            "reason": "no ledger created",
-                        })
-                        logger.debug("RESPONDING no ledger (chat round) — direct done")
-                # else: 台账全 done → 正常放行（clean done，无操作）
+                # ── 票 G2-1：四个收工闸已前移到 THINKING 分支（先账后复）──
+                # 账不平在进 RESPONDING 前已被回注；走到这里 = 闸已全过（纯放行路径）。
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
                 self._ledger_reminded = False  # 票Z：同步重置
                 # ── 所有闸通过，内容落 history ──
