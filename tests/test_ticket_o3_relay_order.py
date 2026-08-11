@@ -58,6 +58,16 @@ class TestRelayOrder:
             monkeypatch.setenv("RELAY_ORDER", raw)
             assert rv._resolve_order() == ["bobo", "hermes", "claude", "pi"], raw
 
+    def test_single_and_dup_order_falls_back(self, monkeypatch):
+        """票 O-3 审查 P2（pi 0007）：单角色自环 / 重复角色 → 回退默认。
+
+        单角色 bobo → bobo→bobo 自环；bobo,bobo → 转发链失效（下一位
+        永远是同一人）。两者均回退默认 4 方。
+        """
+        for raw in ("bobo", "hermes", "bobo,bobo", "pi,pi,pi", "bobo,pi,bobo"):
+            monkeypatch.setenv("RELAY_ORDER", raw)
+            assert rv._resolve_order() == ["bobo", "hermes", "claude", "pi"], raw
+
     def test_order_drives_forward_chain(self, monkeypatch):
         """两人序转发链闭环：bobo→pi→bobo（rounds*len(ORDER) 完成条件适配）"""
         monkeypatch.setenv("RELAY_ORDER", "bobo,pi")

@@ -49,17 +49,23 @@ VALID_AGENTS = set(DEFAULT_ORDER)
 def _resolve_order() -> list:
     """票 O-3 豁免：RELAY_ORDER 环境变量（逗号分隔）覆盖轮巡名单。
 
-    默认 bobo,hermes,claude,pi——未设/空/含非法角色名时回退默认，
-    现行为零变化。例：RELAY_ORDER=bobo,pi → 两人小队轮巡（bobo→pi→bobo）。
-    票 O-3 审查 P1（pi 0006）：只过滤空串不校验角色名 → foo,bar 不回退，
-    与票面"空/非法回退默认"不符。修复：名单中任一名字非合法角色
-    （bobo/hermes/claude/pi）→ 整体回退默认。
+    默认 bobo,hermes,claude,pi——未设/空/名单非法时回退默认，现行为
+    零变化。例：RELAY_ORDER=bobo,pi → 两人小队轮巡（bobo→pi→bobo）。
+    票 O-3 审查（pi 0006/0007）整改：
+      P1：只过滤空串不校验角色名 → foo,bar 不回退，与票面"空/非法回退
+          默认"不符；补 VALID_AGENTS 白名单校验，任一非法角色整体回退。
+      P2：单角色自环（bobo→bobo）；补 len>=2 校验。
+      补充：重复角色（bobo,bobo）转发链失效，补去重校验。
     """
     raw = os.environ.get("RELAY_ORDER", "").strip()
     order = [n.strip() for n in raw.split(",") if n.strip()] if raw else []
     if not order:
         return list(DEFAULT_ORDER)
-    if any(n not in VALID_AGENTS for n in order):
+    if len(order) < 2:  # P2：单角色自环
+        return list(DEFAULT_ORDER)
+    if any(n not in VALID_AGENTS for n in order):  # P1：非法角色
+        return list(DEFAULT_ORDER)
+    if len(set(order)) != len(order):  # 重复角色
         return list(DEFAULT_ORDER)
     return order
 
@@ -474,9 +480,12 @@ def write_summary(state: dict, spoken: dict) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
     vault_dir = os.path.join(ROOT, "library", "agent开发")
     os.makedirs(vault_dir, exist_ok=True)
-    fname = os.path.join(vault_dir, f"四Agent团队讨论汇总-{ts}.md")
+    # 票 O-3 审查 P3（pi 0007）：标题/文件名不再硬编码"四Agent"，
+    # 按实际 ORDER 名单生成（两人序 → bobo、pi 团队讨论汇总）
+    agent_label = "、".join(ORDER)
+    fname = os.path.join(vault_dir, f"{agent_label}团队讨论汇总-{ts}.md")
     lines = [
-        f"# 四 Agent 团队讨论汇总（{ts}）",
+        f"# {agent_label} 团队讨论汇总（{ts}）",
         "",
         f"> 参与者：{' / '.join(ORDER)}",
         f"> 调度：team_relay v2 结构化通道（{' → '.join(ORDER)} 轮巡）",
