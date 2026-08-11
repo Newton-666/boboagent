@@ -272,12 +272,15 @@ def claude_idle(screen: str) -> bool:
     )
     if not has_prompt:
         return False
-    # 忙碌标志只在底部 10 行检查（2026-08-11 演练 1 两次实测校准）：
+    # 忙碌标志只在底部 10 行检查（2026-08-11 演练 1 实测校准）：
     # 全屏扫描被历史发言文本污染（历史引用 Thinking/Working → 误判忙碌）；
-    # 底部 5 行过窄漏捕 busy（claude 忙时 Thinking 在内容区尾部、底部 5 行
-    # 之外 → busy→idle 转变从未被捕获 → 回复漏摘 → 链条断）。10 行是
-    # 内容区尾部（busy 文本出现处）与历史文本（屏幕上方）的折中。
-    busy = ("Thinking", "Working", "⏱",
+    # busy 词以 "esc to interrupt" 为主——2026-08-11 busy 形态实测（0.3s
+    # 高频 capture）：claude auto mode 处理消息时（2.8s→3.4s 窗口）屏幕
+    # 唯一变化是状态区出现 "esc to interrupt"（可中断 = 正在处理），
+    # Thinking/Working 从不出现（"Thought/Worked for Xs" 是完成标记，
+    # 不是进行中）。"esc to interrupt" 是状态区 UI 元素，不会出现在
+    # 历史发言文本里，天然抗污染。
+    busy = ("Thinking", "Working", "⏱", "esc to interrupt",
             "Waiting for", "Do you want to proceed",
             "requires approval", "⌛")
     bottom_text = "\n".join(bottom)
