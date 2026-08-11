@@ -121,9 +121,15 @@ class TestIdleVsContent:
         assert rv.bobo_idle(idle_screen)
 
     def test_hermes_idle_pure_status(self):
-        """hermes 空闲判定：提示符存在 + 无忙碌标志"""
-        busy_screen = "⚕ ❯ 输入\nWorking on task…"
-        idle_screen = "⚕ ❯ 输入"
+        """hermes 空闲判定：提示符存在 + 状态行无忙碌标志（⏱ 活跃计时器）。
+
+        2026-08-11 演练 1 修订：忙碌判定收窄到状态行——hermes 本人确认
+        其 TUI 忙碌时不显示 "Working" 字样，真正忙碌标志是状态行 ⏱
+        计时器（⏲ = 等待计时器 = 空闲）。全屏扫描会被历史发言文本污染
+        （历史引用 Working/⏳ 字样 → 误判忙碌 → 转发卡死）。
+        """
+        busy_screen = "⚕ ❯ 输入 ⏱ 5s"
+        idle_screen = "⚕ ❯ 输入 ⏲ 53s"
         assert not rv.hermes_idle(busy_screen)
         assert rv.hermes_idle(idle_screen)
 

@@ -261,19 +261,24 @@ def claude_idle(screen: str) -> bool:
     注意：❯ 出现在内容中（如引用命令 ❯ ls -la）不是提示符——
     提示符特征是独占一行（前后无大量其他内容）。只检查最后 3 行提高精度。
     """
-    bottom = _bottom_lines(screen, n=3)
-    # 空闲提示符：❯ 作为独立行，或 ❯ 开头且后续无大量内容
+    bottom = _bottom_lines(screen, n=5)
+    # 空闲提示符（2026-08-11 演练 1 实测补充）：auto mode 下 claude 底部
+    # 状态区显示 "auto mode on" 且**无独立 ❯ 提示符**（❯ 只出现在内容
+    # 引用里，不能作空闲依据）——auto mode on 行 = 空闲提示的等价形态。
     has_prompt = any(
         l.strip() == "❯" or (l.strip().startswith("❯") and len(l.strip()) < 40)
+        or "auto mode on" in l
         for l in bottom
     )
     if not has_prompt:
         return False
-    # 忙碌标志：按出现频率排序（常见先检查）
+    # 忙碌标志只在底部 5 行检查（2026-08-11 演练 1 实测：全屏扫描会被
+    # 历史发言文本污染——历史内容引用 "Thinking/Working" 等词 → 误判忙碌）
     busy = ("Thinking", "Working", "⏱",
             "Waiting for", "Do you want to proceed",
             "requires approval", "⌛")
-    return not any(b in screen for b in busy)
+    bottom_text = "\n".join(bottom)
+    return not any(b in bottom_text for b in busy)
 
 
 def hermes_idle(screen: str) -> bool:
@@ -296,9 +301,13 @@ def hermes_idle(screen: str) -> bool:
                      for l in bottom)
     if not has_prompt:
         return False
-    # ⏱ = 活跃计时器 = LLM 调用进行中（hermes 状态栏核心忙碌信号）
+    # 忙碌信号只在状态行（含 ⚕ 的那行）检查——2026-08-11 演练 1 实测：
+    # 全屏扫描会被屏幕历史发言文本污染（hermes 历史发言引用过
+    # "Working/⏳/⏱" 等词 → 误判忙碌 → 转发卡死）。⏱=活跃计时器=忙碌，
+    # ⏲=等待计时器=空闲（hermes 本人确认）。
+    status_line = next((l for l in bottom if "⚕" in l), "")
     busy = ("Initializing agent", "Working", "⏱", "⏳")
-    return not any(b in screen for b in busy)
+    return not any(b in status_line for b in busy)
 
 
 def pi_idle(screen: str) -> bool:
@@ -314,14 +323,22 @@ def pi_idle(screen: str) -> bool:
         - ⏱/⏲ 计时器是 hermes 状态行特征（非 pi 侧），保留在忙碌标志中
           仅作兜底（pi 屏幕正常情况下不出现）。
     """
-    # 必要条件：无忙碌标志（token 统计栏常驻，不作判定依据）
+    # 必要条件：无忙碌标志（token 统计栏常驻，不作判定依据）。
+    # 忙碌检查只查 cwd 行上方紧邻 3 行（内容区尾部）——2026-08-11 演练 1
+    # 实测：底部 10 行全扫会被历史发言文本污染（pi 历史讨论引用过
+    # "Working/spinner/⏱" 字样 → 误判忙碌）。busy 时 spinner/Working
+    # 出现在内容区最底部（紧贴分隔线/cwd 行上方）。
+    bottom = _bottom_lines(screen)
+    cwd_idx = next((i for i, l in enumerate(bottom)
+                    if l.strip().startswith("~/") or l.strip().startswith("/")), None)
+    if cwd_idx is None:
+        return False  # 无 cwd 行 = 非空闲（pi 本人确认：cwd 行是空闲充分条件）
+    tail = bottom[max(0, cwd_idx - 3):cwd_idx]
     busy = ("Working", "Thinking", "⏱", "⠋", "⠙", "⠹", "⠸", "⠼",
             "⠴", "⠦", "⠧", "⠇", "⠏")
-    if any(b in screen for b in busy):
+    if any(b in "\n".join(tail) for b in busy):
         return False
-    # 充分条件：底部出现 cwd 路径行（~/ 或 / 开头）——pi 空闲时 cwd 行在底部
-    bottom = _bottom_lines(screen)
-    return any(l.strip().startswith("~/") or l.strip().startswith("/") for l in bottom)
+    return True
 
 
 def bobo_idle(screen: str) -> bool:
@@ -335,10 +352,13 @@ def bobo_idle(screen: str) -> bool:
     has_prompt = any(l.strip() == ">" or l.strip().startswith("> ") for l in bottom)
     if not has_prompt:
         return False
+    # 思考词只在底部 10 行检查（2026-08-11 演练 1 实测：全屏扫描会被历史
+    # 发言文本污染——bobo 历史讨论引用过 thinking/working 等词）
     thinking = ("cogitating", "analyzing", "deliberating", "reflecting",
                 "pondering", "mulling", "thinking", "working", "computing",
                 "reasoning", "planning", "searching", "reading")
-    return not any(t in screen.lower() for t in thinking)
+    bottom_text = "\n".join(bottom).lower()
+    return not any(t in bottom_text for t in thinking)
 
 
 def pane_idle_fn(name: str):
