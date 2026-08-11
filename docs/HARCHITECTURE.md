@@ -1,80 +1,81 @@
-# Bobo Harness 宪章（HARCHITECTURE）
+# Bobo Harness Constitution (HARCHITECTURE)
 
-> 版本 v0.1（初稿）· 2026-08-11 · Kimi 起草，owner 终审
-> 地位：本文件是 bobo harness 的**宪法层**——只立原则与禁令，不写现状、不写流程。
-> 引用关系：本宪章 → `data/Agent开发手册`（现状地图：有什么）→ `docs/GUIDANCE.md`（行为导航：怎么做）→ `data/skill-standards/`（操作规程：照什么做）。
-> 效力：所有新功能、新模式、新票据进场前必须过本宪章 §4 准入检查；与宪章冲突的历史行为，以宪章为准并开票整改。
-
----
-
-## §1 立法来源（每条原则都有实战血案）
-
-本宪章不是设计出来的，是从以下战役中长出来的：
-
-| 原则 | 来源事件 |
-|------|---------|
-| 模式显式化 | 2026-08-11 owner `/office` 后老板翻 23 次笔记考古——模型不知道自己处于 office 模式（O-4 立案根因） |
-| 执法在决策链 | O-1 能力矩阵落在 `core/engine.py::_confirm` 一处，新工具自动过闸 |
-| 每票对照组 | AUTO MODE 八票全程"普通模式零影响"验收铁律，熵未扩散 |
-| 快照抓漏 | O-1 开火实证：事前路径拦截只有 6-7 成，O-3 快照兜底 |
-| 不信汇报 | bobo 两次虚报（虚报落库、虚报 43 passed），确立"终审=亲手复跑" |
-| 冻结与豁免 | relay 修好后冻一周；O-3 RELAY_ORDER 豁免限定一处，零扩大 |
+> Version v0.2 (draft) · 2026-08-11 · Drafted by Kimi, pending owner ratification
+> Status: CONSTITUTION layer — principles and prohibitions only. No inventory, no procedures.
+> Reading chain: this constitution → `data/Agent开发手册` (inventory: what exists) → `docs/GUIDANCE.md` (behavioral map: how to act) → `data/skill-standards/` (operational procedures).
+> Authority: every new feature, mode, or ticket MUST pass the §4 admission checklist before work begins. Where legacy behavior conflicts with this constitution, the constitution wins and a rectification ticket is filed.
+> Language policy: model-facing normative documents are written in English (consistent with GUIDANCE.md); team collaboration artifacts (tickets, five-check reports, reviews) remain in Chinese.
 
 ---
 
-## §2 四原则
+## §1 Legislative History (every principle is backed by a battle scar)
 
-### 原则一：模式是显式状态，不是隐式行为
+This constitution was not designed; it grew out of these incidents:
 
-- 任何"模式"（auto / office / 未来的 multi 等）必须是**会话级显式状态**，三要素齐全：
-  1. **开关**：用户显式翻转（slash 或环境注入），有状态事件、可 resume 恢复
-  2. **上下文注入**：模式开启时模型上下文中必须有注入告示——模型必须知道自己处在什么模式、身份是什么、职责边界在哪（O-4 标准：四要素——模式名/身份/职责/边界）
-  3. **能力矩阵**：模式决定权限分档，差异写进 `core/command_safety.py` + `data/protected_paths.json`，不靠口头纪律
-- 禁令：**禁止只切 UI 不切认知**的模式切换（底栏亮了模型不知道，视为事故级缺陷）。
-- 禁令：禁止模式间隐式污染——office 的限制不许漏进普通模式，反之亦然。
-
-### 原则二：执法在决策链，不在工具里
-
-- 一切拦截/校验/审计挂在 engine 决策链（`_confirm`）**一处**，新工具、新功能进场自动过闸。
-- 禁令：禁止在单个工具内部私设执法逻辑（分散执法 = 必漏）。
-- 例外唯一通道：终审书面豁免，注明范围，限定到文件级（先例：O-3 RELAY_ORDER 豁免）。
-
-### 原则三：每票必带对照组
-
-- 任何票据的验收必须包含**未开启/未注入/无角色的对照组**：普通模式零影响、零注入、零开销，连字段都不读。
-- 汇报纪律：五查必须附测试原始输出；报数 = 基线 + 新增，精确可核对。
-- 禁令：禁止"我觉得没影响"式验收。
-
-### 原则四：承认拦截不全，快照抓漏
-
-- 事前拦截按 6-7 成成功率设计，**事后必须有第二层**：受保护清单 md5 快照（决策后快照、收工比对、`office.snap` 审计）。
-- 快照语义：抓漏不执法（告警 + 审计，不阻断），执法归 O-1 层。
-- 一切关键状态（票据、手册、relay 文件、library）必须**可回溯**：git 入库（gitignore 挡住的一律 force-add 豁免入库）+ 合并前打 `rollback/pre-*` 标签。
+| Principle | Origin incident |
+|-----------|----------------|
+| Explicit modes | 2026-08-11: after owner typed `/office`, the boss agent spent 23 tool calls digging through notes — the model did not know office mode existed (root cause of TICKET-O4) |
+| Enforcement at the decision chain | O-1 capability matrix lives at a single point: `core/engine.py::_confirm`; new tools pass through it automatically |
+| Control group per ticket | All eight AUTO MODE tickets enforced "zero impact on normal mode" as an acceptance rule; entropy did not spread |
+| Snapshots catch what slips through | O-1 review established by measurement: upfront path interception succeeds only ~60-70%; O-3 added snapshot backstop |
+| Never trust reports | Two fabrication incidents (false "saved to disk", false "43 passed") established: final review = re-run everything yourself |
+| Freeze & exemption | Relay frozen for one week after repair; O-3 RELAY_ORDER exemption scoped to exactly one file, zero scope creep |
 
 ---
 
-## §3 辅助原则
+## §2 The Four Principles
 
-1. **可靠性举证文化**：不信任何"已完成"汇报，终审 = 亲手复跑专项 + 全量 + 真实库 md5 闸门。
-2. **冻结期制度**：刚修好的核心组件（relay、engine 闸）设冻结期，期内改动必须终审豁免。
-3. **降级必须留痕**：任何降级（relay→tmux 直派等）写审计，格式：`降级：时间 原因 动作 恢复`。
-4. **活体隔离**：活体 relay 与 pytest 不共存（抢共享目录会假失败），跑测试前停活体。
+### Principle 1 — A mode is explicit state, not implicit behavior
+
+- Every mode (auto / office / future multi / ...) MUST be session-level explicit state with three elements:
+  1. **Switch**: user toggles it explicitly (slash command or environment injection), with state events and resume support.
+  2. **Context injection**: while the mode is on, the model's context MUST carry an injected notice — the model must know which mode it is in, what identity it holds, and where its responsibility boundaries are (O-4 standard: mode name / identity / duties / boundaries).
+  3. **Capability matrix**: the mode determines the permission tier, codified in `core/command_safety.py` + `data/protected_paths.json`. No verbal discipline substitutes for code.
+- Prohibition: **switching UI without switching cognition is an incident-level defect** (a lit status bar the model cannot see).
+- Prohibition: no implicit cross-mode leakage — office restrictions must not leak into normal mode, nor the reverse.
+
+### Principle 2 — Enforcement lives at the decision chain, never inside tools
+
+- All interception, validation, and audit hooks attach at exactly one point in the engine decision chain (`_confirm`). New tools and features pass the gate automatically.
+- Prohibition: no tool may implement private enforcement logic (distributed enforcement = guaranteed gaps).
+- Sole exception channel: written final-review exemption, scoped to named files (precedent: O-3 RELAY_ORDER exemption).
+
+### Principle 3 — Every ticket ships with a control group
+
+- Every ticket's acceptance MUST include the unopened / uninjected / role-less control group: zero impact, zero injection, zero overhead in normal mode — the field is not even read.
+- Reporting discipline: five-check reports MUST attach raw test output; reported counts = baseline + new, reconcilable to the exact total.
+- Prohibition: "I believe there is no impact" is not acceptance evidence.
+
+### Principle 4 — Admit interception is partial; snapshots catch the rest
+
+- Design upfront interception for ~60-70% success; a **second layer** is mandatory: md5 snapshots of the protected list (snapshot after decision, compare at wrap-up, `office.snap` audit).
+- Snapshot semantics: catch, don't enforce (alert + audit, no blocking). Enforcement belongs to the O-1 layer.
+- All critical state (tickets, manuals, relay files, library) MUST be traceable: committed to git (force-add anything blocked by .gitignore) + `rollback/pre-*` tags before every merge.
 
 ---
 
-## §4 新功能准入检查清单（开票时逐条过）
+## §3 Supporting Principles
 
-1. 属于哪个模式？普通/auto/office/全新模式？新模式是否满足原则一三要素？
-2. 写操作是否过决策链？authorized_paths 是否列全？
-3. 对照组测试在哪？普通模式零影响如何证明？
-4. 碰没碰受保护清单 / 冻结期组件？是否需要豁免？
-5. 产出物（代码/手册/票据）是否全部 git 可回溯？
-6. 验收数字怎么核对（基线 + 新增 = 总数）？
+1. **Evidence culture**: trust no "done" report; final review = re-run targeted tests + full suite + real-library md5 gate, personally.
+2. **Freeze periods**: freshly repaired core components (relay, engine gates) get a freeze window; changes during the window require a final-review exemption.
+3. **Degradation leaves a trail**: every degradation (e.g. relay → direct tmux dispatch) writes an audit record: `degradation: time, cause, action, recovery`.
+4. **Live isolation**: a live relay and pytest never run concurrently (shared-directory contention causes false failures); stop the relay before running the suite.
 
 ---
 
-## §5 待办（宪法落地配套）
+## §4 Admission Checklist (answer all six before filing any ticket)
 
-- [ ] 恢复 `data/Agent开发手册` 正本（现只剩 `Agent开发手册_备份_20260801.md`），更新至 2026-08-11 现状（补执法内核/收工闸/relay/快照四层）
-- [ ] `docs/GUIDANCE.md` 顶部加一行指向本宪章
-- [ ] 章程 v1.1（团队编制/派单/降级）与本宪章对齐后合编
+1. Which mode does this belong to — normal / auto / office / a new mode? If new, does it satisfy Principle 1's three elements?
+2. Do its write operations pass the decision chain? Is `authorized_paths` complete?
+3. Where is the control-group test? How is "zero impact on normal mode" proven?
+4. Does it touch the protected list or a frozen component? Is an exemption required?
+5. Are all artifacts (code / manuals / tickets) fully git-traceable?
+6. How will acceptance numbers be reconciled (baseline + new = total)?
+
+---
+
+## §5 Rollout Tasks
+
+- [ ] Restore `data/Agent开发手册` proper (only `Agent开发手册_备份_20260801.md` survives) and update it to 2026-08-11 inventory (add enforcement kernel / wrap-up gate / relay / snapshot layers)
+- [ ] Add a one-line pointer to this constitution at the top of `docs/GUIDANCE.md`
+- [ ] Align Team Charter v1.1 (staffing / dispatch / degradation) with this constitution and merge
