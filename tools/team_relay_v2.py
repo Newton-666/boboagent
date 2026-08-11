@@ -348,23 +348,22 @@ def pi_idle(screen: str) -> bool:
 
 
 def bobo_idle(screen: str) -> bool:
-    """bobo 空闲：底部有 > 提示符，且状态行无思考词。
+    """bobo 空闲：底部有 > 提示符，且状态行显示 ready。
 
-    bobo 状态行：`─ ● 状态 │ ...`。思考词有
-    cogitating/analyzing/deliberating/reflecting/pondering/mulling/
-    thinking/working 等（引擎退出/等待输入时状态行不显示思考词）。
+    bobo 状态行：`─ ● 状态 │ ...`。空闲时状态行固定显示 `● ready`；
+    忙碌时显示 `● <emoji> <思考词>… · Ns`（如 reasoning/pondering/
+    musing/cogitating 等）。2026-08-11 演练 2 实测：思考词列举法有漏
+    （bobo 思考词 "musing" 不在原元组 → 思考期间误判 idle → 回复漏摘、
+    链条断在 bobo）。改用状态行 ready 判据，覆盖全部思考词形态。
     """
     bottom = _bottom_lines(screen)
     has_prompt = any(l.strip() == ">" or l.strip().startswith("> ") for l in bottom)
     if not has_prompt:
         return False
-    # 思考词只在底部 10 行检查（2026-08-11 演练 1 实测：全屏扫描会被历史
-    # 发言文本污染——bobo 历史讨论引用过 thinking/working 等词）
-    thinking = ("cogitating", "analyzing", "deliberating", "reflecting",
-                "pondering", "mulling", "thinking", "working", "computing",
-                "reasoning", "planning", "searching", "reading")
-    bottom_text = "\n".join(bottom).lower()
-    return not any(t in bottom_text for t in thinking)
+    status_line = next((l for l in bottom if "●" in l), "")
+    if not status_line:
+        return True  # 无状态行（异常/极短屏幕）→ 不阻塞转发，判空闲
+    return "ready" in status_line
 
 
 def pane_idle_fn(name: str):
