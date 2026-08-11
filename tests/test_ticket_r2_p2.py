@@ -147,14 +147,19 @@ class TestHermesIdle:
         assert tr.hermes_idle(screen) is False
 
     def test_busy_working(self):
-        """'Working' 文本 → 忙碌。"""
+        """'Working' 在历史内容（非状态行）不判忙——2026-08-11 演练 1
+        实测：hermes 历史发言引用 Working 字样，全屏扫描误判忙碌、转发
+        卡死。hermes 本人确认：TUI 从不显示 "Working" 字样，忙碌 =
+        状态行 ⏱ 计时器（test_busy_with_stopwatch）。"""
         screen = "Working on the response...\n⚕ ❯"
-        assert tr.hermes_idle(screen) is False
+        assert tr.hermes_idle(screen) is True
 
     def test_busy_initializing(self):
-        """'Initializing agent' → 忙碌。"""
+        """'Initializing agent' 在历史内容（非状态行）不判忙（同理，
+        2026-08-11 演练 1 实测：hermes 历史发言引用 Initializing agent
+        字样 → 全屏扫描误判忙碌）。"""
         screen = "Initializing agent...\n⚕ ❯"
-        assert tr.hermes_idle(screen) is False
+        assert tr.hermes_idle(screen) is True
 
     def test_no_prompt_not_idle(self):
         """无提示符 → 非空闲。"""
