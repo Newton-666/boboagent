@@ -243,42 +243,47 @@ class TestClaudeIdle:
 
 # ── pi_idle ──
 class TestPiIdle:
-    """pi 空闲判定：token 统计栏 + 无忙碌标志。"""
+    """pi 空闲判定：无忙碌标志 + 底部 cwd 行（pi 本人确认 · 收编复核）。"""
 
-    def test_idle_with_token_stats(self):
-        """token 统计可见，无忙碌标志 → 空闲。"""
+    def test_idle_with_cwd_line(self):
+        """无忙碌标志 + 底部 cwd 行 → 空闲。"""
         screen = (
             "some response text\n"
-            "↑ 1.2K ↓ 890 deepseek-v4-pro"
+            "~/Desktop/boboagent_main"
         )
         assert tr.pi_idle(screen) is True
 
+    def test_token_bar_alone_not_idle(self):
+        """token 统计栏常驻（busy 也在）不能当空闲信号——pi 本人确认：无 cwd 行不判空闲。"""
+        screen = "↑ 1.2K ↓ 890 deepseek-v4-pro"
+        assert tr.pi_idle(screen) is False
+
     def test_no_token_stats_not_idle(self):
-        """无 token 统计栏 → pi 尚未完成首次回复 → 忙碌。"""
+        """无 cwd 行且无忙碌标志 → 非空闲。"""
         assert tr.pi_idle("just some text") is False
 
     def test_busy_working(self):
-        """token 统计存在 + 'Working' → 忙碌。"""
+        """'Working' → 忙碌。"""
         screen = (
             "Working on response...\n"
-            "↑ 1.2K ↓ 890 deepseek-v4-pro"
+            "~/Desktop/boboagent_main"
         )
         assert tr.pi_idle(screen) is False
 
     def test_busy_thinking(self):
-        """token 统计存在 + 'Thinking' → 忙碌。"""
-        screen = "Thinking\n↑ 1.2K ↓ 890 deepseek-v4-pro"
+        """'Thinking' → 忙碌。"""
+        screen = "Thinking\n~/Desktop/boboagent_main"
         assert tr.pi_idle(screen) is False
 
     def test_busy_stopwatch(self):
-        """⏱ 活跃计时器 → 忙碌。"""
-        screen = "⏱ 3s\n↑ 1.2K ↓ 890 deepseek-v4-pro"
+        """⏱ 活跃计时器（hermes 侧特征，pi 侧兜底）→ 忙碌。"""
+        screen = "⏱ 3s\n~/Desktop/boboagent_main"
         assert tr.pi_idle(screen) is False
 
     def test_busy_braille_spinner(self):
         """braille spinner 字符（pi 思考动画）→ 忙碌。"""
         for ch in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏":
-            screen = f"{ch} Working...\n↑ 1.2K ↓ 890 deepseek-v4-pro"
+            screen = f"{ch} Working...\n~/Desktop/boboagent_main"
             assert tr.pi_idle(screen) is False, f"spinner '{ch}' should be busy"
 
     def test_empty_screen(self):

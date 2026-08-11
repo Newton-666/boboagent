@@ -302,23 +302,26 @@ def hermes_idle(screen: str) -> bool:
 
 
 def pi_idle(screen: str) -> bool:
-    """pi 空闲：token 统计栏可见，且无进行中标志。
+    """pi 空闲：无忙碌标志（spinner/Working/Thinking），且底部出现 cwd 路径行。
 
-    pi TUI 特征（pi_relay.py 判定经验 + 四 Agent 讨论观察）：
-        - 空闲：底部状态栏含 ↑/↓ token 统计 + deepseek 模型名
-        - 忙碌：处理中时可能出现 "Working"、braille spinner、或活跃计时器
-        - **关键缺陷**：pi_finished 检测的 token 统计栏是 pi TUI 的永久
-          状态行——首轮完成后一直存在，不能单独作为空闲判定依据。
-          必须追加忙碌标志检测，否则从第二轮开始 pi 永远被判定为"空闲"。
-        - ⏱ (U+23F1 STOPWATCH)：活跃 LLM 调用计时器（与 hermes 一致）
+    pi TUI 特征（pi 本人确认 · TICKET-R2-P2 收编复核）：
+        - 空闲：braille spinner 消失 + Working 消失 + 底部出现 ~/... cwd 行
+          + 屏幕连续稳定数秒
+        - 忙碌：Working / Thinking 文本 + braille spinner（⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
+        - **token 统计栏（↑/↓ + deepseek 模型名）常驻——idle/busy 都在，
+          不能作为空闲信号**；pi_finished 一次性误判的根因正是 token 统计
+          一直在、判定永远命中。pi 本人确认后弃用。
+        - ⏱/⏲ 计时器是 hermes 状态行特征（非 pi 侧），保留在忙碌标志中
+          仅作兜底（pi 屏幕正常情况下不出现）。
     """
-    # 必要条件：token 统计栏存在（pi 至少完成过一次回复，或正在显示状态）
-    if not pi_finished(screen):
-        return False
-    # 充分条件：无忙碌标志（含 braille spinner 12 个字符，pi 思考时用）
+    # 必要条件：无忙碌标志（token 统计栏常驻，不作判定依据）
     busy = ("Working", "Thinking", "⏱", "⠋", "⠙", "⠹", "⠸", "⠼",
             "⠴", "⠦", "⠧", "⠇", "⠏")
-    return not any(b in screen for b in busy)
+    if any(b in screen for b in busy):
+        return False
+    # 充分条件：底部出现 cwd 路径行（~/ 或 / 开头）——pi 空闲时 cwd 行在底部
+    bottom = _bottom_lines(screen)
+    return any(l.strip().startswith("~/") or l.strip().startswith("/") for l in bottom)
 
 
 def bobo_idle(screen: str) -> bool:
