@@ -43,8 +43,11 @@ authorized_paths:
 ## 三、验收清单
 
 1. 测试全过 + 全量零回归 + md5 闸门
-2. 实弹：office_manager launch 一个新办公室 → 新窗口**跳到台前**（owner 亲测确认）
-3. 五查汇报附测试原始输出
+2. 实弹（**在 Ghostty 中验收，owner 2026-08-11 裁决 Ghostty 为主力终端**）：
+   office_manager launch 一个新办公室 → 新窗口**跳到台前**（owner 亲测确认）；
+   Ghostty 不支持脚本开窗时，降级文案实弹确认显示正确
+3. Terminal/iTerm 作为兼容性分支回归（不炸即可）
+4. 五查汇报附测试原始输出 + Ghostty 侦查结论
 
 ## 四、纪律
 
