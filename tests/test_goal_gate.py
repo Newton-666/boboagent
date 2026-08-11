@@ -7,6 +7,10 @@
 4. 闲聊零误拦
 5. 收束白名单
 6. 全量回归
+
+【票 G2-1 语义迁移】四个闸已前移到 THINKING 分支（先账后复）：
+闸在进 RESPONDING 前执行，账不平无回复发出、状态停在 THINKING。
+以下断言已按新时序重写（回注发生在 THINKING 阶段，RESPONDING 前）。
 """
 
 import pytest
@@ -55,6 +59,12 @@ class TestGoalGate:
 
         assert engine.state == engine.STATE_DONE
 
+        # 【G2-1 语义迁移】闸在 THINKING 执行：承诺回注期间状态停在 THINKING，
+        # 不进入 RESPONDING（用户只看到 Working，账不平无回复发出）
+        seq = [s for s in states if s != engine.STATE_IDLE]
+        assert engine.STATE_RESPONDING not in seq[:-2], (
+            f"承诺回注应停在 THINKING，不应提前进 RESPONDING: {seq}"
+        )
         # 验证承诺检测触发 → 回注（第 1 轮被拦截，所以 LLM 被多调用一次）
         # 正常流程 2 轮，回注后变 3 轮
         assert fake_llm.call_count == 3
@@ -251,9 +261,19 @@ class TestNoLedgerHardGate:
         ])
         fake_tools = FakeToolExecutor({"echo": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+        states = _collect_states(engine)
         engine.run(user_input="干活")
 
         assert engine.state == engine.STATE_DONE
+
+        # 【G2-1 语义迁移】无账硬闸在 THINKING 执行：回注期间不进 RESPONDING
+        seq = [s for s in states if s != engine.STATE_IDLE]
+        resp_idx = seq.index(engine.STATE_RESPONDING) if engine.STATE_RESPONDING in seq else -1
+        if resp_idx >= 0:
+            # 首个 RESPONDING 之前不允许再出现 RESPONDING（回注全程停在 THINKING）
+            assert engine.STATE_RESPONDING not in seq[:resp_idx], (
+                f"无账回注应停在 THINKING: {seq}"
+            )
 
         # 验证回注消息含 task_ledger
         user_msgs = [m for m in engine.history if m.get("role") == "user"]

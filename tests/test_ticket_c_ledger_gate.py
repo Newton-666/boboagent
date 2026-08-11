@@ -9,6 +9,13 @@
   6. 审计事件字段齐全（type/sid/field_issues 明细）
   7. 判定内核 _ledger_field_issues 单测（单元级，不依赖端到端）
   8. 工具 schema 载体：verify/evidence 为可选字段，execute 语义零变化
+
+【票 G2-1/G2-2 语义迁移】
+  - 四个闸前移到 THINKING 分支（先账后复）：deny 回注发生在进 RESPONDING 前，
+    状态停在 THINKING，无回复发出。
+  - 字段闸死锁安全阀：连续 deny 3 次起降级（回注指令含转 pending 交接/上报调度员），
+    第 5 次强制放行（goal_gate.forced_release + ⚠️ 审计遗言，不 deny）。
+    原"连续 deny 无熔断"裁决 2 由安全阀兜底取代（死锁必破）。
 """
 
 import json
@@ -106,12 +113,12 @@ class TestAutoFieldGate:
         assert engine._ledger_field_deny_count == 0
 
     def test_auto_missing_verify_denied_and_audited(self, monkeypatch):
-        """验收 2：auto + 缺 verify → deny + 审计明细；补齐后放行"""
+        """验收 2：auto + 缺 verify → deny + 审计明细；第 3 次起降级（含转交选项）；补齐后放行"""
         events = _track_events()
         fake_llm = FakeLLMCaller([
             ("已完成全部工作", None),  # R1 → deny #1
             ("已完成全部工作", None),  # R2 → deny #2
-            ("已完成全部工作", None),  # R3 → deny #3（无熔断，仍不放行）
+            ("已完成全部工作", None),  # R3 → deny #3（G2-2 降级：含转 pending 交接选项）
             ("已完成全部工作", None),  # R4 → 钩子已补字段 → 放行
         ])
         fake_tools = FakeToolExecutor()
@@ -137,7 +144,7 @@ class TestAutoFieldGate:
         engine.run(user_input="干活")
 
         assert engine.state == engine.STATE_DONE
-        # 连续 3 次 deny 仍不放行（裁决 2：无熔断）
+        # 连续 3 次 deny 仍不放行（第 3 次起降级，但仍 deny；裁决 2 语义由 G2-2 安全阀兜底）
         denies = [e for e in events if e[0] == "goal_gate.deny"]
         assert len(denies) == 3, f"应 deny 3 次，实际 {len(denies)}"
         assert engine._ledger_field_deny_count == 3
@@ -154,6 +161,10 @@ class TestAutoFieldGate:
         deny_msgs = [m for m in user_msgs if "收工拒绝" in m.get("content", "")]
         assert len(deny_msgs) == 3, "每次 deny 都应向 history 追加指令"
         assert "verify" in deny_msgs[0]["content"] and "1" in deny_msgs[0]["content"]
+        # 【G2-2 语义迁移】第 3 次 deny 降级：指令含转 pending 交接/上报调度员选项
+        assert "转 pending 交接/上报调度员" in deny_msgs[2]["content"], (
+            "第 3 次 deny 应降级含转交选项"
+        )
 
     def test_auto_done_missing_evidence_then_fixed(self, monkeypatch):
         """验收 3：auto + done 缺 evidence → deny；补齐 evidence 后放行"""
