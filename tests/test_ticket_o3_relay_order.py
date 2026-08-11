@@ -48,6 +48,16 @@ class TestRelayOrder:
             monkeypatch.setenv("RELAY_ORDER", raw)
             assert rv._resolve_order() == ["bobo", "hermes", "claude", "pi"], raw
 
+    def test_invalid_agent_falls_back(self, monkeypatch):
+        """票 O-3 审查 P1（pi 0006）：含非法角色名 → 整体回退默认。
+
+        只过滤空串不校验角色名 → foo,bar 会返回 ["foo","bar"] 不回退，
+        与票面"空/非法回退默认"不符。修复后任一名字非合法角色即回退。
+        """
+        for raw in ("foo,bar", "hermes,evil", "bobo,pi,zzz", "  bobo ,  hacker  "):
+            monkeypatch.setenv("RELAY_ORDER", raw)
+            assert rv._resolve_order() == ["bobo", "hermes", "claude", "pi"], raw
+
     def test_order_drives_forward_chain(self, monkeypatch):
         """两人序转发链闭环：bobo→pi→bobo（rounds*len(ORDER) 完成条件适配）"""
         monkeypatch.setenv("RELAY_ORDER", "bobo,pi")

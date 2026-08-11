@@ -43,17 +43,25 @@ from pi_relay import cap, send, clean, diff_new, bobo_state, pi_finished  # noqa
 
 SES = os.environ.get("RELAY_SESSION", "staff_office")
 DEFAULT_ORDER = ["bobo", "hermes", "claude", "pi"]
+VALID_AGENTS = set(DEFAULT_ORDER)
 
 
 def _resolve_order() -> list:
     """票 O-3 豁免：RELAY_ORDER 环境变量（逗号分隔）覆盖轮巡名单。
 
-    默认 bobo,hermes,claude,pi——未设/空/非法时回退默认，现行为零变化。
-    例：RELAY_ORDER=bobo,pi → 两人小队轮巡（bobo→pi→bobo）。
+    默认 bobo,hermes,claude,pi——未设/空/含非法角色名时回退默认，
+    现行为零变化。例：RELAY_ORDER=bobo,pi → 两人小队轮巡（bobo→pi→bobo）。
+    票 O-3 审查 P1（pi 0006）：只过滤空串不校验角色名 → foo,bar 不回退，
+    与票面"空/非法回退默认"不符。修复：名单中任一名字非合法角色
+    （bobo/hermes/claude/pi）→ 整体回退默认。
     """
     raw = os.environ.get("RELAY_ORDER", "").strip()
     order = [n.strip() for n in raw.split(",") if n.strip()] if raw else []
-    return order or list(DEFAULT_ORDER)
+    if not order:
+        return list(DEFAULT_ORDER)
+    if any(n not in VALID_AGENTS for n in order):
+        return list(DEFAULT_ORDER)
+    return order
 
 
 def build_panes(session: str, order: list = None) -> dict:
