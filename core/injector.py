@@ -139,6 +139,7 @@ class PromptInjector:
             "skills": {"chars": 0, "truncated": False},
             "note_pointers": {"chars": 0, "count": 0, "topics": []},
             "guidance": {"chars": 0},
+            "office": {"chars": 0},
         }
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
@@ -149,6 +150,32 @@ class PromptInjector:
                 "content": _guidance,
             })
             budget_stats["guidance"] = {"chars": len(_guidance)}
+
+        # ── 票 O4-2：OFFICE MODE 上下文告示（office_on 才注入；普通模式零注入）──
+        # 对照组铁律：office off / 普通模式连字段都不读（不 import 读取器）——因此
+        # 先只查 engine.sid 是否存在，延迟 import 读取器仅在 office 会话尝试。
+        # 读取失败静默降级（office_on=False → 零注入），绝不影响工具链。
+        _office_on = False
+        _office_sid = session_id or getattr(engine, "sid", "")
+        if _office_sid:
+            try:
+                from bobo_tui_gateway.server import get_office_on as _get_office_on
+                _office_on = bool(_get_office_on(_office_sid))
+            except Exception:
+                _office_on = False
+        if _office_on:
+            _office_notice = (
+                "【OFFICE MODE】当前处于 OFFICE 模式（会话级，owner 用 /office 显式开启）。"
+                "你是老板（owner 的直接对话方），不是员工。职责：听懂 owner 的编制需求"
+                "（几人/什么角色）→ 用 office_manager 搭建办公室（launch/status/teardown）→ "
+                "relay 派工 → 收五查汇报 → 呈交 owner 终审。"
+                "边界：普通对话/笔记考古不是本模式职责；owner 未给任务时先问清需求，不自行翻旧账。"
+            )
+            messages.insert(1, {
+                "role": "system",
+                "content": _office_notice,
+            })
+            budget_stats["office"] = {"chars": len(_office_notice)}
 
         # ── 1. pending diff ──
         if engine._pending_diff:

@@ -88,6 +88,18 @@ class _ServerContext:
 _ctx = _ServerContext()
 
 
+def get_office_on(sid: str) -> bool:
+    """票 O4-1：office 会话状态读取器——供 core/injector 延迟 import 查询。
+
+    唯一事实源 = _office_state（/office 翻转与 resume/activate 共用同一 dict），
+    普通模式（无记录）返回 False → injector 零注入（对照组铁律）。
+    """
+    try:
+        return bool(_office_state.get(sid, {}).get("on", False))
+    except Exception:
+        return False
+
+
 # ── 公开 API（供 entry.py 引用）──
 
 def _save_session_to_disk(sid: str):

@@ -29,16 +29,25 @@ authorized_paths:
 
 - Terminal.app 分支：do script 之前（或之后）补 `tell application "Terminal" to activate`。
 - iTerm.app 分支：同样补 activate。
+- **Ghostty 分支（新增，owner 2026-08-11 19:29 裁决：团队终端迁往 Ghostty）**：
+  - 先侦查：Ghostty 的 `$TERM_PROGRAM` 实际值（预期 `ghostty`）、是否支持 AppleScript 开窗
+    （Ghostty 的 osascript 支持有限，必须先实测，不许假设）。
+  - 支持 → 加独立分支开窗 + 前置；不支持 → 显式识别 Ghostty 并走降级文案
+    （文案里写明"Ghostty 不支持脚本开窗"，不混进通用"未知终端"分支）。
+  - 侦查结论写进五查报告，作为后续终端适配的判据。
 - 降级分支（其他终端返回 attach 文本）：不动。
 - 失败文案分支：不动。
-- 测试：断言生成的 osascript 命令串含 `activate`；三分支回归；全量零回归（基线 1989）+
-  真实库 md5 闸门。
+- 测试：断言生成的 osascript 命令串含 `activate`；Ghostty 分支按侦查结果覆盖；
+  三分支回归；全量零回归（基线 2006）+ 真实库 md5 闸门。
 
 ## 三、验收清单
 
 1. 测试全过 + 全量零回归 + md5 闸门
-2. 实弹：office_manager launch 一个新办公室 → 新窗口**跳到台前**（owner 亲测确认）
-3. 五查汇报附测试原始输出
+2. 实弹（**在 Ghostty 中验收，owner 2026-08-11 裁决 Ghostty 为主力终端**）：
+   office_manager launch 一个新办公室 → 新窗口**跳到台前**（owner 亲测确认）；
+   Ghostty 不支持脚本开窗时，降级文案实弹确认显示正确
+3. Terminal/iTerm 作为兼容性分支回归（不炸即可）
+4. 五查汇报附测试原始输出 + Ghostty 侦查结论
 
 ## 四、纪律
 
