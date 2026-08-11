@@ -16,6 +16,7 @@ actions: status / launch / teardown
 
 import json
 import os
+import sys
 import time
 from datetime import datetime
 
@@ -30,8 +31,104 @@ _AUDIT_PATH = os.path.join(_DATA, "office_audit.jsonl")
 
 # 员工 pane 默认启动命令（注入 BOBO_ROLE / BOBO_TICKET 环境后执行）
 _DEFAULT_START_CMD = "cd ui-tui && npx tsx src/entry.tsx"
-# relay v2 脚本（R1 已参数化：RELAY_SESSION=<session>）
-_RELAY_CMD = "python3 tools/team_relay_v2.py"
+
+
+# ── relay 进程生命周期（票 R2-P3：唯一性 / 解释器 / 崩溃重启）──
+
+def _resolve_relay_python() -> str:
+    """relay 解释器：项目 .venv 优先；$RELAY_PYTHON 可覆盖；系统解释器兜底。
+
+    病历（23:22）：一次 python: No such file or directory——用了框架 Python
+    而非项目 venv。解析顺序：
+      1. $RELAY_PYTHON（显式指定，测试/特殊环境）
+      2. <项目根>/.venv/bin/python（存在即用）
+      3. sys.executable（当前解释器兜底，绝不裸用 'python3'）
+    """
+    env_py = os.environ.get("RELAY_PYTHON", "").strip()
+    if env_py:
+        return env_py
+    venv_py = os.path.join(_ROOT, ".venv", "bin", "python")
+    if os.path.isfile(venv_py):
+        return venv_py
+    return sys.executable or "python3"
+
+
+def _quote(p: str) -> str:
+    return f'"{p}"' if " " in p else p
+
+
+def _relay_script() -> str:
+    return os.path.join(_ROOT, "tools", "team_relay_v2.py")
+
+
+def _relay_launch_cmd(session: str) -> str:
+    """构造 relay 启动命令：RELAY_SESSION 注入 + venv 解释器 + nohup 后台 + 日志落 /tmp。"""
+    py = _resolve_relay_python()
+    return (f"RELAY_SESSION={session} nohup {_quote(py)} {_quote(_relay_script())} "
+            f"> /tmp/office_relay_{session}.log 2>&1 &")
+
+
+def _pid_alive(pid) -> bool:
+    """pid 是否为存活进程（Unix kill(pid,0) 探活）。"""
+    if not pid or int(pid) <= 0:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _state_relay_pid() -> int:
+    """relay.state 记录的 relay pid（唯一事实源；无/损坏返回 0）。"""
+    st_path = os.path.join(_ROOT, "data", "relay_v2", "relay.state")
+    try:
+        with open(st_path, encoding="utf-8") as f:
+            return int(json.load(f).get("pid", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _clear_state_pid():
+    """清空 relay.state 的 pid 字段（teardown 停掉持锁 relay 后调用，释放单实例）。"""
+    st_path = os.path.join(_ROOT, "data", "relay_v2", "relay.state")
+    try:
+        with open(st_path, encoding="utf-8") as f:
+            st = json.load(f)
+        st["pid"] = None
+        tmp = st_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, st_path)
+    except Exception:
+        pass
+
+
+def _relay_alive() -> bool:
+    """relay 是否在跑：relay.state pid 存活（事实源）+ pgrep 兜底（旧版未写 state）。"""
+    if _pid_alive(_state_relay_pid()):
+        return True
+    r = _sh("pgrep -f team_relay_v2.py | head -3 || true", timeout=15)
+    return bool(r.strip())
+
+
+def _relay_stop_cmds(session: str, relay_pid) -> list:
+    """构造停 relay 命令序列（只停本 session 的 relay，不全量 pkill）。
+
+    1) 台账记录的 pid 定向 kill（精确）；
+    2) RELAY_SESSION=<session> 匹配兜底（该 session 专属进程）。
+    绝不使用 pkill -f team_relay_v2.py（会误杀其他 office 的 relay——
+    病历：teardown 曾 pkill 全杀）。
+    """
+    cmds = []
+    if relay_pid and _pid_alive(int(relay_pid)):
+        cmds.append(f"kill {int(relay_pid)} 2>/dev/null; echo done")
+    cmds.append(f"pkill -f 'RELAY_SESSION={session}' 2>/dev/null; echo done")
+    return cmds
 
 
 # ── 台账 / 审计 ──
@@ -139,6 +236,11 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
     if len(roles) > 4:
         return "错误: 最多 4 个员工 pane（relay v2 PANES 为 :0.0~:0.3）"
 
+    # 票 R2-P3：relay 单实例前置校验（已有 relay 在跑 → 拒绝，防双实例并发，病历 23:22）
+    if _relay_alive():
+        return (f"错误: relay 已在运行（state pid={_state_relay_pid() or '无'}），拒绝双实例。"
+                f"先 office_manager teardown 旧办公室，或 ensure 查看状态。")
+
     # 1. detached 建 session（skill 纪律：绝不碰正在 attach 的 client）
     r = _sh(f"tmux new-session -d -s {session} -n office", timeout=15)
     if "error" in r.lower() and "no server running" not in r.lower():
@@ -164,21 +266,25 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
     # 布局
     _sh(f"tmux select-layout -t {session}:0 {layout}", timeout=15)
 
-    # 3. 起 relay v2（RELAY_SESSION=<session> 后台，relay 自管单实例锁）
-    relay_cmd = f"RELAY_SESSION={session} nohup {_RELAY_CMD} > /tmp/office_relay_{session}.log 2>&1 &"
+    # 3. 起 relay v2（票 R2-P3：venv 解释器启动；RELAY_SESSION=<session> 后台）
+    relay_cmd = _relay_launch_cmd(session)
     _sh(relay_cmd, timeout=15)
+    time.sleep(1.0)  # 等 relay 启动写 state pid
+    relay_pid = _state_relay_pid()
 
-    # 4. 登记台账 + 审计
+    # 4. 登记台账 + 审计（relay_pid 供 teardown 定向停、ensure 崩溃检测）
     reg = _load_registry()
     reg[session] = {
         "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "staff": roles,
         "layout": layout,
         "ticket": ticket,
+        "relay_pid": relay_pid,
     }
     _save_registry(reg)
     _audit("office.setup",
-           f"session={session} staff={roles} layout={layout} ticket={ticket or '无'}")
+           f"session={session} staff={roles} layout={layout} ticket={ticket or '无'} "
+           f"relay_pid={relay_pid}")
 
     # 5. 新窗口自动打开（TERM_PROGRAM 三分支，降级不炸）
     open_note = _open_new_window(session)
@@ -190,7 +296,7 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
     ]
     for i, role in enumerate(roles):
         lines.append(f"  pane 0.{i}  [{role}]  {_DEFAULT_START_CMD}")
-    lines.append(f"  relay   RELAY_SESSION={session} → {_RELAY_CMD}")
+    lines.append(f"  relay   RELAY_SESSION={session} → {_resolve_relay_python()} tools/team_relay_v2.py")
     lines.append("")
     lines.append(f"员工 pane 环境：BOBO_ROLE={roles[0] if roles else '?'}（有票时 + BOBO_TICKET）")
     lines.append(f"新窗口：{open_note}")
@@ -225,12 +331,40 @@ def status(session: str = "") -> str:
                 line = line.strip()
                 if line:
                     lines.append(f"    {line}")
-        # relay 存活
-        r = _sh(f"pgrep -f 'team_relay_v2.py' | head -3 || true", timeout=15)
-        relay_alive = "team_relay_v2" in r or (r.strip().isdigit())
+        # relay 存活（票 R2-P3：state pid 事实源 + pgrep 兜底）
+        relay_alive = _relay_alive()
         lines.append(f"    relay: {'🟢 运行中' if relay_alive else '⚪ 未运行'} "
-                     f"(RELAY_SESSION={s} 的 relay 由 pgrep 确认)")
+                     f"(state pid={_state_relay_pid() or '无'})")
     return "\n".join(lines)
+
+
+def ensure_relay(session: str) -> str:
+    """崩溃重启（票 R2-P3）：relay 应活而亡 → 用项目 venv 解释器重启。
+
+    - session 不存在（tmux 无此 session）→ 不重启，提示先 launch；
+    - relay 存活 → 报告正常；
+    - relay 应活而亡（state pid 已死 / pgrep 无命中）→ 重启 + 校验新 pid 进台账。
+    """
+    session = session.strip()
+    ok, reason = _guard_self_created(session)
+    if not ok:
+        return reason
+    r = _sh(f"tmux has-session -t {session} 2>&1 && echo ALIVE || echo DEAD", timeout=15)
+    if "ALIVE" not in r:
+        return f"session {session} 不在（已 teardown 或从未 launch），不重启 relay"
+    if _relay_alive():
+        return f"relay 正常（state pid={_state_relay_pid() or '无'}），无需重启"
+    relay_cmd = _relay_launch_cmd(session)
+    _sh(relay_cmd, timeout=15)
+    time.sleep(1.0)
+    pid = _state_relay_pid()
+    reg = _load_registry()
+    if session in reg:
+        reg[session]["relay_pid"] = pid
+        _save_registry(reg)
+    _audit("office.guard", f"relay 崩溃重启 session={session} pid={pid}")
+    return (f"relay 已重启（venv 解释器 {_resolve_relay_python()}，"
+            f"state pid={pid or '待写入'}）")
 
 
 def teardown(session: str, keep: bool = True) -> str:
@@ -245,9 +379,17 @@ def teardown(session: str, keep: bool = True) -> str:
     if not ok:
         return reason
 
-    # 1. 停 relay（该 session 的 relay：RELAY_SESSION=<session>）
-    r = _sh(f"pkill -f 'team_relay_v2.py' 2>/dev/null; echo done", timeout=15)
-    relay_note = "relay 已停（pkill team_relay_v2）" if "done" in r else f"停 relay 异常: {r}"
+    # 1. 停 relay（票 R2-P3：定向停本 session——台账 pid + RELAY_SESSION 匹配，
+    #    不再 pkill -f team_relay_v2.py 全杀，避免误杀其他 office 的 relay）
+    relay_pid = _load_registry().get(session, {}).get("relay_pid")
+    cmds = _relay_stop_cmds(session, relay_pid)
+    for c in cmds:
+        _sh(c, timeout=15)
+    # 若停的是持锁 relay（state pid == 台账 pid），清 state pid 释放单实例
+    if relay_pid and _state_relay_pid() == int(relay_pid):
+        _clear_state_pid()
+    relay_note = (f"relay 已停（台账 pid={relay_pid or '无'} + RELAY_SESSION={session} 匹配，"
+                  f"非全量 pkill）")
 
     # 2. 员工 pane 发退出指令（skill 第 7 节停止信号；relay 停了不再灌消息）
     roles = _load_registry().get(session, {}).get("staff", [])
@@ -282,7 +424,7 @@ def teardown(session: str, keep: bool = True) -> str:
 def office_manager(action: str, session: str = "", staff: str = "bobo,hermes,claude,pi",
                    layout: str = "even-horizontal", ticket: str = "",
                    keep: bool = True) -> str:
-    """office_manager 入口。action: status / launch / teardown。"""
+    """office_manager 入口。action: status / launch / teardown / ensure。"""
     action = (action or "").strip().lower()
     if action == "launch":
         return launch(session, staff, layout, ticket)
@@ -290,7 +432,9 @@ def office_manager(action: str, session: str = "", staff: str = "bobo,hermes,cla
         return status(session)
     if action == "teardown":
         return teardown(session, keep)
-    return "错误: action 必须是 launch / status / teardown 之一"
+    if action == "ensure":
+        return ensure_relay(session)
+    return "错误: action 必须是 launch / status / teardown / ensure 之一"
 
 
 TOOL_FUNC = office_manager
@@ -306,8 +450,8 @@ TOOL_SCHEMA = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["launch", "status", "teardown"],
-                    "description": "操作：launch 建办公室 / status 查状态 / teardown 收尾"
+                    "enum": ["launch", "status", "teardown", "ensure"],
+                    "description": "操作：launch 建办公室 / status 查状态 / teardown 收尾 / ensure 崩溃重启 relay"
                 },
                 "session": {
                     "type": "string",

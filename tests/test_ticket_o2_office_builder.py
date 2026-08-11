@@ -256,7 +256,8 @@ class TestOfficeManagerRedline:
         om_mod, captured = om
         r = om_mod.teardown("office-mine", keep=True)
         assert "收尾完成" in r
-        assert any("team_relay_v2.py" in c for c in captured)  # 停 relay
+        assert any("RELAY_SESSION=office-mine" in c for c in captured)  # 停 relay
+        assert not any(c.startswith("pkill -f 'team_relay_v2.py'") for c in captured)  # R2-P3：定向停不全杀
         assert any("send-keys" in c and "停止信号" in c for c in captured)  # 员工退出
         audit = open(om_mod._AUDIT_PATH, encoding="utf-8").read()
         assert "office.teardown" in audit
