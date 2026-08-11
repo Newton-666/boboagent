@@ -1,10 +1,12 @@
 # Bobo Harness Constitution (HARCHITECTURE)
 
-> Version v0.2 (draft) · 2026-08-11 · Drafted by Kimi, pending owner ratification
+> Version v1.0 (ratified) · 2026-08-11 · Drafted by Kimi, ratified by owner
 > Status: CONSTITUTION layer — principles and prohibitions only. No inventory, no procedures.
 > Reading chain: this constitution → `data/Agent开发手册` (inventory: what exists) → `docs/GUIDANCE.md` (behavioral map: how to act) → `data/skill-standards/` (operational procedures).
 > Authority: every new feature, mode, or ticket MUST pass the §4 admission checklist before work begins. Where legacy behavior conflicts with this constitution, the constitution wins and a rectification ticket is filed.
 > Language policy: model-facing normative documents are written in English (consistent with GUIDANCE.md); team collaboration artifacts (tickets, five-check reports, reviews) remain in Chinese.
+> Amendment: changes require owner ratification; record the battle-scar origin of any new principle in §1.
+> Future experiment (parked 2026-08-11, owner): systematic A/B of context-input composition — constitution vs GUIDANCE vs skill content variants — to find the optimal injection mix. Not scheduled yet.
 
 ---
 
