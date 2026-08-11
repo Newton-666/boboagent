@@ -16,6 +16,7 @@ authorized_paths:
   - core/engine.py
   - data/skill-standards/tmux-office/standard.md
   - tests/
+  - tools/team_relay_v2.py   # O-3 豁免（owner 2026-08-11）：RELAY_ORDER 环境变量，其余冻结
 ---
 
 # TICKET-O3 快照与运营手册（第一张纯 relay 团队票）
@@ -58,4 +59,5 @@ authorized_paths:
 
 - 分支 `feat/ticket-o3` 自最新 main（695b4cf）切出；未终审不 merge 不 push。
 - 不做：auto 决策树、O-1/O-2 代码、relay 代码（刚修好，冻它一周）。
+  - **终审豁免（Kimi 2026-08-11 14:50）**：仅豁免一处——`tools/team_relay_v2.py` 允许新增 `RELAY_ORDER` 环境变量（逗号分隔轮巡名单，默认 `bobo,hermes,claude,pi`，现行为零变化，须补两人序测试）。2 人小队（stage0-2staff: bobo+pi）以此走全程 relay 派工。relay 其余逻辑仍冻结，`authorized_paths` 追加 `tools/team_relay_v2.py`。
 - 普通模式零影响对照组每条必配。
