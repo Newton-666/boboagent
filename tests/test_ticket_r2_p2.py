@@ -60,6 +60,12 @@ class TestSeqOf:
 class TestSanitizeState:
     """防御 state/inbox 不一致（票 R2-P2）。"""
 
+    @pytest.fixture(autouse=True)
+    def _iso(self, tmp_path, monkeypatch):
+        """tmp 隔离（收编修复）：不写真实 inbox/relay.state，防环境残留污染断言。"""
+        monkeypatch.setattr(tr, "INBOX_ROOT", str(tmp_path))
+        monkeypatch.setattr(tr, "STATE_PATH", str(tmp_path / "relay.state"))
+
     def test_all_agents_present(self):
         """返回的 state 必须含全部 4 个 agent。"""
         state = tr.sanitize_state({"bobo": 1})

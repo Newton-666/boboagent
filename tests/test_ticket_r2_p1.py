@@ -10,7 +10,9 @@
 
 修复（本票）：
 1. 触发只看通道：read_new_inbox(name, state) 有文件才转，不依赖摘录计数
-2. sanitize_state：state > 通道最大序号 → 自愈重置为 0
+2. sanitize_state：state > 通道最大序号 → 归一为通道最大序号
+   （收编裁决 TICKET-R2：P1 归零版与 P2 max_seq 版同名双定义，采用 P2 版——
+   保留 max_seq 防漏跳且无旧消息重放，测试断言按 P2 语义更新）
 3. read_new_inbox 按数字序号排序（字符串排序 seq>=10 乱序）
 4. 注入后重设目标基线：防注入内容被 diff 当发言回声转发
 """
@@ -50,16 +52,16 @@ class TicketR2P1Test(unittest.TestCase):
 
     # ── 病历 1：23:30 零转发（封口 999 / 残留高位 state）──
     def test_sanitize_resets_capped_state(self):
-        """state[bobo]=999（封口设置）且通道有 0001-0002 → 重置为 0。"""
+        """state[bobo]=999（封口设置）且通道有 0001-0002 → 归一为 2（P2 版裁决：保留 max_seq 防漏跳）。"""
         _make_inbox(self.root, "bobo", [1, 2])
         state = tr.sanitize_state({"bobo": 999, "hermes": 0, "claude": 0, "pi": 0})
-        self.assertEqual(state["bobo"], 0)
+        self.assertEqual(state["bobo"], 2)
 
     def test_sanitize_resets_leftover_after_cleanup(self):
-        """上次运行遗留 state=4，通道清理后只有 0001-0003 → 重置为 0。"""
+        """上次运行遗留 state=4，通道清理后只有 0001-0003 → 归一为 3（P2 版裁决）。"""
         _make_inbox(self.root, "bobo", [1, 2, 3])
         state = tr.sanitize_state({"bobo": 4, "hermes": 0, "claude": 0, "pi": 0})
-        self.assertEqual(state["bobo"], 0)
+        self.assertEqual(state["bobo"], 3)
 
     def test_sanitize_keeps_valid_state(self):
         """state=3 且通道最大 0005 → 保留（新文件 0004/0005 待转发）。"""
@@ -78,11 +80,14 @@ class TicketR2P1Test(unittest.TestCase):
 
     # ── 修复后的触发语义：只看通道，不依赖计数 ──
     def test_forward_trigger_channel_based(self):
-        """旧逻辑 spoken<=state 会永久跳过；新逻辑 sanitize 后通道文件可读。"""
+        """旧逻辑 spoken<=state 会永久跳过；新逻辑 sanitize 归一后新消息可转发。"""
         _make_inbox(self.root, "bobo", [1, 2])
         state = tr.sanitize_state({"bobo": 999, "hermes": 0, "claude": 0, "pi": 0})
+        self.assertEqual(state["bobo"], 2)  # 封口 999 归一为通道最大序号（P2 版裁决，不归零）
+        # 归一后新文件 0003 可正常转发（封口不再阻塞）
+        _make_inbox(self.root, "bobo", [3])
         msgs = tr.read_new_inbox("bobo", state["bobo"])
-        self.assertEqual([seq for seq, _ in msgs], [1, 2])
+        self.assertEqual([seq for seq, _ in msgs], [3])
 
     def test_no_duplicate_forward(self):
         """state=2 时只返回 0003/0004，不重复转发已转过的。"""
