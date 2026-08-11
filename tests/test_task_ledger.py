@@ -91,6 +91,24 @@ class TestTaskLedgerTool:
         result = execute(action="list")
         assert "1/2" in result
 
+    def test_list_shows_verify_evidence_flags(self):
+        """票 C 落账收编（C2）：create 带 verify → list 显 [V|e-]；补 evidence → [V|E]。"""
+        from tools.task_ledger import execute
+        execute(action="create", items=[{"id": "v1", "title": "带验证", "verify": "pytest 全绿"}])
+        result = execute(action="list")
+        assert "[V|e-]" in result, f"verify 落账未显示 V: {result}"
+        execute(action="update", items=[{"id": "v1", "status": "pending", "evidence": "md5 一致"}])
+        result = execute(action="list")
+        assert "[V|E]" in result, f"evidence 补录后未显示 E: {result}"
+
+    def test_update_adds_evidence_shows_e(self):
+        """票 C 落账收编（C2）：update 补 evidence → [v-|E]，缺 verify 不误显 V。"""
+        from tools.task_ledger import execute
+        execute(action="create", items=[{"id": "v2", "title": "补证据"}])
+        execute(action="update", items=[{"id": "v2", "status": "done", "evidence": "测试 12 全过"}])
+        result = execute(action="list")
+        assert "[v-|E]" in result, f"evidence 未显示 E 或 verify 误显: {result}"
+
     def test_all_done_prompt(self):
         from tools.task_ledger import execute
         execute(action="create", items=[{"id": "1", "title": "A"}])

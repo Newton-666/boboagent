@@ -117,6 +117,8 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
                 "id": item["id"],
                 "title": item["title"],
                 "status": item.get("status", "pending"),
+                "verify": item.get("verify", ""),
+                "evidence": item.get("evidence", ""),
             }
             _ledger.append(entry)
             _write_event("create", entry["id"], entry["title"], entry["status"])
@@ -149,6 +151,10 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
                 if entry["id"] == item_id:
                     old_status = entry["status"]
                     entry["status"] = new_status
+                    if "verify" in item and item.get("verify"):
+                        entry["verify"] = item["verify"]
+                    if "evidence" in item and item.get("evidence"):
+                        entry["evidence"] = item["evidence"]
                     _write_event("update", entry["id"], entry["title"], entry["status"])
                     updated.append(f'{entry["title"][:20]}: {old_status} → {new_status}')
                     found = True
@@ -179,7 +185,9 @@ def execute(action: str = "list", items: list = None, _engine=None) -> str:
         lines = ["📋 任务台账:"]
         for i, entry in enumerate(_ledger, 1):
             icon = {"pending": "⬜", "in_progress": "🔄", "done": "✅"}.get(entry["status"], "⬜")
-            lines.append(f"  {i}. {icon} [{entry['id']}] {entry['title'][:40]} ({entry['status']})")
+            v = "V" if (entry.get("verify") or "").strip() else "v-"
+            e = "E" if (entry.get("evidence") or "").strip() else "e-"
+            lines.append(f"  {i}. {icon} [{entry['id']}] {entry['title'][:40]} ({entry['status']}) [{v}|{e}]")
 
         done_count = sum(1 for e in _ledger if e["status"] == "done")
         lines.append(f"--- {done_count}/{len(_ledger)} done ---")
