@@ -311,7 +311,7 @@ class TestOpenNewWindow:
         return om
 
     def test_apple_terminal_opens(self, om, monkeypatch):
-        """Apple_Terminal → Terminal.app do script attach"""
+        """Apple_Terminal → Terminal.app do script attach + activate 前置"""
         monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
         calls = []
         monkeypatch.setattr(om, "_sh",
@@ -320,9 +320,10 @@ class TestOpenNewWindow:
         assert "新 Terminal 窗口" in r
         assert "osascript" in calls[0]
         assert "tmux attach -t office-x" in calls[0]
+        assert "activate" in calls[0]
 
     def test_iterm_opens(self, om, monkeypatch):
-        """iTerm.app → iTerm2 create window"""
+        """iTerm.app → iTerm2 create window + activate 前置"""
         monkeypatch.setenv("TERM_PROGRAM", "iTerm.app")
         calls = []
         monkeypatch.setattr(om, "_sh",
@@ -330,6 +331,29 @@ class TestOpenNewWindow:
         r = om._open_new_window("office-y")
         assert "iTerm2" in r
         assert "osascript" in calls[0]
+        assert "activate" in calls[0]
+
+    def test_ghostty_opens(self, om, monkeypatch):
+        """ghostty → AppleScript new window + configuration + activate 前置"""
+        monkeypatch.setenv("TERM_PROGRAM", "ghostty")
+        calls = []
+        monkeypatch.setattr(om, "_sh",
+                            lambda cmd, timeout=30: calls.append(cmd) or "")
+        r = om._open_new_window("office-g")
+        assert "新 Ghostty 窗口" in r
+        assert "osascript" in calls[0]
+        assert "new window" in calls[0]
+        assert "tmux attach -t office-g" in calls[0]
+        assert "wait after command:true" in calls[0]
+        assert "activate" in calls[0]
+
+    def test_ghostty_error_degrades(self, om, monkeypatch):
+        """ghostty osascript 报错 → 降级返回手动命令（不炸）"""
+        monkeypatch.setenv("TERM_PROGRAM", "ghostty")
+        monkeypatch.setattr(om, "_sh",
+                            lambda cmd, timeout=30: "execution error: not allowed")
+        r = om._open_new_window("office-g2")
+        assert "手动" in r
 
     def test_other_terminal_degrades(self, om, monkeypatch):
         """vscode 等 → 降级：不失败，返回 attach 命令文本"""

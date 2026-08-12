@@ -109,11 +109,21 @@ def _clear_state_pid():
 
 
 def _relay_alive() -> bool:
-    """relay 是否在跑：relay.state pid 存活（事实源）+ pgrep 兜底（旧版未写 state）。"""
+    """relay 是否在跑：relay.state pid 存活（事实源）+ pgrep 兜底（旧版未写 state）。
+
+    病历（2026-08-11）：pgrep 兜底曾误判——execute_terminal.execute 在命令
+    成功无输出时返回包装文本 "(命令执行成功，无输出)"，bool(strip()) 恒为 True，
+    导致 launch 被误拒"relay 已在运行"。改为 subprocess 直取 pgrep 原始 stdout。
+    """
     if _pid_alive(_state_relay_pid()):
         return True
-    r = _sh("pgrep -f team_relay_v2.py | head -3 || true", timeout=15)
-    return bool(r.strip())
+    try:
+        import subprocess
+        r = subprocess.run(["pgrep", "-f", "team_relay_v2.py"],
+                           capture_output=True, text=True, timeout=10)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
 
 
 def _relay_stop_cmds(session: str, relay_pid) -> list:
@@ -194,19 +204,32 @@ def _open_new_window(session: str) -> str:
     """
     term = os.environ.get("TERM_PROGRAM", "")
     if term == "Apple_Terminal":
-        # Terminal.app：do script 开新窗口并 attach
+        # Terminal.app：do script 开新窗口并 attach，activate 前置
         cmd = (f'osascript -e \'tell application "Terminal" to do script '
-               f'"tmux attach -t {session}"\'')
+               f'"tmux attach -t {session}"\' '
+               f'-e \'tell application "Terminal" to activate\'')
         r = _sh(cmd, timeout=15)
         if "error" not in r.lower() and "execution error" not in r.lower():
             return f"已在新 Terminal 窗口打开：tmux attach -t {session}"
         return f"自动开窗失败（{r[:120]}），请手动：tmux attach -t {session}"
     if term == "iTerm.app":
         cmd = (f'osascript -e \'tell application "iTerm2" to create window '
-               f'with default profile command "tmux attach -t {session}"\'')
+               f'with default profile command "tmux attach -t {session}"\' '
+               f'-e \'tell application "iTerm2" to activate\'')
         r = _sh(cmd, timeout=15)
         if "error" not in r.lower() and "execution error" not in r.lower():
             return f"已在新 iTerm2 窗口打开：tmux attach -t {session}"
+        return f"自动开窗失败（{r[:120]}），请手动：tmux attach -t {session}"
+    if term == "ghostty":
+        # Ghostty 1.3.1（2026-08-11 侦查实测）：AppleScript new window + configuration
+        # 开窗（Ghostty 无 do script 命令、CLI +new-window macOS 不支持），activate 前置
+        cmd = (f'osascript -e \'tell application "Ghostty" to new window '
+               f'with configuration {{command:"tmux attach -t {session}", '
+               f'wait after command:true}}\' '
+               f'-e \'tell application "Ghostty" to activate\'')
+        r = _sh(cmd, timeout=15)
+        if "error" not in r.lower() and "execution error" not in r.lower():
+            return f"已在新 Ghostty 窗口打开：tmux attach -t {session}"
         return f"自动开窗失败（{r[:120]}），请手动：tmux attach -t {session}"
     # 其他终端（含 vscode）→ 降级：不失败，返回 attach 命令文本
     return (f"当前终端（TERM_PROGRAM={term or '未知'}）不支持自动开新窗口，"
@@ -252,7 +275,11 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
         env = f"BOBO_ROLE={role}"
         if ticket:
             env += f" BOBO_TICKET={ticket}"
-        start_cmd = f"{env} {_DEFAULT_START_CMD}"
+        # 病历（2026-08-11）：env 前缀曾被 _DEFAULT_START_CMD 的 cd 吃掉——
+        # "BOBO_ROLE=x cd ui-tui && npx ..." 里 env 只作用于紧随的 cd（shell 内置
+        # 命令不传递环境），&& 后的 npx 拿不到 BOBO_ROLE → 员工 pane 角色全丢，
+        # 界面全部显示默认 Bobo Agent。修正：env 放在 npx 前。
+        start_cmd = f"cd ui-tui && {env} npx tsx src/entry.tsx"
         if i == 0:
             # pane 0 已存在：send-keys 启动（先清屏再启动）
             cmds.append(f"tmux send-keys -t {session}:0.0 \"{start_cmd}\" Enter")
@@ -265,6 +292,13 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
             return f"员工 pane 启动失败: {rr}（步骤: {c}）"
     # 布局
     _sh(f"tmux select-layout -t {session}:0 {layout}", timeout=15)
+
+    # 2.5 pane 边框标注角色（病历 2026-08-11：多 Ghostty 窗口 attach 同一 window 时
+    # active pane 共享，光靠 TUI 文字区分不了员工；边框顶部标 BOBO_ROLE，一眼可辨）
+    _sh(f"tmux set-option -t {session} pane-border-status top", timeout=15)
+    _sh(f"tmux set-option -t {session} pane-border-format '#{{pane_title}}'", timeout=15)
+    for i, role in enumerate(roles):
+        _sh(f"tmux select-pane -t {session}:0.{i} -T {role}", timeout=15)
 
     # 3. 起 relay v2（票 R2-P3：venv 解释器启动；RELAY_SESSION=<session> 后台）
     relay_cmd = _relay_launch_cmd(session)
@@ -295,7 +329,7 @@ def launch(session: str, staff: str = "bobo,hermes,claude,pi",
         "布局图：",
     ]
     for i, role in enumerate(roles):
-        lines.append(f"  pane 0.{i}  [{role}]  {_DEFAULT_START_CMD}")
+        lines.append(f"  pane 0.{i}  [{role}]  cd ui-tui && BOBO_ROLE={role} npx tsx src/entry.tsx")
     lines.append(f"  relay   RELAY_SESSION={session} → {_resolve_relay_python()} tools/team_relay_v2.py")
     lines.append("")
     lines.append(f"员工 pane 环境：BOBO_ROLE={roles[0] if roles else '?'}（有票时 + BOBO_TICKET）")
