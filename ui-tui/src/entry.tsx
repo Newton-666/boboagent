@@ -11,6 +11,7 @@ import { type MemorySnapshot, startMemoryMonitor } from './lib/memoryMonitor.js'
 import { openExternalUrl } from './lib/openExternalUrl.js'
 import { recordParentLifecycle } from './lib/parentLog.js'
 import { resetTerminalModes } from './lib/terminalModes.js'
+import { idleExit, idleTimeoutMinutesFromEnv } from './lib/idleExit.js'
 import { patchUiState } from './app/uiStore.js'
 
 if (!process.stdin.isTTY) {
@@ -52,6 +53,34 @@ if (TERMUX_TUI_MODE) {
 const gw = new GatewayClient()
 
 gw.start()
+
+// TICKET-ENG2 (b①): 闲置自动退出 —— 防僵尸前端。任何输入/后端活动重置计时，
+// 超时走清理退出路径（resetTerminalModes + gw.kill + exit → 'exit' hook 兜底）。
+const idleTimeoutMinutes = idleTimeoutMinutesFromEnv()
+if (idleTimeoutMinutes > 0) {
+  idleExit.start({
+    timeoutMinutes: idleTimeoutMinutes,
+    onWarn: minutesLeft => {
+      patchUiState({
+        notice: {
+          key: 'idle-exit-warn',
+          kind: 'sticky',
+          level: 'warn',
+          text: `已闲置 ${idleTimeoutMinutes} 分钟，${minutesLeft} 分钟后自动退出（输入任意键继续）`
+        }
+      })
+    },
+    onIdleExit: () => {
+      recordParentLifecycle(`idle-exit: no activity for ${idleTimeoutMinutes} minutes → cleaning up terminal + killing gateway`)
+      resetTerminalModes()
+      gw.kill('idle-exit')
+      process.exit(0)
+    }
+  })
+  // 后端活动信号：任何 gateway 事件都算活动
+  gw.on('event', () => idleExit.poke())
+  recordParentLifecycle(`idle-exit armed: ${idleTimeoutMinutes} minutes (BOBO_TUI_IDLE_TIMEOUT_MINUTES)`)
+}
 
 const dumpNotice = (snap: MemorySnapshot, dump: HeapDumpResult | null) =>
   `bobo-tui: ${snap.level} memory (${formatBytes(snap.heapUsed)}) — auto heap dump → ${dump?.heapPath ?? dump?.diagPath ?? '(failed)'}\n`

@@ -11,6 +11,7 @@ import type {
   VoiceRecordResponse
 } from '../gatewayTypes.js'
 import { isAction, isCopyShortcut, isMac, isVoiceToggleKey } from '../lib/platform.js'
+import { idleExit } from '../lib/idleExit.js'
 import { computePrecisionWheelStep, initPrecisionWheel } from '../lib/precisionWheel.js'
 import { computeWheelStep, initWheelAccelForHost } from '../lib/wheelAccel.js'
 
@@ -335,6 +336,8 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
   }
 
   useInput((ch, key) => {
+    // TICKET-ENG2 (b①): 任何按键 = 活动信号，重置闲置退出计时
+    idleExit.poke()
     const live = getUiState()
 
     // ── 票 AUTO-E E-2：ESC 单一入口（焦点优先级链） ──
