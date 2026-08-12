@@ -304,10 +304,11 @@ def test_prompt_budget_event(library, no_skills, tmp_path, monkeypatch):
     assert ev["total_chars"] == sum(len(m.get("content", "")) for m in msgs)
     sec = ev["sections"]
     # 八段齐全（票 TICKET-E3b：+guidance 预付层；票 O4-2：+office 会话告示；
-    # 票 G1-1：+selfmap L0 常驻；票 G1-2：+selfmap_chapters 章节触发记账）
+    # 票 G1-1：+selfmap L0 常驻；票 G1-2：+selfmap_chapters 章节触发记账；
+    # 票 TICKET-P1：+now 日期时间锚点）
     assert set(sec.keys()) == {
         "identity", "memory", "skills", "note_pointers", "guidance", "office",
-        "selfmap", "selfmap_chapters",
+        "selfmap", "now", "selfmap_chapters",
     }
     assert sec["identity"] == len("You are Bobo.")
     assert isinstance(sec["memory"], dict)

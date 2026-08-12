@@ -259,10 +259,11 @@ class PromptInjector:
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
         # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，
-        # GUIDANCE 紧跟其后用 insert(3)（E3b "紧跟自查协议之后"语义不变）。
+        # 票 TICKET-P1：NOW 锚点紧随 L0 之后（index 2），自查协议被挤到 index 3，
+        # GUIDANCE 用 insert(4) 紧跟自查协议之后（E3b "紧跟自查协议之后"语义不变）。
         _guidance = _load_guidance()
         if _guidance:
-            messages.insert(3, {
+            messages.insert(4, {
                 "role": "system",
                 "content": _guidance,
             })
@@ -282,7 +283,7 @@ class PromptInjector:
                 _chapter = _extract_self_chapter(_ccfg["title"])
                 if _chapter:
                     _selfmap_chapter_texts[_ckey] = _chapter
-                    messages.insert(4, {
+                    messages.insert(5, {
                         "role": "system",
                         "content": f"[SELF {_ccfg['title']}]\n{_chapter}",
                     })
