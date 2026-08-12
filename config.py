@@ -55,6 +55,11 @@ MODEL_TYPE = os.environ.get("MODEL_TYPE", "api")
 # （config.py 未加载完 → tools 发现 → obsidian_tools 回 import config → BLOCKED_FOLDERS 未定义）
 _provider_cache = None
 
+def refresh_config_cache():
+    """外部配置写入 .env 后调用：重置 provider 缓存，使后续属性访问读到新值（热生效，不重启）。"""
+    global _provider_cache
+    _provider_cache = None
+
 def _get_provider():
     global _provider_cache
     if _provider_cache is None:

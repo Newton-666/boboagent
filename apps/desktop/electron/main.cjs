@@ -45,12 +45,18 @@ function startBackend() {
     projectRoot = path.resolve(__dirname, '..', '..', '..')
   }
 
+  // TICKET-D1b E1: force stdio mode — strip TUI-specific env vars so the
+  // backend cannot fall into socket mode (BOBO_GW_SOCKET) or inherit the
+  // TUI's dedicated session path (BOBO_SESSION_DIR). Only BOBO_BACKEND stays.
   const env = {
     ...process.env,
     BOBO_BACKEND: '1',
     PYTHONPATH: projectRoot,
     BOBO_CWD: process.cwd(),
     BOBO_DATA_DIR: process.env.BOBO_DATA_DIR || path.join(require('os').homedir(), '.bobo'),
+  }
+  for (const k of ['BOBO_GW_SOCKET', 'BOBO_SESSION_DIR']) {
+    delete env[k]
   }
 
   console.log(`[bobo-desktop] Starting backend: ${python} -m bobo_tui_gateway.entry`)
