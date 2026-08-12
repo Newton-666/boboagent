@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from bobo_tui_gateway.server_utils import ok, err, write_atomic
-from config import API_KEY, ACTIVE_PROVIDER, API_MODEL_NAME, BOBO_DATA_DIR
+import config as _cfg
 
 # 由 register() 注入，供 handle_config_set 访问 server 的 engine_cache
 _engine_cache = None
@@ -13,8 +13,8 @@ _engine_cache = None
 
 def handle_setup_status(params: dict, rid: str) -> dict:
     return ok(rid, {
-        "provider_configured": bool(API_KEY),
-        "provider": ACTIVE_PROVIDER,
+        "provider_configured": bool(_cfg.API_KEY),
+        "provider": _cfg.ACTIVE_PROVIDER,
         "providers": ["deepseek", "openai", "anthropic", "openrouter", "google", "ollama", "custom"],
     })
 
@@ -26,7 +26,7 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
     if not api_key:
         return ok(rid, {"ok": False, "error": "API Key 不能为空"})
 
-    env_path = str(BOBO_DATA_DIR / ".env")
+    env_path = str(_cfg.BOBO_DATA_DIR / ".env")
     os.makedirs(os.path.dirname(env_path), exist_ok=True)
 
     from core.provider import get_provider
@@ -65,6 +65,11 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
             if not found:
                 content += "\n" + prov_line + provider
         write_atomic(env_path, content)
+        # TICKET-D1b B3: 写 .env 后同步刷新 os.environ + config 缓存（热生效，禁止重启）
+        os.environ[env_key] = api_key
+        if provider != "deepseek":
+            os.environ["BOBO_PROVIDER"] = provider
+        _cfg.refresh_config_cache()
         return ok(rid, {"ok": True, "message": f"{provider} 已配置", "provider_configured": True})
     except Exception as e:
         return ok(rid, {"ok": False, "error": str(e)})
@@ -72,7 +77,7 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
 
 def handle_config_get(params: dict, rid: str) -> dict:
     key = params.get("key", "")
-    values = {"model": API_MODEL_NAME}
+    values = {"model": _cfg.API_MODEL_NAME}
     return ok(rid, {"value": values.get(key, "")})
 
 
@@ -84,7 +89,7 @@ def handle_config_set(params: dict, rid: str) -> dict:
         model_name = value.split("--provider")[0].strip()
         model_name = re.sub(r"\s+#tui\s*$", "", model_name).strip()
         # 写入 .env
-        env_path = str(BOBO_DATA_DIR / ".env")
+        env_path = str(_cfg.BOBO_DATA_DIR / ".env")
         try:
             lines = []
             if os.path.exists(env_path):
@@ -139,11 +144,7 @@ def handle_config_set(params: dict, rid: str) -> dict:
             if _engine_cache is not None:
                 _engine_cache.pop("_llm", None)  # 清除缓存的 LLM caller
             # 清除 config.py 的 provider 缓存（必须设为 None，空 dict 不触发重新解析）
-            try:
-                import config as _cfg
-                _cfg._provider_cache = None
-            except Exception:
-                pass
+            _cfg.refresh_config_cache()
             return ok(rid, {"value": model_name, "saved": True,
                              "note": "已生效，下一回合将使用新模型"})
         except Exception as e:
