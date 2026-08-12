@@ -170,3 +170,84 @@ class TestPromptPoolIntegration:
         assert "identity" in decision["allocated"]
         assert "memory" in decision["used"]
         assert decision["used"]["memory"] >= 0
+
+
+class TestNowAnchor:
+    """票 TICKET-P1：日期时间锚点（[NOW] 常驻行）测试。
+
+    验收点：锚点存在、格式正确、随时间变化、计入 prompt.budget。
+    """
+
+    def _build(self, injector, session_id="s1"):
+        return injector.build_messages(
+            system_prompt="You are Bobo.",
+            user_input="hello",
+            tools_schema=[],
+            extra_categories=set(),
+            session_id=session_id,
+        )
+
+    def _find_anchor(self, msgs):
+        for m in msgs:
+            c = m.get("content", "")
+            if isinstance(c, str) and c.startswith("[NOW] "):
+                return c
+        return None
+
+    def test_anchor_injected(self, injector):
+        """锚点存在：build_messages 输出含 [NOW] 段。"""
+        msgs = self._build(injector)
+        anchor = self._find_anchor(msgs)
+        assert anchor is not None, "messages 中未找到 [NOW] 锚点"
+
+    def test_anchor_format(self, injector):
+        """格式正确：`[NOW] YYYY-MM-DD HH:MM Weekday (Asia/Shanghai)`，≤60 字符。"""
+        msgs = self._build(injector)
+        anchor = self._find_anchor(msgs)
+        assert anchor is not None
+        assert len(anchor) <= 60, f"锚点超长: {len(anchor)}"
+        import re
+        pat = (
+            r"^\[NOW\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} "
+            r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) "
+            r"\(Asia/Shanghai\)$"
+        )
+        assert re.match(pat, anchor), f"格式不符: {anchor}"
+
+    def test_anchor_tracks_time(self, monkeypatch, injector):
+        """随时间变化：固定不同时间点，锚点输出跟随变化。"""
+        from datetime import datetime
+
+        class _FakeNow:
+            def __init__(self):
+                self.current = datetime(2026, 8, 12, 18, 23)
+
+            def now(self, tz=None):
+                return self.current.replace(tzinfo=tz)
+
+        fake = _FakeNow()
+        monkeypatch.setattr("core.injector._datetime", fake)
+        from core.injector import _build_now_anchor
+
+        a1 = _build_now_anchor()
+        fake.current = datetime(2026, 8, 13, 9, 5)
+        a2 = _build_now_anchor()
+        assert a1 != a2, "锚点未随时间变化"
+        assert "2026-08-12" in a1 and "2026-08-13" in a2
+
+    def test_anchor_in_budget(self, silence_event_bus, injector):
+        """计入 budget：prompt.budget 事件 sections 含 now 键，chars 与锚点一致。"""
+        msgs = self._build(injector)
+        anchor = self._find_anchor(msgs)
+        assert anchor is not None
+        budget = [d for t, d in silence_event_bus if t == "prompt.budget"]
+        assert budget, "未发出 prompt.budget 事件"
+        sections = budget[0]["sections"]
+        assert "now" in sections, "budget sections 缺少 now"
+        assert sections["now"]["chars"] == len(anchor)
+
+    def test_anchor_in_all_modes(self, injector):
+        """全模式一致：普通/auto/office 无差别注入锚点（office 仅多一段告示）。"""
+        for mode in ("normal", "auto", "office"):
+            msgs = self._build(injector, session_id=f"{mode}-s1")
+            assert self._find_anchor(msgs) is not None, f"模式 {mode} 缺锚点"

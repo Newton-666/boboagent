@@ -106,6 +106,25 @@ def _extract_selfmap_l0() -> str | None:
     return m.group(1)
 
 
+def _build_now_anchor() -> str:
+    """票 TICKET-P1：生成 [NOW] 日期时间锚点（≤60 字符）。
+
+    格式：`[NOW] 2026-08-12 18:23 Thursday (Asia/Shanghai)`。
+    每轮组装时调用（build_messages 内），取当前时间；优先 Asia/Shanghai 时区，
+    系统无 tzdata 时回退本地时间（ZoneInfo 不可用不炸）。超长截断为无星期几格式。
+    全模式（普通/auto/office）无差别注入——日期时间是无模式的基础信息。
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        now = _datetime.now(ZoneInfo("Asia/Shanghai"))
+    except Exception:
+        now = _datetime.now()
+    anchor = now.strftime("[NOW] %Y-%m-%d %H:%M %A (Asia/Shanghai)")
+    if len(anchor) > 60:
+        anchor = now.strftime("[NOW] %Y-%m-%d %H:%M (Asia/Shanghai)")
+    return anchor
+
+
 def _extract_self_chapter(title_marker: str) -> str | None:
     """提取 SELF.md 指定章全文（## <title_marker> 起到下一个 ## 或文末）。
 
@@ -213,6 +232,7 @@ class PromptInjector:
             "guidance": {"chars": 0},
             "office": {"chars": 0},
             "selfmap": {"chars": 0},
+            "now": {"chars": 0},
             "selfmap_chapters": {"chars": 0, "chapters": []},
         }
 
@@ -226,6 +246,16 @@ class PromptInjector:
                 "content": _l0,
             })
             budget_stats["selfmap"] = {"chars": len(_l0)}
+
+        # ── 票 TICKET-P1：日期时间锚点（常驻，全模式一致，≤60字符）──
+        # 每轮组装时取当前时间，紧跟 L0 selfmap 之后注入；计入 prompt.budget。
+        _now_anchor = _build_now_anchor()
+        if _now_anchor:
+            messages.insert(2, {
+                "role": "system",
+                "content": _now_anchor,
+            })
+            budget_stats["now"] = {"chars": len(_now_anchor)}
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
         # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，
