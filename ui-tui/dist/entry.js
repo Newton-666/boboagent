@@ -68986,7 +68986,7 @@ function ArtLines({ lines }) {
 function CompactBanner({ cols, t }) {
   const w = Math.max(28, cols - 4);
   return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", height: 3, marginBottom: 1, opaque: true, width: w, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.primary, children: ruleIn(t.brand.name, w) }),
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { bold: true, color: t.color.primary, children: ruleIn(ROLE_NAME, w) }),
     /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: centerIn(TAG_FULL, w) }),
     /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.primary, children: "\u2500".repeat(w) })
   ] });
@@ -69012,7 +69012,7 @@ function Banner({ maxWidth, t }) {
   if (cols >= COMPACT_FROM) {
     return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(CompactBanner, { cols, t });
   }
-  const name = cols >= 52 ? t.brand.name : t.brand.name.split(" ")[0] ?? t.brand.name;
+  const name = cols >= 52 ? ROLE_NAME : ROLE_NAME.split(" ")[0] ?? ROLE_NAME;
   const tag = cols >= 64 ? TAG_FULL : cols >= 46 ? TAG_MID : TAG_TINY;
   return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
     /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { bold: true, color: t.color.primary, wrap: "truncate-end", children: [
@@ -69142,7 +69142,10 @@ function SessionPanel({ info, maxWidth, sid, t }) {
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, {}),
       /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.accent, children: [
         info.model.split("/").pop(),
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
+          " \xB7 ",
+          ROLE_NAME
+        ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
       sid && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { children: [
@@ -69152,13 +69155,16 @@ function SessionPanel({ info, maxWidth, sid, t }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", width: w, children: [
       wide ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Box_default, { justifyContent: "center", marginBottom: 1, children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { bold: true, color: t.color.primary, children: [
-        t.brand.name,
+        ROLE_NAME,
         info.version ? ` v${info.version}` : "",
         info.release_date ? ` (${info.release_date})` : ""
       ] }) }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Box_default, { flexDirection: "column", marginBottom: 1, children: [
         /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.accent, wrap: "truncate-end", children: [
           info.model.split("/").pop(),
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, children: " \xB7 Bobo Agent" })
+          /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { color: t.color.muted, children: [
+            " \xB7 ",
+            ROLE_NAME
+          ] })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: info.cwd || process.cwd() }),
         sid && /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(Text, { wrap: "truncate-end", children: [
@@ -69247,7 +69253,7 @@ function Panel({ sections, t, title }) {
     ] }, si))
   ] });
 }
-var import_react90, import_jsx_runtime30, LOADER_TICK_MS, TAG_FULL, TAG_MID, TAG_TINY, HIDE_BELOW, COMPACT_FROM, clip, centerIn, ruleIn, SKILLS_MAX, TOOLSETS_MAX;
+var import_react90, import_jsx_runtime30, LOADER_TICK_MS, ROLE_RAW, ROLE_NAME, TAG_FULL, TAG_MID, TAG_TINY, HIDE_BELOW, COMPACT_FROM, clip, centerIn, ruleIn, SKILLS_MAX, TOOLSETS_MAX;
 var init_branding = __esm({
   async "src/components/branding.tsx"() {
     "use strict";
@@ -69258,9 +69264,11 @@ var init_branding = __esm({
     init_text();
     import_jsx_runtime30 = __toESM(require_jsx_runtime(), 1);
     LOADER_TICK_MS = 120;
-    TAG_FULL = "Bobo Agent \xB7 Your Personal AI Assistant";
-    TAG_MID = "Bobo Agent";
-    TAG_TINY = "Bobo";
+    ROLE_RAW = (process.env.BOBO_ROLE || "").trim().toLowerCase();
+    ROLE_NAME = ROLE_RAW ? `${ROLE_RAW.charAt(0).toUpperCase()}${ROLE_RAW.slice(1)} Agent` : "Bobo Agent";
+    TAG_FULL = `${ROLE_NAME} \xB7 Your Personal AI Assistant`;
+    TAG_MID = ROLE_NAME;
+    TAG_TINY = ROLE_NAME.split(" ")[0] ?? "Bobo";
     HIDE_BELOW = 34;
     COMPACT_FROM = 58;
     clip = (s, w) => w <= 0 ? "" : s.length > w ? `${s.slice(0, Math.max(0, w - 1))}\u2026` : s;

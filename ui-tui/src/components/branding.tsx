@@ -39,9 +39,16 @@ export function ArtLines({ lines }: { lines: [string, string][] }) {
   )
 }
 
-const TAG_FULL = 'Bobo Agent · Your Personal AI Assistant'
-const TAG_MID = 'Bobo Agent'
-const TAG_TINY = 'Bobo'
+// 员工角色名：office_manager launch 注入 BOBO_ROLE（bobo/hermes/claude/pi）。
+// 病历（2026-08-11）：两个员工 pane 都显示 "Bobo Agent"——角色名硬编码，
+// 且 BOBO_ROLE 曾被 cd 吃掉。此处按 BOBO_ROLE 动态显示，区分员工。
+const ROLE_RAW = (process.env.BOBO_ROLE || '').trim().toLowerCase()
+const ROLE_NAME = ROLE_RAW
+  ? `${ROLE_RAW.charAt(0).toUpperCase()}${ROLE_RAW.slice(1)} Agent`
+  : 'Bobo Agent'
+const TAG_FULL = `${ROLE_NAME} · Your Personal AI Assistant`
+const TAG_MID = ROLE_NAME
+const TAG_TINY = ROLE_NAME.split(' ')[0] ?? 'Bobo'
 const HIDE_BELOW = 34
 const COMPACT_FROM = 58
 
@@ -69,7 +76,7 @@ function CompactBanner({ cols, t }: { cols: number; t: Theme }) {
 
   return (
     <Box flexDirection="column" height={3} marginBottom={1} opaque width={w}>
-      <Text bold color={t.color.primary}>{ruleIn(t.brand.name, w)}</Text>
+      <Text bold color={t.color.primary}>{ruleIn(ROLE_NAME, w)}</Text>
       <Text color={t.color.muted}>{centerIn(TAG_FULL, w)}</Text>
       <Text color={t.color.primary}>{'─'.repeat(w)}</Text>
     </Box>
@@ -102,7 +109,7 @@ export function Banner({ maxWidth, t }: { maxWidth?: number; t: Theme }) {
     return <CompactBanner cols={cols} t={t} />
   }
 
-  const name = cols >= 52 ? t.brand.name : (t.brand.name.split(' ')[0] ?? t.brand.name)
+  const name = cols >= 52 ? ROLE_NAME : (ROLE_NAME.split(' ')[0] ?? ROLE_NAME)
   const tag = cols >= 64 ? TAG_FULL : cols >= 46 ? TAG_MID : TAG_TINY
 
   return (
@@ -271,7 +278,7 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
 
           <Text color={t.color.accent}>
             {info.model.split('/').pop()}
-            <Text color={t.color.muted}> · Bobo Agent</Text>
+            <Text color={t.color.muted}> · {ROLE_NAME}</Text>
           </Text>
 
           <Text color={t.color.muted} wrap="truncate-end">
@@ -291,7 +298,7 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
         {wide ? (
           <Box justifyContent="center" marginBottom={1}>
             <Text bold color={t.color.primary}>
-              {t.brand.name}
+              {ROLE_NAME}
               {info.version ? ` v${info.version}` : ''}
               {info.release_date ? ` (${info.release_date})` : ''}
             </Text>
@@ -300,7 +307,7 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
           <Box flexDirection="column" marginBottom={1}>
             <Text color={t.color.accent} wrap="truncate-end">
               {info.model.split('/').pop()}
-              <Text color={t.color.muted}> · Bobo Agent</Text>
+              <Text color={t.color.muted}> · {ROLE_NAME}</Text>
             </Text>
             <Text color={t.color.muted} wrap="truncate-end">
               {info.cwd || process.cwd()}
