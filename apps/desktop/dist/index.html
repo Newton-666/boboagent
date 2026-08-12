@@ -159,6 +159,38 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #preview-iframe { flex:1; border:none; background:#fff; }
 .preview-btn { background:#5b9bd5; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; padding:2px 8px; font-family:inherit; margin-right:4px; }
 .preview-btn:hover { opacity:0.85; }
+/* ── TICKET-D1d 新增模块（不动现有样式）── */
+/* ① 工具卡片展开：参数 + 结果 + diff */
+.tool-detail { font-size:11px; color:var(--text2); margin:4px 0 0 24px; padding:6px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:'SF Mono',Monaco,Menlo,monospace; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto; display:none; }
+.tool-detail.open { display:block; }
+.tool-detail .td-args { color:#5b9bd5; font-weight:600; margin-bottom:2px; }
+.tool-detail .td-result { color:var(--text2); }
+.tool-detail .diff-add { color:#50a14f; }
+.tool-detail .diff-del { color:#f48771; }
+.tool-detail .diff-file { color:#5b9bd5; font-weight:600; }
+.tool-detail .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
+/* ③ 闸确认模态卡 */
+#approval-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:3000; align-items:center; justify-content:center; }
+#approval-overlay.open { display:flex; }
+#approval-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:440px; max-width:90vw; padding:20px 22px; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+#approval-modal .ap-title { font-size:15px; font-weight:600; margin-bottom:10px; color:var(--text); }
+#approval-modal .ap-cmd { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:8px 12px; margin-bottom:10px; color:var(--text); word-break:break-all; max-height:120px; overflow-y:auto; }
+#approval-modal .ap-desc { font-size:12px; color:var(--text2); margin-bottom:16px; white-space:pre-wrap; word-break:break-word; }
+#approval-modal .ap-btns { display:flex; gap:10px; justify-content:flex-end; }
+#approval-modal .ap-btn { padding:8px 18px; border-radius:6px; border:none; cursor:pointer; font:inherit; font-size:13px; }
+#approval-modal .ap-deny { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+#approval-modal .ap-deny:hover { background:var(--hover); }
+#approval-modal .ap-allow { background:#e8913a; color:#fff; }
+#approval-modal .ap-allow:hover { opacity:0.88; }
+/* ④ 状态条模式徽标 */
+#status-mode { font-size:10px; padding:1px 6px; border-radius:3px; letter-spacing:0.5px; margin-left:auto; display:none; }
+#status-mode.on { display:inline-block; }
+#status-mode.auto { background:rgba(232,145,58,0.15); color:#e8913a; border:1px solid rgba(232,145,58,0.4); }
+#status-mode.office { background:rgba(91,155,213,0.15); color:#5b9bd5; border:1px solid rgba(91,155,213,0.4); }
+/* ⑤ 中断按钮 */
+#stop-btn { position:absolute; right:64px; bottom:36px; width:28px; height:28px; border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; border:1px solid rgba(244,135,113,0.4); cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; }
+#stop-btn:hover { background:rgba(244,135,113,0.22); }
+#stop-btn.show { display:flex; }
 </style>
 </head>
 <body>
@@ -182,7 +214,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div class="section-bd" id="body-plugin">
       <div id="plugin-list"></div>
     </div>
-    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
+    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="status-mode"></span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
   </div>
   <div id="main">
     <div id="welcome">
@@ -199,6 +231,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div id="input-box">
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
       <button id="send" disabled>↑</button>
+      <button id="stop-btn" title="中断 (Esc)" onclick="stopThinking()">■</button>
     </div>
   </div>
   <div id="resize-handle"></div>
@@ -275,6 +308,18 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <p id="setup-msg" style="font-size:11px;color:var(--text-muted);margin-top:10px;"></p>
   </div>
 </div>
+<!-- TICKET-D1d ③: 闸确认模态卡（替代原生 confirm，无超时自动拒绝）-->
+<div id="approval-overlay">
+  <div id="approval-modal">
+    <div class="ap-title">⚠ 需要批准</div>
+    <div class="ap-cmd" id="approval-cmd"></div>
+    <div class="ap-desc" id="approval-desc"></div>
+    <div class="ap-btns">
+      <button class="ap-btn ap-deny" id="approval-deny">拒绝</button>
+      <button class="ap-btn ap-allow" id="approval-allow">批准一次</button>
+    </div>
+  </div>
+</div>
 <script>
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
@@ -331,11 +376,29 @@ var sessions = [];
 var sendTimeoutId = null;
 
 function debug(msg) { debugEl.textContent = '[' + msg + ']'; }
+// TICKET-D1d ④: 模式徽标（AUTO / OFFICE / 正常不显示）
+function setMode(mode) {
+  var el = document.getElementById('status-mode');
+  if (!el) return;
+  el.className = mode ? 'on ' + mode : '';
+  el.textContent = mode ? mode.toUpperCase() : '';
+}
+// TICKET-D1d ④: 状态条 running 状态
+function setBusy(busy) {
+  if (!connected) return;
+  statusText.textContent = busy ? 'Running' : 'Ready';
+}
+// TICKET-D1d ⑤: 中断按钮显隐
+function showStop(b) {
+  var sb = document.getElementById('stop-btn');
+  if (sb) sb.classList.toggle('show', b);
+}
 function setConnected(c) {
   connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
   inputEl.placeholder = c ? '输入消息 (⌘↵ 发送，↵ 换行)' : 'Connecting...';
   statusDot.className = 'dot ' + (c ? 'green' : 'red');
-  statusText.textContent = c ? 'Connected' : 'Offline';
+  statusText.textContent = c ? 'Ready' : 'Offline';
+  if (!c) showStop(false);
 }
 var _codeStore = {};
 var _codeId = 0;
@@ -533,7 +596,7 @@ function addTool(name, context, toolId) {
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-function updateToolResult(toolId, resultText, error, duration) {
+function updateToolResult(toolId, data) {
   // Find the first still-running entry for this tool name
   var allEntries = chatEl.querySelectorAll('.tool[data-tool="' + toolId + '"]');
   var div = null;
@@ -546,6 +609,11 @@ function updateToolResult(toolId, resultText, error, duration) {
   var statusEl = div.querySelector('.tool-status');
   var toggleEl = div.querySelector('.tool-toggle');
   var resultEl = div.querySelector('.tool-result');
+  var error = data ? data.error || '' : '';
+  var duration = data ? data.duration || 0 : 0;
+  var resultText = data ? data.result_text || '' : '';
+  var args = (data && data.arguments) ? data.arguments : {};
+  var inlineDiff = data ? data.inline_diff || '' : '';
 
   if (error) {
     dot.className = 'dot fail';
@@ -557,10 +625,10 @@ function updateToolResult(toolId, resultText, error, duration) {
     dot.className = 'dot done';
     statusEl.textContent = duration ? 'done (' + duration.toFixed(1) + 's)' : 'done';
     statusEl.style.color = '#50a14f';
-    if (resultText) {
-      var preview = resultText.split('\\n').filter(function(l){return l.trim();})[0] || '';
-      if (preview.length > 120) preview = preview.substring(0, 120) + '...';
-      resultEl.textContent = preview;
+    // TICKET-D1d ①②: 摘要行显示工具名+耗时（status 已有）；展开显示参数 + 完整结果 + diff 高亮
+    if (resultText || Object.keys(args).length > 0) {
+      resultEl.className = 'tool-result';
+      resultEl.innerHTML = renderToolDetail(args, resultText, inlineDiff);
       div.setAttribute('data-result', resultText);
     }
     toggleEl.style.display = 'inline';
@@ -573,6 +641,33 @@ function updateToolResult(toolId, resultText, error, duration) {
       }
     }
   }
+}
+// TICKET-D1d ②: diff 红绿高亮（+ 绿 / - 红 / @@ 蓝，兼容 ++/-- 文件头）
+function diffHighlight(text) {
+  var lines = esc(text).split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i];
+    if (/^\+/.test(l) && !/^\+\+\+/.test(l)) lines[i] = '<span class="diff-add">' + l + '</span>';
+    else if (/^-/.test(l) && !/^---/.test(l)) lines[i] = '<span class="diff-del">' + l + '</span>';
+    else if (/^@@/.test(l)) lines[i] = '<span class="diff-file">' + l + '</span>';
+  }
+  return lines.join('\n');
+}
+// TICKET-D1d ①: 工具卡片展开内容 = 参数 + 完整结果 + INLINE_DIFF
+function renderToolDetail(args, resultText, inlineDiff) {
+  var html = '';
+  var keys = Object.keys(args);
+  if (keys.length > 0) {
+    html += '<span class="td-args">参数</span>\n' + esc(JSON.stringify(args, null, 2)) + '\n';
+  }
+  if (resultText) {
+    if (html) html += '\n';
+    html += '<span class="td-args">结果</span>\n' + diffHighlight(resultText) + '\n';
+  }
+  if (inlineDiff) {
+    html += '<div class="inline-diff">' + diffHighlight(inlineDiff) + '</div>';
+  }
+  return html || '(无输出)';
 }
 function addStatus(text) {
   var div = document.createElement('div'); div.className = 'status'; div.textContent = text;
@@ -999,6 +1094,7 @@ function createThinkBox() {
 }
 
 function stopThinking() {
+  showStop(false);   // TICKET-D1d ⑤
   if (thinkBoxEl) {
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
@@ -1011,6 +1107,7 @@ function stopThinking() {
 on('message.start', function() {
   if (sendTimeoutId) { clearTimeout(sendTimeoutId); sendTimeoutId = null; }
   messaging = true; sendEl.classList.add('loading'); debug('Receiving...');
+  setBusy(true); showStop(true);   // TICKET-D1d ④⑤
   thinkText = '';
   toolsCalledThisRound = false;
   streamingId = null;
@@ -1028,6 +1125,7 @@ on('message.delta', function(data) {
 });
 on('message.complete', function(data) {
   messaging = false; sendEl.classList.remove('loading'); debug('Connected ✓');
+  setBusy(false); showStop(false);   // TICKET-D1d ④⑤
   var toolsWereCalled = toolIdCounter > 0;
   thinkText = '';
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
@@ -1056,7 +1154,7 @@ on('tool.start', function(data) {
 });
 on('tool.complete', function(data) {
   var tid = data ? data.tool_id || '' : '';
-  if (tid) updateToolResult(tid, data ? data.result_text || '' : '', data ? data.error || '' : '', data ? data.duration || 0 : 0);
+  if (tid) updateToolResult(tid, data);
   // 联动：Bobo 读文件 → 自动在项目面板显示
   var name = data ? data.name : '';
   if (name === 'read_local_file') {
@@ -1069,6 +1167,9 @@ on('tool.complete', function(data) {
     if (fn) { openPlugin('notes'); }
   }
 });
+// TICKET-D1d ④: 模式徽标 —— AUTO / OFFICE 实时指示（对齐 TUI 底部状态栏）
+on('session.auto_state', function(data) { setMode(data && data.on ? 'auto' : ''); });
+on('session.office_state', function(data) { setMode(data && data.on ? 'office' : ''); });
 on('status.update', function(data) {
   var t = data ? data.text || '' : ''; if (!t) return;
   if (t.indexOf('准备执行')===0 || t.indexOf('并行执行')===0) return;
@@ -1099,35 +1200,46 @@ document.getElementById('setup-save').onclick = function() {
   var msg = document.getElementById('setup-msg');
   if (!key) { msg.textContent = '请输入 API Key'; return; }
   msg.textContent = '正在保存...';
-  if (window.boboAPI && window.boboAPI.saveEnv) {
-    window.boboAPI.saveEnv({
-      DEEPSEEK_API_KEY: key,
-      DEEPSEEK_API_BASE_URL: url || '',
-      DEEPSEEK_API_MODEL: model || ''
-    }).then(function(r) {
-      if (r && r.ok) {
-        msg.textContent = '已保存，正在重启...';
-        setTimeout(function() {
-          hideSetup();
-        }, 1500);
-      } else {
-        msg.textContent = '保存失败';
-      }
-    });
-  } else {
-    msg.textContent = '不在桌面端环境中';
-  }
+  // TICKET-D1d ⑦-B: api_key 走 setup.submit（后端权威写盘 BOBO_DATA_DIR/.env + B3 热生效，零重启）
+  call('setup.submit', { provider: 'deepseek', api_key: key }).then(function(res) {
+    if (res && res.ok === false) {
+      msg.textContent = '保存失败: ' + (res.error || '未知错误');
+      return;
+    }
+    // model 走 config.set（权威 key: API_MODEL_NAME，热生效）
+    if (model && model !== 'deepseek-chat') {
+      call('config.set', { key: 'model', value: model });
+    }
+    // base_url 无 RPC 通道 → 走保留的 save-env（仅写该字段；TICKET-D1d ⑦-A 已令其跟随数据目录）
+    if (url && window.boboAPI && window.boboAPI.saveEnv) {
+      window.boboAPI.saveEnv({ DEEPSEEK_API_BASE_URL: url });
+      msg.textContent = '已保存，正在重启...';
+      setTimeout(function() { hideSetup(); }, 1500);
+    } else {
+      msg.textContent = '已保存';
+      setTimeout(function() { hideSetup(); }, 800);
+    }
+  });
 };
 
 on('approval.request', function(data) {
+  // TICKET-D1d ③: 模态卡替代原生 confirm —— 立即呈现、操作预览、无超时自动拒绝
   var cmd = data.command || data.description || 'unknown';
-  if (confirm('Bobo 想要执行:\n\n' + cmd + '\n\n是否允许？')) {
-    call('approval.respond', { session_id: currentSessionId, choice: 'once' });
-  } else {
-    call('approval.respond', { session_id: currentSessionId, choice: 'deny' });
-    addStatus('已拒绝: ' + cmd.substring(0, 80));
-  }
+  var desc = data.description || '';
+  document.getElementById('approval-cmd').textContent = cmd;
+  document.getElementById('approval-desc').textContent = desc;
+  document.getElementById('approval-overlay').classList.add('open');
 });
+// 批准/拒绝：直接 send（不经 call() 的 120s resolve 包装）——保证送达，杜绝瞎闸
+function approvalRespond(choice) {
+  document.getElementById('approval-overlay').classList.remove('open');
+  if (window.boboAPI) {
+    window.boboAPI.send({ jsonrpc:'2.0', id:'approval-resp-'+(++reqId), method:'approval.respond', params:{ session_id: currentSessionId, choice: choice } });
+  }
+  if (choice === 'deny') addStatus('已拒绝操作');
+}
+document.getElementById('approval-allow').onclick = function() { approvalRespond('once'); };
+document.getElementById('approval-deny').onclick = function() { approvalRespond('deny'); };
 on('gateway.error', function(data) {
   addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
   debug('Error: ' + (data.message || '').substring(0, 60));

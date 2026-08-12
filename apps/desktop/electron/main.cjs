@@ -13,6 +13,47 @@ let backendBuffer = ''
 let backendRestartCount = 0
 const MAX_BACKEND_RESTARTS = 3
 let pendingMessages = []  // Buffer for messages received before window's IPC listener is ready
+let frontendLogFd = null   // TICKET-D1d ⑧: renderer log (O-7 黑匣子对齐)
+
+// TICKET-D1d ⑧: data/logs 目录解析 —— dev 用仓库 data/logs（与 TUI dev 一致），
+// packaged 用 ~/.bobo/data/logs（与 TUI 生产一致）。
+function getLogDir() {
+  if (app.isPackaged) {
+    return path.join(os.homedir(), '.bobo', 'data', 'logs')
+  }
+  return path.join(path.resolve(__dirname, '..', '..', '..'), 'data', 'logs')
+}
+
+// TICKET-D1d ⑦-A: 数据目录解析（save-env 写盘路径跟随）—— dev 用仓库 data/（与
+// setup.submit/BOBO_DATA_DIR 一致，消除双 .env 分叉），packaged 用 ~/.bobo。
+function getDataDir() {
+  if (app.isPackaged) {
+    return path.join(os.homedir(), '.bobo')
+  }
+  return path.join(path.resolve(__dirname, '..', '..', '..'), 'data')
+}
+
+function initFrontendLog() {
+  try {
+    const logDir = getLogDir()
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
+    const pid = process.pid
+    const logPath = path.join(logDir, `frontend_${pid}.log`)
+    frontendLogFd = fs.openSync(logPath, 'a')
+    const header = `=== desktop frontend log started at ${new Date().toISOString()} (pid=${pid}) ===\n`
+    fs.writeSync(frontendLogFd, header)
+    console.log(`[bobo-desktop] Frontend log: ${logPath}`)
+  } catch (e) {
+    console.warn(`[bobo-desktop] Frontend log init failed: ${e.message}`)
+  }
+}
+
+function frontendLog(line) {
+  if (!frontendLogFd) return
+  try {
+    fs.writeSync(frontendLogFd, `[${new Date().toISOString()}] ${line}\n`)
+  } catch (_) {}
+}
 
 // ── Python backend management ──────────────────────────────────────────
 
@@ -181,6 +222,28 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
 
+  // TICKET-D1d ⑧: renderer log (O-7 黑匣子对齐) — console / crash / preload 错误落盘
+  initFrontendLog()
+  mainWindow.webContents.on('console-message', (...args) => {
+    // Electron 32+ 新签名: (event, {level, message, lineNumber, sourceId})
+    // 旧签名: (event, level, message, line, sourceId) — 兼容处理
+    let level, message, line, sourceId
+    if (args.length >= 5 && typeof args[1] === 'number') {
+      ;[ , level, message, line, sourceId] = args
+    } else {
+      const d = args[1] || {}
+      level = d.level; message = d.message; line = d.lineNumber; sourceId = d.sourceId
+    }
+    const levelName = ['log', 'info', 'warning', 'error'][level] || String(level)
+    frontendLog(`[renderer:${levelName}] ${message} (${sourceId || ''}:${line})`)
+  })
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    frontendLog(`[renderer-gone] reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+  mainWindow.webContents.on('preload-error', (_e, preloadPath, error) => {
+    frontendLog(`[preload-error] ${preloadPath}: ${error.message}`)
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -196,9 +259,13 @@ ipcMain.handle('backend-send-sync', async (_event, msg) => {
   return sendToBackend(msg)
 })
 
-// ── First-run config: write .env directly (no RPC) ──
+// ── First-run config ──
+// DEPRECATED (TICKET-D1d ⑦-B): setup 屏幕已改调 setup.submit（后端权威写盘 + B3 热生效）。
+// 本 handler 保留不删，仅作 base_url 等无 RPC 通道的字段的兜底写入通道。
 ipcMain.handle('save-env', async (_event, data) => {
-  const envDir = path.join(os.homedir(), '.bobo')
+  // TICKET-D1d ⑦-A: envDir 跟随数据目录（dev=仓库 data/，packaged=~/.bobo），与
+  // setup.submit 的 BOBO_DATA_DIR/.env 一致，消除 dev 双 .env 分叉。
+  const envDir = getDataDir()
   if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true })
   const envPath = path.join(envDir, '.env')
   let lines = []
