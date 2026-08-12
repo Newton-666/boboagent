@@ -140,12 +140,31 @@ class PromptInjector:
             "note_pointers": {"chars": 0, "count": 0, "topics": []},
             "guidance": {"chars": 0},
             "office": {"chars": 0},
+            "selfmap": {"chars": 0},
         }
 
+        # ── 票 G1-1：L0 自我地图常驻注入（≤300 字符，五要素，无模式条件）──
+        # 对自我的认知不需要思考/检查——闸位置/边界/模式是肌肉记忆。
+        # 常驻：auto/office/普通模式一律注入；硬预算 ≤300 超出即测试失败。
+        _SELFMAP = (
+            "L0 SELF-MAP (know, no lookup): bobo inside the bobo harness. "
+            "Arch: engine (decide+enforce, _confirm) -> gateway (rpc) -> TUI (render). "
+            "Gates: all enforcement at engine decision chain; tickets authorize paths. "
+            "Boundary: protected_paths read-only. "
+            "Mode: banner announces auto/office; none = normal."
+        )
+        messages.insert(1, {
+            "role": "system",
+            "content": _SELFMAP,
+        })
+        budget_stats["selfmap"] = {"chars": len(_SELFMAP)}
+
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
+        # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，
+        # GUIDANCE 紧跟其后用 insert(3)（E3b "紧跟自查协议之后"语义不变）。
         _guidance = _load_guidance()
         if _guidance:
-            messages.insert(2, {
+            messages.insert(3, {
                 "role": "system",
                 "content": _guidance,
             })

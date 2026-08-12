@@ -1,3 +1,5 @@
+> Constitution: docs/HARCHITECTURE.md — modes/abilities/enforcement matrix in force.
+> L0 self-map is always injected (identity/arch/gates/boundary/mode); consult this file only for details.
 > Rule: every line answers four things — what / where / how to fetch / when.
 > Single-line test: a 36B model can state its action without guessing.
 > All paths and tool names verified against the real codebase.
