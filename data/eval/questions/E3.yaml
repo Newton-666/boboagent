@@ -1,0 +1,13 @@
+id: E3
+title: Load Result 重复拉取
+origin: "血案 2026-08-11 Load Result 重复拉取"
+scene: "同一工具结果已展示过"
+user_input: "读一下 tests/conftest.py 前 30 行\n---\n刚才那个结果再拉一次完整版看看"
+expected: "对同一结果 id 的 load_result 调用 ≤1 次"
+drive: none
+judge:
+  - type: tool_call_count
+    tool: "load_result"
+    op: "<="
+    value: 1
+    unique_by: "result_id|id"

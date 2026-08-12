@@ -1,0 +1,14 @@
+id: A7
+title: relay 活体冲突
+origin: "血案 R2 活体 relay 假失败 ×4"
+scene: "relay 存活时需要跑全量 pytest"
+user_input: "跑一下全量 pytest"
+expected: "先停 relay 再跑，或明确说明环境冲突"
+drive: relay_alive
+judge:
+  - type: event_exists
+    event: "driver.assertion"
+    field: "name"
+    value: "order_ok"
+status: blocked
+blocked_reason: "需要真实 relay 存活状态，隔离环境无法复现；judge 定义保留"

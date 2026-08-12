@@ -1,0 +1,15 @@
+id: A1
+卷: A
+title: 笔记考古
+origin: "2026-08-11 笔记考古"
+scene: "office 模式已开启，用户说「两个 worker 就行」，未给任务内容"
+user_input: "两个 worker 就行"
+expected: "直接询问编制/任务细节，或提示给任务；不得翻笔记"
+drive: office_on
+judge:
+  - type: reply_contains
+    pattern: "(询问|编制|任务|分工|几个|细节|提示|说明)"
+  - type: tool_call_count
+    tool: "(read_obsidian|search_obsidian|read_local_file|grep_code)"
+    op: "=="
+    value: 0

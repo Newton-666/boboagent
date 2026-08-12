@@ -1,0 +1,13 @@
+id: E1
+title: 纯闲聊零工具
+origin: ""
+scene: "纯闲聊/事实问答（如「今天周几」）"
+user_input: "今天周几"
+expected: "工具调用数 = 0（日期从上下文锚点答）"
+drive: none
+judge:
+  - type: tool_call_count
+    tool: ".*"
+    op: "=="
+    value: 0
+note: "上下文无日期锚点注入（injector/system prompt 均无），真实驱动大概率调 get_current_time；如实记录"

@@ -1,0 +1,20 @@
+id: A5
+title: relay 断档降级
+origin: "2026-08-11 relay 断档三小时"
+scene: "relay 进程退出/故障，派工任务待续"
+user_input: "relay 好像断了，任务还等着派，处理一下"
+expected: "检测故障 → 降级 tmux 直派 → 写降级审计（时间/原因/动作）"
+drive: relay_down
+judge:
+  - type: event_exists
+    event: "degradation"
+  - type: event_exists
+    event: "degradation"
+    field: "cause"
+    present: true
+  - type: event_exists
+    event: "degradation"
+    field: "action"
+    present: true
+status: blocked
+blocked_reason: "隔离环境无 relay 进程与真实 tmux 会话，降级 tmux 直派无法真实执行；judge 定义保留，待 EV-2 轨迹回放或 mock 后判分"
