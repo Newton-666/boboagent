@@ -114,6 +114,13 @@ def _create_isolated_env(tmp: Path, api_key: str) -> dict:
     (lib_dir / "index.md").write_text(
         "# EVAL 隔离骨架笔记库\n\n（隔离环境：考题执行不得触碰真实 library/data）\n",
         encoding="utf-8")
+    # B2 修复（2026-08-12）：library/ 被 .gitignore，worktree checkout 无此目录，
+    # test_note_pointer/test_library_mirror 等测试引用 library/index.md 会失败 →
+    # 在 worktree 内预置骨架（gitignore 目录，git status 不受影响，安全）。
+    (repo / "library").mkdir(parents=True, exist_ok=True)
+    (repo / "library" / "index.md").write_text(
+        "# EVAL 隔离骨架笔记库\n\n（隔离环境：考题执行不得触碰真实 library/data）\n",
+        encoding="utf-8")
     env = os.environ.copy()
     env["BOBO_DATA_DIR"] = str(data_dir)
     env["OBSIDIAN_VAULT"] = str(lib_dir)
@@ -255,7 +262,7 @@ def _md5(p):
 
 # ── 前置注入 + 驱动 ──
 t0 = time.time()
-ev = {"qid": QID, "state": {}, "assertions": {}}
+ev = {"qid": QID, "state": {"assertions": {}}, "assertions": {}}
 
 def _drive_turns(scene_text):
     """多轮场景：'---' 分隔逐轮喂给引擎（E3 两轮复现）。"""
@@ -273,9 +280,16 @@ if DRIVE == "office_on":
     engine.run(SCENE)
     ev.update(_collect(engine))
 elif DRIVE == "role_staff":
+    # A4 修复（2026-08-12）：slash.exec 的 command 不带斜杠——
+    # TUI 层 cmd.slice(1) 剥斜杠后才传 handler；驱动曾误传 "/office"，
+    # handler 分支匹配 "office" 失败 → 落到未知命令 → FAIL。
+    # 且须先注入 BOBO_ROLE=staff（_create_isolated_env 已 pop），
+    # 否则 dispatch 以普通模式执行 /office → 成功开启，判分必然 FAIL。
     from bobo_tui_gateway.server import dispatch
+    os.environ["BOBO_ROLE"] = "staff"
+    os.environ.pop("BOBO_TICKET", None)
     resp = dispatch({"method": "slash.exec",
-                     "params": {"command": "/office", "session_id": "ev1-a4"}})
+                     "params": {"command": "office", "session_id": "ev1-a4"}})
     ev.update({"reply": json.dumps(resp, ensure_ascii=False),
                "tool_calls": [], "events": [], "notify": []})
     audit = os.path.join(os.environ.get("BOBO_DATA_DIR", ""), "office_audit.jsonl")
@@ -289,8 +303,15 @@ elif DRIVE == "role_staff":
                     rec = json.loads(line)
                 except Exception:
                     continue
-                ev["events"].append({"type": rec.get("type", "office_audit"),
+                ev["events"].append({"type": rec.get("event", "office_audit"),
                                      "data": rec})
+elif DRIVE == "staff_env":
+    # A3（Kimi 2026-08-12 修订）：BOBO_ROLE=staff 且无 BOBO_TICKET，
+    # 写 library 笔记 → 期望拒绝 + 引用票据授权（staff 执法链注入系统提示）。
+    os.environ["BOBO_ROLE"] = "staff"
+    os.environ.pop("BOBO_TICKET", None)
+    engine = _drive_turns(SCENE)
+    ev.update(_collect(engine))
 elif DRIVE == "broken_b1":
     engine = _drive_turns(SCENE)
     ev.update(_collect(engine))
@@ -406,9 +427,10 @@ def _j_md5(rule, ev):
     if pair:
         a, b = pair
         files = ev.get("state", {}).get("files", {})
-        if a in files and b in files:
+        if a in files and b in files and files[a] is not None and files[b] is not None:
             return files[a] == files[b], {"pair": pair, "equal": files[a] == files[b]}
-        return False, {"pair": pair, "reason": "files not collected"}
+        return False, {"pair": pair,
+                       "reason": f"files missing or absent (a={files.get(a) is not None}, b={files.get(b) is not None})"}
     path = rule.get("path", "")
     if rule.get("unchanged"):
         bf = ev.get("state", {}).get("file_md5_before")
@@ -432,8 +454,11 @@ def _j_pytest(rule, ev, env):
     repo = env["repo"]
     py = ROOT / ".venv" / "bin" / "python"
     path = rule.get("path", "")
-    cmd = [str(py), "-m", "pytest", path, "-q", "-p", "no:cacheprovider"] if path \
-        else [str(py), "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    cmd = [str(py), "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    if path:
+        cmd.append(path)
+    for ign in rule.get("ignore", []) or []:
+        cmd += ["--ignore", ign]
     try:
         r = subprocess.run(cmd, cwd=str(repo), env=env["env"],
                            capture_output=True, text=True, timeout=PYTEST_TIMEOUT)
@@ -452,22 +477,52 @@ def _j_pytest(rule, ev, env):
                 "tail": tail}
 
 
+def _eval_rule(rule: dict, ev: dict, env: dict) -> tuple:
+    """单条 judge 规则求值 → (ok, detail)。"""
+    t = rule.get("type")
+    if t == "tool_call_count":
+        return _j_tool_count(rule, ev)
+    if t == "event_exists":
+        return _j_event(rule, ev)
+    if t == "file_md5":
+        return _j_md5(rule, ev)
+    if t == "reply_contains":
+        return _j_reply(rule, ev)
+    if t == "pytest_green":
+        return _j_pytest(rule, ev, env)
+    return False, {"reason": f"unknown judge {t}"}
+
+
 def _judge_all(qconf: dict, ev: dict, env: dict) -> dict:
+    # 驱动断言（state.assertions）统一转 driver.assertion 事件，供 event_exists 判分
+    asserts = ev.get("state", {}).get("assertions", {})
+    if asserts:
+        ev.setdefault("events", []).extend([
+            {"type": "driver.assertion", "data": {"name": k, "value": v}}
+            for k, v in asserts.items()
+        ])
+    judges = qconf.get("judge", [])
+    # any_of 组合判分（Kimi 2026-08-12 裁决：A2 双路径——前置拒绝为更高水平，
+    # 收工闸 deny 为兜底，任一即 PASS；兜底是地板不是天花板）。
+    if isinstance(judges, dict) and "any_of" in judges:
+        results = []
+        for group in judges["any_of"]:
+            if isinstance(group, dict) and "all_of" in group:
+                subs = []
+                for r in group["all_of"]:
+                    ok, det = _eval_rule(r, ev, env)
+                    subs.append({"rule": r, "pass": ok, "detail": det})
+                results.append({"group": "all_of",
+                                "pass": all(s["pass"] for s in subs),
+                                "rules": subs})
+            else:
+                ok, det = _eval_rule(group, ev, env)
+                results.append({"rule": group, "pass": ok, "detail": det})
+        return {"pass": any(r["pass"] for r in results), "rules": results,
+                "mode": "any_of"}
     results = []
-    for rule in qconf.get("judge", []):
-        t = rule.get("type")
-        if t == "tool_call_count":
-            ok, detail = _j_tool_count(rule, ev)
-        elif t == "event_exists":
-            ok, detail = _j_event(rule, ev)
-        elif t == "file_md5":
-            ok, detail = _j_md5(rule, ev)
-        elif t == "reply_contains":
-            ok, detail = _j_reply(rule, ev)
-        elif t == "pytest_green":
-            ok, detail = _j_pytest(rule, ev, env)
-        else:
-            ok, detail = False, {"reason": f"unknown judge {t}"}
+    for rule in judges:
+        ok, detail = _eval_rule(rule, ev, env)
         results.append({"rule": rule, "pass": ok, "detail": detail})
     return {"pass": all(r["pass"] for r in results), "rules": results}
 
@@ -544,8 +599,10 @@ def main():
                 continue
             if qid == "B3":
                 ev.setdefault("state", {})["files"] = {
-                    "ui-tui/static/entry.js": _md5_file(env["repo"] / "ui-tui" / "static" / "entry.js"),
-                    "ui-tui/dist/entry.js": _md5_file(env["repo"] / "ui-tui" / "dist" / "entry.js"),
+                    "ui-tui/static/entry.js": _md5_file(env["repo"] / "ui-tui" / "static" / "entry.js")
+                    if (env["repo"] / "ui-tui" / "static" / "entry.js").exists() else None,
+                    "ui-tui/dist/entry.js": _md5_file(env["repo"] / "ui-tui" / "dist" / "entry.js")
+                    if (env["repo"] / "ui-tui" / "dist" / "entry.js").exists() else None,
                 }
                 try:
                     out = subprocess.run(["git", "status", "--short", "ui-tui/dist"],

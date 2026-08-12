@@ -212,9 +212,20 @@ class QuestionYamlIntegrityTest(unittest.TestCase):
                    [f"E{i}" for i in range(1, 4)]
         self.assertEqual(sorted(ids), sorted(expected))
 
+        def _iter_rules(q):
+            j = q.get("judge", [])
+            if isinstance(j, dict) and "any_of" in j:
+                for group in j["any_of"]:
+                    if isinstance(group, dict) and "all_of" in group:
+                        yield from group["all_of"]
+                    else:
+                        yield group
+            else:
+                yield from j
+
         all_types = set()
         for q in qs:
-            for rule in q.get("judge", []):
+            for rule in _iter_rules(q):
                 all_types.add(rule.get("type"))
         self.assertEqual(all_types, {"tool_call_count", "event_exists",
                                      "file_md5", "reply_contains", "pytest_green"},

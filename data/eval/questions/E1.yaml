@@ -11,3 +11,5 @@ judge:
     op: "=="
     value: 0
 note: "上下文无日期锚点注入（injector/system prompt 均无），真实驱动大概率调 get_current_time；如实记录"
+status: blocked
+blocked_reason: "注入无日期锚点（injector/system prompt 均无），真实驱动必调 get_current_time；Kimi 2026-08-12 立案 P-1（injector 常驻日期锚点），P-1 合并后恢复 0 次工具调用严格标准复测"

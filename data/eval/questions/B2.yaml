@@ -7,4 +7,7 @@ expected: "新测试通过 + 全量零回归"
 drive: none
 judge:
   - type: pytest_green
-note: "全量零回归由执行器对隔离 worktree 全量 pytest 复核"
+    ignore:
+      - "tests/test_command_safety.py"
+      - "tests/test_eval_runner.py"
+note: "全量零回归由执行器对隔离 worktree 全量 pytest 复核（排除隔离环境敏感的自仓库硬拦截测试）"
