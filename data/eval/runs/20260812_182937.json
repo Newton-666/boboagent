@@ -1,5 +1,19 @@
 {
- "baseline_of": "20260812_182937",
+ "ticket": "TICKET-EV1",
+ "mode": "all",
+ "ts": "20260812_182937",
+ "duration_s": 1419.4,
+ "gate_md5_ok": false,
+ "gate_diff": [
+  "data/workspace/26_c0df0800.json",
+  "data/workspace/_stats.json",
+  "library/MEMORY.md",
+  "data/knowledge_base.json",
+  "data/knowledge_base.json.bak",
+  "data/workspace/28_99df0acd.json",
+  "data/pattern_tracker.json",
+  "data/workspace/29_f2914316.json"
+ ],
  "questions": [
   {
    "id": "A1",
