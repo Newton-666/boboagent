@@ -149,3 +149,22 @@ def engine():
 def mock_engine(engine):
     """Alias for 'engine' fixture. Both names work."""
     return engine
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _eng2_backend_guard_cleanup():
+    """TICKET-ENG2 (b②): 测试 session 结束兜底清理全部真实后端进程。
+
+    防测试残留僵尸后端（2026-08-12 六连发事故同类风险）：无论测试成败，
+    tests/backend_guard 登记的存活后端在 session 收尾时全部 terminate。
+    """
+    import backend_guard
+
+    yield
+    leaked = backend_guard.shutdown_all()
+    if leaked:
+        import sys
+
+        print(f"\n[ENG-2b②] session 收尾清理 {leaked} 个残留后端（正常测试不应泄漏）",
+              file=sys.stderr)
+

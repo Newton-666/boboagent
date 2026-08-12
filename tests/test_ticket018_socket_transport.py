@@ -123,7 +123,10 @@ class TestGatewaySurvivesFrontendDeath:
         out_f = open(tmp_path / "gw_stdout.log", "w")
         err_f = open(tmp_path / "gw_stderr.log", "w")
 
-        proc = subprocess.Popen(
+        # TICKET-ENG2 (b②): 统一走 backend_guard，并发后端 ≤2 硬约束
+        import backend_guard
+
+        proc = backend_guard.spawn_backend(
             [sys.executable, "-u", "-c",
              "import os,sys; sys.path.insert(0, '.'); "
              "from bobo_tui_gateway.entry import _run_socket_backend; "
@@ -148,11 +151,7 @@ class TestGatewaySurvivesFrontendDeath:
 
         yield proc, sock_path, tmp_path
 
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        backend_guard.release_backend(proc)
         try:
             os.unlink(sock_path)
         except FileNotFoundError:
