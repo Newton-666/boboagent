@@ -146,29 +146,79 @@ def resolve_skin() -> dict:
     }
 
 
+# ── TICKET-O7：崩溃取证黑匣子（前端 stderr 持久化 + 滚动清理）────
+_FRONTEND_LOG_KEEP = 20   # frontend_*.log 保留份数，超出清理
+
+
+def _tail_lines(fh, n: int) -> list:
+    """从已打开的文件对象读取末尾 n 行（黑匣子内联用，TICKET-O7-2）。
+
+    从文件尾部向前回读，最多返回 n 行；超大文件也不会整体读入。
+    """
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    if size == 0:
+        return []
+    step = 4096
+    pos = size
+    buf = b""
+    lines = []
+    while pos > 0 and len(lines) < n:
+        chunk = step if pos >= step else pos
+        pos -= chunk
+        fh.seek(pos)
+        buf = fh.read(chunk) + buf
+        lines = buf.decode("utf-8", errors="replace").splitlines()
+    return lines[-n:]
+
+
+def _prune_frontend_logs(keep: int = _FRONTEND_LOG_KEEP) -> None:
+    """frontend_*.log 滚动：保留最近 keep 份（按 mtime），超出清理（TICKET-O7-1）。
+
+    清理失败静默降级，不影响前端启动主流程。
+    """
+    from pathlib import Path
+    try:
+        logs = sorted(
+            (p for p in Path(_LOG_DIR).glob("frontend_*.log") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in logs[keep:]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def _find_tui_path():
+    """查找 TUI entry.js：pip installed → dev clone → cwd（TICKET-O7 提取，便于测试注入）。"""
+    from pathlib import Path
+    candidates = [
+        Path(__file__).parent / "static" / "entry.js",        # pip installed
+        Path(__file__).parent.parent / "ui-tui" / "dist" / "entry.js",  # dev clone
+        Path.cwd() / "ui-tui" / "dist" / "entry.js",         # cwd
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 def main():
     # 当用户直接运行 `bobo` 命令时，启动 TUI 前端
     import signal
     import subprocess
     import sys
-    from pathlib import Path
 
     # 如果已经是 TUI 的后端进程，直接进入后端逻辑
     if os.environ.get("BOBO_BACKEND"):
         _run_backend()
         return
 
-    # 查找 TUI 文件
-    candidates = [
-        Path(__file__).parent / "static" / "entry.js",        # pip installed
-        Path(__file__).parent.parent / "ui-tui" / "dist" / "entry.js",  # dev clone
-        Path.cwd() / "ui-tui" / "dist" / "entry.js",         # cwd
-    ]
-    tui_path = None
-    for p in candidates:
-        if p.exists():
-            tui_path = p
-            break
+    tui_path = _find_tui_path()
 
     if tui_path:
         # 忽略 Ctrl+C — 让 TUI 前端处理中断
@@ -178,10 +228,27 @@ def main():
         # SIG_IGN 会被 Node 子进程继承，导致 Apple Terminal 上中文 IME
         # 组合事件异常（光标跳、文字重叠、多换行）。preexec_fn 在子进程
         # exec 前恢复 SIGINT 为默认——父进程仍然忽略 Ctrl+C。
+        #
+        # ── TICKET-O7-1：黑匣子 —— node 前端 stderr 持久化 ──────────
+        # 前端 pid 在 Popen 前未知，先用临时名开文件；Popen 拿到 pid 后
+        # rename 成 frontend_<pid>.log。rename 不改变已打开 fd 指向的
+        # inode，node 的 stderr 持续落盘。异常退出时 gateway 负责把
+        # stderr 尾部内联进 bobo.log（TICKET-O7-2）。
+        _prune_frontend_logs()
+        frontend_tmp = os.path.join(
+            _LOG_DIR, f"frontend_{int(time.time() * 1000)}.tmp")
+        frontend_fh = open(frontend_tmp, "ab")
+        frontend_fh.write(
+            ("=== frontend stderr log started at %s ===\n"
+             % datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+             ).encode("utf-8", errors="replace"))
+        frontend_fh.flush()
         try:
             proc = subprocess.Popen(["node", str(tui_path)], env=env,
+                                    stderr=frontend_fh,
                                     preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
         except FileNotFoundError:
+            frontend_fh.close()
             print("=" * 60)
             print("  未检测到 Node.js — Bobo TUI 依赖 Node.js 运行")
             print("=" * 60)
@@ -193,7 +260,27 @@ def main():
             print("  安装 Node.js 后重新运行 bobo。")
             print("=" * 60)
             sys.exit(1)
-        proc.wait()
+        frontend_log = os.path.join(_LOG_DIR, f"frontend_{proc.pid}.log")
+        try:
+            os.rename(frontend_tmp, frontend_log)
+        except OSError:
+            frontend_log = frontend_tmp  # rename 失败则保持临时名，日志仍有效
+        logger.info("前端子进程启动 pid=%s stderr=%s", proc.pid, frontend_log)
+        code = proc.wait()
+        frontend_fh.flush()
+        if code != 0:
+            # frontend_fh 是 "ab" 追加写模式，不可读；CRITICAL 内联用只读 fd 重开
+            try:
+                with open(frontend_log, "rb") as _rf:
+                    tail = "\n".join(_tail_lines(_rf, 50))
+            except OSError:
+                tail = ""
+            logger.critical(
+                "前端子进程异常退出 pid=%s code=%s stderr_tail(50):\n%s",
+                proc.pid, code, tail or "(无 stderr 输出)")
+        else:
+            logger.info("前端子进程正常退出 pid=%s", proc.pid)
+        frontend_fh.close()
         return
 
     # 找不到 TUI
