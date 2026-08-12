@@ -249,13 +249,19 @@ class PromptInjector:
 
         # ── 票 TICKET-P1：日期时间锚点（常驻，全模式一致，≤60字符）──
         # 每轮组装时取当前时间，紧跟 L0 selfmap 之后注入；计入 prompt.budget。
+        # 锚点行 ≤60 字符；附引导行：日期/星期/时间问题直接引用锚点，禁调工具
+        # （E1 首跑实证：无引导时 get_current_time 工具描述诱导必调工具）。
         _now_anchor = _build_now_anchor()
         if _now_anchor:
+            _now_block = (
+                _now_anchor + "\n"
+                "回答日期/星期/时间类问题直接引用上方 [NOW] 锚点，禁止为此调用工具。"
+            )
             messages.insert(2, {
                 "role": "system",
-                "content": _now_anchor,
+                "content": _now_block,
             })
-            budget_stats["now"] = {"chars": len(_now_anchor)}
+            budget_stats["now"] = {"chars": len(_now_block)}
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
         # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，

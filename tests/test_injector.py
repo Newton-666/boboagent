@@ -201,18 +201,22 @@ class TestNowAnchor:
         assert anchor is not None, "messages 中未找到 [NOW] 锚点"
 
     def test_anchor_format(self, injector):
-        """格式正确：`[NOW] YYYY-MM-DD HH:MM Weekday (Asia/Shanghai)`，≤60 字符。"""
+        """格式正确：首行 `[NOW] YYYY-MM-DD HH:MM Weekday (Asia/Shanghai)` ≤60 字符。"""
         msgs = self._build(injector)
         anchor = self._find_anchor(msgs)
         assert anchor is not None
-        assert len(anchor) <= 60, f"锚点超长: {len(anchor)}"
+        first_line = anchor.splitlines()[0]
+        assert len(first_line) <= 60, f"锚点行超长: {len(first_line)}"
         import re
         pat = (
             r"^\[NOW\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} "
             r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) "
             r"\(Asia/Shanghai\)$"
         )
-        assert re.match(pat, anchor), f"格式不符: {anchor}"
+        assert re.match(pat, first_line), f"格式不符: {first_line}"
+        # 引导行：日期/星期/时间问题直接引用锚点，禁调工具（E1 硬指标）
+        assert "引用上方 [NOW] 锚点" in anchor
+        assert "禁止为此调用工具" in anchor
 
     def test_anchor_tracks_time(self, monkeypatch, injector):
         """随时间变化：固定不同时间点，锚点输出跟随变化。"""
