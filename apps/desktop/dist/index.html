@@ -104,6 +104,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .think-dot:nth-child(3) { animation-delay:0.4s; }
 .think-box .think-text { white-space:pre-wrap; word-break:break-word; line-height:1.5; }
 @keyframes thinkPulse { 0%,60%,100% { opacity:0.2; transform:scale(1); } 30% { opacity:1; transform:scale(1.3); } }
+/* TICKET-GUI-F1 (F1-2): thinking 折叠态 —— 默认收起只留摘要行，点击展开（样式沿用 think-box 体系，视觉零新增） */
+.think-box.collapsed { display:block; cursor:pointer; user-select:none; }
+.think-box.collapsed .think-text { display:none; }
 .status { font-size:12px; color:var(--text2); text-align:center; padding:4px; }
 /* Code blocks */
 .code-block-wrapper { margin:8px 0; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
@@ -1093,6 +1096,46 @@ function createThinkBox() {
   return tb;
 }
 
+// TICKET-GUI-F1 (F1-2): 从 final_text 剥离思考段（── 💭 思考过程 ── ... [── 思考结束 ──]）
+// 返回 { body: 正文, thinking: 思考内容 }。无思考段则 body=全文、thinking=''。
+function splitThinking(s) {
+  if (!s) return { body: '', thinking: '' };
+  var m = s.match(/(?:^|\n)──\s*💭\s*思考过程\s*──\n([\s\S]*?)(?:──\s*思考结束\s*(?:──)?[^\n]*\n?)?$/);
+  if (m) {
+    return { body: s.slice(0, m.index).trim(), thinking: m[1].trim() };
+  }
+  return { body: s.trim(), thinking: '' };
+}
+// F1-2: 流式 thinking 框 → 折叠摘要框（清 timer/动画，label 变摘要行，内容保留）
+function collapseThinkBox(tb, thinkingText) {
+  if (!tb) return;
+  if (tb._warnTimer) clearTimeout(tb._warnTimer);
+  if (tb._killTimer) clearTimeout(tb._killTimer);
+  tb._warnTimer = null; tb._killTimer = null;
+  var dots = tb.querySelectorAll('.think-dot');
+  for (var i = 0; i < dots.length; i++) dots[i].remove();
+  var stopBtn = tb.querySelector('.think-stop');
+  if (stopBtn) stopBtn.remove();
+  var label = tb.querySelector('.think-label');
+  if (label) label.innerHTML = '<span>💭 思考过程</span><span class="tool-toggle">▸</span>';
+  var txt = tb.querySelector('.think-text');
+  if (txt) txt.textContent = thinkingText || '';
+  tb.classList.remove('show');
+  tb.classList.add('collapsed');
+  tb.onclick = function(e) {
+    // 点内容文本时允许选择，不触发折叠切换
+    if (e && e.target && e.target.closest && e.target.closest('.think-text')) return;
+    toggleThinkBox(tb);
+  };
+}
+// F1-2: 折叠/展开切换（▸/▾）
+function toggleThinkBox(tb) {
+  if (!tb) return;
+  var nowShow = tb.classList.toggle('show');
+  tb.classList.toggle('collapsed', !nowShow);
+  var toggle = tb.querySelector('.tool-toggle');
+  if (toggle) toggle.textContent = nowShow ? '▾' : '▸';
+}
 function stopThinking() {
   showStop(false);   // TICKET-D1d ⑤
   if (thinkBoxEl) {
@@ -1131,9 +1174,20 @@ on('message.complete', function(data) {
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
   toolIdCounter = 0;
   var t = data ? data.final_text || '' : '';
-  if (t && t.trim()) {
-    if (thinkBoxEl) { thinkBoxEl.remove(); thinkBoxEl = null; }
-    addMsg('bobo', t, 'msg-' + Date.now());
+  // TICKET-GUI-F1 (F1-2): 剥离思考段（── 💭 思考过程 ── ...）收进蓝色框默认折叠，正文零泄漏
+  var split = splitThinking(t);
+  var body = split.body;
+  var thinking = split.thinking;
+  if (body && body.trim()) {
+    if (thinking && thinkBoxEl) {
+      collapseThinkBox(thinkBoxEl, thinking);
+    } else if (thinkBoxEl) {
+      thinkBoxEl.remove(); thinkBoxEl = null;
+    }
+    addMsg('bobo', body, 'msg-' + Date.now());
+  } else if (thinking && thinkBoxEl) {
+    // 纯工具回合：只有思考无正文 → 保留折叠框
+    collapseThinkBox(thinkBoxEl, thinking);
   } else if (toolsWereCalled && thinkBoxEl) {
     // All tool calls done with no final text — clean up think box
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
@@ -1170,10 +1224,33 @@ on('tool.complete', function(data) {
 // TICKET-D1d ④: 模式徽标 —— AUTO / OFFICE 实时指示（对齐 TUI 底部状态栏）
 on('session.auto_state', function(data) { setMode(data && data.on ? 'auto' : ''); });
 on('session.office_state', function(data) { setMode(data && data.on ? 'office' : ''); });
+// TICKET-GUI-F1 (F1-3): 引擎内部诊断类状态不进消息区 —— thinking 阶段（tool_filter/calling_llm/
+// executing_tools/executing/continuing/compressing/cross_search）由 engine_adapter 转发为
+// status.update，TUI 侧只在思考区/状态栏快闪；GUI 若 addStatus 会每轮永久堆积成状态轰炸。
+// 统一按 kind 黑名单过滤 + 文本正则兜底（防御文本变化），保留 undo/rate_limit/turn_summary 等用户可见状态。
+var STATUS_DIAG_KINDS = {
+  tool_filter: 1, calling_llm: 1, executing_tools: 1, executing: 1,
+  continuing: 1, compressing: 1, cross_search: 1
+};
 on('status.update', function(data) {
   var t = data ? data.text || '' : ''; if (!t) return;
-  if (t.indexOf('准备执行')===0 || t.indexOf('并行执行')===0) return;
-  if (t === '工具执行完成' || t === '正在思考...') return;
+  var kind = data ? data.kind || '' : '';
+  if (STATUS_DIAG_KINDS[kind]) return;
+  // F1-3 文本兜底：诊断类文本（kind 缺失或新 phase）同样拦截
+  if (/^加载 \d+ 个工具 \(/.test(t)) return;
+  if (/^准备执行 \d+ 个工具/.test(t) || /^并行执行 \d+ 个工具/.test(t)) return;
+  if (t === '工具执行完成' || t === '正在思考...' || /^已用 \d+\/\d+ 步$/.test(t)) return;
+  if (/^正在压缩历史上下文/.test(t) || /^搜索 '.*' 跨平台/.test(t)) return;
+  // heartbeat：周期性活性提示（15s 一次）——连续同条不追加、同前缀替换上一条，防长任务堆叠
+  if (kind === 'heartbeat' || t.indexOf('仍在工作') === 0) {
+    var lastSt = chatEl.lastElementChild;
+    if (lastSt && lastSt.classList.contains('status')) {
+      if (lastSt.textContent === t) return;
+      if (lastSt.textContent.indexOf('仍在工作') === 0) {
+        lastSt.textContent = t; chatEl.scrollTop = chatEl.scrollHeight; return;
+      }
+    }
+  }
   addStatus(t);
 });
 on('backend.exited', function(data) {
@@ -1295,7 +1372,14 @@ function handleSlash(cmd) {
   return false;
 }
 
+// TICKET-GUI-F1 (F1-1): 输入法组词标志 —— 组词中任何回车/发送都不触发，交给 IME 上屏
+var imeComposing = false;
+inputEl.addEventListener('compositionstart', function() { imeComposing = true; });
+inputEl.addEventListener('compositionend', function() { imeComposing = false; });
+
 sendEl.addEventListener('click', function() {
+  // F1-1: 输入法组词中点发送按钮 → 拦截（半成品拼音不上屏）
+  if (imeComposing) return;
   var text = inputEl.value.trim(); if (!text || !connected || messaging) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
@@ -1306,6 +1390,8 @@ sendEl.addEventListener('click', function() {
   sendPrompt(text);
 });
 inputEl.addEventListener('keydown', function(e) {
+  // F1-1: 组词中（isComposing / keyCode 229 / imeComposing 任一命中）回车不发送，上屏选词交给输入法
+  if (e.isComposing || e.keyCode === 229 || imeComposing) return;
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendEl.click(); }
 });
 // Auto-height textarea
