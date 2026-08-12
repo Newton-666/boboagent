@@ -148,6 +148,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
         self._ledger_reminded: bool = False  # 票Z 缝1：无账提醒标记
+        self._ledger_backfill_suspect: bool = False  # 票 O8-2：事后补账嫌疑（工具轮批量创建即全 done）
         # 主动模式管理器（含记忆连接 + 参与度追踪）
         self.proactive = ProactiveManager(llm_caller=self.llm_caller)
         # 技能标准加载器
@@ -604,6 +605,20 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if missing:
                 issues.append({"id": e.get("id", "?"), "missing": missing})
         return issues
+
+    def _detect_ledger_backfill(self, prev_ledger: list, tool_names: list) -> bool:
+        """票 O8-2：事后补账判定内核（收工闸补账闸的检测）。
+
+        补账特征：本工具轮含 task_ledger 调用，且创建前台账为空（无历史轮次 = 非 resume），
+        轮末新台账 >=2 项且 done 占比 >=80%（全部/大部直接标 done，创建与 done 无中间轮次）。
+        resume 恢复既有台账（create 前已有非空台账 = 有历史轮次）→ 豁免，返回 False。
+        """
+        if "task_ledger" not in tool_names:
+            return False
+        if prev_ledger or len(self.task_ledger) < 2:
+            return False
+        done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
+        return done_cnt >= max(1, int(len(self.task_ledger) * 0.8))
 
     @staticmethod
     def _parse_frontmatter_list(text: str, key: str) -> list[str]:
@@ -1473,9 +1488,42 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         })
                                         warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
                                         self._pending_content = (self._pending_content or "") + warning
-                    # ── 票 C 收工闸 auto 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
-                    # auto off → 整段物理跳过，普通模式连判定都不经过（零影响铁律）。
-                    if self._auto_mode_getter is not None and self._auto_mode_getter():
+                    # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
+                    # 激活条件（票 O8-1）：auto on 或 office on（会话级 get_office_on）。
+                    # 普通模式（两者皆无）→ 整段物理跳过，连判定都不经过（零影响铁律）。
+                    _gate_active = (self._auto_mode_getter is not None and self._auto_mode_getter())
+                    _gate_label = "AUTO MODE"
+                    if not _gate_active:
+                        try:
+                            from bobo_tui_gateway.server import get_office_on as _get_office_on
+                            _gate_active = bool(_get_office_on(getattr(self, "sid", "")))
+                            if _gate_active:
+                                _gate_label = "OFFICE MODE"
+                        except Exception:
+                            _gate_active = False
+                    if _gate_active:
+                        # ── 票 O8-2：补账检测闸（先于字段闸：批量创建即全 done = 事后补登记）──
+                        # deny + history 追加指令（要求列出下一步真实待办）+ goal_gate.deny
+                        # 审计（reason=ledger_backfill）。resume 豁免由 _detect_ledger_backfill
+                        # 的 prev 非空判定保证（有历史轮次 → 不置嫌疑）。
+                        if self._ledger_backfill_suspect:
+                            rej_msg = (
+                                f"{_gate_label} 收工拒绝（补账检测）：台账 {len(self.task_ledger)} 项在本轮"
+                                "批量创建且全部/大部直接标 done，无中间施工轮次——视为事后补登记。"
+                                "请用 task_ledger update 将未完成项改为 pending 并列出下一步真实待办"
+                                "（verify/evidence 按字段闸要求补齐），然后继续。不要说明、不要道歉，直接做。"
+                            )
+                            self._append_to_history("user", rej_msg)
+                            self._pending_content = None
+                            self._pending_tool_calls = None
+                            self.current_depth += 1
+                            event_bus.write("goal_gate.deny", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "ledger_backfill",
+                                "items": len(self.task_ledger),
+                            })
+                            self._emit_state_change(self.STATE_THINKING, "ledger backfill deny")
+                            return
                         field_issues = self._ledger_field_issues()
                         if field_issues:
                             # ── 票 G2-2：字段闸死锁安全阀（原无熔断上限 → 3 次降级 / 5 次强制放行）──
@@ -1493,14 +1541,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 })
                                 _ids = ", ".join(f'{i["id"]}' for i in field_issues)
                                 warning = (
-                                    f"\n\n⚠️ AUTO MODE 字段闸连续 deny {self._ledger_field_deny_count} 次，"
+                                    f"\n\n⚠️ {_gate_label} 字段闸连续 deny {self._ledger_field_deny_count} 次，"
                                     f"引擎强制放行（审计：item {_ids} 仍缺字段）"
                                 )
                                 self._pending_content = (self._pending_content or "") + warning
                             elif self._ledger_field_deny_count >= 3:
                                 # 第 3 次起降级：补字段 或 转 pending 交接/上报调度员
                                 rej_msg = (
-                                    f"AUTO MODE 收工拒绝（第 {self._ledger_field_deny_count} 次）："
+                                    f"{_gate_label} 收工拒绝（第 {self._ledger_field_deny_count} 次）："
                                     f"台账 {len(field_issues)} 项缺字段（{_parts}）。"
                                     "请用 task_ledger update 补齐 verify（怎么算做完/怎么验证）与 done 项的 "
                                     "evidence（完成证据），或将该 item update 写明卡点转 pending 交接/上报调度员，"
@@ -1521,7 +1569,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             else:
                                 # 第 1-2 次：原语义 deny（安全阀兜底前）
                                 rej_msg = (
-                                    f"AUTO MODE 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
+                                    f"{_gate_label} 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
                                     "请用 task_ledger update "
                                     "补齐 verify（怎么算做完/怎么验证）与 done 项的 evidence（完成证据），"
                                     "或删除该项，然后继续。不要说明、不要道歉，直接做。"
@@ -1648,12 +1696,28 @@ class Engine(ContextMixin, ToolRunnerMixin):
             # task_ledger 工具在 ToolRunnerMixin 提供的 Engine 上下文中
             # 已经直接修改了 self.task_ledger；若当前线程仍存在上下文（旧测试/直接调用），
             # 则回退同步模块级变量。
+            _prev_ledger = list(self.task_ledger)
             try:
                 from tools.task_ledger import current_engine_var, _current_ledger
                 if current_engine_var.get() is not None:
                     self.task_ledger = list(_current_ledger())
             except Exception:
                 pass
+            # ── 票 O8-2：事后补账检测（紧跟同步，先于一切收工判定）──
+            # 工具轮含 task_ledger → 重新评估补账嫌疑：create 前台账为空（无历史轮次，
+            # 非 resume）+ 新账 >=2 项且 done 占比 >=80%（全部/大部直接标 done）→ 嫌疑。
+            # resume 恢复既有台账（create 前已有非空台账 = 有历史轮次）→ 豁免。
+            # agent 修正（update 出 pending 项 / create 含 pending）→ 自动清除嫌疑。
+            # 不含 task_ledger 的工具轮 → 嫌疑保持不变（防绕过：不动账直接收工仍被 deny）。
+            if self._pending_tool_calls:
+                _tc_names = [
+                    tc.get("function", {}).get("name", "")
+                    for tc in self._pending_tool_calls
+                ]
+                if "task_ledger" in _tc_names:
+                    self._ledger_backfill_suspect = self._detect_ledger_backfill(
+                        _prev_ledger, _tc_names
+                    )
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls)
             self._append_to_history("tool", tool_results=tool_results)
