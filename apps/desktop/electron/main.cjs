@@ -53,7 +53,12 @@ function startBackend() {
     BOBO_BACKEND: '1',
     PYTHONPATH: projectRoot,
     BOBO_CWD: process.cwd(),
-    BOBO_DATA_DIR: process.env.BOBO_DATA_DIR || path.join(require('os').homedir(), '.bobo'),
+  }
+  // TICKET-D1c (E3): dev 模式不强制 BOBO_DATA_DIR —— 让 config.py 自动判定
+  // （仓库 data/ 存在 → 仓库 data/，与 TUI dev 一致）；packaged 模式才固定
+  // ~/.bobo（与 TUI 生产安装一致）。两端数据目录统一，会话/记忆/知识库共享。
+  if (isPackaged) {
+    env.BOBO_DATA_DIR = process.env.BOBO_DATA_DIR || path.join(require('os').homedir(), '.bobo')
   }
   for (const k of ['BOBO_GW_SOCKET', 'BOBO_SESSION_DIR']) {
     delete env[k]
