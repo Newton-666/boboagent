@@ -1691,12 +1691,17 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     self._emit_state_change(self.STATE_THINKING, "retry after verification")
                     return
 
+            # ── 票 O9：台账基线快照必须在工具执行前 ──
+            # O8-2 判定内核前提是"create 前台账为空（无历史轮次 = 非 resume）"。
+            # 原实现把 _prev_ledger 放在 _execute_tool_loop 之后快照——task_ledger
+            # 工具执行后 engine.task_ledger 已被替换为新账（同轮批量建账全 done），
+            # prev 非空 → 误判为 resume 豁免 → 补账闸永不触发（A2 FAIL 根因，TICKET-O9）。
+            _prev_ledger = list(self.task_ledger)
             tool_results = self._execute_tool_loop(self._pending_tool_calls)
             # ── 票 K v2 + L：工具执行后同步台账 ──
             # task_ledger 工具在 ToolRunnerMixin 提供的 Engine 上下文中
             # 已经直接修改了 self.task_ledger；若当前线程仍存在上下文（旧测试/直接调用），
             # 则回退同步模块级变量。
-            _prev_ledger = list(self.task_ledger)
             try:
                 from tools.task_ledger import current_engine_var, _current_ledger
                 if current_engine_var.get() is not None:

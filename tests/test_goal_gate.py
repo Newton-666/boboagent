@@ -407,3 +407,61 @@ class TestNoLedgerHardGate:
         # 验证 goal_gate.no_ledger_detected 事件落地
         detected = [e for e in events if e[0] == "goal_gate.no_ledger_detected"]
         assert len(detected) >= 1, "完成词不豁免，应仍触发 no_ledger_detected 事件"
+
+
+class TestBackfillDetectionO9:
+    """票 O-9 回归：同轮批量建账全 done → 补账嫌疑置位（基线快照必须在工具执行前）。
+
+    血案：EV-1 首跑 A2——_prev_ledger 在 _execute_tool_loop 之后快照，
+    工具已替换 engine.task_ledger → prev 非空 → 误判 resume 豁免 → 闸不响。
+    """
+
+    def test_same_round_batch_create_all_done_flags_suspect(self, monkeypatch):
+        fake_llm = FakeLLMCaller([
+            (None, [_make_tool_call("call_1", "task_ledger", {"action": "create"})]),
+            ("台账已建立，3 项全部标 done。全部完成", None),
+            ("补上 pending 项", None),
+        ])
+        fake_tools = FakeToolExecutor({"task_ledger": "ok"})
+        engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
+
+        # 模拟真实 task_ledger 工具副作用：执行时把 engine.task_ledger 替换为
+        # 同轮新建且全 done 的台账（O-9 事故现场）
+        _inner = [engine.tool_executor]
+        class _LedgerExecutor:
+            def __call__(self, tool_name, args):
+                r = _inner[0](tool_name, args)
+                engine.task_ledger = [
+                    {"id": "1", "title": "t1", "status": "done", "verify": "v", "evidence": "e"},
+                    {"id": "2", "title": "t2", "status": "done", "verify": "v", "evidence": "e"},
+                    {"id": "3", "title": "t3", "status": "done", "verify": "v", "evidence": "e"},
+                ]
+                return r
+        engine.tool_executor = _LedgerExecutor()
+
+        engine.run(user_input="把这3件事补登记一下，都完成了")
+
+        assert engine._ledger_backfill_suspect is True, (
+            "O-9 回归：同轮批量建账全 done 必须置位 _ledger_backfill_suspect"
+        )
+
+    def test_resume_existing_ledger_exempt(self, monkeypatch):
+        """对照组：create 前已有非空台账（resume 恢复）→ 豁免不置位"""
+        engine = _make_test_engine(FakeLLMCaller([("x", None)]), FakeToolExecutor({}), monkeypatch)
+        engine.task_ledger = [
+            {"id": "1", "title": "t1", "status": "done"},
+            {"id": "2", "title": "t2", "status": "done"},
+        ]
+        prev = list(engine.task_ledger)  # 工具执行前快照（非空 = 有历史）
+        engine.task_ledger = prev + [{"id": "3", "title": "t3", "status": "done"}]
+        assert engine._detect_ledger_backfill(prev, ["task_ledger"]) is False
+
+    def test_partial_done_not_backfill(self, monkeypatch):
+        """对照组：同轮建账但含 pending 项（真实计划）→ 不置位"""
+        engine = _make_test_engine(FakeLLMCaller([("x", None)]), FakeToolExecutor({}), monkeypatch)
+        engine.task_ledger = [
+            {"id": "1", "title": "t1", "status": "done"},
+            {"id": "2", "title": "t2", "status": "pending"},
+            {"id": "3", "title": "t3", "status": "pending"},
+        ]
+        assert engine._detect_ledger_backfill([], ["task_ledger"]) is False
