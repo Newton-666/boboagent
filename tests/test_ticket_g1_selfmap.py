@@ -97,17 +97,21 @@ class TestSyncLock:
         assert injector_mod._extract_selfmap_l0() == _mother_l0()
 
     def test_l0_claims_trace_to_chapters(self):
-        """L0 每个声明可追溯到 SELF.md 章节（claim → 章节 + 章内支撑关键词）"""
+        """L0 每个声明可追溯到 SELF.md 章节（claim → 章节 + 章内支撑关键词）
+
+        注：claim 取自 SELF.md 修订后 L0 段实际文本（Kimi 54e55a2 压缩措辞，
+        语义不变）；若母文档再次修订措辞，此处需同步适配。
+        """
         claims = [
             # (L0 声明, 目标章节, 章内支撑关键词)
-            ("engine (decisions + gates", "2. Architecture map", "engine"),
-            ("gateway (sessions/rpc", "2. Architecture map", "gateway"),
+            ("engine (gates, core/engine.py)", "2. Architecture map", "engine"),
+            ("gateway (sessions, bobo_tui_gateway/", "2. Architecture map", "gateway"),
             ("TUI (ui-tui)", "2. Architecture map", "TUI"),
-            ("describe_tool if unsure", "3. Capabilities", "describe_tool"),
+            ("the request schema; never guess", "3. Capabilities", "describe_tool"),
             ("decision chain", "4. Boundaries and enforcement", "decision chain"),
             ("protected_paths read-only", "4. Boundaries and enforcement", "protected_paths"),
             ("without a ticket", "4. Boundaries and enforcement", "ticket"),
-            ("Mode is told by injected notices", "4. Boundaries and enforcement", "BOBO_ROLE"),
+            ("Mode from injected notices", "4. Boundaries and enforcement", "BOBO_ROLE"),
             ("report honestly", "6. Honest limits", "Honest"),
         ]
         for claim, chapter_marker, keyword in claims:
