@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/niuqingwei/bobo-agent"
+Homepage = "https://github.com/Newton-666/boboagent"
 
 [project.scripts]
 bobo = "bobo_tui_gateway.entry:main"

@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/Newton-666/boboagent/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-1407%20passed-brightgreen.svg" alt="1407 Tests Passed"></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-2016%20passed-brightgreen.svg" alt="2016 Tests Passed"></a>
 </p>
 
 ---
@@ -159,20 +159,29 @@ Talk to Bobo: "connect Notion" — it'll ask for your Notion API key.
 ## Architecture
 
 ```
-bobo (CLI)
-  └── ui-tui/              Hermes TUI frontend (React/Ink/TypeScript)
-        └── spawns python backend via JSON-RPC over stdin/stdout
-              └── core/    Agent engine
-                    ├── engine.py      State machine, skill injection
-                    ├── context.py     Dynamic context budget, token estimation
-                    ├── tool_runner.py Parallel execution, result marking
-                    ├── llm_caller.py  API caller with streaming + retry
-                    ├── provider.py    8 built-in providers
-                    └── session_manager.py  Atomic persistence
-              └── tools/              79 auto-discovered tools with gating
-              └── data/skill-standards/ Preset workflow standards (auto-discovered)
-              └── ~/.bobo/             User config + data directory
+bobo (CLI)   entry: bobo_tui_gateway.entry:main
+  └── bobo_tui_gateway/   Python gateway (JSON-RPC over stdio/socket)
+        ├── entry.py       main: 无 BOBO_BACKEND → spawn node TUI; 有 → _run_backend()
+        ├── server.py      JSON-RPC server
+        ├── transport.py   stdio/socket transport
+        ├── server_utils.py
+        └── handlers/      Per-domain handlers (configs/misc/models/prompts/sessions/tools)
+        └── spawns node ui-tui/dist/entry.js (TUI frontend)
+              └── ui-tui/              Hermes TUI frontend (React/Ink/TypeScript)
+                    └── gatewayClient.ts spawns `python -m bobo_tui_gateway.entry` (BOBO_BACKEND=1) via JSON-RPC
+                          └── core/    Agent engine
+                                ├── engine.py      State machine, skill injection
+                                ├── context.py     Dynamic context budget, token estimation
+                                ├── tool_runner.py Parallel execution, result marking
+                                ├── llm_caller.py  API caller with streaming + retry
+                                ├── provider.py    8 built-in providers
+                                └── session_manager.py  Atomic persistence
+                          └── tools/              82 auto-discovered tools with gating
+                          └── data/skill-standards/ Preset workflow standards (auto-discovered)
+                          └── ~/.bobo/             User config + data directory
 ```
+
+注：core/、tools/ 实际位于仓库根目录（与 ui-tui/、bobo_tui_gateway/ 平级），缩进仅为展示调用层级。
 
 ---
 
@@ -183,7 +192,7 @@ git clone https://github.com/Newton-666/boboagent.git
 cd boboagent
 pip install -e ".[dev]"
 
-# Run tests (no API key needed, 1407 passed, 2 skipped)
+# Run tests (no API key needed, 2016 passed, 2 skipped)
 pytest tests/ -q
 ```
 
