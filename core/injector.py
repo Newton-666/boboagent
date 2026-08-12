@@ -6,6 +6,7 @@
 
 import json
 import os as _os
+import re as _re
 import logging
 import time as _time
 from datetime import datetime as _datetime
@@ -47,6 +48,77 @@ def _load_guidance() -> str | None:
             _GUIDANCE_CACHE["mtime"] = -1
             return None
     return _GUIDANCE_CACHE["content"]
+
+
+# ── 票 TICKET-G1（母子结构 v2）：SELF.md 母文档同源读取 ──
+# 母文档 docs/SELF.md 已由 owner/Kimi 定稿（不许改写），本票只交付机制：
+# L0 常驻注入 = 顶部 [SELF] 代码块原文（逐字节，不许摘要/改写——母子同源）。
+# 章节触发展开 = §2 架构 / §4 边界 / §5 自救，关键词命中才注入该章全文。
+_SELF_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "docs", "SELF.md")
+_SELF_CACHE: dict = {"mtime": -1, "content": None}
+
+# 章节触发展开：主题 → (章节号, 触发关键词表)。关键词命中 user_input 或
+# 最近 history 即注入该章全文；无触发则零注入（对照组铁律）。
+_SELF_CHAPTER_TRIGGERS = {
+    "arch":   {"title": "2. Architecture map",   "keywords": ("engine", "gateway", "tui", "injector", "architecture", "架构", "rpc", "session", "decision chain", "闸", "_confirm", "command_safety")},
+    "boundary": {"title": "4. Boundaries and enforcement", "keywords": ("ticket", "authorized_paths", "protected", "read-only", "boundary", "边界", "执法", "role", "角色", "豁免", "越权", "exemption")},
+    "rescue": {"title": "5. Failure self-rescue", "keywords": ("crash", "崩溃", "排查", "forensics", "自救", "log", "evidence", "复现", "escalate", "升级", "测试汇报", "fabricat")},
+}
+
+
+def _load_selfmap() -> str | None:
+    """读 docs/SELF.md 全文（mtime 缓存），缺失/不可读返回 None。
+
+    与 _load_guidance 同模式：每轮只做一次 _os.stat，文件不变不重复读盘。
+    """
+    try:
+        st = _os.stat(_SELF_PATH)
+    except OSError:
+        _SELF_CACHE["content"] = None
+        _SELF_CACHE["mtime"] = -1
+        return None
+    if st.st_mtime != _SELF_CACHE.get("mtime"):
+        try:
+            with open(_SELF_PATH, encoding="utf-8") as f:
+                _SELF_CACHE["content"] = f.read()
+            _SELF_CACHE["mtime"] = st.st_mtime
+        except OSError:
+            _SELF_CACHE["content"] = None
+            _SELF_CACHE["mtime"] = -1
+            return None
+    return _SELF_CACHE["content"]
+
+
+def _extract_selfmap_l0() -> str | None:
+    """提取 SELF.md 顶部 [SELF] 代码块原文（逐字节，含 [SELF] 前缀）。
+
+    同步锁：本函数返回值是唯一常驻注入源，测试断言与母文档逐字节一致。
+    块不存在时返回 None（静默降级，不注入也不炸）。
+    """
+    text = _load_selfmap()
+    if not text:
+        return None
+    m = _re.search(r"```\n(\[SELF\].*?)\n```", text, _re.S)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _extract_self_chapter(title_marker: str) -> str | None:
+    """提取 SELF.md 指定章全文（## <title_marker> 起到下一个 ## 或文末）。
+
+    用于 G1-2 章节触发展开：命中关键词才注入该章（L1 层，非常驻）。
+    """
+    text = _load_selfmap()
+    if not text:
+        return None
+    pat = _re.compile(rf"##\s+{_re.escape(title_marker)}.*?(?=\n##\s|\Z)", _re.S)
+    m = pat.search(text)
+    if not m:
+        return None
+    return m.group(0).strip()
 
 
 def _read_note_frontmatter(path) -> dict:
@@ -141,23 +213,19 @@ class PromptInjector:
             "guidance": {"chars": 0},
             "office": {"chars": 0},
             "selfmap": {"chars": 0},
+            "selfmap_chapters": {"chars": 0, "chapters": []},
         }
 
-        # ── 票 G1-1：L0 自我地图常驻注入（≤300 字符，五要素，无模式条件）──
-        # 对自我的认知不需要思考/检查——闸位置/边界/模式是肌肉记忆。
-        # 常驻：auto/office/普通模式一律注入；硬预算 ≤300 超出即测试失败。
-        _SELFMAP = (
-            "L0 SELF-MAP (know, no lookup): bobo inside the bobo harness. "
-            "Arch: engine (decide+enforce, _confirm) -> gateway (rpc) -> TUI (render). "
-            "Gates: all enforcement at engine decision chain; tickets authorize paths. "
-            "Boundary: protected_paths read-only. "
-            "Mode: banner announces auto/office; none = normal."
-        )
-        messages.insert(1, {
-            "role": "system",
-            "content": _SELFMAP,
-        })
-        budget_stats["selfmap"] = {"chars": len(_SELFMAP)}
+        # ── 票 G1-1（v2 母子结构）：L0 常驻注入 = SELF.md 顶部 [SELF] 块原文 ──
+        # 逐字节同源（不许改写/摘要）；缺失静默降级不注入。常驻无模式条件。
+        # 同步锁：注入文本 == _extract_selfmap_l0() == 母文档顶部块（测试断言）。
+        _l0 = _extract_selfmap_l0()
+        if _l0:
+            messages.insert(1, {
+                "role": "system",
+                "content": _l0,
+            })
+            budget_stats["selfmap"] = {"chars": len(_l0)}
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
         # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，
@@ -169,6 +237,31 @@ class PromptInjector:
                 "content": _guidance,
             })
             budget_stats["guidance"] = {"chars": len(_guidance)}
+
+        # ── 票 G1-2：章节触发展开（L1，SELF.md §2 架构/§4 边界/§5 自救）──
+        # 关键词命中 user_input 或最近 4 轮 history 才注入该章全文；无触发零注入。
+        # 对照组铁律：不命中关键词绝不展开（与 O4-2 同款零注入原则）。
+        _self_haystack = " ".join(
+            str(m.get("content", "")) for m in engine.history[-4:]
+        ) + " " + (user_input or "")
+        _self_haystack_l = _self_haystack.lower()
+        _selfmap_chapters = []
+        _selfmap_chapter_texts = {}
+        for _ckey, _ccfg in _SELF_CHAPTER_TRIGGERS.items():
+            if any(kw in _self_haystack_l for kw in _ccfg["keywords"]):
+                _chapter = _extract_self_chapter(_ccfg["title"])
+                if _chapter:
+                    _selfmap_chapter_texts[_ckey] = _chapter
+                    messages.insert(4, {
+                        "role": "system",
+                        "content": f"[SELF {_ccfg['title']}]\n{_chapter}",
+                    })
+                    _selfmap_chapters.append(_ckey)
+        if _selfmap_chapters:
+            budget_stats["selfmap_chapters"] = {
+                "chars": sum(len(t) for t in _selfmap_chapter_texts.values()),
+                "chapters": _selfmap_chapters,
+            }
 
         # ── 票 O4-2：OFFICE MODE 上下文告示（office_on 才注入；普通模式零注入）──
         # 对照组铁律：office off / 普通模式连字段都不读（不 import 读取器）——因此

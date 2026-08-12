@@ -1,15 +1,13 @@
-"""TICKET-G1 验收测试 — L0 自我地图常驻注入（F 卷雏形）。
+"""TICKET-G1（v2 母子结构）验收测试 — SELF.md 同源注入 + 章节触发 + 同步锁。
 
-覆盖票 G1-1/G1-2/G1-3 全部验收：
-1. L0 段存在：build_messages 产物含 "L0 SELF-MAP"
-2. 五要素齐全：身份/架构/闸位置/边界/模式 关键词都在
-3. 硬预算：段文本 ≤300 字符（超出即失败）
-4. 计入 budget：prompt.budget 事件 sections.selfmap.chars 正确
-5. 闭卷模拟：tools_schema=[]（无 describe_tool/读文件工具）上下文里，
-   注入段文本直接包含闸位置/边界/模式的答案要点（模型凭 L0 段可答，不翻文件）
-6. 常驻性：office on / auto on / 普通模式一律注入（无模式条件）
-7. GUIDANCE.md 顶部两行指针（宪章 + L0 分层说明）
+覆盖票 G1-1/G1-2/G1-3/G1-4 全部验收：
+- G1-1 同源注入：L0 常驻注入 = docs/SELF.md 顶部 [SELF] 代码块原文（逐字节，不许改写）
+- G1-2 章节触发展开：§2 架构/§4 边界/§5 自救，关键词命中才注入 + 无触发零注入对照
+- G1-3 GUIDANCE.md 顶部指针（宪章 + SELF L0 已常驻）
+- G1-4 同步锁：注入 L0 与母文档逐字节一致（漂移即红）；L0 声明可追溯到章节
 """
+
+import re
 
 import pytest
 
@@ -33,9 +31,10 @@ def silence_event_bus(monkeypatch):
 
 
 class MockEngine:
-    def __init__(self, load_standards_result=None):
-        self.history = [{"role": "user", "content": "hello world"}]
-        self.current_user_input = "测试"
+    def __init__(self, history=None, user_input="测试"):
+        self.history = history if history is not None else [
+            {"role": "user", "content": "hello world"}]
+        self.current_user_input = user_input
         self._pending_diff = ""
         self._compressing = False
         self._just_compressed = False
@@ -46,109 +45,161 @@ class MockEngine:
         self.skill_loader = type(
             "S",
             (),
-            {"load_standards": lambda self, _r=load_standards_result: _r or []},
+            {"load_standards": lambda self, _r=None: []},
         )()
 
 
 def _build(engine, tools_schema=None):
     return PromptInjector(engine).build_messages(
         system_prompt="You are Bobo.",
-        user_input="测试",
+        user_input=engine.current_user_input,
         tools_schema=tools_schema if tools_schema is not None else [],
         extra_categories=set(),
         session_id="s1",
     )
 
 
+def _mother_l0() -> str:
+    """直接从 SELF.md 提取顶部 [SELF] 代码块原文（测试侧的母文档参照）。"""
+    text = open(injector_mod._SELF_PATH, encoding="utf-8").read()
+    m = re.search(r"```\n(\[SELF\].*?)\n```", text, re.S)
+    assert m, "SELF.md 顶部 [SELF] 代码块缺失"
+    return m.group(1)
+
+
 def _selfmap_text(msgs):
-    """从 build_messages 产物中提取 L0 段文本；不存在返回 ''。"""
+    """提取 L0 常驻注入段文本（含 [SELF] 前缀）；不存在返回 ''。"""
     for m in msgs:
         c = m.get("content", "")
-        if "L0 SELF-MAP" in c:
+        if c.startswith("[SELF]"):
             return c
     return ""
 
 
-# ── G1-1：L0 段存在 + 五要素 + 硬预算 ──
+def _chapter_texts(msgs):
+    """提取所有 [SELF <章标题>] 触发展开段。"""
+    return [m.get("content", "") for m in msgs if "[SELF " in m.get("content", "")]
 
-class TestSelfmapSegment:
-    def test_selfmap_injected(self):
-        """L0 段存在：build_messages 产物含 'L0 SELF-MAP'"""
+
+# ── G1-4 同步锁（关键）──
+
+class TestSyncLock:
+    def test_l0_byte_identical_to_mother(self):
+        """同步锁：注入 L0 与 SELF.md 顶部块逐字节一致（改一边不改另一边 → 红）"""
+        injected = _selfmap_text(_build(MockEngine()))
+        assert injected, "L0 常驻注入缺失"
+        assert injected == _mother_l0(), (
+            "L0 注入与母文档漂移：injector 必须逐字节使用 SELF.md 顶部 [SELF] 块"
+        )
+
+    def test_extractor_matches_mother(self):
+        """提取器本身与母文档逐字节一致（机制层同步锁）"""
+        assert injector_mod._extract_selfmap_l0() == _mother_l0()
+
+    def test_l0_claims_trace_to_chapters(self):
+        """L0 每个声明可追溯到 SELF.md 章节（claim → 章节 + 章内支撑关键词）"""
+        claims = [
+            # (L0 声明, 目标章节, 章内支撑关键词)
+            ("engine (decisions + gates", "2. Architecture map", "engine"),
+            ("gateway (sessions/rpc", "2. Architecture map", "gateway"),
+            ("TUI (ui-tui)", "2. Architecture map", "TUI"),
+            ("describe_tool if unsure", "3. Capabilities", "describe_tool"),
+            ("decision chain", "4. Boundaries and enforcement", "decision chain"),
+            ("protected_paths read-only", "4. Boundaries and enforcement", "protected_paths"),
+            ("without a ticket", "4. Boundaries and enforcement", "ticket"),
+            ("Mode is told by injected notices", "4. Boundaries and enforcement", "BOBO_ROLE"),
+            ("report honestly", "6. Honest limits", "Honest"),
+        ]
+        for claim, chapter_marker, keyword in claims:
+            assert claim in _mother_l0(), f"L0 缺少声明: {claim}"
+            chap = injector_mod._extract_self_chapter(chapter_marker)
+            assert chap and keyword in chap, (
+                f"L0 声明 '{claim}' 的支撑关键词 '{keyword}' 不在 {chapter_marker} 章"
+            )
+
+
+# ── G1-1 常驻注入（同源）──
+
+class TestResidentInjection:
+    def test_selfmap_injected_any_mode(self):
+        """常驻：无模式条件，普通模式也注入 L0"""
         msgs = _build(MockEngine())
-        assert "L0 SELF-MAP" in _selfmap_text(msgs)
-
-    def test_five_elements_present(self):
-        """五要素齐全：身份/架构/闸位置/边界/模式"""
-        text = _selfmap_text(_build(MockEngine()))
-        # 1 身份
-        assert "bobo harness" in text
-        # 2 架构一句话
-        assert "engine" in text and "gateway" in text and "TUI" in text
-        assert "->" in text
-        # 3 闸位置：engine decision chain + tickets authorize paths
-        assert "engine decision chain" in text
-        assert "tickets authorize paths" in text
-        # 4 绝对边界：protected_paths read-only
-        assert "protected_paths read-only" in text
-        # 5 模式指针：banner announces auto/office; none = normal
-        assert "auto/office" in text
-        assert "none = normal" in text
-
-    def test_hard_budget_300_chars(self):
-        """硬预算：L0 段 ≤300 字符（预算即宪法原则一对上下文的态度）"""
-        text = _selfmap_text(_build(MockEngine()))
-        assert len(text) <= 300, f"L0 段 {len(text)} 字符超出 300 硬预算"
-
-    def test_always_injected_any_mode(self):
-        """常驻性：无模式条件——普通/office/auto 一律注入（本注入段无分支）"""
-        msgs = _build(MockEngine())
-        assert "L0 SELF-MAP" in _selfmap_text(msgs)
+        assert _selfmap_text(msgs).startswith("[SELF]")
 
     def test_budget_event_counts_selfmap(self, silence_event_bus):
-        """计入 budget：prompt.budget 事件 sections.selfmap.chars == 段文本长度"""
+        """计入 budget：prompt.budget sections.selfmap.chars == 母文档 L0 长度"""
         _build(MockEngine())
         budget_events = [d for t, d in silence_event_bus if t == "prompt.budget"]
         assert budget_events, "应写 prompt.budget 事件"
-        sections = budget_events[0]["sections"]
-        assert "selfmap" in sections
-        assert sections["selfmap"]["chars"] == len(
-            _selfmap_text(_build(MockEngine()))
-        )
+        assert budget_events[0]["sections"]["selfmap"]["chars"] == len(_mother_l0())
+
+    def test_missing_self_file_silent(self, monkeypatch):
+        """SELF.md 缺失：静默不注入也不炸（保守降级）"""
+        monkeypatch.setattr(injector_mod, "_SELF_PATH", "/nonexistent/SELF.md")
+        msgs = _build(MockEngine())
+        assert _selfmap_text(msgs) == ""
 
 
-# ── G1-3：闭卷模拟（F 卷雏形） ──
+# ── G1-2 章节触发展开 ──
 
-class TestClosedBookSimulation:
-    def test_closed_book_answers_gate_location(self):
-        """闭卷：无工具上下文，模型凭 L0 段可直接答闸位置（断言注入文本含要点）"""
-        msgs = _build(MockEngine(), tools_schema=[])  # 不挂任何工具
-        text = _selfmap_text(msgs)
-        assert "engine decision chain" in text
-        assert "tickets authorize paths" in text
+class TestChapterTriggers:
+    def test_arch_chapter_triggered_by_engine(self):
+        """§2 架构：user_input 含 'engine 闸' → 架构章全文注入"""
+        msgs = _build(MockEngine(user_input="engine 的闸在哪、decision chain 怎么走"))
+        chapters = " ".join(_chapter_texts(msgs))
+        assert "Architecture map" in chapters
+        assert "engine.py" in chapters
 
-    def test_closed_book_answers_boundary(self):
-        """闭卷：绝对边界答案在 L0 段内（protected_paths read-only）"""
-        msgs = _build(MockEngine(), tools_schema=[])
-        assert "protected_paths read-only" in _selfmap_text(msgs)
+    def test_boundary_chapter_triggered_by_ticket(self):
+        """§4 边界：user_input 含 'ticket authorized_paths' → 边界章注入"""
+        msgs = _build(MockEngine(user_input="ticket authorized_paths 怎么豁免 protected"))
+        chapters = " ".join(_chapter_texts(msgs))
+        assert "Boundaries and enforcement" in chapters
+        assert "authorized_paths" in chapters
 
-    def test_closed_book_answers_mode(self):
-        """闭卷：模式指针答案在 L0 段内（banner auto/office; none = normal）"""
-        msgs = _build(MockEngine(), tools_schema=[])
-        text = _selfmap_text(msgs)
-        assert "auto/office" in text and "none = normal" in text
+    def test_rescue_chapter_triggered_by_crash(self):
+        """§5 自救：user_input 含 '崩溃排查 log' → 自救章注入"""
+        msgs = _build(MockEngine(user_input="崩溃了怎么排查，看 log 吗"))
+        chapters = " ".join(_chapter_texts(msgs))
+        assert "Failure self-rescue" in chapters
+        assert "bobo.log" in chapters
+
+    def test_trigger_from_history(self):
+        """触发源含最近 history：上轮谈 engine 闸，本轮展开架构章"""
+        hist = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "engine 的闸在 decision chain"},
+        ]
+        msgs = _build(MockEngine(history=hist, user_input="继续"))
+        chapters = " ".join(_chapter_texts(msgs))
+        assert "Architecture map" in chapters
+
+    def test_no_trigger_no_chapter(self):
+        """对照组：无关键词 → 零章节注入（L0 仍在，章节绝不展开）"""
+        msgs = _build(MockEngine(user_input="今天天气不错"))
+        assert _chapter_texts(msgs) == [], "无触发不应展开任何章节"
+        assert _selfmap_text(msgs).startswith("[SELF]"), "L0 常驻不受影响"
+
+    def test_budget_counts_chapters(self, silence_event_bus):
+        """触发时 budget 记账：selfmap_chapters.chapters 含命中章"""
+        _build(MockEngine(user_input="engine 闸 + ticket 豁免 + 崩溃排查 log"))
+        budget_events = [d for t, d in silence_event_bus if t == "prompt.budget"]
+        sec = budget_events[0]["sections"]["selfmap_chapters"]
+        assert set(sec["chapters"]) >= {"arch", "boundary", "rescue"}
+        assert sec["chars"] > 0
 
 
-# ── G1-2：GUIDANCE.md 顶部指针 ──
+# ── G1-3 GUIDANCE.md 指针 ──
 
 class TestGuidancePointer:
-    def test_guidance_top_has_constitution_and_l0_note(self):
-        """GUIDANCE.md 顶部两行：宪章指针 + L0 已常驻分层说明"""
+    def test_guidance_top_has_constitution_and_self_note(self):
+        """GUIDANCE.md 顶部两行：宪章指针 + SELF L0 已常驻说明"""
         guidance = injector_mod._load_guidance()
         assert guidance is not None
         head = guidance.splitlines()[:3]
         assert any("HARCHITECTURE" in line for line in head), "宪章指针缺失"
-        assert any("L0 self-map is always injected" in line for line in head), (
-            "L0 已常驻分层说明缺失"
+        assert any("SELF L0 is always resident" in line for line in head), (
+            "SELF L0 已常驻说明缺失"
         )
 
     def test_guidance_still_injected(self):
