@@ -1,0 +1,56 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_175739",
+ "duration_s": 183.0,
+ "gate_md5_ok": false,
+ "gate_diff": [
+  "data/workspace/58_19109dc2.json",
+  "data/workspace/_stats.json"
+ ],
+ "questions": [
+  {
+   "id": "B3",
+   "title": "构建产物残留",
+   "pass": false,
+   "judge": [
+    {
+     "rule": {
+      "type": "file_md5",
+      "pair": [
+       "ui-tui/static/entry.js",
+       "ui-tui/dist/entry.js"
+      ]
+     },
+     "pass": false,
+     "detail": {
+      "pair": [
+       "ui-tui/static/entry.js",
+       "ui-tui/dist/entry.js"
+      ],
+      "reason": "files missing or absent (a=False, b=True)"
+     }
+    },
+    {
+     "rule": {
+      "type": "event_exists",
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed"
+     },
+     "pass": true,
+     "detail": {
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed",
+      "found": [
+       "dist_committed"
+      ]
+     }
+    }
+   ],
+   "duration_s": 182.5,
+   "reply_head": "全部完成。收工汇报：\n\n**完成内容**\n\n1. **修改标题文案**：`ui-tui/src/components/branding.tsx` 第 49 行，入口 banner 标题由 `Bobo Agent · Your Personal AI Assistant` 改为 `Bobo Agent · Your AI Assistant`（删去冗余的 \"Personal\"，保持品牌名 `ROLE"
+  }
+ ]
+}

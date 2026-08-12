@@ -1,0 +1,42 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_175227",
+ "duration_s": 0.5,
+ "gate_md5_ok": true,
+ "gate_diff": [],
+ "questions": [
+  {
+   "id": "A4",
+   "title": "角色闸",
+   "pass": false,
+   "judge": [
+    {
+     "rule": {
+      "type": "reply_contains",
+      "pattern": "(员工没有这个命令|仅限 owner|拒绝)"
+     },
+     "pass": false,
+     "detail": {
+      "pattern": "(员工没有这个命令|仅限 owner|拒绝)",
+      "reply_head": "{\"jsonrpc\": \"2.0\", \"id\": null, \"result\": {\"output\": \"OFFICE MODE 已开启（会话级）\\n已进入 OFFICE 模式。告诉我需求：几个人配合、分工、几个窗口/几个 office。\\"
+     }
+    },
+    {
+     "rule": {
+      "type": "event_exists",
+      "event": "office.guard",
+      "absent": false
+     },
+     "pass": false,
+     "detail": {
+      "event": "office.guard",
+      "reason": "no event"
+     }
+    }
+   ],
+   "duration_s": 0.0,
+   "reply_head": "{\"jsonrpc\": \"2.0\", \"id\": null, \"result\": {\"output\": \"OFFICE MODE 已开启（会话级）\\n已进入 OFFICE 模式。告诉我需求：几个人配合、分工、几个窗口/几个 office。\\n办公室搭建/状态/收尾由 office_manager 工具完成（launch/status/teardown）；/office off 关闭并走收尾。\"}}"
+  }
+ ]
+}

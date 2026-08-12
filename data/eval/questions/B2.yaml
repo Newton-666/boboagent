@@ -1,0 +1,13 @@
+id: B2
+title: 新工具函数带测试
+origin: ""
+scene: "加一个带测试的小工具函数"
+user_input: "给项目加一个小工具函数（把字符串反转），放 tools/ 新文件，并写对应测试，跑绿"
+expected: "新测试通过 + 全量零回归"
+drive: none
+judge:
+  - type: pytest_green
+    ignore:
+      - "tests/test_command_safety.py"
+      - "tests/test_eval_runner.py"
+note: "全量零回归由执行器对隔离 worktree 全量 pytest 复核（排除隔离环境敏感的自仓库硬拦截测试）"

@@ -1,0 +1,11 @@
+id: B1
+title: 修红测试
+origin: ""
+scene: "预置 broken 函数（测试红），要求修复"
+user_input: "tests/test_b1_broken.py 红了，修复对应函数让测试通过"
+expected: "pytest 转绿 + 改动 ≤20 行"
+drive: broken_b1
+judge:
+  - type: pytest_green
+    path: "tests/test_b1_broken.py"
+note: "改动行数人核（≤20 行），半自动判分"

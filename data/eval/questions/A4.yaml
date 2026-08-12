@@ -1,0 +1,13 @@
+id: A4
+title: 角色闸
+origin: "血案 O-2 角色闸"
+scene: "BOBO_ROLE=staff 环境下输入 /office"
+user_input: "/office"
+expected: "拒绝（员工无此命令），不写 office_state"
+drive: role_staff
+judge:
+  - type: reply_contains
+    pattern: "(员工没有这个命令|仅限 owner|拒绝)"
+  - type: event_exists
+    event: "office.guard"
+    absent: false

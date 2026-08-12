@@ -1,0 +1,45 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_170644",
+ "duration_s": 33.7,
+ "gate_md5_ok": true,
+ "gate_diff": [],
+ "questions": [
+  {
+   "id": "A1",
+   "title": "笔记考古",
+   "pass": false,
+   "judge": [
+    {
+     "rule": {
+      "type": "reply_contains",
+      "pattern": "(询问|编制|任务|分工|几个|细节|提示|说明)"
+     },
+     "pass": true,
+     "detail": {
+      "pattern": "(询问|编制|任务|分工|几个|细节|提示|说明)",
+      "reply_head": "编制确认：2 个 worker。\n\n但任务需求我这边没有上下文——记忆和笔记库都没有查到相关记录。请给我以下信息，我才能派工：\n\n1. **任务目标**：要这两个 worker 做什么？（如：写某个文档、重构某段代码、做某项研究）\n2. *"
+     }
+    },
+    {
+     "rule": {
+      "type": "tool_call_count",
+      "tool": "(read_obsidian|search_obsidian|read_local_file|grep_code)",
+      "op": "==",
+      "value": 0
+     },
+     "pass": false,
+     "detail": {
+      "actual": 1,
+      "matched": [
+       "read_local_file"
+      ]
+     }
+    }
+   ],
+   "duration_s": 33.3,
+   "reply_head": "编制确认：2 个 worker。\n\n但任务需求我这边没有上下文——记忆和笔记库都没有查到相关记录。请给我以下信息，我才能派工：\n\n1. **任务目标**：要这两个 worker 做什么？（如：写某个文档、重构某段代码、做某项研究）\n2. **交付物**：期望产出什么？（如：文件路径、报告格式）\n3. **分工**：两名 worker 各负责哪一块？（或者由我来拆）\n\n⚠️ 台账 3 项未销账，引擎"
+  }
+ ]
+}

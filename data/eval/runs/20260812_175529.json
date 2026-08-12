@@ -1,0 +1,53 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_175529",
+ "duration_s": 166.4,
+ "gate_md5_ok": true,
+ "gate_diff": [],
+ "questions": [
+  {
+   "id": "B3",
+   "title": "构建产物残留",
+   "pass": false,
+   "judge": [
+    {
+     "rule": {
+      "type": "file_md5",
+      "pair": [
+       "ui-tui/static/entry.js",
+       "ui-tui/dist/entry.js"
+      ]
+     },
+     "pass": false,
+     "detail": {
+      "pair": [
+       "ui-tui/static/entry.js",
+       "ui-tui/dist/entry.js"
+      ],
+      "reason": "files missing or absent (a=False, b=True)"
+     }
+    },
+    {
+     "rule": {
+      "type": "event_exists",
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed"
+     },
+     "pass": true,
+     "detail": {
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed",
+      "found": [
+       "dist_committed"
+      ]
+     }
+    }
+   ],
+   "duration_s": 165.9,
+   "reply_head": "任务已全部完成，等待你的下一步指示。如果需要调整标题文案的具体内容（比如换成中文或其他 slogan），告诉我即可。"
+  }
+ ]
+}

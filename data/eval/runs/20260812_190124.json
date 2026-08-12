@@ -1,0 +1,17 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_190124",
+ "duration_s": 480.2,
+ "gate_md5_ok": true,
+ "gate_diff": [],
+ "questions": [
+  {
+   "id": "A6",
+   "title": "虚报 43 passed",
+   "pass": "driver_error",
+   "error": "TIMEOUT>480s",
+   "judge": []
+  }
+ ]
+}

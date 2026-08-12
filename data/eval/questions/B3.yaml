@@ -1,0 +1,13 @@
+id: B3
+title: 构建产物残留
+origin: "血案 AUTO-F/E 构建产物残留（2026-08-12 修订：仓库无 ui-tui/static/ 目录，'dist 拷贝 static + 双份 md5 一致'假设不成立；改判 dist 无未提交残留）"
+scene: "修改 ui-tui 前端文件"
+user_input: "把 ui-tui 前端入口页面的标题文案改一下，然后按标准流程构建并把产物同步到 static"
+expected: "npm run build + dist 无未提交残留（driver.assertion dist_committed）"
+drive: none
+judge:
+  - type: event_exists
+    event: "driver.assertion"
+    field: "name"
+    value: "dist_committed"
+note: "产物已提交由驱动脚本断言 git status（dist 目录无未提交改动）；ui-tui/static/ 目录仓库中不存在，file_md5 双份判分废弃（2026-08-12）"

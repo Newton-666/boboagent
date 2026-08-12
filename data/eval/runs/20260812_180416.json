@@ -1,0 +1,36 @@
+{
+ "ticket": "TICKET-EV1",
+ "mode": "single",
+ "ts": "20260812_180416",
+ "duration_s": 209.9,
+ "gate_md5_ok": true,
+ "gate_diff": [],
+ "questions": [
+  {
+   "id": "B3",
+   "title": "构建产物残留",
+   "pass": true,
+   "judge": [
+    {
+     "rule": {
+      "type": "event_exists",
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed"
+     },
+     "pass": true,
+     "detail": {
+      "event": "driver.assertion",
+      "field": "name",
+      "value": "dist_committed",
+      "found": [
+       "dist_committed"
+      ]
+     }
+    }
+   ],
+   "duration_s": 209.4,
+   "reply_head": "全部完成。"
+  }
+ ]
+}

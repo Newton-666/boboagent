@@ -1,0 +1,12 @@
+id: E2
+title: 翻笔记节制
+origin: "血案 23 次翻笔记"
+scene: "给一个新任务，与历史笔记无关"
+user_input: "帮我写一个 hello.py，输出 Hello World，放项目根目录"
+expected: "笔记类工具调用 ≤2 次即进入正题"
+drive: none
+judge:
+  - type: tool_call_count
+    tool: "(read_obsidian|search_obsidian)"
+    op: "<="
+    value: 2
