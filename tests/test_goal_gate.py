@@ -94,7 +94,7 @@ class TestGoalGate:
     # ── 验收标准 2：无账强制建账 ──
 
     def test_no_ledger_reminder_after_two_tool_rounds(self, monkeypatch):
-        """3 个工具轮无台账 → history 中出现建账提醒"""
+        """3 个工具轮无台账 → 零回注零提醒直接 DONE（R2a v2 软限制）"""
         fake_llm = FakeLLMCaller([
             (None, [_make_tool_call("call_1", "echo", {"msg": "step1"})]),
             (None, [_make_tool_call("call_2", "echo", {"msg": "step2"})]),
@@ -111,10 +111,12 @@ class TestGoalGate:
 
         assert engine.state == engine.STATE_DONE
 
-        # 验证历史中有系统建账提醒
+        # R2a v2：不再注入任何建账提醒/回注
         sys_msgs = [m for m in engine.history if m.get("role") == "system"]
         reminder_found = any("未建台账" in m.get("content", "") for m in sys_msgs)
-        assert reminder_found, "应出现建账提醒但未找到"
+        assert not reminder_found, "R2a 软限制：不应出现建账提醒"
+        user_msgs = [m for m in engine.history if m.get("role") == "user"]
+        assert not any("task_ledger" in m.get("content", "") for m in user_msgs), "不应有回注"
 
     # ── 验收标准 3：熔断逃生 ──
 
@@ -238,14 +240,14 @@ class TestGoalGate:
         assert engine._ledger_reinject_count <= 2
 
 
-class TestNoLedgerHardGate:
-    """票 Z v3：无账硬闸 — 工作回合无台账强制回注"""
+class TestNoLedgerSoftGate:
+    """票 R2a v2：无账软限制 — 任何回合不再因没建账被回注"""
 
-    # ── 验收标准 1：工作回合无账被拦 ──
+    # ── 验收标准 1：工作回合无账直接放行 ──
 
-    def test_work_round_no_ledger_rejected(self, monkeypatch):
+    def test_work_round_no_ledger_passes(self, monkeypatch):
         """1轮工具调用后给中性收尾文本（无承诺词无完成词）
-        → 不回 complete，回注消息含'task_ledger'，事件 goal_gate.no_ledger_detected 落地"""
+        → 直接 done 零回注，事件 task.no_ledger 落地，无 goal_gate.no_ledger_detected"""
         from core.event_bus import event_bus
         events = []
         original_write = event_bus.write
@@ -256,8 +258,7 @@ class TestNoLedgerHardGate:
 
         fake_llm = FakeLLMCaller([
             (None, [_make_tool_call("call_1", "echo", {"msg": "work"})]),  # R1: tool → tool_round=1
-            ("好的，已处理", None),  # R2: neutral → no-ledger re-injection
-            ("已完成全部工作", None),  # R3: after re-injection, finish
+            ("好的，已处理", None),  # R2: neutral → 软限制直接放行
         ])
         fake_tools = FakeToolExecutor({"echo": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
@@ -266,57 +267,44 @@ class TestNoLedgerHardGate:
 
         assert engine.state == engine.STATE_DONE
 
-        # 【G2-1 语义迁移】无账硬闸在 THINKING 执行：回注期间不进 RESPONDING
+        # R2a v2：无账不再回注，直接走到 RESPONDING
         seq = [s for s in states if s != engine.STATE_IDLE]
-        resp_idx = seq.index(engine.STATE_RESPONDING) if engine.STATE_RESPONDING in seq else -1
-        if resp_idx >= 0:
-            # 首个 RESPONDING 之前不允许再出现 RESPONDING（回注全程停在 THINKING）
-            assert engine.STATE_RESPONDING not in seq[:resp_idx], (
-                f"无账回注应停在 THINKING: {seq}"
-            )
+        assert engine.STATE_RESPONDING in seq, f"软限制应正常收工: {seq}"
 
-        # 验证回注消息含 task_ledger
+        # 验证零回注：user 消息不含 task_ledger
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
-        assert any("task_ledger" in m.get("content", "") for m in user_msgs)
+        assert not any("task_ledger" in m.get("content", "") for m in user_msgs)
 
-        # 验证 goal_gate.no_ledger_detected 事件落地
+        # 验证 task.no_ledger 事件落地，且无 goal_gate.no_ledger_detected
+        no_ledger = [e for e in events if e[0] == "task.no_ledger"]
+        assert len(no_ledger) >= 1, "应写 task.no_ledger 事件"
         detected = [e for e in events if e[0] == "goal_gate.no_ledger_detected"]
-        assert len(detected) >= 1, "应触发 goal_gate.no_ledger_detected 事件"
+        assert len(detected) == 0, "R2a v2 不应再触发 goal_gate.no_ledger_detected"
 
-    # ── 验收标准 2：回注后建账全销 → 干净收工 ──
+    # ── 验收标准 2：无账直接收工，history 零回注 ──
 
-    def test_no_ledger_reinject_then_clean_done(self, monkeypatch):
-        """回注后建账并全 done → 正常 done，history 中回注消息仅 1 条"""
+    def test_no_ledger_direct_done_zero_reinject(self, monkeypatch):
+        """工具轮无账 + 中性收尾 → 直接 DONE，history 中零回注消息"""
         fake_llm = FakeLLMCaller([
             (None, [_make_tool_call("call_1", "echo", {"msg": "work"})]),  # R1: tool → tool_round=1
-            ("好的", None),  # R2: neutral → no-ledger re-injection
-            ("已完成全部工作", None),  # R3: after re-injection, complete with ledger set
+            ("好的", None),  # R2: neutral → R2a v2 直接放行
         ])
         fake_tools = FakeToolExecutor({"echo": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
-
-        # 拦截 no-ledger 回注事件，在第一次回注后设置台账（模拟模型建账）
-        original_emit = engine._emit_state_change
-        _injected = [False]
-        def tracking_emit(state, reason):
-            if state == engine.STATE_THINKING and "no-ledger" in str(reason) and not _injected[0]:
-                _injected[0] = True
-                engine.task_ledger = [{"id": "1", "title": "task", "status": "done"}]
-            original_emit(state, reason)
-        engine._emit_state_change = tracking_emit
+        engine.task_ledger = []  # 明确无台账
 
         engine.run(user_input="干活")
         assert engine.state == engine.STATE_DONE
 
-        # history 中回注消息仅 1 条（建账后不再回注）
+        # history 零回注（原硬闸语义下这里会有 1 条 task_ledger 回注）
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
         reinject_msgs = [m for m in user_msgs if "task_ledger" in m.get("content", "")]
-        assert len(reinject_msgs) == 1, f"应只有 1 条回注消息，实际 {len(reinject_msgs)}"
+        assert len(reinject_msgs) == 0, f"R2a v2 应零回注，实际 {len(reinject_msgs)}"
 
-    # ── 验收标准 3：两次熔断放行 ──
+    # ── 验收标准 3：多轮无账也直接放行（原熔断机制随硬闸一并拆除） ──
 
-    def test_no_ledger_circuit_breaker_releases(self, monkeypatch):
-        """连续 2 回合不建账 → 放行，终稿含 ⚠️，事件 goal_gate.released reason=no_ledger_exhausted"""
+    def test_no_ledger_multi_round_direct_done(self, monkeypatch):
+        """连续 2 回合不建账 → 直接放行，终稿无 ⚠️，无 goal_gate.released no_ledger_exhausted"""
         from core.event_bus import event_bus
         events = []
         original_write = event_bus.write
@@ -327,10 +315,10 @@ class TestNoLedgerHardGate:
 
         fake_llm = FakeLLMCaller([
             (None, [_make_tool_call("call_1", "echo", {"msg": "1"})]),  # R1: tool → tool_round=1
-            ("好的", None),  # R2: neutral → re-injection #1
+            ("好的", None),  # R2: neutral → R2a v2 直接放行
             (None, [_make_tool_call("call_2", "echo", {"msg": "2"})]),  # R3: tool → tool_round=2
-            ("好的", None),  # R4: neutral → re-injection #2 (count=2,熔断)
-            ("好的", None),  # R5: neutral → 已熔断, 放行 + ⚠️
+            ("好的", None),  # R4: neutral → 仍直接放行
+            ("好的", None),  # R5: neutral → 直接 DONE
         ])
         fake_tools = FakeToolExecutor({"echo": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
@@ -338,13 +326,13 @@ class TestNoLedgerHardGate:
 
         assert engine.state == engine.STATE_DONE
 
-        # 终稿含 ⚠️
+        # 终稿无 ⚠️ 遗言（原熔断放行才追加）
         asst_texts = [str(m.get("content", "")) for m in engine.history if m.get("role") == "assistant" and m.get("content") is not None]
-        assert any("⚠️" in c for c in asst_texts), "终稿应含 ⚠️ 警告"
+        assert not any("⚠️" in c for c in asst_texts), "R2a v2 无账不应有 ⚠️ 遗言"
 
-        # goal_gate.released 事件 reason=no_ledger_exhausted
+        # 无 goal_gate.released reason=no_ledger_exhausted（原熔断事件已随硬闸拆除）
         released = [e for e in events if e[0] == "goal_gate.released" and e[1].get("reason") == "no_ledger_exhausted"]
-        assert len(released) >= 1, "应触发 goal_gate.released reason=no_ledger_exhausted"
+        assert len(released) == 0, "R2a v2 不应再触发 no_ledger_exhausted 熔断事件"
 
     # ── 验收标准 4：纯聊天零误伤 ──
 
@@ -376,11 +364,11 @@ class TestNoLedgerHardGate:
         reinject_msgs = [m for m in user_msgs if "task_ledger" in m.get("content", "")]
         assert len(reinject_msgs) == 0, "纯聊天不应有回注消息"
 
-    # ── 验收标准 5（回归）：收束词不豁免 ──
+    # ── 验收标准 5（回归）：完成词无账也直接放行 ──
 
-    def test_completion_word_no_exemption(self, monkeypatch):
-        """工作回合含"已完成"但无台账 → 仍然回注，不因完成词放行。
-        回归票Z v3 终审结论：删掉 _HAS_COMPLETION 豁免。"""
+    def test_completion_word_no_ledger_passes(self, monkeypatch):
+        """工作回合含"已完成"但无台账 → 直接放行（R2a v2 无账不再回注）。
+        原票Z v3 语义：完成词不豁免硬闸；R2a v2：硬闸已拆，完成词与否都放行。"""
         from core.event_bus import event_bus
         events = []
         original_write = event_bus.write
@@ -391,8 +379,7 @@ class TestNoLedgerHardGate:
 
         fake_llm = FakeLLMCaller([
             (None, [_make_tool_call("call_1", "echo", {"msg": "work"})]),  # R1: tool → tool_round=1
-            ("已完成全部工作", None),  # R2: 含完成词但无台账 → 仍回注
-            ("好的，我来建账", None),  # R3: after re-injection
+            ("已完成全部工作", None),  # R2: 含完成词但无台账 → 直接放行
         ])
         fake_tools = FakeToolExecutor({"echo": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
@@ -400,13 +387,13 @@ class TestNoLedgerHardGate:
 
         assert engine.state == engine.STATE_DONE
 
-        # 验证回注消息含 task_ledger（完成词没救它）
+        # 零回注：user 消息不含 task_ledger
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
-        assert any("task_ledger" in m.get("content", "") for m in user_msgs)
+        assert not any("task_ledger" in m.get("content", "") for m in user_msgs)
 
-        # 验证 goal_gate.no_ledger_detected 事件落地
+        # 无 goal_gate.no_ledger_detected 事件（R2a v2 不再触发）
         detected = [e for e in events if e[0] == "goal_gate.no_ledger_detected"]
-        assert len(detected) >= 1, "完成词不豁免，应仍触发 no_ledger_detected 事件"
+        assert len(detected) == 0, "R2a v2 不应再触发 no_ledger_detected 事件"
 
 
 class TestBackfillDetectionO9:

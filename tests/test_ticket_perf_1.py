@@ -257,7 +257,8 @@ class TestPerf1LedgerPrompt:
             test_mode=True,
         )
         prompt = engine.system_prompt
-        assert "任务台账（建账纪律）" in prompt, "系统提示词应有建账纪律节"
+        # R2a v2：标题改为"任务台账（建账纪律 · 票 R2a 软引导版）"，前缀断言兼容
+        assert "任务台账（建账纪律" in prompt, "系统提示词应有建账纪律节"
         assert "verify" in prompt and "evidence" in prompt
         assert "当场" in prompt, "必须强调当场带字段（禁止收工前补登记）"
         assert "批量" in prompt and "done" in prompt, "应含批量建账全标 done 的拒绝语义"
