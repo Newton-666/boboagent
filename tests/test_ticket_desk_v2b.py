@@ -159,12 +159,13 @@ def test_v2b_2_ctx_dashboard_static():
     # 排版地图：#input-box 正上方（chat 与 input-box 之间）
     assert src.index('<div id="chat">') < src.index('id="ctx-stats-wrap"') < src.index('<div id="input-box">'), \
         "细条必须在 #chat 与 #input-box 之间"
-    # DOM 三件：wrap/bar/detail + 三项数值 span
+    # DOM 三件：wrap/bar/detail + 药丸两件（V2B2 由数值 span 改造为进度药丸）
     assert 'id="ctx-stats-wrap"' in src and 'id="ctx-stats-bar"' in src and 'id="ctx-stats-detail"' in src
-    assert 'id="ctx-token"' in src and 'id="ctx-saved"' in src and 'id="ctx-injected"' in src
-    assert 'onclick="toggleCtxStats()"' in src, "细条点击应展开明细卡"
-    # CSS：22px 细条、向上展开（bottom:100% 不遮盖输入框）、fadeIn 动效、色板取色
-    assert ".ctx-bar { height:22px;" in src
+    assert 'id="ctx-pill-fill"' in src and 'id="ctx-pill-text"' in src
+    assert 'onclick="toggleCtxStats()"' in src, "药丸点击应展开明细卡"
+    # CSS：圆角药丸（轨道 --bg3）、向上展开（bottom:100% 不遮盖输入框）、fadeIn 动效、色板取色
+    assert ".ctx-pill {" in src and "border-radius:999px" in src, "药丸应为圆角胶囊形态"
+    assert "background:var(--bg3)" in src, "药丸轨道应取 --bg3"
     assert ".ctx-detail { position:absolute; bottom:100%;" in src
     assert "animation:fadeIn 0.25s ease-out" in src, "明细卡入场应复用既有 fadeIn 动效"
     assert "color:var(--text-muted)" in src, "细条默认弱存在（--text-muted）"
@@ -194,25 +195,26 @@ def test_v2b_2_ctx_dashboard_node():
     js = r"""
 const els = {};
 function makeEl(id) {
-  return { id, textContent: '', innerHTML: '', style: { display: 'none' } };
+  return { id, textContent: '', innerHTML: '', style: { display: 'none', width: '', background: '' } };
 }
-['ctx-token', 'ctx-saved', 'ctx-injected', 'ctx-stats-detail'].forEach(function(id) { els[id] = makeEl(id); });
+['ctx-pill-fill', 'ctx-pill-text', 'ctx-stats-detail'].forEach(function(id) { els[id] = makeEl(id); });
 global.document = { getElementById: function(id) { return els[id] || null; } };
 global.currentSessionId = 'v2b_s_001';
 global.call = function(m, p) {
   if (m !== 'context.stats') throw new Error('应调用 context.stats，实际: ' + m);
   if (p.session_id !== 'v2b_s_001') throw new Error('session_id 应透传');
   return Promise.resolve({ result: {
-    token_estimate: 1234, saved_chars: 56789, marked: 12, loaded: 8, memory_injected: 8 } });
+    token_estimate: 41000, saved_chars: 56789, marked: 12, loaded: 8, memory_injected: 8, context_limit: 128000 } });
 };
 """ + refresh + "\n" + toggle + r"""
 // 展开 → 显示 + 拉最新
 toggleCtxStats();
 if (els['ctx-stats-detail'].style.display !== 'block') throw new Error('点击应展开明细卡');
 Promise.resolve().then(function() {
-  if (els['ctx-token'].textContent !== '1234') throw new Error('ctx-token 应更新为 1234: ' + els['ctx-token'].textContent);
-  if (els['ctx-saved'].textContent !== '56789') throw new Error('ctx-saved 应更新为 56789');
-  if (els['ctx-injected'].textContent !== '8') throw new Error('ctx-injected 应更新为 8');
+  if (els['ctx-pill-fill'].style.width !== '32%') throw new Error('填充宽度应 32%: ' + els['ctx-pill-fill'].style.width);
+  if (els['ctx-pill-text'].textContent.indexOf('32%') === -1) throw new Error('药丸文字应含 32%: ' + els['ctx-pill-text'].textContent);
+  if (els['ctx-pill-text'].textContent.indexOf('41K/128K') === -1) throw new Error('药丸文字应含 41K/128K: ' + els['ctx-pill-text'].textContent);
+  if (els['ctx-pill-fill'].style.background !== '#5b9bd5') throw new Error('32% 应取思考蓝: ' + els['ctx-pill-fill'].style.background);
   if (els['ctx-stats-detail'].innerHTML.indexOf('上下文 token 估算') === -1) throw new Error('明细卡应含明细行');
   // 再点 → 收起
   toggleCtxStats();
@@ -248,6 +250,7 @@ def test_v2b_2_context_stats_backend(monkeypatch, tmp_path):
     assert res["saved_chars"] == 56789
     assert res["marked"] == 12 and res["loaded"] == 8
     assert res["memory_injected"] == res["loaded"], "记忆注入条数 = load_result 取回次数"
+    assert res["context_limit"] > 0, f"context_limit 应为正（get_context_length），实际: {res['context_limit']}"
 
     # 未知会话 → token 估算 0（不炸），累计值照常返回
     r2 = misc_mod.handle_context_stats({"session_id": "nonexistent"}, "r2", ctx)
@@ -267,7 +270,7 @@ def test_v2b_dom_before_script():
     script_pos = src.find("<script>")
     assert script_pos > 0
     for dom_id in ('id="ctx-stats-wrap"', 'id="ctx-stats-bar"', 'id="ctx-stats-detail"',
-                   'id="ctx-token"', 'id="ctx-saved"', 'id="ctx-injected"'):
+                   'id="ctx-pill-fill"', 'id="ctx-pill-text"'):
         pos = src.find(dom_id)
         assert pos > 0, f"{dom_id} 缺失"
         assert pos < script_pos, f"{dom_id} 在 <script> 之后，顶层 JS 将空指针崩溃"

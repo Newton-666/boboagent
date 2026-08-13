@@ -307,12 +307,14 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* ══ TICKET-DESK-V2B：工具时间线 + 上下文仪表盘（只加 class，零改既有）══ */
 /* V2B-1 工具耗时：.tool-status 右侧 44px 等宽右对齐数字，flex-shrink:0 不挤压名称/路径 */
 .tool .tool-time { width:44px; text-align:right; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:10px; color:var(--text-muted); flex-shrink:0; }
-/* V2B-2 上下文仪表盘：#input-box 正上方 22px 细条，左右与输入框对齐（padding 同 #input-box） */
+/* V2B-2 上下文仪表盘：#input-box 正上方进度药丸（TICKET-DESK-V2B2 由文字细条改造；ctx-* 规则属本票改造对象） */
 .ctx-stats-wrap { position:relative; }
-.ctx-bar { height:22px; display:flex; align-items:center; gap:14px; padding:0 16px; cursor:pointer; user-select:none; }
-.ctx-bar:hover { background:var(--hover); }
-.ctx-bar .ctx-item { font-size:10px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; }
-.ctx-bar .ctx-item b { color:var(--text2); font-weight:600; }
+/* 药丸本体：轨道 --bg3、圆角胶囊、弱存在（10-11px --text-muted），点击展开明细卡 */
+.ctx-bar { padding:4px 16px; cursor:pointer; user-select:none; }
+.ctx-bar:hover { opacity:0.9; }
+.ctx-pill { position:relative; overflow:hidden; border-radius:999px; background:var(--bg3); height:16px; display:flex; align-items:center; }
+.ctx-pill-fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:#5b9bd5; transition:width 0.3s ease; }
+.ctx-pill-text { position:relative; z-index:1; padding:0 10px; font-size:10px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; white-space:nowrap; }
 /* 明细卡：向上展开（bottom:100% 不遮盖输入框），300ms 内入场（fadeIn 0.25s 既有动效） */
 .ctx-detail { position:absolute; bottom:100%; left:0; right:0; margin-bottom:4px; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; z-index:60; animation:fadeIn 0.25s ease-out; }
 .ctx-detail .ctx-row { display:flex; justify-content:space-between; gap:16px; font-size:11px; color:var(--text); padding:3px 0; font-family:'SF Mono',Monaco,Menlo,monospace; }
@@ -359,9 +361,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div id="ctx-stats-wrap">
       <div id="ctx-stats-detail" class="ctx-detail" style="display:none"></div>
       <div id="ctx-stats-bar" class="ctx-bar" title="上下文统计（点击展开 / Esc 收起）" onclick="toggleCtxStats()">
-        <span class="ctx-item">ctx <b id="ctx-token">—</b> tok</span>
-        <span class="ctx-item">压缩节省 <b id="ctx-saved">—</b></span>
-        <span class="ctx-item">记忆注入 <b id="ctx-injected">—</b></span>
+        <div class="ctx-pill">
+          <div class="ctx-pill-fill" id="ctx-pill-fill"></div>
+          <span class="ctx-pill-text" id="ctx-pill-text">0% · 0/128K</span>
+        </div>
       </div>
     </div>
     <div id="input-box">
@@ -1092,21 +1095,30 @@ function updateToolResult(toolId, data) {
     }
   }
 }
-// TICKET-DESK-V2B：上下文仪表盘 —— 细条数据刷新 + 明细卡展开/收起
+// TICKET-DESK-V2B2：上下文仪表盘 —— 进度药丸刷新 + 明细卡展开/收起
 function refreshCtxStats() {
   call('context.stats', { session_id: currentSessionId || '' }).then(function(res) {
     var d = res && res.result ? res.result : null;
     if (!d) return;
     var fmt = function(n) { return (typeof n === 'number') ? String(n) : '—'; };
-    var t = document.getElementById('ctx-token');
-    if (t) t.textContent = fmt(d.token_estimate);
-    var s = document.getElementById('ctx-saved');
-    if (s) s.textContent = fmt(d.saved_chars);
-    var m = document.getElementById('ctx-injected');
-    if (m) m.textContent = fmt(d.memory_injected);
+    // 药丸进度：百分比 = token 估算 / context_limit（context.stats 现返回上限，128K 兜底）
+    var limit = (typeof d.context_limit === 'number' && d.context_limit > 0) ? d.context_limit : 128000;
+    var used = (typeof d.token_estimate === 'number') ? d.token_estimate : 0;
+    var pct = Math.min(100, Math.round(used * 100 / limit));
+    var fill = document.getElementById('ctx-pill-fill');
+    if (fill) fill.style.width = pct + '%';
+    var pillText = document.getElementById('ctx-pill-text');
+    if (pillText) {
+      var kb = function(n) { return (n >= 1000) ? Math.round(n / 1000) + 'K' : String(n); };
+      pillText.textContent = pct + '% · ' + kb(used) + '/' + kb(limit);
+      // 三色阶（色板取色）：<60% 思考蓝 / ≥60% 品牌橙 / ≥85% 语义红
+      var color = pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5');
+      if (fill) fill.style.background = color;
+    }
     var det = document.getElementById('ctx-stats-detail');
     if (det) det.innerHTML =
-      '<div class="ctx-row"><span>上下文 token 估算</span><b>' + fmt(d.token_estimate) + '</b></div>' +
+      '<div class="ctx-row"><span>上下文 token 估算</span><b>' + fmt(used) + '</b></div>' +
+      '<div class="ctx-row"><span>上下文上限</span><b>' + fmt(limit) + '</b></div>' +
       '<div class="ctx-row"><span>压缩节省（字符）</span><b>' + fmt(d.saved_chars) + '</b></div>' +
       '<div class="ctx-row"><span>结果标记条数</span><b>' + fmt(d.marked) + '</b></div>' +
       '<div class="ctx-row"><span>记忆注入条数</span><b>' + fmt(d.memory_injected) + '</b></div>' +
