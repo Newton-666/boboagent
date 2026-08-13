@@ -238,6 +238,8 @@ def run_engine(
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
         engine.sid = sid
         engine.proactive.load_config()
+        # ── 票 AUTO-G2：注入会话级"已交接水位线"（None=首回合列全部）──
+        engine.handoff_watermark = session.get("handoff_watermark")
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))
@@ -306,6 +308,13 @@ def run_engine(
         # task_ledger 工具在 Engine 上下文中已直接修改 engine.task_ledger，
         # 持久化直接取 Engine 实例字段，不再依赖模块级 _get_ledger。
         session["task_ledger"] = list(engine.task_ledger)
+
+        # ── 票 AUTO-G2：已交接水位线回写会话（收工列出新拒绝后水位线推到本回合
+        # 最后一条 deny 的 ts；下次收工旧账不再重复糊出）。
+        # getattr 防御：外部替身引擎（测试 FakeEngine 等）可能无该属性，静默跳过。
+        _new_wm = getattr(engine, "_handoff_last_ts", None) or getattr(engine, "handoff_watermark", None)
+        if _new_wm is not None:
+            session["handoff_watermark"] = _new_wm
 
         save_session_to_disk(sid)
 

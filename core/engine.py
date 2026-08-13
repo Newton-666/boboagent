@@ -143,6 +143,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._ledger_field_deny_count: int = 0  # 票 C：台账缺字段 deny 计数（独立，无熔断上限）
         self._last_reasoning: str = ""  # 票 P：上一轮 reasoning 思考过程（展示用，不进历史）
         self._interrupt_event: threading.Event | None = None
+        # 票 AUTO-G2：待人工清单"已交接水位线"（events.jsonl 事件 ts）。
+        # 收工只列 ts > 水位线的 auto 拒绝；None = 首回合/无记录 → 列全部（兼容现状）。
+        # run_engine 注入会话旧值、收工回写 session 持久化；/clear-handoff 推到最新。
+        self.handoff_watermark: float | None = None
+        self._handoff_last_ts: float | None = None  # 本回合扫到的最后一条 deny ts（收工后作新水位线）
         self._recent_tool_calls: list[tuple[str, str]] = []  # (tool_name, args_key) for loop detection
         self._used_categories: set[str] = set()  # 边执行边扩张的工具分类
         self._phase_pending_cleanup: bool = False
@@ -655,10 +660,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
         event_bus.write(f"office.{event_type}", event)
 
     def _build_handoff_list(self) -> str:
-        """票 AUTO-D D-2：收工交接清单——从 events.jsonl 现查本会话 auto 拒绝记录。
+        """票 AUTO-D D-2 + 票 AUTO-G2：收工交接清单——从 events.jsonl 现查本会话 auto 拒绝记录。
 
         过滤 type=="auto.decide" and sid==self.sid and verdict=="deny"，
         同命令去重（按 command 首次出现），黑名单与外部不可逆分节渲染。
+        票 AUTO-G2 增量：只列 ts > self.handoff_watermark 的新拒绝；水位线为 None
+        （首回合/无记录）时列全部（兼容现状）。扫描后把本回合最后一条 deny 的 ts
+        记入 _handoff_last_ts，由 run_engine 回写 session 持久化为新水位线——
+        下次收工不再重复糊出已交接条目（陈年旧账退场）。
         正常模式不写 auto.decide（无清单）；清单为空返回 ""。
         读失败 / 行解析失败 → 静默跳过，绝不阻塞收工（事件总线铁律）。
         """
@@ -668,6 +677,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         except Exception:
             return ""
         _sid = getattr(self, "sid", "")
+        _wm = self.handoff_watermark
+        _last_ts = self._handoff_last_ts
         blacklisted: dict[str, str] = {}    # command -> reason
         irreversible: dict[str, str] = {}   # command -> reason
         for _line in _lines:
@@ -682,14 +693,20 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 continue
             if _ev.get("verdict") != "deny":
                 continue
+            _ts = _ev.get("ts") or 0.0
+            if _wm is not None and _ts <= _wm:
+                continue  # 票 AUTO-G2：已交接旧账不重复糊出
             _cmd = (_ev.get("command") or "").strip()
             _reason = _ev.get("reason") or ""
             if not _cmd:
                 continue
+            if _ts > (_last_ts or 0.0):
+                _last_ts = _ts
             if _reason.startswith("危险黑名单硬锁"):
                 blacklisted.setdefault(_cmd, _reason)
             else:
                 irreversible.setdefault(_cmd, _reason)
+        self._handoff_last_ts = _last_ts  # 供 run_engine 收工回写为新水位线
         _parts: list[str] = []
         if blacklisted:
             _parts.append("【危险黑名单（系统硬锁，禁止任何途径执行）】")

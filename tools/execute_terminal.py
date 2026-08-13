@@ -47,14 +47,20 @@ def is_dangerous(command: str) -> bool:
     if len(command) > MAX_COMMAND_LENGTH:
         return True
     
+    # 票 AUTO-G2：误伤收紧——先剥离引号/heredoc 字面文本（骨架匹配），
+    # cat > /tmp/x.py <<'EOF' 体内的危险字样是文件内容不执行、不参与判定。
+    # 含命令替换的引号体/裸 heredoc 由 strip_literal_text 保守保留（安全语义不动）。
+    from core.command_safety import strip_literal_text
+    _skeleton = strip_literal_text(command)
+
     # 危险模式匹配
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, command):
+        if re.search(pattern, _skeleton):
             return True
     
     # 禁止字符检查（反引号执行、变量注入）
     for char in BLOCKED_CHARS:
-        if char in command:
+        if char in _skeleton:
             return True
     
     return False

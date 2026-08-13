@@ -498,7 +498,47 @@ function highlight(code, lang) {
   }
   return result;
 }
+// ── 票 AUTO-G2：待人工清单折叠卡片（默认收起，点开展开完整列表）──
+function buildHandoffCard(text) {
+  var marker = '📋 待人工执行清单';
+  var idx = text.indexOf(marker);
+  if (idx < 0) return null;
+  var head = text.slice(0, idx).replace(/[ \t]+\n/g, '\n');
+  var list = text.slice(idx + marker.length).replace(/^\s*\n/, '');
+  var sections = [];
+  var cur = null;
+  list.split('\n').forEach(function(line) {
+    var sm = line.match(/^【(.+?)】$/);
+    if (sm) { cur = { title: sm[1], items: [] }; sections.push(cur); return; }
+    var im = line.match(/^- (.+?)：(.*)$/);
+    if (im && cur) { cur.items.push({ cmd: im[1], reason: im[2] }); }
+  });
+  var total = 0;
+  sections.forEach(function(s) { total += s.items.length; });
+  if (total === 0) return null;  // 无条目不渲染卡片
+  var body = sections.map(function(s) {
+    var items = s.items.map(function(it) {
+      return '<div style="padding:4px 0;border-bottom:1px solid rgba(220,60,40,0.1);"><code>' + esc(it.cmd) + '</code><div style="color:var(--text2);font-size:12px;margin-top:2px;">' + esc(it.reason) + '</div></div>';
+    }).join('');
+    return '<div style="font-weight:600;color:var(--text1);margin:6px 0 2px;">' + esc(s.title) + '</div>' + items;
+  }).join('');
+  return { head: head, card:
+    '<div style="border:1px solid #d33;border-left:3px solid #d33;border-radius:6px;margin:8px 0;overflow:hidden;">' +
+    '<div onclick="toggleHandoff(this)" style="padding:8px 12px;background:rgba(220,60,40,0.08);cursor:pointer;font-weight:600;color:#d33;">⚠ ' + total + ' 条操作被 AUTO 拦截，待人工处理 <span style="float:right;">▸</span></div>' +
+    '<div class="handoff-body" style="display:none;padding:8px 12px;border-top:1px solid rgba(220,60,40,0.2);">' + body + '</div>' +
+    '</div>' };
+}
+function toggleHandoff(headEl) {
+  var body = headEl.parentNode.querySelector('.handoff-body');
+  var arrow = headEl.querySelector('span');
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  arrow.textContent = open ? '▸' : '▾';
+}
 function md(s) {
+  // 票 AUTO-G2：待人工清单 → 默认收起的折叠卡片（先抽离，markdown 处理后还原）
+  var handoffCard = buildHandoffCard(s);
+  if (handoffCard) { s = handoffCard.head + '\n\n%%HANDOFF_CARD%%'; }
   var codeBlocks = [];
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     var rawCode = code.trim();
@@ -574,6 +614,7 @@ function md(s) {
   s = lines.join('\n');
   s = s.replace(/%%CODEBLOCK(\d+)%%/g, function(_, i) { return codeBlocks[+i]; });
   s = s.replace(/%%TABLE(\d+)%%/g, function(_, i) { return tables[+i]; });
+  if (handoffCard) { s = s.replace(/%%HANDOFF_CARD%%/g, handoffCard.card); }
   return s;
 }
 

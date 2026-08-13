@@ -52,6 +52,9 @@ def _save_session_to_disk(sid, ctx):
             data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
             # TICKET-GUI-F7：持久化手动命名标记（保留磁盘旧值，防止内存未设置时覆盖）
             data["user_named"] = bool(session.get("user_named", data.get("user_named", False)))
+            # 票 AUTO-G2：持久化已交接水位线（保留磁盘旧值，防内存未设置时覆盖）
+            if session.get("handoff_watermark") is not None:
+                data["handoff_watermark"] = session["handoff_watermark"]
         else:
             data = {
                 "id": sid,
@@ -60,6 +63,7 @@ def _save_session_to_disk(sid, ctx):
                 "messages": in_mem_msgs,
                 "summary": None,
                 "user_named": False,
+                "handoff_watermark": session.get("handoff_watermark"),
             }
     except Exception:
         data = {
@@ -69,6 +73,7 @@ def _save_session_to_disk(sid, ctx):
             "messages": in_mem_msgs,
             "summary": None,
             "user_named": False,
+            "handoff_watermark": session.get("handoff_watermark"),
         }
     mgr._write_atomic(session_path, data)
 
