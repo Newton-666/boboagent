@@ -1172,6 +1172,8 @@ function startRename(s, span) {
     var t = input.value.trim();
     if (t && t !== s.title) {
       s.title = t.substring(0, 35);
+      // TICKET-GUI-F7：手动改名成功 → 本地立即标 user_named=true（防自动命名覆盖）
+      s.user_named = true;
       call('session.rename', { session_id: s.id, title: t });
       renderSessions();
     } else {
@@ -1225,7 +1227,8 @@ async function deleteSession(sid) {
 }
 function updateSessionTitle(sid, text) {
   var s = sessions.find(function(x) { return x.id === sid; });
-  if (s) { s.title = text || s.title; s.title = s.title.substring(0, 35); renderSessions(); }
+  // TICKET-GUI-F7：手动命名标记为真则拒绝自动覆盖（双保险，防其他自动路径）
+  if (s && !s.user_named) { s.title = text || s.title; s.title = s.title.substring(0, 35); renderSessions(); }
 }
 
 // TICKET-GUI-F3 重写：F3-1 选中态立即跟随 currentSessionId（单一事实源）；
@@ -1264,9 +1267,11 @@ async function loadSession(sid) {
   call('session.activate', { session_id: sid });
   renderSessions();
   // Update title with first user message
+  // TICKET-GUI-F7：自动命名闸门 —— 用户手动命名过（user_named=true）则不覆盖；
+  // 未手动命名的会话仍保留自动取名行为
   var msgs = result.messages || [];
   var firstUserMsg = msgs.find(function(m) { return m.role === 'user'; });
-  if (firstUserMsg) updateSessionTitle(sid, firstUserMsg.text.substring(0, 30));
+  if (firstUserMsg && !result.user_named) updateSessionTitle(sid, firstUserMsg.text.substring(0, 30));
 }
 
 // F3-2: 侧栏该项加载指示开关（呼吸闪烁）
