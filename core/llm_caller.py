@@ -383,11 +383,12 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None):
         # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
         import os as _os
         _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
-        _max_tokens = int(_os.environ.get("BOBO_MAX_TOKENS", "8192"))
+        _max_tokens = (max_tokens if max_tokens is not None
+                       else int(_os.environ.get("BOBO_MAX_TOKENS", "8192")))
         payload = {
             "model": model_name,
             "messages": messages,

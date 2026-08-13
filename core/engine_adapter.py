@@ -309,20 +309,11 @@ def run_engine(
 
         save_session_to_disk(sid)
 
-        # 无论成功或失败，都要发射 message.complete 给 TUI（票 AUTO-E Q1 裁决：
-        # 中断也发——回合必有一个结束事件；TUI 已有 interrupted 抑制逻辑，发安全）。
-        # 此前 STATE_ERROR 时跳过了这个事件，TUI 的回合生命周期依赖
-        # message.complete / error / interrupt 三者之一来解除 busy 状态。
-        # gateway.error 事件在 Hermes fork 的 TUI 中没有处理器，被丢弃，
-        # 导致 busy 永不解锁 → Bobo 用户看到的"不回复"其实是 TUI 死锁。
-        emit("message.complete", sid, {
-            "session_id": sid,
-            "final_text": result_text[0] if not _interrupted else f"{result_text[0]}\n\n*[已中断]*",
-            "usage": last_usage[0],
-        })
-
-        # ── 票 M：回合小结 + 退出标记（覆盖 message.complete 的 "ready"）──
-        _hb_stop.set()  # 停止心跳 daemon
+        # ── ENG-1：回合小结与心跳停止先于 message.complete ──
+        # owner 裁决：message.complete = 回合结束信号，发出后零用户可见事件、
+        # 零 LLM/工具调用，状态立即 ready。故心跳必须在此停、回合小结必须在此发，
+        # complete 必须是引擎层最后一个 emit（emit 见下方收尾段末尾）。
+        _hb_stop.set()  # 停止心跳 daemon（ENG-1：必须在 complete 之前）
         _elapsed = _time.time() - _turn_start[0] if _turn_start[0] > 0 else 0
 
         # 构建回合小结文案
@@ -362,6 +353,17 @@ def run_engine(
                     "text": f"回合完成 · 耗时 {_elapsed:.0f}s",
                     "session_id": sid,
                 })
+
+        # ── ENG-1：message.complete 必须是本回合最后一个 emit ──
+        # 无论成功或失败（含中断），都要发射 message.complete 给 TUI（票 AUTO-E
+        # Q1 裁决：中断也发——回合必有一个结束事件；TUI 已有 interrupted 抑制逻辑，
+        # 发安全）。此前 STATE_ERROR 时跳过了这个事件，TUI 的回合生命周期依赖
+        # message.complete / error / interrupt 三者之一来解除 busy 状态。
+        emit("message.complete", sid, {
+            "session_id": sid,
+            "final_text": result_text[0] if not _interrupted else f"{result_text[0]}\n\n*[已中断]*",
+            "usage": last_usage[0],
+        })
 
     except Exception as e:
         import logging
