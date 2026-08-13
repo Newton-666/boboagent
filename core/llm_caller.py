@@ -395,6 +395,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
             "temperature": _temperature,
             "max_tokens": _max_tokens,
         }
+        # 票 PERF-1 事故 2：length 空正文翻倍重试标志（调用级，跨 attempt/流式非流式只重试一次）
+        _length_retried = False
         # 如果调用方传了 tools_override，用它替换默认的 tools_schema
         active_tools = tools_override if tools_override is not None else tools_schema
         if use_tools and active_tools:
@@ -465,6 +467,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             reasoning_buf = ""   # 票 P：reasoning_content 独立缓冲，绝不混入正文
                             tool_calls_buffer = []
                             usage = {}
+                            _finish_reason = None   # 票 PERF-1 事故 2：流式 finish_reason 收集
                             _parsed_any = False  # 票 P：是否成功解析过任何 SSE 数据行
                             _got_done = False    # 是否收到 [DONE]（防半截 EOF 冒充完整流）
                             # 票 N2：读者线程 + 队列；看门狗只看"内容行"时间
@@ -511,6 +514,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                 if _tc:
                                     tool_calls_buffer.extend(_tc)
                                     _vitals["last_chunk"] = time.time()
+                                # 票 PERF-1 事故 2：SSE 最后一个 chunk 的 delta 带 finish_reason
+                                _fr = _dl.get("finish_reason")
+                                if _fr:
+                                    _finish_reason = _fr
 
                             # ── 半截 EOF 防线 ──
                             # 解析过 SSE 数据却没等到 [DONE] 就 EOF = 服务器中途死亡，
@@ -530,6 +537,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     _msg = _body.get("choices", [{}])[0].get("message", {})
                                     full_content = _msg.get("content") or ""
                                     reasoning_buf = (_msg.get("reasoning_content") or "") or reasoning_buf
+                                    _finish_reason = (_body.get("choices", [{}])[0]
+                                                      .get("finish_reason") or _finish_reason)  # 票 PERF-1
                                     if _msg.get("tool_calls"):
                                         tool_calls_buffer.extend(_msg["tool_calls"])
                                     if "usage" in _body:
@@ -545,6 +554,53 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     )
                                 except (json.JSONDecodeError, ValueError, AttributeError):
                                     pass  # 真空响应，走原有空响应通道
+
+                            # ── 票 PERF-1 事故 2：finish_reason=length 且正文为空 → 翻倍 max_tokens 重试一次 ──
+                            # 根因：reasoning 模型思考烧光 max_tokens（content_chars=0、reasoning 有值），
+                            # 引擎直接判 error 退出（2026-08-13 13:46 铁证：prompt=78140 tokens,
+                            # completion=8191 撞顶, reasoning=18499 chars, content=0 chars）。
+                            # 仅重试一次（_length_retried 防死循环）；重试仍空才走原 error 路径。
+                            # 错误提示文案的 BOBO_MAX_TOKENS 指引保留不动（要求 d）。
+                            # 位置必须在此（break 前、try 内）：continue 作用于 while True，
+                            # 回到顶部用新 response 重读流；若放 try 外 continue 会落到外层 for。
+                            if (_finish_reason == "length" and not full_content.strip()
+                                    and not _length_retried):
+                                _length_retried = True
+                                _max_tokens = _max_tokens * 2
+                                payload["max_tokens"] = _max_tokens
+                                _logger.warning(
+                                    "PERF-1 length 截断且正文为空（reasoning=%d chars, content=%d chars）"
+                                    "— 翻倍 max_tokens 重试一次: %d→%d, session=%s",
+                                    len(reasoning_buf), len(full_content),
+                                    _max_tokens // 2, _max_tokens, session_id or "?",
+                                )
+                                try:
+                                    _event_bus.write("llm.length_retry", {
+                                        "session_id": session_id or "",
+                                        "reasoning_chars": len(reasoning_buf),
+                                        "content_chars": len(full_content),
+                                        "max_tokens": _max_tokens,
+                                    })
+                                except Exception:
+                                    pass
+                                response = _post_with_headers_watchdog(
+                                    api_url,
+                                    json=payload,
+                                    headers=headers,
+                                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+                                    stream=True,
+                                    headers_timeout=_get_headers_timeout(),
+                                    event_bus=_event_bus,
+                                    session_id=session_id,
+                                )
+                                if response.status_code != 200:
+                                    return {
+                                        "error": f"length 重试 HTTP {response.status_code}",
+                                        "error_type": "http",
+                                        "retryable": False,
+                                        "detail": response.text[:500],
+                                    }
+                                continue  # 回到 while True 顶部，用新 response 重读流
 
                             break  # 正常读完，退出 while
 
@@ -622,6 +678,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     result = {"choices": [choice]}
                     if usage:
                         result["usage"] = usage
+                    if _finish_reason:   # 票 PERF-1：finish_reason 透出（调用方/审计可用）
+                        result["finish_reason"] = _finish_reason
                     # 票 P：reasoning 独立返回（不混入 content），并留事件
                     if reasoning_buf:
                         result["reasoning"] = reasoning_buf
@@ -637,7 +695,39 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     return result
 
                 # ── 非流式模式 ──
-                return response.json()
+                _body = response.json()
+                # ── 票 PERF-1 事故 2：非流式同样检测 finish_reason=length 且正文为空 → 翻倍重试一次 ──
+                _fr_ns = _body.get("choices", [{}])[0].get("finish_reason")
+                _content_ns = (_body.get("choices", [{}])[0]
+                               .get("message", {}).get("content") or "")
+                if (_fr_ns == "length" and not _content_ns.strip()
+                        and not _length_retried):
+                    _length_retried = True
+                    _max_tokens = _max_tokens * 2
+                    payload["max_tokens"] = _max_tokens
+                    _logger.warning(
+                        "PERF-1 非流式 length 截断且正文为空 — 翻倍 max_tokens 重试一次: %d→%d, session=%s",
+                        _max_tokens // 2, _max_tokens, session_id or "?",
+                    )
+                    response = _post_with_headers_watchdog(
+                        api_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+                        stream=False,
+                        headers_timeout=_get_headers_timeout(),
+                        event_bus=_event_bus,
+                        session_id=session_id,
+                    )
+                    if response.status_code != 200:
+                        return {
+                            "error": f"length 重试 HTTP {response.status_code}",
+                            "error_type": "http",
+                            "retryable": False,
+                            "detail": response.text[:500],
+                        }
+                    continue  # 回到 for attempt 循环（attempt+1，消耗一次重试配额，_length_retried 防循环）
+                return _body
 
             except Exception as e:
                 error_type, retryable, message = _classify_error(exception=e)

@@ -733,6 +733,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 禁止以工具调用框或半截过程话收尾。纯闲聊回合（问候、确认、问答）不受此限，自然回复即可。
 
+## 任务台账（建账纪律）
+
+- 多步任务开工先建账：调用 task_ledger create 时，每项必须**当场**带 verify（怎么算做完、怎么验证）与 evidence（完成证据）字段，禁止收工前补登记。
+- 完成一项立即 update 销账（标 done 时带 evidence）。
+- 建账后按序施工，每完成一项销一项；不要一次性批量补登——收工闸会检测"批量建账全标 done"并拒绝收工。
+
 ## 可信度
 
 - 工具失败时，尝试至少一种替代方法（web_search 超时就改 web_extract，grep 失败就改 os.walk）。
@@ -936,22 +942,29 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         return False
 
-    def _extract_takeaways(self, fallback_content: str = "") -> list[str]:
+    def _extract_takeaways(self, fallback_content: str = "", history: list | None = None,
+                           tool_round: int | None = None) -> list[str]:
         """从最近一轮对话中提取 1-2 条值得记住的关键结论（草稿记忆）。
 
         fallback_content: 当 history 中 assistant 消息未落账时，以此为源。
+        history: 可选 history 快照（票 PERF-1 后台沉淀线程用，避免与下一轮
+            并发写冲突）；None 时用 self.history（主线程原行为不变）。
+        tool_round: 可选工具轮次快照；None 时用 self.current_tool_round。
         """
         import os as _os
         if _os.environ.get("BOBO_TAKEAWAYS", "").lower() == "off":
             return []
         try:
+            _hist = history if history is not None else self.history
+            _tool_round = tool_round if tool_round is not None else getattr(
+                self, "current_tool_round", 0)
             # ── 票 E4a：user 窗口从 [-4:] 扩大为向前回溯 20 条 ──
             # 根因：多轮工具执行后收工，history 末尾常为 assistant/tool 交替，
             # [-4:] 内无 user → user_msg 空 → 静默 return []（失语）。
-            _window = self.history[-20:]
+            _window = _hist[-20:]
             user_msgs = [m.get("content", "") for m in _window
                          if m.get("role") == "user" and m.get("content")]
-            asst_msgs = [m.get("content", "") for m in self.history[-4:]
+            asst_msgs = [m.get("content", "") for m in _hist[-4:]
                           if m.get("role") == "assistant" and m.get("content")]
             if not user_msgs or not asst_msgs:
                 # 收工闸推迟落账时，用 fallback_content 替代
@@ -979,7 +992,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             # ── 预筛闸门：不值得则零成本跳过 ──
             # 终审补漏（2026-07-29）：工具回合无条件放行——工作回合默认有
             # 沉淀价值（任务单原则：宁可多打不可漏记），即便收尾文字很短。
-            _has_tool_round = getattr(self, 'current_tool_round', 0) > 0
+            _has_tool_round = _tool_round > 0
             if not _has_tool_round and not self._takeaway_worthy(user_msg, asst_msg):
                 event_bus.write("takeaway.skipped", {
                     "reason": "local_gate",
@@ -1044,6 +1057,75 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 "stage": "takeaway_extract",
             })
             return []
+
+    def _run_sedimentation(self, pending_content: str) -> None:
+        """票 PERF-1 事故 1（要求 b）：后台沉淀线程主体。
+
+        takeaway 提取 + 草稿记忆镜像 + living_notes 成文整体移出回合关键路径：
+        主线程发完回复先退场（message.complete 不被 LLM 调用阻塞），沉淀在
+        daemon 线程跑；失败只留事件（WARNING + notes.error），绝不影响回合。
+
+        输入用快照（history 浅拷贝 + 工具轮次），避免与下一轮并发写冲突；
+        event_bus 自带 threading.Lock，事件写入线程安全。
+        """
+        _sid = getattr(self, "sid", "")
+        try:
+            _hist_snap = list(self.history)
+            _tool_round_snap = getattr(self, "current_tool_round", 0)
+            takeaways = self._extract_takeaways(
+                fallback_content=pending_content,
+                history=_hist_snap,
+                tool_round=_tool_round_snap,
+            )
+            if takeaways:
+                # ── 草稿记忆镜像（失败静默，原语义不变）──
+                try:
+                    from tools.v5_memory import add_entry, _save, _load, _write_lock
+                    for t in takeaways:
+                        entry = add_entry(t, entry_type="draft")
+                        if entry:
+                            entry["signal_score"] = 30
+                            entry["is_draft"] = True
+                            with _write_lock:
+                                data = _load()
+                                for e in data.get("entries", []):
+                                    if e.get("id") == entry["id"]:
+                                        e["signal_score"] = 30
+                                        e["is_draft"] = True
+                                        break
+                                _save(data)
+                except Exception:
+                    pass
+                # ── 主题笔记钩子（LN-2，失败只留痕不阻塞）──
+                try:
+                    from tools.living_notes import write_living_notes
+                    _ln_user_msgs = [
+                        m.get("content", "") for m in _hist_snap[-20:]
+                        if m.get("role") == "user" and m.get("content")
+                    ]
+                    _ln_asst_msgs = [
+                        m.get("content", "") for m in _hist_snap[-4:]
+                        if m.get("role") == "assistant" and m.get("content")
+                    ]
+                    _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
+                                   else (pending_content or ""))
+                    write_living_notes(
+                        takeaways,
+                        _ln_user_msgs[-1] if _ln_user_msgs else "",
+                        _sid,
+                        self.llm_caller,
+                        full_reply=_full_reply,
+                    )
+                except Exception as _ln_err:
+                    logger.warning("living notes hook failed (sid=%s): %s",
+                                   _sid, _ln_err)
+                    event_bus.write("notes.error", {
+                        "session_id": _sid,
+                        "error": str(_ln_err),
+                        "stage": "ln_hook",
+                    })
+        except Exception:
+            logger.exception("sedimentation failed (sid=%s)", _sid)
 
     def _truncate_history(self):
         """硬截断最早的消息（超过 MAX_HISTORY_MESSAGES），复用孤儿配对保护。"""
@@ -1397,65 +1479,33 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     # 故提取+笔记块整体前移到此（闸之前）：事件链 takeaway.extracted → notes.written
                     # 与旧语义一致，闸只决定"回注不发回复"，不干扰提取。
                     if self._pending_content and self.proactive.mode != "off":
-                        logger.debug("extract_takeaways start (pre-gate)")
-                        takeaways = self._extract_takeaways(fallback_content=self._pending_content)
-                        if takeaways:
+                        # ── 票 PERF-1 事故 1（要求 b）：沉淀后台化 ──
+                        # takeaway 提取 + 草稿记忆镜像 + living_notes 成文整体移出
+                        # 回合关键路径：主线程发完回复先退场（message.complete 不被
+                        # LLM 调用阻塞），沉淀在 daemon 线程跑；失败只留事件不影响回合。
+                        # 事件链 takeaway.extracted → notes.written 语义保留（延迟到后台）。
+                        if self.test_mode:
+                            # 测试模式：同步执行——E4a 等测试断言 run 返回后事件已发，
+                            # 时序确定性优先；生产（gateway）走后台线程。
+                            self._run_sedimentation(self._pending_content)
+                        else:
                             try:
-                                from tools.v5_memory import add_entry, bump_signal
-                                for t in takeaways:
-                                    entry = add_entry(t, entry_type="draft")
-                                    if entry:
-                                        # 草稿记忆：低初始分，写入磁盘
-                                        entry["signal_score"] = 30
-                                        entry["is_draft"] = True
-                                        from tools.v5_memory import _save, _load, _write_lock
-                                        with _write_lock:
-                                            data = _load()
-                                            for e in data.get("entries", []):
-                                                if e.get("id") == entry["id"]:
-                                                    e["signal_score"] = 30
-                                                    e["is_draft"] = True
-                                                    break
-                                            _save(data)
-                            except Exception:
-                                pass
-                        # ── 票 LN-2：主题笔记钩子（takeaways 非空才触发）──
-                        # 逻辑全在 tools/living_notes.py，这里只做 try/except 包裹。
-                        # 内部已保证失败静默降级（WARNING + notes.error），绝不阻塞收工。
-                        try:
-                            from tools.living_notes import write_living_notes
-                            # ── 票 E4a：窗口与 _extract_takeaways 同步（回溯 20 条）──
-                            _ln_user_msgs = [
-                                m.get("content", "") for m in self.history[-20:]
-                                if m.get("role") == "user" and m.get("content")
-                            ]
-                            # ── 票 LN-2S：full_reply = 本轮 assistant 完整回复（不截断）──
-                            # 来源同 _extract_takeaways(fallback_content=...)：
-                            # history 末条 assistant 优先，否则 _pending_content 兜底。
-                            _ln_asst_msgs = [
-                                m.get("content", "") for m in self.history[-4:]
-                                if m.get("role") == "assistant" and m.get("content")
-                            ]
-                            _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
-                                           else (self._pending_content or ""))
-                            write_living_notes(
-                                takeaways,
-                                _ln_user_msgs[-1] if _ln_user_msgs else "",
-                                self.sid,
-                                self.llm_caller,
-                                full_reply=_full_reply,
-                            )
-                        except Exception as _ln_err:
-                            # ── 票 E4a：钩子异常留痕（WARNING + notes.error），不静默吞 ──
-                            logger.warning("living notes hook failed (sid=%s): %s",
-                                           getattr(self, "sid", ""), _ln_err)
-                            event_bus.write("notes.error", {
-                                "session_id": getattr(self, "sid", ""),
-                                "error": str(_ln_err),
-                                "stage": "ln_hook",
-                            })
-                        logger.debug("extract_takeaways done (pre-gate): %d items",
-                                     len(takeaways) if takeaways else 0)
+                                import threading as _threading
+                                _sed_thread = _threading.Thread(
+                                    target=self._run_sedimentation,
+                                    args=(self._pending_content,),
+                                    daemon=True,
+                                    name=f"sediment-{getattr(self, 'sid', '')}",
+                                )
+                                _sed_thread.start()
+                            except Exception as _sed_err:
+                                logger.warning("sedimentation thread start failed (sid=%s): %s",
+                                               getattr(self, "sid", ""), _sed_err)
+                                event_bus.write("notes.error", {
+                                    "session_id": getattr(self, "sid", ""),
+                                    "error": str(_sed_err),
+                                    "stage": "ln_hook",
+                                })
                     # ── 票 O3-1：收工闸快照比对（抓漏不执法：只审计+告警，不阻断收工）──
                     # office 角色会话：回合内写类工具通过决策链后已生成 guardsnap，
                     # 收工比对当前 md5——不一致 → office.snap 审计 + 回复明示告警。
