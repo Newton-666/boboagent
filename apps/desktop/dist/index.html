@@ -20,10 +20,15 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* TICKET-GUI-F3 (F3-2): 加载指示 —— 点击会话后该项呼吸闪烁，直到 resume 完成 */
 .session-item.loading { background:var(--bg3); color:var(--text); animation:sessionLoading 1.2s ease-in-out infinite; }
 @keyframes sessionLoading { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
-.session-item .del { visibility:hidden; cursor:pointer; color:#f44336; font-size:14px; margin-left:6px; flex-shrink:0; }
-.session-item:hover .del { visibility:visible; }
-.session-item .re { visibility:hidden; }
-.session-item:hover .re { visibility:visible; }
+/* V2A 打磨（owner 反馈 2026-08-13）：行内操作三键统一 .act —— 同尺寸/同基线/紧凑右置，
+   默认弱色 hover 显形，删除仅 hover 变红，pin 激活态细橙色；拒绝 emoji 直出（📌 渲染大红太扎眼） */
+.session-item .act { visibility:hidden; cursor:pointer; color:var(--text-muted); width:16px; height:16px; margin-left:2px; flex-shrink:0; background:none; border:none; padding:0; font-family:inherit; font-size:12px; line-height:1; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; }
+.session-item:hover .act { visibility:visible; }
+.session-item .act:hover { color:var(--text); background:var(--bg3); }
+.session-item .act.del:hover { color:#f44336; }
+.session-item .act.pin.on { visibility:visible; color:#e8913a; }
+.session-item .act svg { display:block; }
+.session-item .stitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 #sidebar-footer { margin-top:auto; padding:12px; font-size:12px; color:var(--text2); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; }
 #sidebar-footer .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 #sidebar-footer .dot.green { background:var(--green); }
@@ -282,11 +287,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .v2a-empty { display:flex; flex-direction:column; align-items:center; gap:6px; padding:24px 12px; text-align:center; font-size:12px; color:var(--text-muted); }
 .v2a-empty .v2a-empty-icon { font-size:22px; line-height:1; }
 
-/* ── V2A-2 pin 图钉 / 搜索空态 ── */
-.pin-btn { cursor:pointer; font-size:12px; color:var(--text-muted); margin-left:4px; flex-shrink:0; background:none; border:none; padding:0; font-family:inherit; line-height:1; }
-.pin-btn:hover { color:#e8913a; }
-.pin-btn.on { color:#e8913a; }
-.pin-mark { font-size:11px; color:#e8913a; margin-left:2px; flex-shrink:0; }
+/* ── V2A-2 pin 图钉 / 搜索空态 ──（行内按钮已并入 .act 体系统一，见上；此处仅留 pin-mark 弱化版） */
+.pin-mark { display:inline-flex; align-items:center; margin-right:5px; flex-shrink:0; color:var(--text-muted); }
 .search-empty { padding:20px 8px; text-align:center; font-size:12px; color:var(--text-muted); }
 
 /* ── V2A-2 删除二次确认模态（复用 approval-modal 样式体系）── */
@@ -602,13 +604,22 @@ function showToast(type, msg) {
   setTimeout(remove, 3000);
 }
 // ── TICKET-DESK-V2A：删除二次确认（复用确认模态，替代原生 confirm）──
+// V2A 打磨（owner 反馈）：打开即聚焦确认键，Enter=确认 / Esc=取消（对齐原生 confirm 手感）
 var _confirmCb = null;
+function _confirmKey(e) {
+  var ov = document.getElementById('confirm-overlay');
+  if (!ov || !ov.classList.contains('open')) return;
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('cf-ok').click(); }
+  else if (e.key === 'Escape') { e.preventDefault(); document.getElementById('cf-cancel').click(); }
+}
+document.addEventListener('keydown', _confirmKey);
 function askConfirm(title, desc, cb) {
   document.getElementById('cf-title').textContent = title;
   document.getElementById('cf-desc').textContent = desc;
   document.getElementById('cf-ok').textContent = '删除';
   _confirmCb = cb;
   document.getElementById('confirm-overlay').classList.add('open');
+  document.getElementById('cf-ok').focus();
 }
 document.getElementById('cf-cancel').onclick = function() {
   _confirmCb = null;
@@ -1522,24 +1533,27 @@ function renderSessions(filter) {
   filtered.forEach(function(s) {
     // TICKET-GUI-F3 (F3-1/F3-2): data-sid 供加载指示定位；active 类严格跟随 currentSessionId
     var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':''); div.dataset.sid = s.id;
-    var span = document.createElement('span'); span.textContent = s.title || s.id; span.style.overflow='hidden'; span.style.textOverflow='ellipsis';
+    var span = document.createElement('span'); span.textContent = s.title || s.id; span.className = 'stitle';
     span.onclick = function() { loadSession(s.id); };
-    // TICKET-DESK-V2A：pin 图钉标记（视觉仅加小图钉，不改行样式）
+    // V2A 打磨：pin 标记改细 SVG 弱色图钉（弃用 emoji 图钉，渲染大红太扎眼）
     if (s.pinned) {
-      var pinMark = document.createElement('span'); pinMark.className = 'pin-mark'; pinMark.textContent = '📌';
+      var pinMark = document.createElement('span'); pinMark.className = 'pin-mark';
+      pinMark.innerHTML = PIN_SVG;
       span.insertBefore(pinMark, span.firstChild);
     }
-    var re = document.createElement('span'); re.textContent = '✎'; re.className = 're'; re.style.cssText = 'cursor:pointer;color:var(--text-muted);font-size:12px;margin-left:4px;flex-shrink:0;';
-    re.onclick = function(e) { e.stopPropagation(); startRename(s, span); };
-    // TICKET-DESK-V2A：pin 行内按钮（hover 显示，与 ✎/✕ 同模式）
-    var pin = document.createElement('button'); pin.className = 'pin-btn' + (s.pinned ? ' on' : ''); pin.textContent = '📌'; pin.title = s.pinned ? '取消置顶' : '置顶';
+    // V2A 打磨：行内三键统一 .act（同尺寸同基线紧凑右置），顺序 pin→改名→删除
+    var pin = document.createElement('button'); pin.className = 'act pin' + (s.pinned ? ' on' : ''); pin.innerHTML = PIN_SVG; pin.title = s.pinned ? '取消置顶' : '置顶';
     pin.onclick = function(e) { e.stopPropagation(); togglePin(s); };
-    var del = document.createElement('span'); del.className = 'del'; del.textContent = '✕';
+    var re = document.createElement('button'); re.className = 'act re'; re.textContent = '✎'; re.title = '重命名';
+    re.onclick = function(e) { e.stopPropagation(); startRename(s, span); };
+    var del = document.createElement('button'); del.className = 'act del'; del.textContent = '✕'; del.title = '删除';
     del.onclick = function(e) { e.stopPropagation(); deleteSession(s.id); };
-    div.appendChild(span); div.appendChild(re); div.appendChild(pin); div.appendChild(del);
+    div.appendChild(span); div.appendChild(pin); div.appendChild(re); div.appendChild(del);
     sessionListEl.appendChild(div);
   });
 }
+// V2A 打磨：细线 SVG 图钉（替代 📌 emoji，视觉克制）
+var PIN_SVG = '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.6 1.2l5.2 5.2-1.1 1.1-1.7-.4-2.7 2.7.4 3.6-1.1 1.1L5.5 11.4l-3.6 3.6-.7-.7 3.6-3.6-3.1-3.1 1.1-1.1 3.6.4 2.7-2.7-.4-1.7z"/></svg>';
 // TICKET-DESK-V2A：pin 切换（本地即时渲染 + 后端持久化；失败静默，下次 list 回源）
 function togglePin(s) {
   s.pinned = !s.pinned;
