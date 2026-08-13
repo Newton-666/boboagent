@@ -1462,8 +1462,20 @@ on('message.delta', function(data) {
   if (t) {
     // TICKET-GUI-F6（缺陷 1）：思考分段 —— 当前无打开思考框（已被 tool.start
     // 收束为折叠段）时另开新框，让后续思考独立成段，与工具卡交错排列
+    // TICKET-GUI-F6B（F6 精化）：连续思考合并 —— 分段只发生在工具边界。
+    // 无打开框时先看消息流末尾紧邻元素：若是已收束的折叠思考框（中间无工具卡/
+    // 正文/diff），把新思考追加进该框（换行衔接），不另开新框；隔了工具卡/正文
+    // 则照常新建（F6 行为保留）
     if (!thinkBoxEl) {
-      thinkBoxEl = createThinkBox();
+      var lastEl = chatEl.lastElementChild;
+      if (lastEl && lastEl.classList && lastEl.classList.contains('think-box') &&
+          lastEl.classList.contains('collapsed')) {
+        thinkBoxEl = lastEl;
+        var prevTxt = thinkBoxEl.querySelector('.think-text');
+        thinkText = (prevTxt && prevTxt.textContent) ? prevTxt.textContent + '\n' : '';
+      } else {
+        thinkBoxEl = createThinkBox();
+      }
     }
     thinkText += t;
     var txt = thinkBoxEl.querySelector('.think-text');
