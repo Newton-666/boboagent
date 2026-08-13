@@ -45,6 +45,11 @@ def _index_path() -> Path:
 # 总开关
 _ENV_OFF = "BOBO_LIVING_NOTES"
 
+# 票 PERF-1 事故 1（要求 a）：成文 LLM 调用硬超时（秒）
+# 根因：write_living_notes 的 llm_call 无超时保护，网络故障时干等 ~120s
+# 钉死收尾回合（2026-08-13 12:59-13:01 铁证）。超时立即降级，绝不钉死回合。
+_LN_LLM_TIMEOUT = 30
+
 # 固定骨架章节（LN-2R：所有主题笔记统一）
 _SKELETON_SECTIONS = ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]
 
@@ -146,6 +151,40 @@ def _emit(event_type: str, data: dict):
         _ebus.write(event_type, data)
     except Exception:
         pass
+
+
+def _with_llm_timeout(llm_call, timeout: int = _LN_LLM_TIMEOUT):
+    """给注入的 llm_call 加硬超时（票 PERF-1 事故 1 要求 a）。
+
+    ThreadPoolExecutor 提交后 result(timeout=...) 等待；超时立即返回
+    {"error": ...} → 调用方走既有错误路径（ValueError → notes.error 事件），
+    绝不钉死收尾回合。
+    关键：shutdown(wait=False)——若 wait=True（with 块默认），超时后仍会
+    等挂死线程跑完，超时保护形同虚设；wait=False 立即返回，线程结果丢弃
+    （Python 线程不可杀，降级优先于完整性）。
+    """
+
+    def wrapped(prompt, **kwargs):
+        import concurrent.futures as _cf
+        _ex = _cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            _fut = _ex.submit(llm_call, prompt, **kwargs)
+            try:
+                return _fut.result(timeout=timeout)
+            except _cf.TimeoutError:
+                logger.warning(
+                    "living_notes llm call timed out after %ss — degrade (prompt=%d chars)",
+                    timeout, len(prompt) if prompt else 0,
+                )
+                return {
+                    "error": f"llm call timeout after {timeout}s",
+                    "error_type": "timeout",
+                    "retryable": False,
+                }
+        finally:
+            _ex.shutdown(wait=False)
+
+    return wrapped
 
 
 def _sanitize_name(name: str) -> str:
@@ -508,6 +547,12 @@ def write_living_notes(takeaways: list[str], user_msg: str, sid: str, llm_call,
         return {"written": False, "error": "disabled"}
     if not takeaways:
         return {"written": False, "error": None}
+
+    # ── 票 PERF-1 事故 1（要求 a）：LLM 成文调用加 30s 硬超时 ──
+    # 根因：llm_call 无超时保护，网络故障干等 ~120s 钉死收尾回合。
+    # 包 wrapper 后全函数内所有 llm_call（主题判定 + 成文/重写）统一受控，
+    # 超时返回 error dict → 走下方既有 ValueError → notes.error 降级路径。
+    llm_call = _with_llm_timeout(llm_call, timeout=_LN_LLM_TIMEOUT)
 
     # LN-2S：成文/重写原料 = 完整回复全文（超 32000 才截断 + notes.error truncated）
     material = full_reply if full_reply else "\n".join(f"- {t}" for t in takeaways)
