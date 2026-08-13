@@ -309,6 +309,27 @@ def run_engine(
         # 持久化直接取 Engine 实例字段，不再依赖模块级 _get_ledger。
         session["task_ledger"] = list(engine.task_ledger)
 
+        # ── 票 L1：台账持久化独立事件（ledger.persist）──
+        # 落盘前发独立事件，md5 复核可区分"台账改动"与"业务改动"；
+        # 事件含指纹（items/done/verify/evidence 计数），供对账与审计。
+        try:
+            import hashlib as _hl
+            _led = session["task_ledger"]
+            _done = sum(1 for e in _led if isinstance(e, dict) and e.get("status") == "done")
+            _v = sum(1 for e in _led if isinstance(e, dict) and (e.get("verify") or "").strip())
+            _ev = sum(1 for e in _led if isinstance(e, dict) and (e.get("evidence") or "").strip())
+            _fp = _hl.md5(repr(_led).encode("utf-8", "replace")).hexdigest()[:12]
+            _ebus.write("ledger.persist", {
+                "session_id": sid,
+                "items": len(_led),
+                "done": _done,
+                "with_verify": _v,
+                "with_evidence": _ev,
+                "fingerprint": _fp,
+            })
+        except Exception:
+            pass  # 审计事件失败不阻塞落盘（事件总线铁律）
+
         # ── 票 AUTO-G2：已交接水位线回写会话（收工列出新拒绝后水位线推到本回合
         # 最后一条 deny 的 ts；下次收工旧账不再重复糊出）。
         # getattr 防御：外部替身引擎（测试 FakeEngine 等）可能无该属性，静默跳过。

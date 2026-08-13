@@ -599,6 +599,43 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 return line.split(":", 1)[1].strip().strip('"').strip("'")
         return ""
 
+    def _workspace_recon(self) -> str:
+        """票 L1：收工自动对账 —— 只读 git 工作区实况注入。
+
+        收工闸触发（放行/熔断/干净收工）时执行只读 git status + diff --stat，
+        把"工作区实况"注入终稿，堵汇报失实（台账与汇报必须与实况一致）。
+        只读命令（status/diff --stat），绝不执行写操作；失败静默返回空串，
+        不阻塞收工（事件总线铁律）。
+        """
+        import subprocess as _sp
+        try:
+            r1 = _sp.run(
+                ["git", "status", "--short"],
+                capture_output=True, text=True, timeout=5,
+                cwd=os.getcwd(),
+            )
+            r2 = _sp.run(
+                ["git", "diff", "--stat"],
+                capture_output=True, text=True, timeout=5,
+                cwd=os.getcwd(),
+            )
+            status_out = (r1.stdout or "").strip() if r1.returncode == 0 else ""
+            diff_out = (r2.stdout or "").strip() if r2.returncode == 0 else ""
+            if not status_out and not diff_out:
+                return ""  # 工作区干净 → 无需对账注入
+            parts = ["\n\n── 工作区实况（收工对账，只读）──"]
+            if status_out:
+                lines = status_out.splitlines()
+                parts.append(f"git status --short: {len(lines)} 项变更")
+                parts.append("\n".join(lines[:20]) + ("\n…（截断）" if len(lines) > 20 else ""))
+            if diff_out:
+                parts.append("git diff --stat:")
+                parts.append(diff_out[:800])
+            parts.append("台账与汇报必须与以上工作区实况一致（完成项逐条带证据，未完成项带原因与下一步）。")
+            return "\n".join(parts)
+        except Exception:
+            return ""
+
     def _ledger_field_issues(self) -> list[dict]:
         """票 C：台账字段质量扫描（收工闸 auto 硬拦的判定内核）。
 
@@ -746,10 +783,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 ## 收工汇报（重要）
 
-每个任务回合结束时，你的最后一条回复必须是简短的收工汇报，用自然的语言交底：
-- **做完了什么**（一两句话，别罗列每个工具调用）
-- **还剩什么 / 下一步等什么**（如果有未完成事项；有任务台账时对照台账说明）
-- 全部完成就明确说"全部完成"，别含糊。
+每个任务回合结束时，你的最后一条回复必须是简短的收工汇报，用自然的语言交底，逐条交底，禁止"OK / 完成 / 未完成"式一句话（质量硬性要求 · 票 LEDGER-1）：
+
+- **完成项**：逐条列出，每条必须带证据（文件路径 / 测试数字 / commit / 返回值）。例如"修好了 X（core/engine.py 字段闸改放行，py_compile 通过）"，不要只写"修好了 X"。
+- **未完成项**：逐条列出，每条带具体原因与下一步动作（如"卡在 X：环境缺依赖，下一步装依赖后重跑"）。
+- **台账对照**：有任务台账时对照台账逐项销账说明，与台账状态一致。
+- **对账一致**：收工闸已注入"工作区实况"（git status/diff --stat）时，汇报内容必须与实况一致——实况里改了哪些文件，汇报就得交代哪些文件；实况有未跟踪改动，汇报不得声称全部完成。
+- 全部完成就明确说"全部完成"，但"全部完成"必须建立在逐条证据之上。
 
 禁止以工具调用框或半截过程话收尾。纯闲聊回合（问候、确认、问答）不受此限，自然回复即可。
 
@@ -1773,66 +1813,31 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             return
                         field_issues = self._ledger_field_issues()
                         if field_issues:
-                            # ── 票 G2-2：字段闸死锁安全阀（原无熔断上限 → 3 次降级 / 5 次强制放行）──
+                            # ── 票 L1：deny 降本 —— 缺字段不再强制全上下文重跑 ──
+                            # 精简补正指令本轮放行 + 执法记录照留（goal_gate.deny 审计 + 计数）。
+                            # 不 return、不 append history 重跑：补正指令随终稿带出，
+                            # 模型下轮自然补（省掉全上下文重跑一轮的 +15s 成本）。
+                            # 铁律保留：台账执法能力不删（缺字段仍被记录、仍被点名），
+                            # 只改同步与成本结构（票 L1 裁决）。
                             self._ledger_field_deny_count += 1
                             _parts = "; ".join(
                                 f'{i["id"]} 缺 {", ".join(i["missing"])}' for i in field_issues
                             )
-                            if self._ledger_field_deny_count >= 5:
-                                # 第 5 次：强制放行 + 审计事件（含 item 明细/deny 次数），不 deny
-                                event_bus.write("goal_gate.forced_release", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "reason": "ledger_field_missing_exhausted",
-                                    "field_issues": field_issues,
-                                    "deny_count": self._ledger_field_deny_count,
-                                })
-                                _ids = ", ".join(f'{i["id"]}' for i in field_issues)
-                                warning = (
-                                    f"\n\n⚠️ {_gate_label} 字段闸连续 deny {self._ledger_field_deny_count} 次，"
-                                    f"引擎强制放行（审计：item {_ids} 仍缺字段）"
-                                )
-                                self._pending_content = (self._pending_content or "") + warning
-                            elif self._ledger_field_deny_count >= 3:
-                                # 第 3 次起降级：补字段 或 转 pending 交接/上报调度员
-                                rej_msg = (
-                                    f"{_gate_label} 收工拒绝（第 {self._ledger_field_deny_count} 次）："
-                                    f"台账 {len(field_issues)} 项缺字段（{_parts}）。"
-                                    "请用 task_ledger update 补齐 verify（怎么算做完/怎么验证）与 done 项的 "
-                                    "evidence（完成证据），或将该 item update 写明卡点转 pending 交接/上报调度员，"
-                                    "或删除该项，然后继续。不要说明、不要道歉，直接做。"
-                                )
-                                self._append_to_history("user", rej_msg)
-                                self._pending_content = None
-                                self._pending_tool_calls = None
-                                self.current_depth += 1
-                                event_bus.write("goal_gate.deny", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "reason": "ledger_field_missing",
-                                    "field_issues": field_issues,
-                                    "deny_count": self._ledger_field_deny_count,
-                                })
-                                self._emit_state_change(self.STATE_THINKING, "ledger field deny")
-                                return
-                            else:
-                                # 第 1-2 次：原语义 deny（安全阀兜底前）
-                                rej_msg = (
-                                    f"{_gate_label} 收工拒绝：台账 {len(field_issues)} 项缺字段（{_parts}）。"
-                                    "请用 task_ledger update "
-                                    "补齐 verify（怎么算做完/怎么验证）与 done 项的 evidence（完成证据），"
-                                    "或删除该项，然后继续。不要说明、不要道歉，直接做。"
-                                )
-                                self._append_to_history("user", rej_msg)
-                                self._pending_content = None
-                                self._pending_tool_calls = None
-                                self.current_depth += 1
-                                event_bus.write("goal_gate.deny", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "reason": "ledger_field_missing",
-                                    "field_issues": field_issues,
-                                    "deny_count": self._ledger_field_deny_count,
-                                })
-                                self._emit_state_change(self.STATE_THINKING, "ledger field deny")
-                                return
+                            event_bus.write("goal_gate.deny", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "ledger_field_missing",
+                                "field_issues": field_issues,
+                                "deny_count": self._ledger_field_deny_count,
+                                "mode": "pass_with_note",  # L1：本轮放行 + 执法记录照留
+                            })
+                            logger.debug("LEDGER field-gate note #%d (pass-with-note): %s",
+                                         self._ledger_field_deny_count, _parts)
+                            self._pending_content = (self._pending_content or "") + (
+                                f"\n\n⚠️ {_gate_label} 字段闸记录（第 {self._ledger_field_deny_count} 次，"
+                                f"本轮放行）：台账 {len(field_issues)} 项缺字段（{_parts}）。"
+                                "收工汇报需给出补正计划：补齐 verify（怎么算做完/怎么验证）与 done 项的 "
+                                "evidence（完成证据），或写明卡点转 pending 交接/上报调度员。"
+                            )
                     # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
                     pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
                     if pending_items:
@@ -1879,7 +1884,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 "session_id": getattr(self, "sid", ""),
                                 "tool_round": self.current_tool_round,
                             })
-                            if self._ledger_reinject_count < 2:
+                            # ── 票 L1：提醒降噪 —— 强制建账提醒每回合至多一次 ──
+                            # 原上限 2 次（同回合可回注两次）；改为 1 次即放行，
+                            # 提醒不再反复注入对话流（票 L1 问题 3）。
+                            if self._ledger_reinject_count < 1:
                                 self._ledger_reinject_count += 1
                                 rej_msg = "本回合调用了工具但没有建立任务台账。task_ledger 就在你的可用工具列表中，请直接调用它建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
                                 self._append_to_history("user", rej_msg)
@@ -1891,7 +1899,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 self._emit_state_change(self.STATE_THINKING, "no-ledger re-injection")
                                 return
                             else:
-                                # 已达 2 次熔断上限 → 放行
+                                # 已达 1 次上限 → 放行（L1：提醒降噪后不重复回注）
                                 event_bus.write("goal_gate.released", {
                                     "session_id": getattr(self, "sid", ""),
                                     "reason": "no_ledger_exhausted",
@@ -1973,6 +1981,40 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls)
             self._append_to_history("tool", tool_results=tool_results)
+            # ── 票 L1：自动销账辅助（建议性，模型可推翻）──
+            # 检测强完成信号：run_tests 全绿（N passed 且无 failed）→ 注入建议，
+            # 提示模型用 task_ledger update 标 done（带 evidence）。
+            # 只建议不改账（引擎不替模型记账：台账由模型执笔，铁律保留）。
+            if tool_results and self.task_ledger:
+                _pending_cnt = sum(1 for e in self.task_ledger if e.get("status") != "done")
+                if _pending_cnt:
+                    for _tr in tool_results:
+                        if not isinstance(_tr, dict):
+                            continue
+                        _c = _tr.get("content") or ""
+                        if isinstance(_c, list):
+                            _c = " ".join(
+                                str(x.get("text", "")) for x in _c if isinstance(x, dict)
+                            )
+                        _c = str(_c)
+                        # 全绿信号：N passed 且无 [1-9] failed（0 failed 不算失败）
+                        if re.search(r"\d+\s+passed", _c) and not re.search(r"[1-9]\d*\s+failed", _c):
+                            self.history.append({
+                                "role": "system",
+                                "content": (
+                                    "💡 检测到测试全绿强完成信号（run_tests）。"
+                                    f"台账仍有 {_pending_cnt} 项 pending：若对应工作已由测试"
+                                    "验证完成，请用 task_ledger update 标 done（带 evidence："
+                                    "测试数字/文件路径）；否则忽略本条建议（模型可推翻）。"
+                                ),
+                            })
+                            event_bus.write("ledger.auto_suggest", {
+                                "session_id": getattr(self, "sid", ""),
+                                "pending_count": _pending_cnt,
+                            })
+                            logger.debug("LEDGER auto-suggest: %d pending after all-green tests",
+                                         _pending_cnt)
+                            break
             # 检测阶段完成信号
             if self._pending_content and self._is_phase_complete(self._pending_content):
                 self._phase_pending_cleanup = True
@@ -2048,6 +2090,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 # 账不平在进 RESPONDING 前已被回注；走到这里 = 闸已全过（纯放行路径）。
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
                 self._ledger_reminded = False  # 票Z：同步重置
+                # ── 票 L1：收工自动对账（堵汇报失实）──
+                # 有工具轮 → 引擎只读 git status/diff --stat 注入工作区实况，
+                # 终稿强制携带对账段：台账与汇报必须与工作区实况一致。
+                # 工作区干净 → _workspace_recon 返回 ""，零注入零开销。
+                if self.current_tool_round > 0:
+                    _recon = self._workspace_recon()
+                    if _recon:
+                        self._pending_content = (self._pending_content or "") + _recon
                 # ── 所有闸通过，内容落 history ──
                 self._append_to_history("assistant", self._pending_content)
                 # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分

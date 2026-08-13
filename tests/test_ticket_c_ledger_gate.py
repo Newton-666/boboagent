@@ -112,89 +112,65 @@ class TestAutoFieldGate:
         assert denies == [], "合规台账不应 deny"
         assert engine._ledger_field_deny_count == 0
 
-    def test_auto_missing_verify_denied_and_audited(self, monkeypatch):
-        """验收 2：auto + 缺 verify → deny + 审计明细；第 3 次起降级（含转交选项）；补齐后放行"""
+    def test_auto_missing_field_pass_with_note_and_audited(self, monkeypatch):
+        """票 L1（deny 降本）：auto + 缺 verify → 本轮放行 + 执法记录照留，不再重跑。
+
+        原票 C 语义：缺字段连续 deny（最多 3 次降级）强制全上下文重跑；
+        票 L1 裁决：精简补正指令本轮放行 + goal_gate.deny 审计（mode=pass_with_note）。
+        台账执法能力不删：缺字段仍被记录、仍被点名。
+        """
         events = _track_events()
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),  # R1 → deny #1
-            ("已完成全部工作", None),  # R2 → deny #2
-            ("已完成全部工作", None),  # R3 → deny #3（G2-2 降级：含转 pending 交接选项）
-            ("已完成全部工作", None),  # R4 → 钩子已补字段 → 放行
-        ])
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])
         fake_tools = FakeToolExecutor()
         engine = _make_auto_engine(fake_llm, fake_tools, monkeypatch, [
-            {"id": "1", "title": "a", "status": "pending"},  # 缺 verify
+            {"id": "1", "title": "a", "status": "done"},  # done 缺 evidence
         ], auto=True)
+        final_output = [""]
+        engine.callback = (lambda et, d: final_output.__setitem__(0, d.get("content", ""))
+                           if et == "complete" else None)
 
-        # 钩子：第 3 次 deny 后模拟 agent 补字段（否则 deny 循环到 depth 熔断）
-        original_emit = engine._emit_state_change
-        _denies = [0]
-
-        def tracking_emit(state, reason):
-            if state == engine.STATE_THINKING and "ledger field deny" in str(reason):
-                _denies[0] += 1
-                if _denies[0] == 3:
-                    engine.task_ledger = [
-                        {"id": "1", "title": "a", "status": "done",
-                         "verify": "跑测试", "evidence": "全过"},
-                    ]
-            original_emit(state, reason)
-
-        engine._emit_state_change = tracking_emit
         engine.run(user_input="干活")
 
         assert engine.state == engine.STATE_DONE
-        # 连续 3 次 deny 仍不放行（第 3 次起降级，但仍 deny；裁决 2 语义由 G2-2 安全阀兜底）
+        # 执法记录照留：goal_gate.deny（reason + mode=pass_with_note + 字段明细）
         denies = [e for e in events if e[0] == "goal_gate.deny"]
-        assert len(denies) == 3, f"应 deny 3 次，实际 {len(denies)}"
-        assert engine._ledger_field_deny_count == 3
-        # 独立计数：不消耗回注熔断计数
-        assert engine._ledger_reinject_count == 0, "缺字段 deny 不应消耗回注计数"
-        # 审计事件字段齐全（验收 6）
+        assert len(denies) == 1
+        assert engine._ledger_field_deny_count == 1
         last_deny = denies[-1][1]
         assert last_deny["reason"] == "ledger_field_missing"
         assert last_deny["session_id"] == getattr(engine, "sid", "")
-        assert last_deny["field_issues"] == [{"id": "1", "missing": ["verify"]}]
-        assert last_deny["deny_count"] == 3
-        # deny 指令含明确指引
+        assert last_deny["field_issues"] == [{"id": "1", "missing": ["verify", "evidence"]}]
+        assert last_deny["deny_count"] == 1
+        assert last_deny["mode"] == "pass_with_note"
+        # 独立计数：不消耗回注熔断计数
+        assert engine._ledger_reinject_count == 0, "缺字段记录不应消耗回注计数"
+        # 不再强制重跑：无"收工拒绝"user 回注，LLM 只调 1 次
+        assert fake_llm.call_count == 1
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
         deny_msgs = [m for m in user_msgs if "收工拒绝" in m.get("content", "")]
-        assert len(deny_msgs) == 3, "每次 deny 都应向 history 追加指令"
-        assert "verify" in deny_msgs[0]["content"] and "1" in deny_msgs[0]["content"]
-        # 【G2-2 语义迁移】第 3 次 deny 降级：指令含转 pending 交接/上报调度员选项
-        assert "转 pending 交接/上报调度员" in deny_msgs[2]["content"], (
-            "第 3 次 deny 应降级含转交选项"
-        )
+        assert deny_msgs == []
+        # 终稿带 AUTO MODE 补正指令（本轮放行语义）
+        assert "AUTO MODE 字段闸记录" in final_output[0]
+        assert "本轮放行" in final_output[0]
+        assert "evidence" in final_output[0]
 
     def test_auto_done_missing_evidence_then_fixed(self, monkeypatch):
-        """验收 3：auto + done 缺 evidence → deny；补齐 evidence 后放行"""
+        """票 L1：done 缺 evidence → 本轮放行 + 执法记录（mode=pass_with_note），不重跑"""
         events = _track_events()
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),  # R1 → deny（done 缺 evidence）
-            ("已完成全部工作", None),  # R2 → 钩子已补 evidence → 放行
-        ])
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])
         fake_tools = FakeToolExecutor()
         engine = _make_auto_engine(fake_llm, fake_tools, monkeypatch, [
             {"id": "1", "title": "a", "status": "done", "verify": "跑测试"},  # 缺 evidence
         ], auto=True)
 
-        original_emit = engine._emit_state_change
-
-        def tracking_emit(state, reason):
-            if state == engine.STATE_THINKING and "ledger field deny" in str(reason):
-                engine.task_ledger = [
-                    {"id": "1", "title": "a", "status": "done",
-                     "verify": "跑测试", "evidence": "全过"},
-                ]
-            original_emit(state, reason)
-
-        engine._emit_state_change = tracking_emit
         engine.run(user_input="干活")
 
         assert engine.state == engine.STATE_DONE
         denies = [e for e in events if e[0] == "goal_gate.deny"]
         assert len(denies) == 1
         assert denies[0][1]["field_issues"] == [{"id": "1", "missing": ["evidence"]}]
+        assert denies[0][1]["mode"] == "pass_with_note"
+        assert fake_llm.call_count == 1
 
     def test_auto_off_legacy_ledger_passes_unaffected(self, monkeypatch):
         """验收 4（对照组）：auto off + 老格式缺字段台账 → 与施工前一致直接收工"""
