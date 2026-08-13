@@ -303,6 +303,21 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #confirm-modal .cf-cancel:hover { background:var(--hover); }
 #confirm-modal .cf-ok { background:#f48771; color:#fff; }
 #confirm-modal .cf-ok:hover { opacity:0.88; }
+
+/* ══ TICKET-DESK-V2B：工具时间线 + 上下文仪表盘（只加 class，零改既有）══ */
+/* V2B-1 工具耗时：.tool-status 右侧 44px 等宽右对齐数字，flex-shrink:0 不挤压名称/路径 */
+.tool .tool-time { width:44px; text-align:right; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:10px; color:var(--text-muted); flex-shrink:0; }
+/* V2B-2 上下文仪表盘：#input-box 正上方 22px 细条，左右与输入框对齐（padding 同 #input-box） */
+.ctx-stats-wrap { position:relative; }
+.ctx-bar { height:22px; display:flex; align-items:center; gap:14px; padding:0 16px; cursor:pointer; user-select:none; }
+.ctx-bar:hover { background:var(--hover); }
+.ctx-bar .ctx-item { font-size:10px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; }
+.ctx-bar .ctx-item b { color:var(--text2); font-weight:600; }
+/* 明细卡：向上展开（bottom:100% 不遮盖输入框），300ms 内入场（fadeIn 0.25s 既有动效） */
+.ctx-detail { position:absolute; bottom:100%; left:0; right:0; margin-bottom:4px; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; z-index:60; animation:fadeIn 0.25s ease-out; }
+.ctx-detail .ctx-row { display:flex; justify-content:space-between; gap:16px; font-size:11px; color:var(--text); padding:3px 0; font-family:'SF Mono',Monaco,Menlo,monospace; }
+.ctx-detail .ctx-row span { color:var(--text-muted); font-family:-apple-system,'PingFang SC',sans-serif; }
+.ctx-detail .ctx-note { font-size:10px; color:var(--text-muted); margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-family:-apple-system,'PingFang SC',sans-serif; }
 </style>
 </head>
 <body>
@@ -340,6 +355,15 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     </div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
     <div id="chat"></div>
+    <!-- TICKET-DESK-V2B：上下文仪表盘细条（#input-box 正上方，22px；点击展开明细卡，Esc 收起）-->
+    <div id="ctx-stats-wrap">
+      <div id="ctx-stats-detail" class="ctx-detail" style="display:none"></div>
+      <div id="ctx-stats-bar" class="ctx-bar" title="上下文统计（点击展开 / Esc 收起）" onclick="toggleCtxStats()">
+        <span class="ctx-item">ctx <b id="ctx-token">—</b> tok</span>
+        <span class="ctx-item">压缩节省 <b id="ctx-saved">—</b></span>
+        <span class="ctx-item">记忆注入 <b id="ctx-injected">—</b></span>
+      </div>
+    </div>
     <div id="input-box">
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
       <button id="auto-toggle" title="AUTO 模式开关（点击切换，回车=发送 / Shift+回车=换行）" disabled>AUTO</button>
@@ -899,6 +923,7 @@ function addTool(name, context, toolId) {
     '<span class="tool-name">' + esc(friendly) + '</span>' +
     (context && context !== name ? '<span class="tool-context">' + esc(context) + '</span>' : '') +
     '<span class="tool-status">running</span>' +
+    '<span class="tool-time"></span>' +
     '<span class="tool-toggle" style="display:none">▸</span>' +
     '<div class="tool-result"></div>';
   div.onclick = function(e) {
@@ -1031,11 +1056,16 @@ function updateToolResult(toolId, data) {
     dot.className = 'dot fail';
     statusEl.textContent = 'failed';
     statusEl.style.color = '#f48771';
+    var timeElF = div.querySelector('.tool-time');
+    if (timeElF) timeElF.textContent = '—';
     resultEl.className = 'tool-result error open';
     resultEl.textContent = error.substring(0, 200);
   } else {
     dot.className = 'dot done';
-    statusEl.textContent = duration ? 'done (' + duration.toFixed(1) + 's)' : 'done';
+    // TICKET-DESK-V2B：耗时从状态文本迁出为独立时间列（.tool-time 44px 等宽右对齐）
+    statusEl.textContent = 'done';
+    var timeEl = div.querySelector('.tool-time');
+    if (timeEl) timeEl.textContent = duration ? duration.toFixed(1) + 's' : '—';
     statusEl.style.color = '#50a14f';
     // TICKET-D1d ①② + F3-5: 有 diff 时工具卡只留一行摘要，diff 本体搬出为独立区块
     if (resultText || Object.keys(args).length > 0) {
@@ -1062,6 +1092,36 @@ function updateToolResult(toolId, data) {
     }
   }
 }
+// TICKET-DESK-V2B：上下文仪表盘 —— 细条数据刷新 + 明细卡展开/收起
+function refreshCtxStats() {
+  call('context.stats', { session_id: currentSessionId || '' }).then(function(res) {
+    var d = res && res.result ? res.result : null;
+    if (!d) return;
+    var fmt = function(n) { return (typeof n === 'number') ? String(n) : '—'; };
+    var t = document.getElementById('ctx-token');
+    if (t) t.textContent = fmt(d.token_estimate);
+    var s = document.getElementById('ctx-saved');
+    if (s) s.textContent = fmt(d.saved_chars);
+    var m = document.getElementById('ctx-injected');
+    if (m) m.textContent = fmt(d.memory_injected);
+    var det = document.getElementById('ctx-stats-detail');
+    if (det) det.innerHTML =
+      '<div class="ctx-row"><span>上下文 token 估算</span><b>' + fmt(d.token_estimate) + '</b></div>' +
+      '<div class="ctx-row"><span>压缩节省（字符）</span><b>' + fmt(d.saved_chars) + '</b></div>' +
+      '<div class="ctx-row"><span>结果标记条数</span><b>' + fmt(d.marked) + '</b></div>' +
+      '<div class="ctx-row"><span>记忆注入条数</span><b>' + fmt(d.memory_injected) + '</b></div>' +
+      '<div class="ctx-note">token 由当前会话消息估算；压缩节省与注入条数为工作区累计值。</div>';
+  });
+}
+function toggleCtxStats() {
+  var det = document.getElementById('ctx-stats-detail');
+  if (!det) return;
+  var open = det.style.display !== 'none';
+  if (open) { det.style.display = 'none'; return; }
+  det.style.display = 'block';
+  refreshCtxStats(); // 展开时拉最新
+}
+
 // TICKET-D1d ②: diff 红绿高亮（+ 绿 / - 红 / @@ 蓝，兼容 ++/-- 文件头）
 function diffHighlight(text) {
   var lines = esc(text).split('\n');
@@ -1772,6 +1832,7 @@ on('gateway.ready', async function() {
   renderPluginList();
   document.getElementById('body-plugin').classList.add('closed');
   document.getElementById('arr-plugin').classList.add('closed');
+  refreshCtxStats();   // TICKET-DESK-V2B：就绪后初始刷新上下文仪表盘
   debug('Ready'); inputEl.focus();
 });
 
@@ -1933,6 +1994,7 @@ on('message.complete', function(data) {
     thinkBoxEl.style.opacity = '0.5';
   }
   loadSessions();
+  refreshCtxStats();   // TICKET-DESK-V2B：回合结束刷新上下文仪表盘
 });
 on('tool.start', function(data) {
   // TICKET-GUI-F6（缺陷 1）：工具卡是天然分段点 —— 到达时把当前思考框收束为
@@ -2258,7 +2320,12 @@ document.addEventListener('keydown', function(e) {
   var mod = e.metaKey || e.ctrlKey;
   if (e.key === 'n' && mod) { e.preventDefault(); newChat(); }
   if (e.key === ',' && mod) { e.preventDefault(); document.getElementById('settings-icon').click(); }
-  if (e.key === 'Escape') { stopThinking(); }
+  if (e.key === 'Escape') {
+    // TICKET-DESK-V2B：明细卡开着时 Esc 优先收起（不触发中断）
+    var ctxDet = document.getElementById('ctx-stats-detail');
+    if (ctxDet && ctxDet.style.display !== 'none') { ctxDet.style.display = 'none'; }
+    else { stopThinking(); }
+  }
 });
 
 // ── Auto-hide sidebar on narrow window ──────────────────────────────────

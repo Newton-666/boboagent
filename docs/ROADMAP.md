@@ -9,7 +9,8 @@
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
 | 1 | ~~DESK-V2A 体验地基~~ | ✅ 已合并（6d11d0b）：覆盖层/搜索/重命名/删除/pin/Toast/三态，CSS 零改动闸门锁死 | ✅ done |
-| 2 | DESK-V2B 差异化面板 | 工具活动流时间线 + 上下文仪表盘（输入条上方细条）；Worker 视图已拆出 | 📋 票已写（data/tickets/TICKET-DESK-V2B.md），下一张 |
+| 2 | DESK-V2B 差异化面板 | 工具活动流时间线 + 上下文仪表盘（输入条上方细条）；Worker 视图已拆出 | 📋 票已写，施工中 |
+| 2.5 | GUI-F9（P0 插队） | 运行中会话切回丢进行中回合：引擎在副本上跑、回合末才写回，resume 忙分支需读活引擎 history（Kimi 已定位 engine_adapter.py:245/305） | 📋 票已写（data/tickets/TICKET-GUI-F9.md），V2B 后立刻做 |
 | 3 | DESK-V2C 锦上添花 | 流式 markdown 简版 + 记忆面板 + 中文优先排版 + 主题 token 化（不做浅色主题） | 📋 待开 |
 
 ### 第二梯队：评估与内核深化（排在 DESK-V2 之后，owner 拍板：性能在 GUI 提升后）
