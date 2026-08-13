@@ -57,6 +57,43 @@ def _scan_directory(path: str, max_depth: int = 4) -> list:
     return tree
 
 
+def handle_context_stats(params: dict, rid: str, ctx) -> dict:
+    """只读上下文统计（TICKET-DESK-V2B）：当前会话 token 估算 / 压缩节省 / 记忆注入条数。
+
+    数据全部来自现有链路，只读不写：
+    - token_estimate：ctx.sessions[sid].messages 经 core.context._estimate_tokens 估算
+    - saved_chars / marked / loaded：tools.load_result.get_marking_stats（工作区 _stats.json 累计）
+    - memory_injected：取 loaded（load_result 取回次数 = 结果/记忆注入次数）
+    """
+    sid = params.get("session_id", "")
+    token_estimate = 0
+    if sid and sid in ctx.sessions:
+        try:
+            from core.context import _estimate_tokens
+            msgs = ctx.sessions.get(sid, {}).get("messages", []) or []
+            token_estimate = _estimate_tokens(msgs)
+        except Exception:
+            token_estimate = 0
+    saved_chars = 0
+    marked = 0
+    loaded = 0
+    try:
+        from tools.load_result import get_marking_stats
+        st = get_marking_stats() or {}
+        saved_chars = st.get("total_chars_saved", 0) or 0
+        marked = st.get("marked", 0) or 0
+        loaded = st.get("loaded", 0) or 0
+    except Exception:
+        pass
+    return ok(rid, {
+        "token_estimate": token_estimate,
+        "saved_chars": saved_chars,
+        "marked": marked,
+        "loaded": loaded,
+        "memory_injected": loaded,
+    })
+
+
 def handle_project_set_root(params: dict, rid: str, ctx) -> dict:
     """设置项目根目录，扫描并发射文件树"""
     root = params.get("path", "")
@@ -85,4 +122,5 @@ def register(reg_method, ctx):
     reg_method("paste.collapse")(handle_paste_collapse)
     reg_method("terminal.resize")(handle_terminal_resize)
     reg_method("input.detect_drop")(handle_input_detect_drop)
+    reg_method("context.stats")(lambda params, rid: handle_context_stats(params, rid, ctx))
     reg_method("project.set_root")(lambda params, rid: handle_project_set_root(params, rid, ctx))
