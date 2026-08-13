@@ -96,41 +96,38 @@ class TestDetectLedgerBackfill:
 # ── 端到端：office on（无 auto）闸生效（票 O8-1） ──
 
 class TestOfficeFieldGate:
-    def test_office_on_missing_verify_denied(self, monkeypatch):
-        """验收 1：office on（无 auto）+ 缺 verify → deny（reason=ledger_field_missing）+ OFFICE MODE 文案"""
+    def test_office_on_missing_field_pass_with_note(self, monkeypatch):
+        """票 L1（deny 降本）：office on + 缺字段 → 本轮放行 + 执法记录照留。
+
+        原票 O8-1 语义：缺字段 deny 强制全上下文重跑一轮；
+        票 L1 裁决：精简补正指令本轮放行 + goal_gate.deny 执法记录，不再重跑。
+        """
         events = _track_events()
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),  # R1 → deny
-            ("已完成全部工作", None),  # R2 → 钩子已补字段 → 放行
-        ])
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])
         fake_tools = FakeToolExecutor()
         engine = _make_engine(fake_llm, fake_tools, monkeypatch, [
-            {"id": "1", "title": "a", "status": "pending"},  # 缺 verify
+            {"id": "1", "title": "a", "status": "done"},  # done 缺 evidence
         ], auto=False, office_on=True)
+        final_output = [""]
+        engine.callback = (lambda et, d: final_output.__setitem__(0, d.get("content", ""))
+                           if et == "complete" else None)
 
-        original_emit = engine._emit_state_change
-        _denies = [0]
-
-        def tracking_emit(state, reason):
-            if state == engine.STATE_THINKING and "ledger field deny" in str(reason):
-                _denies[0] += 1
-                if _denies[0] == 1:
-                    engine.task_ledger = [
-                        {"id": "1", "title": "a", "status": "done",
-                         "verify": "跑测试", "evidence": "全过"},
-                    ]
-            original_emit(state, reason)
-
-        engine._emit_state_change = tracking_emit
         engine.run(user_input="干活")
 
         assert engine.state == engine.STATE_DONE
+        # 执法记录照留：goal_gate.deny（reason=ledger_field_missing, mode=pass_with_note）
         denies = [e for e in events if e[0] == "goal_gate.deny"]
         assert len(denies) == 1
         assert denies[0][1]["reason"] == "ledger_field_missing"
+        assert denies[0][1]["mode"] == "pass_with_note"
+        # 不再强制全上下文重跑：无"收工拒绝"user 回注，LLM 只调 1 次
+        assert fake_llm.call_count == 1
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
         deny_msgs = [m for m in user_msgs if "收工拒绝" in m.get("content", "")]
-        assert "OFFICE MODE 收工拒绝" in deny_msgs[0]["content"]
+        assert deny_msgs == []
+        # 终稿带 OFFICE MODE 补正指令（本轮放行语义）
+        assert "OFFICE MODE 字段闸记录" in final_output[0]
+        assert "本轮放行" in final_output[0]
 
     def test_office_on_compliant_passes(self, monkeypatch):
         """验收 2：office on + 全字段合规 → 直接放行，无 deny"""
@@ -214,34 +211,27 @@ class TestNormalModeControl:
 # ── auto 模式回归 ──
 
 class TestAutoModeRegression:
-    def test_auto_mode_label_unchanged(self, monkeypatch):
-        """验收 5：auto on 缺字段 deny 文案仍为 AUTO MODE（票 C 语义不变）"""
+    def test_auto_mode_label_kept_in_note(self, monkeypatch):
+        """票 L1：auto on 缺字段 → AUTO MODE 文案保留（本轮放行补正指令）。"""
         events = _track_events()
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),
-            ("已完成全部工作", None),
-        ])
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])
         fake_tools = FakeToolExecutor()
         engine = _make_engine(fake_llm, fake_tools, monkeypatch, [
-            {"id": "1", "title": "a", "status": "pending"},
+            {"id": "1", "title": "a", "status": "done"},  # done 缺 evidence
         ], auto=True, office_on=False)
+        final_output = [""]
+        engine.callback = (lambda et, d: final_output.__setitem__(0, d.get("content", ""))
+                           if et == "complete" else None)
 
-        original_emit = engine._emit_state_change
-        _denies = [0]
-
-        def tracking_emit(state, reason):
-            if state == engine.STATE_THINKING and "ledger field deny" in str(reason):
-                _denies[0] += 1
-                if _denies[0] == 1:
-                    engine.task_ledger = [
-                        {"id": "1", "title": "a", "status": "done",
-                         "verify": "跑测试", "evidence": "全过"},
-                    ]
-            original_emit(state, reason)
-
-        engine._emit_state_change = tracking_emit
         engine.run(user_input="干活")
 
-        user_msgs = [m for m in engine.history if m.get("role") == "user"]
-        deny_msgs = [m for m in user_msgs if "收工拒绝" in m.get("content", "")]
-        assert "AUTO MODE 收工拒绝" in deny_msgs[0]["content"]
+        assert engine.state == engine.STATE_DONE
+        # 执法记录照留 + AUTO MODE 文案（票 C 标签语义保留）
+        denies = [e for e in events if e[0] == "goal_gate.deny"]
+        assert len(denies) == 1
+        assert denies[0][1]["reason"] == "ledger_field_missing"
+        assert denies[0][1]["mode"] == "pass_with_note"
+        assert "AUTO MODE 字段闸记录" in final_output[0]
+        assert "本轮放行" in final_output[0]
+        # 不再强制重跑：LLM 只调 1 次
+        assert fake_llm.call_count == 1

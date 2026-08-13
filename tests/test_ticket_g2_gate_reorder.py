@@ -130,32 +130,30 @@ class TestGateBeforeReply:
 
 
 class TestSafetyValve:
-    """G2-2：字段闸死锁安全阀（auto 缺字段 deny 3 次降级 / 5 次强制放行）"""
+    """G2-2/L1：字段闸 deny 降本——缺字段单次记录即放行，死锁循环已退役
 
-    def test_deny_3_degrades_to_handoff(self, monkeypatch):
-        """连续 deny 第 3 次：回注指令降级（含"转 pending 交接"提示）。"""
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),  # deny #1
-            ("已完成全部工作", None),  # deny #2
-            ("已完成全部工作", None),  # deny #3 → 降级文案
-        ])
+    票 L1 裁决：缺字段不再强制全上下文重跑（旧语义 deny 3 次降级 / 5 次强制放行），
+    改为本轮放行 + 执法记录照留（goal_gate.deny mode=pass_with_note）。
+    旧安全阀（3 次降级 / 5 次 forced_release）随循环语义一并退役。
+    """
+
+    def test_deny_stops_at_first_pass_with_note(self, monkeypatch):
+        """L1：缺字段第 1 次即 pass_with_note 放行，无 deny 循环、无重跑。"""
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])  # 只调 1 次 = 无重跑
         fake_tools = FakeToolExecutor()
         engine = _make_auto_engine(fake_llm, fake_tools, monkeypatch,
                                    [{"id": "1", "title": "任务", "status": "done"}], auto=True)
-        # 4 步：第 1 步 IDLE→THINKING（不消耗 deny），后 3 步各 deny 1 次
         for _ in range(4):
             engine._step()
 
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
         deny_msgs = [m for m in user_msgs if "收工拒绝" in m.get("content", "")]
-        assert len(deny_msgs) == 3
-        # 第 3 次 deny 含降级提示（转交接）
-        assert "转 pending 交接" in deny_msgs[-1]["content"], \
-            f"第 3 次 deny 应降级为交接提示，实际: {deny_msgs[-1]['content']}"
-        assert engine._ledger_field_deny_count == 3
+        assert deny_msgs == [], "L1：缺字段不再回注'收工拒绝'重跑指令"
+        assert engine._ledger_field_deny_count == 1, "单次记录即止"
+        assert fake_llm.call_count == 1, "不应重跑"
 
-    def test_deny_5_force_release_with_audit(self, monkeypatch):
-        """连续 deny 第 5 次：强制放行 + goal_gate.forced_release 审计事件 + ⚠️ 遗言。"""
+    def test_no_forced_release_loop_under_l1(self, monkeypatch):
+        """L1：字段闸不再有 5 次 forced_release 循环——单次记录后终稿带补正指令放行。"""
         from core.event_bus import event_bus
         events = []
         original_write = event_bus.write
@@ -166,33 +164,28 @@ class TestSafetyValve:
 
         event_bus.write = tracking_write
 
-        fake_llm = FakeLLMCaller([
-            ("已完成全部工作", None),  # deny #1
-            ("已完成全部工作", None),  # deny #2
-            ("已完成全部工作", None),  # deny #3
-            ("已完成全部工作", None),  # deny #4
-            ("已完成全部工作", None),  # deny #5 → 强制放行
-        ])
+        fake_llm = FakeLLMCaller([("已完成全部工作", None)])
         fake_tools = FakeToolExecutor()
         engine = _make_auto_engine(fake_llm, fake_tools, monkeypatch,
                                    [{"id": "1", "title": "任务", "status": "done"}], auto=True)
 
         completes = _track_notify_complete(engine)
-        # 7 步：step1 IDLE→THINKING；step2-6 为 deny #1-4 + 第 5 次强制放行
-        # （放行后 state=RESPONDING）；step7 执行 RESPONDING 分支落 history + 发回复
-        for _ in range(7):
+        for _ in range(4):
             engine._step()
 
-        # 强制放行审计事件落地
+        # 不再有 forced_release 循环事件；只有 1 次 pass_with_note 记录
         forced = [e for e in events if e[0] == "goal_gate.forced_release"]
-        assert len(forced) == 1, f"应触发 1 次 forced_release，实际 {len(forced)}"
-        assert forced[0][1]["deny_count"] == 5
-        assert forced[0][1]["field_issues"] == [{"id": "1", "missing": ["verify", "evidence"]}]
-        # 终稿含 ⚠️ 审计遗言
-        assert any("强制放行" in (m.get("content") or "") for m in engine.history
+        assert forced == [], "L1：forced_release 循环已退役"
+        notes = [e for e in events if e[0] == "goal_gate.deny"]
+        assert len(notes) == 1
+        assert notes[0][1]["mode"] == "pass_with_note"
+        assert notes[0][1]["field_issues"] == [{"id": "1", "missing": ["verify", "evidence"]}]
+        # 终稿带补正指令（本轮放行语义），且回复正常发出
+        assert any("字段闸记录" in (m.get("content") or "") for m in engine.history
                    if m.get("role") == "assistant")
-        # 放行后发出回复（闸过）
-        assert len(completes) == 1, f"第 5 次放行应发出回复，实际 {len(completes)}"
+        assert any("本轮放行" in (m.get("content") or "") for m in engine.history
+                   if m.get("role") == "assistant")
+        assert len(completes) == 1, "记录后应直接放行发出回复"
 
     def test_auto_off_control_group(self, monkeypatch):
         """对照组：auto off（_auto_mode_getter 为 False）→ 字段闸整段跳过，不 deny。"""
