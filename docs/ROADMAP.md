@@ -8,8 +8,8 @@
 
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
-| 1 | DESK-V2A 体验地基 | 状态覆盖层（连接中/失败/断连/空态）+ 会话管理（搜索/重命名/删除/pin）+ 控件 hover/focus + Toast + 三态统一组件 | 📋 票已写（data/tickets/TICKET-DESK-V2A.md），下一张 |
-| 2 | DESK-V2B 差异化面板 | 工具活动流时间线 + Worker 活动视图 + 上下文仪表盘（_marking_stats） | 📋 待开 |
+| 1 | ~~DESK-V2A 体验地基~~ | ✅ 已合并（6d11d0b）：覆盖层/搜索/重命名/删除/pin/Toast/三态，CSS 零改动闸门锁死 | ✅ done |
+| 2 | DESK-V2B 差异化面板 | 工具活动流时间线 + Worker 活动视图 + 上下文仪表盘（_marking_stats） | 📋 待开，下一张 |
 | 3 | DESK-V2C 锦上添花 | 流式 markdown 简版 + 记忆面板 + 中文优先排版 + 主题 token 化（不做浅色主题） | 📋 待开 |
 
 ### 第二梯队：评估与内核深化（排在 DESK-V2 之后，owner 拍板：性能在 GUI 提升后）
