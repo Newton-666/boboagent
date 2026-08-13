@@ -236,12 +236,25 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
     # 消息）时，resume 返回内存版最新消息，禁止磁盘版覆盖运行中会话（否则最近
     # 对话"消失"且丢回合）。仅在引擎空闲时才允许磁盘版覆盖内存（原行为）。
     from core.engine_adapter import is_running
+    from core.engine_adapter import get_live_history  # TICKET-GUI-F9
 
     engine_busy = is_running(sid)
+    mem_session = None
     if engine_busy:
         with ctx.sessions_lock:
             mem_session = ctx.sessions.get(sid)
-        messages = (mem_session.get("messages", []) or []) if mem_session else (session_data.get("messages", []) or [])
+        # TICKET-GUI-F9（P0）：运行中回合切回丢失 —— 内存版 session["messages"]
+        # 是回合末才写回的旧版，读活引擎的 history 才含进行中的用户消息与工具步骤。
+        # 取不到活引擎（竞态窗口/引擎恰好退出）回退内存版；get_live_history 内部
+        # 有兜底，此处再包一层双保险 —— 任何异常都不许打断 resume。
+        try:
+            live_msgs = get_live_history(sid)
+        except Exception:
+            live_msgs = None
+        if live_msgs is not None:
+            messages = live_msgs
+        else:
+            messages = (mem_session.get("messages", []) or []) if mem_session else (session_data.get("messages", []) or [])
     else:
         messages = session_data.get("messages", []) or []
 
