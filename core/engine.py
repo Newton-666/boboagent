@@ -793,11 +793,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 禁止以工具调用框或半截过程话收尾。纯闲聊回合（问候、确认、问答）不受此限，自然回复即可。
 
-## 任务台账（建账纪律）
+## 任务台账（建账纪律 · 票 R2a 软引导版）
 
-- 多步任务开工先建账：调用 task_ledger create 时，每项必须**当场**带 verify（怎么算做完、怎么验证）与 evidence（完成证据）字段，禁止收工前补登记。
+- 遇到多步施工任务（改代码/多文件/多阶段）时主动建账防丢；简单问答、查资料、一两步能做完的事不要建账，直接回答。台账是你的工具，不是仪式。
+- 一旦自愿建账：调用 task_ledger create 时，每项必须**当场**带 verify（怎么算做完、怎么验证）与 evidence（完成证据）字段，禁止收工前补登记；字段闸/补账检测/批量销账检测照常执行——自建的账必须认真销。
 - 完成一项立即 update 销账（标 done 时带 evidence）。
-- 建账后按序施工，每完成一项销一项；不要一次性批量补登——收工闸会检测"批量建账全标 done"并拒绝收工。
+- 无账回合收工回复禁止出现台账段（📋 台账 只在真的有账时显示）。
 
 ## 可信度
 
@@ -1880,46 +1881,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             logger.debug("GATE ledger force-release: %d items still pending",
                                          len(pending_items))
                     elif not self.task_ledger:
-                        # ── 票Z v3：无账硬闸 ──
-                        # 不设收束词豁免：收工汇报文化导致几乎所有收尾都会含完成词，
-                        # 豁免等于废掉闸。无台账就是无台账，谁说都不行。
-                        if self.current_tool_round > 0:
-                            # 工作回合无账 → 视同未完成，强制回注
-                            event_bus.write("goal_gate.no_ledger_detected", {
-                                "session_id": getattr(self, "sid", ""),
-                                "tool_round": self.current_tool_round,
-                            })
-                            # ── 票 L1：提醒降噪 —— 强制建账提醒每回合至多一次 ──
-                            # 原上限 2 次（同回合可回注两次）；改为 1 次即放行，
-                            # 提醒不再反复注入对话流（票 L1 问题 3）。
-                            if self._ledger_reinject_count < 1:
-                                self._ledger_reinject_count += 1
-                                rej_msg = "本回合调用了工具但没有建立任务台账。task_ledger 就在你的可用工具列表中，请直接调用它建账（已完成的列 done，未完成的列 pending），然后继续。不要说明、不要道歉，直接做。"
-                                self._append_to_history("user", rej_msg)
-                                self._pending_content = None
-                                self._pending_tool_calls = None
-                                self.current_depth += 1
-                                logger.debug("GATE no-ledger re-injection #%d",
-                                             self._ledger_reinject_count)
-                                self._emit_state_change(self.STATE_THINKING, "no-ledger re-injection")
-                                return
-                            else:
-                                # 已达 1 次上限 → 放行（L1：提醒降噪后不重复回注）
-                                event_bus.write("goal_gate.released", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "reason": "no_ledger_exhausted",
-                                    "reinject_count": self._ledger_reinject_count,
-                                    "tool_round": self.current_tool_round,
-                                })
-                                warning = "\n\n⚠️ 工作回合未建台账，引擎放行"
-                                self._pending_content = (self._pending_content or "") + warning
-                        else:
-                            # 纯聊天回合，tool_round == 0 → 直接放行，行为不变
-                            event_bus.write("task.no_ledger", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "no ledger created",
-                            })
-                            logger.debug("GATE no ledger (chat round) — direct done")
+                        # ── 票 R2a（v2 软限制版）：无账硬闸已拆除 ──
+                        # owner 终裁：让 LLM 自己理解复杂度，软限制不做硬限制。
+                        # 任何回合不再因为"没建账"被回注；纯读问答/简单任务直接收工。
+                        # 自愿建账后的字段闸/补账检测/批量销账检测全部保留（见上方分支）。
+                        event_bus.write("task.no_ledger", {
+                            "session_id": getattr(self, "sid", ""),
+                            "reason": "no ledger (soft limit, R2a)",
+                            "tool_round": self.current_tool_round,
+                        })
+                        logger.debug("GATE no ledger — soft limit (R2a), direct done")
                     self._emit_state_change(self.STATE_RESPONDING, "responding")
         elif self.state == self.STATE_EXECUTING:
             # 冲突检测：检查多个编辑操作是否要改同一文件的同一段
@@ -2072,14 +2043,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._pending_tool_calls = None
             self.current_depth += 1
             self.current_tool_round += 1
-            # ── 票Z 缝1：无账工作回合强制建账 ──
-            if not self._ledger_reminded and self.current_tool_round >= 2 and not self.task_ledger:
-                self.history.insert(0, {
-                    "role": "system",
-                    "content": "注意：检测到多步任务但未建台账，task_ledger 就在你的可用工具列表中，请直接调用它建账再继续。"
-                })
-                self._ledger_reminded = True
-                logger.debug("EXECUTING no-ledger reminder injected")
+            # ── 票 R2a（v2 软限制版）：票Z 缝1 无账强制提醒已拆除 ──
+            # owner 终裁：软限制不做硬限制，运行时不再因"没建账"注入任何提醒；
+            # 建账与否由 LLM 依据系统提示词软引导自行判断。
             self._emit_state_change(self.STATE_THINKING, "next tool round")
         elif self.state == self.STATE_RESPONDING:
             if self._pending_content:
