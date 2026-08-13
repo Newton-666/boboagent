@@ -122,8 +122,12 @@ def _node_simulation_script(with_missing_think: bool, no_think_second: bool = Fa
     no_think_second: 第 2 步无思考（测隔聚合卡吞并 + 无思考残留）
     """
     src = GUI_FILE.read_text(encoding="utf-8")
+    # F6D 配套：提取写类名单常量 + isWriteToolEl（addTool 现在引用它，桩必须带上）
+    wt_m = re.search(r"var WRITE_TOOLS = \[[^\]]*\];", src)
+    assert wt_m, "F6D: 需要 var WRITE_TOOLS 名单"
     fns = "\n".join(
-        _extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")
+        [wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
+        [_extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
     )
     # 每步 (思考文本或 None, 工具 id)；默认每步带思考
     steps = [(f"思考{i}", f"t{i}") for i in range(1, 6)]
