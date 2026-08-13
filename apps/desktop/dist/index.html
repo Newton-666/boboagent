@@ -17,6 +17,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .session-item { padding:10px 12px; border-radius:8px; cursor:pointer; color:var(--text2); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; justify-content:space-between; }
 .session-item:hover { background:var(--hover); }
 .session-item.active { background:var(--bg3); color:var(--text); }
+/* TICKET-GUI-F3 (F3-2): 加载指示 —— 点击会话后该项呼吸闪烁，直到 resume 完成 */
+.session-item.loading { background:var(--bg3); color:var(--text); animation:sessionLoading 1.2s ease-in-out infinite; }
+@keyframes sessionLoading { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
 .session-item .del { visibility:hidden; cursor:pointer; color:#f44336; font-size:14px; margin-left:6px; flex-shrink:0; }
 .session-item:hover .del { visibility:visible; }
 .session-item .re { visibility:hidden; }
@@ -190,6 +193,14 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tool-detail .diff-file, .tool-result .diff-file { color:#5b9bd5; font-weight:600; }
 .tool-detail .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
 .tool-result .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
+/* TICKET-GUI-F3 (F3-5): diff 区块与回复同级 —— 独立出现在消息流，整行底色高亮（绿底新增/红底删除），工具卡片只留一行摘要 */
+.tool-summary { font-size:12px; color:var(--text2); }
+.diff-block { margin:4px 0 16px; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-family:SF Mono,Monaco,Menlo,monospace; font-size:12px; line-height:1.55; background:var(--bg2); animation:fadeIn 0.25s ease-out; }
+.diff-block .df { display:block; padding:5px 12px; background:var(--bg3); color:var(--text2); font-weight:600; white-space:pre-wrap; word-break:break-all; }
+.diff-block .dl { display:block; padding:2px 12px; white-space:pre-wrap; word-break:break-all; }
+.diff-block .dl.add { background:rgba(80,161,79,0.20); color:#2c5e2b; }
+.diff-block .dl.del { background:rgba(244,135,113,0.20); color:#8a3a2c; }
+.diff-block .dl.ctx { color:var(--text2); }
 /* ③ 闸确认模态卡 */
 #approval-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:3000; align-items:center; justify-content:center; }
 #approval-overlay.open { display:flex; }
@@ -396,6 +407,8 @@ var statusText = document.getElementById('status-text');
 var messaging = false;
 var sessions = [];
 var sendTimeoutId = null;
+// TICKET-GUI-F3 (F3-2): 会话加载竞态序号 —— 快速连点两会话，以后一次为准（前者作废）
+var sessionLoadSeq = 0;
 
 function debug(msg) { debugEl.textContent = '[' + msg + ']'; }
 // TICKET-D1d ④: 模式徽标（AUTO / OFFICE / 正常不显示）
@@ -699,14 +712,18 @@ function updateToolResult(toolId, data) {
     dot.className = 'dot done';
     statusEl.textContent = duration ? 'done (' + duration.toFixed(1) + 's)' : 'done';
     statusEl.style.color = '#50a14f';
-    // TICKET-D1d ①②: 摘要行显示工具名+耗时（status 已有）；展开显示参数 + 完整结果 + diff 高亮
+    // TICKET-D1d ①② + F3-5: 有 diff 时工具卡只留一行摘要，diff 本体搬出为独立区块
     if (resultText || Object.keys(args).length > 0) {
       resultEl.className = 'tool-result';
-      resultEl.innerHTML = renderToolDetail(args, resultText, inlineDiff);
       div.setAttribute('data-result', resultText);
-      // F2-4: 编辑类工具（带 inline_diff）默认展开 —— diff 红绿高亮是用户批准/回滚的
-      // 决策依据，不点任何展开即可见（owner 设计裁决：diff 默认展开，工具结果默认收起）
-      if (inlineDiff) { resultEl.classList.add('open'); toggleEl.textContent = '▾'; }
+      if (inlineDiff) {
+        // F3-5: 工具卡片只留一行摘要（"编辑文件 path +N/-M"），diff 区块独立于消息流
+        resultEl.classList.add('open'); toggleEl.textContent = '▾';
+        resultEl.innerHTML = '<div class="tool-summary">' + esc(toolSummary(args, inlineDiff)) + '</div>';
+        appendDiffBlock(div, inlineDiff);
+      } else {
+        resultEl.innerHTML = renderToolDetail(args, resultText, inlineDiff);
+      }
     }
     toggleEl.style.display = 'inline';
     if (!inlineDiff) toggleEl.textContent = '▸';
@@ -730,6 +747,50 @@ function diffHighlight(text) {
     else if (/^@@/.test(l)) lines[i] = '<span class="diff-file">' + l + '</span>';
   }
   return lines.join('\n');
+}
+// TICKET-GUI-F3 (F3-5): diff 行统计（+N/-M，排除 +++/--- 文件头）
+function diffStats(text) {
+  var add = 0, del = 0;
+  if (!text) return { add: 0, del: 0 };
+  text.split('\n').forEach(function(l) {
+    if (/^\+/.test(l) && !/^\+\+\+/.test(l)) add++;
+    else if (/^-/.test(l) && !/^---/.test(l)) del++;
+  });
+  return { add: add, del: del };
+}
+// TICKET-GUI-F3 (F3-5): 工具卡一行摘要 —— "编辑文件 path +N/-M"
+function toolSummary(args, inlineDiff) {
+  var pathKeys = ['file_path', 'path', 'filepath', 'filename', 'source', 'target'];
+  var p = '';
+  for (var i = 0; i < pathKeys.length; i++) {
+    var v = args[pathKeys[i]];
+    if (typeof v === 'string' && v) { p = v; break; }
+  }
+  var st = diffStats(inlineDiff);
+  return (p ? p + ' ' : '') + '+' + st.add + '/-' + st.del;
+}
+// TICKET-GUI-F3 (F3-5): 独立 diff 区块（整行底色：绿=新增/红=删除/灰=上下文，@@ 文件头）
+function diffBlock(text) {
+  var lines = esc(text).split('\n');
+  var html = '<div class="diff-block">';
+  lines.forEach(function(l) {
+    if (/^@@/.test(l)) html += '<div class="df">' + l + '</div>';
+    else if (/^\+/.test(l) && !/^\+\+\+/.test(l)) html += '<div class="dl add">' + l + '</div>';
+    else if (/^-/.test(l) && !/^---/.test(l)) html += '<div class="dl del">' + l + '</div>';
+    else html += '<div class="dl ctx">' + (l ? l : '&nbsp;') + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+// TICKET-GUI-F3 (F3-5): 在工具卡之后插入独立 diff 区块（与回复同级；聚合卡场景插到聚合卡后）
+function appendDiffBlock(toolDiv, inlineDiff) {
+  var block = document.createElement('div');
+  block.innerHTML = diffBlock(inlineDiff);
+  var child = block.firstChild;
+  var aggBody = toolDiv.closest ? toolDiv.closest('.tool-agg-body') : null;
+  var anchor = aggBody ? aggBody.parentNode : toolDiv;
+  if (anchor.nextSibling) chatEl.insertBefore(child, anchor.nextSibling);
+  else chatEl.appendChild(child);
 }
 // TICKET-D1d ① + F4-3: 工具卡片展开内容 = 路径 + 内容预览/diff + 结果（原始 JSON 永不直接上屏）
 function renderToolDetail(args, resultText, inlineDiff) {
@@ -1131,7 +1192,8 @@ function renderSessions(filter) {
     filtered = sessions.filter(function(s) { return (s.title || '').toLowerCase().indexOf(q) !== -1; });
   }
   filtered.forEach(function(s) {
-    var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':'');
+    // TICKET-GUI-F3 (F3-1/F3-2): data-sid 供加载指示定位；active 类严格跟随 currentSessionId
+    var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':''); div.dataset.sid = s.id;
     var span = document.createElement('span'); span.textContent = s.title || s.id; span.style.overflow='hidden'; span.style.textOverflow='ellipsis';
     span.onclick = function() { loadSession(s.id); };
     var re = document.createElement('span'); re.textContent = '✎'; re.className = 're'; re.style.cssText = 'cursor:pointer;color:var(--text-muted);font-size:12px;margin-left:4px;flex-shrink:0;';
@@ -1147,22 +1209,94 @@ async function deleteSession(sid) {
   if (!confirm('删除此会话？TUI 中也会同步删除。')) return;
   await call('session.delete', { session_id: sid });
   sessions = sessions.filter(function(s) { return s.id !== sid; });
-  if (currentSessionId === sid) { currentSessionId = null; clearChat(); welcomeEl.style.display = 'flex'; }
-  if (sessions.length > 0 && !currentSessionId) { currentSessionId = sessions[0].id; call('session.activate', { session_id: sessions[0].id }); }
-  renderSessions();
+  var wasCurrent = currentSessionId === sid;
+  if (wasCurrent) {
+    // F3-1: 删除当前会话后落到第一个会话 —— 完整 loadSession（内容区与高亮同步切换）
+    currentSessionId = null;
+    clearChat(); welcomeEl.style.display = 'flex';
+    if (sessions.length > 0) {
+      await loadSession(sessions[0].id);
+    } else {
+      renderSessions();
+    }
+  } else {
+    renderSessions();
+  }
 }
 function updateSessionTitle(sid, text) {
   var s = sessions.find(function(x) { return x.id === sid; });
   if (s) { s.title = text || s.title; s.title = s.title.substring(0, 35); renderSessions(); }
 }
 
+// TICKET-GUI-F3 重写：F3-1 选中态立即跟随 currentSessionId（单一事实源）；
+// F3-2 点击必应答（立即加载指示、失败显式报错、连点以后一次为准）；
+// F3-3 历史全文恢复（归档 archived_messages 拼接 + 压缩分隔线）。
 async function loadSession(sid) {
-  var result = await call('session.resume', { session_id: sid });
-  if (!result || result.error) return;
-  currentSessionId = sid;
+  // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
+  if (currentSessionId !== sid) {
+    currentSessionId = sid;
+    renderSessions();
+  }
+  // F3-2 竞态：本次加载序号；期间再点其他会话，本次结果作废
+  var mySeq = ++sessionLoadSeq;
+  setSessionLoading(sid, true);
+  addStatus('加载会话…');
+  var result = null;
+  try {
+    result = await call('session.resume', { session_id: sid });
+  } catch (e) {
+    result = null;
+  }
+  if (mySeq !== sessionLoadSeq) return; // 已被后一次点击作废
+  setSessionLoading(sid, false);
+  if (!result || result.error || !result.session_id) {
+    // F3-2: 失败必须显式报错，禁止静默停留旧会话
+    var em = (result && result.error && (result.error.message || result.error)) || '后端无响应（超时或连接断开）';
+    addStatus('⚠ 加载会话失败：' + em);
+    return;
+  }
   clearChat();
-  // Render existing messages
+  // F3-3: 归档全文 + 现存消息拼接，压缩边界给分隔线
+  await renderFullHistory(sid, result);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
+  setMode(result.auto_state ? 'auto' : '');
+  call('session.activate', { session_id: sid });
+  renderSessions();
+  // Update title with first user message
   var msgs = result.messages || [];
+  var firstUserMsg = msgs.find(function(m) { return m.role === 'user'; });
+  if (firstUserMsg) updateSessionTitle(sid, firstUserMsg.text.substring(0, 30));
+}
+
+// F3-2: 侧栏该项加载指示开关（呼吸闪烁）
+function setSessionLoading(sid, on) {
+  var items = sessionListEl.querySelectorAll('.session-item');
+  items.forEach(function(d) {
+    if (d.dataset.sid === sid) d.classList.toggle('loading', !!on);
+  });
+}
+
+// F3-3: 完整对话渲染 = 归档 archived_messages 全文（按压缩事件顺序）+ 现存消息，
+// 每个压缩边界插柔和分隔线。无归档/读失败则现状渲染（现有消息照常展示）。
+async function renderFullHistory(sid, result) {
+  var msgs = result.messages || [];
+  if (window.boboAPI && window.boboAPI.readArchive) {
+    try {
+      var ar = await window.boboAPI.readArchive(sid);
+      if (ar && ar.ok && ar.records && ar.records.length > 0) {
+        for (var i = 0; i < ar.records.length; i++) {
+          var rec = ar.records[i];
+          var ams = rec.archived_messages || [];
+          renderArchivedMessages(ams, 'hist-' + sid + '-a' + i + '-');
+          var n = rec.pre_msg_count || ams.length;
+          addStatus('— 此前 ' + n + ' 条消息经上下文压缩 —');
+        }
+      }
+    } catch (e) {
+      addStatus('⚠ 归档读取失败，仅展示当前消息：' + ((e && e.message) || e));
+    }
+  }
   msgs.forEach(function(m) {
     if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
     else if (m.role === 'assistant') addMsg('bobo', m.text, 'hist-' + Math.random());
@@ -1173,14 +1307,19 @@ async function loadSession(sid) {
       addStatus(m.text);
     }
   });
-  chatEl.scrollTop = chatEl.scrollHeight;
-  // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
-  setMode(result.auto_state ? 'auto' : '');
-  call('session.activate', { session_id: sid });
-  renderSessions();
-  // Update title with first user message
-  var firstUserMsg = msgs.find(function(m) { return m.role === 'user'; });
-  if (firstUserMsg) updateSessionTitle(sid, firstUserMsg.text.substring(0, 30));
+}
+
+// F3-3: 渲染归档消息（role: user/assistant/system/tool；assistant 纯工具回合给占位）
+function renderArchivedMessages(ams, idPrefix) {
+  ams.forEach(function(m, idx) {
+    var role = m.role || '';
+    var content = (m.content != null && String(m.content)) || '';
+    var id = idPrefix + idx;
+    if (role === 'user') addMsg('user', content, id);
+    else if (role === 'assistant') addMsg('bobo', content || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), id);
+    else if (role === 'tool') addTool(m.name || m.tool_name || '工具', content, id + '-t');
+    else if (role === 'system' && content && content.length < 200) addStatus(content);
+  });
 }
 
 async function newChat() {

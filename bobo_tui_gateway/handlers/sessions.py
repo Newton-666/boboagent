@@ -1,5 +1,6 @@
 """handlers/sessions.py — Session 生命周期 handler（create/resume/list/close/delete/rename/interrupt/steer/activate）。"""
 
+import logging
 import os
 import time
 import uuid
@@ -7,6 +8,8 @@ from datetime import datetime
 
 from bobo_tui_gateway.server_utils import ok, err, emit, write_atomic, get_context_length
 from config import API_MODEL_NAME, ACTIVE_PROVIDER, SESSION_DIR
+
+logger = logging.getLogger(__name__)
 
 _session_mgr = None
 
@@ -20,27 +23,39 @@ def _get_session_mgr():
 
 
 def _save_session_to_disk(sid, ctx):
-    """将内存中的会话保存到磁盘（直接原子写入，不触碰 mgr.current_session 以避免跨会话竞态）。"""
+    """将内存中的会话保存到磁盘（直接原子写入，不触碰 mgr.current_session 以避免跨会话竞态）。
+
+    TICKET-GUI-F3 F3-4（Kimi 特批 2026-08-13）：防数据破坏兜底 ——
+    内存 messages 为空且磁盘已有同 sid 非空版本时，拒绝覆盖并记 warning 日志。
+    """
     with ctx.sessions_lock:
         session = ctx.sessions.get(sid)
     if not session:
         return
     mgr = _get_session_mgr()
     session_path = mgr.session_dir / f"{sid}.json"
+    in_mem_msgs = session.get("messages", []) or []
     # 尝试加载已有会话以便保留元数据（created_at 等），否则新建
     try:
         if session_path.exists():
             with open(session_path, "r", encoding="utf-8") as f:
                 import json as _json
                 data = _json.load(f)
-            data["messages"] = session.get("messages", [])
+            # F3-4 兜底：内存空消息不得覆盖磁盘非空历史（竞态丢消息案，20260813_105719 等 0 消息落盘）
+            if not in_mem_msgs and data.get("messages"):
+                logger.warning(
+                    "F3-4 拒绝覆盖：session %s 内存 messages 为空但磁盘已有 %d 条消息，保留磁盘版本",
+                    sid, len(data["messages"]),
+                )
+                return
+            data["messages"] = in_mem_msgs
             data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
         else:
             data = {
                 "id": sid,
                 "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
                 "title": session.get("title", f"会话_{sid}"),
-                "messages": session.get("messages", []),
+                "messages": in_mem_msgs,
                 "summary": None,
             }
     except Exception:
@@ -48,7 +63,7 @@ def _save_session_to_disk(sid, ctx):
             "id": sid,
             "created_at": datetime.fromtimestamp(session.get("created_at", time.time())).isoformat(),
             "title": session.get("title", f"会话_{sid}"),
-            "messages": session.get("messages", []),
+            "messages": in_mem_msgs,
             "summary": None,
         }
     mgr._write_atomic(session_path, data)

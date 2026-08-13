@@ -195,10 +195,10 @@ class TestF24DiffChain:
         assert "beta-UPDATED" in target.read_text(encoding="utf-8")
 
     def test_gui_edit_card_diff_default_open(self):
-        """F2-4: GUI 编辑类工具卡（带 inline_diff）默认展开 —— diff 红绿高亮不点可见。"""
+        """F2-4: 编辑类工具卡默认展开 —— F3-5 后工具卡内为摘要 + open 类，diff 本体独立区块。"""
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "if (inlineDiff) { resultEl.classList.add('open'); toggleEl.textContent = '▾'; }" in src
-        # diffHighlight 红绿高亮函数仍在
+        assert "resultEl.classList.add('open'); toggleEl.textContent = '▾';" in src
+        # diff 本体搬出为独立区块（F3-5），红绿底色类仍在
         assert "diff-add" in src and "diff-del" in src and "diff-file" in src
 
 

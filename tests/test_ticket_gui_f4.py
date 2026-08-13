@@ -330,7 +330,8 @@ class TestF1F2F3NoRegression:
 
     def test_f2_edit_card_default_open(self):
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "if (inlineDiff) { resultEl.classList.add('open'); toggleEl.textContent = '▾'; }" in src
+        # F2-4 行为：带 diff 的编辑卡默认展开（F3-5 后工具卡内为摘要 + open 类仍成立）
+        assert "resultEl.classList.add('open'); toggleEl.textContent = '▾';" in src
 
     def test_f3_style_zero_new(self):
         """F4 不新增视觉体系（沿用 tool-agg/tool-result 既有类）。"""

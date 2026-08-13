@@ -27,4 +27,7 @@ contextBridge.exposeInMainWorld('boboAPI', {
 
   // Save .env config (bypasses backend, writes directly)
   saveEnv: (data) => ipcRenderer.invoke('save-env', data),
+
+  // TICKET-GUI-F3 (F3-3): 读取会话上下文归档（archives/{sid}.jsonl）
+  readArchive: (sid) => ipcRenderer.invoke('read-archive', sid),
 })
