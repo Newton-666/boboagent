@@ -20,6 +20,7 @@
 | EV-2 | 评估跑道升级：轨迹回放 + mock 驱动；复活 BLOCKED 的 A5/A7 题；A1 新规则（≤2 次工具）复测；B2 的 test_archive_file_exists 定位 | 📋 排队 |
 | EVAL 体验题 | 新增考题：同一真实任务在 Hermes/bobo 桌面端对照跑，体验差距量化（DESKTOP_VISION 第四步机制） | 📋 待开 |
 | vitest 存量 13 失败 | gatewayClient websocket 10 个等陈年老账立案清理 | 📋 排队 |
+| TOOL-OPT 实验线 | 工具调用效率优化：测量报告先行（近 3 天实证 26.7% 纯重复调用/2.8 亿 prompt tokens）→ 候选优化（读文件缓存/同回合去重/纯读命令结果复用）→ 依赖 EV-2 轨迹回放做 A/B 验证（2026-08-13 owner 拍板立项） | 📋 排队（EV-2 之后） |
 
 ### 第三梯队：治理与组织
 
@@ -36,6 +37,7 @@
 | Apple Developer 签名发布 | 桌面端成为每日主力后再买（$99），不提前 |
 | DESK-V3 Automation 侧栏 | 定时任务进侧栏（对标 Hermes CRON JOBS，我们体系现成） |
 | 造 Agent 方向讨论 | 战略级对话，等桌面端稳定后展开 |
+| 电脑操控方向（BROWSER-1→COMPUTER-1） | 2026-08-13 讨论后 owner 拍板"先放着"：真实浏览器 CDP 驱动（可并行多窗口）→ 像素级操控（串行、需签名权限）；重启讨论前不动 |
 
 ## 固定循环（每张票的生死流程）
 
