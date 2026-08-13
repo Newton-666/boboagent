@@ -362,6 +362,31 @@ ipcMain.handle('select-folder', async () => {
   return result.filePaths[0]
 })
 
+// TICKET-GUI-F3 (F3-3): 读会话上下文归档（archives/{sid}.jsonl）供展示层全文恢复。
+// 归档目录解析与 core/context.py._get_archive_dir 一致：BOBO_DATA_DIR 环境变量优先，
+// 否则默认 ~/.bobo_v2。只读不改写；sid 白名单 + 路径前缀双校验防穿越。
+ipcMain.handle('read-archive', async (_event, sid) => {
+  if (typeof sid !== 'string' || !/^[\w.-]+$/.test(sid) || sid.includes('..')) {
+    return { ok: false, error: 'invalid sid' }
+  }
+  const base = process.env.BOBO_DATA_DIR || path.join(os.homedir(), '.bobo_v2')
+  const archiveDir = path.resolve(base, 'archives')
+  const target = path.resolve(archiveDir, `${sid}.jsonl`)
+  if (!target.startsWith(archiveDir + path.sep)) {
+    return { ok: false, error: 'invalid path' }
+  }
+  try {
+    if (!fs.existsSync(target)) return { ok: true, records: [] }
+    const lines = fs.readFileSync(target, 'utf8').split('\n').filter(Boolean)
+    const records = lines
+      .map((l) => { try { return JSON.parse(l) } catch { return null } })
+      .filter(Boolean)
+    return { ok: true, records }
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) }
+  }
+})
+
 // Renderer requests any buffered backend messages that arrived before IPC was ready
 ipcMain.on('backend-get-pending', (event) => {
   if (pendingMessages.length > 0) {
