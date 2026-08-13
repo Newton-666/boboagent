@@ -155,7 +155,7 @@ def test_v2a_2_sessions_static():
     rs = _extract_func(src, "renderSessions")
     assert "b.pinned" in rs, "应含 pin 排序"
     assert "pin-mark" in rs, "应含 pin 图钉标记"
-    assert "pin-btn" in rs, "应含 pin 行内按钮"
+    assert "act pin" in rs, "应含 pin 行内按钮（.act 体系）"
     assert "v2a-empty" in rs, "搜索无结果应给空态"
     assert "没有匹配的会话" in rs
     # togglePin：本地即时 + 后端持久化（session.pin）
@@ -314,8 +314,21 @@ def test_v2a_css_zero_change_on_existing():
     # 新 style 中 V2A 注释块起点前 = 旧 style 全文（V2A 只允许追加在末尾）
     v2a_pos = new_style.find("/* ══ TICKET-DESK-V2A")
     assert v2a_pos > 0, "V2A 注释块应在 style 块内"
-    assert new_style[:v2a_pos].rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于 HEAD（零改动）"
+    # 特批豁免（owner 2026-08-13 打磨单）：会话行行内键旧规则（.del/.re）由 V2A 打磨
+    # 统一重构为 .act 体系 —— 双向剔除该段后再比对，其余既有 CSS 仍逐字节锁死
+    old_seg = re.search(
+        r"\.session-item \.del \{[^}]*\}\n\.session-item:hover \.del \{[^}]*\}\n"
+        r"\.session-item \.re \{[^}]*\}\n\.session-item:hover \.re \{[^}]*\}\n", old_style)
+    assert old_seg, "基线中应能找到旧 .del/.re 规则段"
+    old_style = old_style.replace(old_seg.group(0), "")
+    new_pre = new_style[:v2a_pos]
+    new_seg = re.search(
+        r"/\* V2A 打磨（owner 反馈 2026-08-13）：行内操作三键统一 \.act.*?"
+        r"\.session-item \.stitle \{[^}]*\}\n", new_pre, re.S)
+    assert new_seg, "新 style 中应能找到 .act 打磨段"
+    new_pre = new_pre.replace(new_seg.group(0), "")
+    assert new_pre.rstrip() == old_style.rstrip(), \
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段外零改动）"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────
@@ -344,3 +357,23 @@ def test_v2a_dom_before_script():
         pos = src.find(dom_id)
         assert pos > 0, f"{dom_id} 缺失"
         assert pos < script_pos, f"{dom_id} 在 <script> 之后，顶层 JS 将空指针崩溃"
+
+
+# ── V2A 打磨回归闸（owner 反馈 2026-08-13：确认弹窗键盘化 + 行内键秩序）──
+def test_v2a_polish_confirm_keyboard():
+    src = _gui()
+    ac = _extract_func(src, "askConfirm")
+    assert "cf-ok').focus()" in ac or 'cf-ok").focus()' in ac, "打开确认弹窗必须聚焦确认键"
+    assert "_confirmKey" in src and "e.key === 'Enter'" in src and "e.key === 'Escape'" in src, \
+        "确认弹窗必须支持 Enter=确认 / Esc=取消"
+
+
+def test_v2a_polish_session_row_order():
+    src = _gui()
+    rs = _extract_func(src, "renderSessions")
+    # 三键统一 .act 体系，顺序 pin → 改名 → 删除；emoji 📌 不得复出
+    assert "'act pin'" in rs and "'act re'" in rs and "'act del'" in rs
+    assert rs.index("div.appendChild(pin)") < rs.index("div.appendChild(re)") < rs.index("div.appendChild(del)"), \
+        "行内键顺序必须 pin→改名→删除"
+    assert "📌" not in rs, "禁止 emoji 图钉复出（渲染大红太扎眼）"
+    assert "PIN_SVG" in rs, "pin 应使用细线 SVG"
