@@ -157,6 +157,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._worker_reminded: bool = False
         self._ledger_reminded: bool = False  # 票Z 缝1：无账提醒标记
         self._ledger_backfill_suspect: bool = False  # 票 O8-2：事后补账嫌疑（工具轮批量创建即全 done）
+        self._reply_quality_reinject_count: int = 0  # 票 R2b：答复质量闸打回计数（每回合至多 1 次，防死循环）
+        self._round_had_write_tool: bool = False  # 票 R2b：本回合是否含写类工具（问答回合无台账段判定）
         # 主动模式管理器（含记忆连接 + 参与度追踪）
         self.proactive = ProactiveManager(llm_caller=self.llm_caller)
         # 技能标准加载器
@@ -785,6 +787,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
 每个任务回合结束时，你的最后一条回复必须是简短的收工汇报，用自然的语言交底，逐条交底，禁止"OK / 完成 / 未完成"式一句话（质量硬性要求 · 票 LEDGER-1）：
 
+- **答复优先**（票 R2b）：最终回复第一要义是**直接回答用户当前问题 / 汇报用户要的事**，把你对问题的分析结论落到纸上；台账状态、待人工清单只能作为附属段落跟在答复之后，禁止以台账/清单代替答复。
 - **完成项**：逐条列出，每条必须带证据（文件路径 / 测试数字 / commit / 返回值）。例如"修好了 X（core/engine.py 字段闸改放行，py_compile 通过）"，不要只写"修好了 X"。
 - **未完成项**：逐条列出，每条带具体原因与下一步动作（如"卡在 X：环境缺依赖，下一步装依赖后重跑"）。
 - **台账对照**：有任务台账时对照台账逐项销账说明，与台账状态一致。
@@ -1781,6 +1784,46 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         })
                                         warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
                                         self._pending_content = (self._pending_content or "") + warning
+                    # ── 票 R2b：答复质量闸（先答问题再交账；思考落纸） ──
+                    # 轻量启发式（不依赖语义理解）：
+                    # 1) 台账/清单腔：回复开头即台账段/清单且总长过短（<120 字）→ 未直接回答问题
+                    # 2) 思考落纸：thinking 有实质分析（≥60 字）但回复过短（<80 字）→ 分析没落到回复
+                    # 打回每回合至多一次（_reply_quality_reinject_count，防死循环）；
+                    # 写类施工回合豁免（施工收尾以交账为主，不误伤）。
+                    if (self._pending_content and not self._reply_quality_reinject_count
+                            and not self._round_had_write_tool):
+                        _content = self._pending_content
+                        _len = len(_content)
+                        _stripped = _content.strip()
+                        _quality_hit = False
+                        # 台账/清单腔：开头即台账段/清单/纯清单腔
+                        _ledgerish_head = (
+                            _stripped.startswith("📋")
+                            or _stripped.startswith("任务台账")
+                            or _stripped.startswith("待人工执行清单")
+                            or _stripped.startswith("台账")
+                            or _stripped.startswith("完成项")
+                        )
+                        if _ledgerish_head and _len < 120:
+                            _quality_hit = True
+                        # 思考落纸：thinking 分析 ≥60 字但回复 <80 字
+                        _r = (self._last_reasoning or "").strip()
+                        if not _quality_hit and len(_r) >= 60 and _len < 80:
+                            _quality_hit = True
+                        if _quality_hit:
+                            self._reply_quality_reinject_count += 1
+                            _rej = (
+                                "你的最终回复没有直接回答用户的问题：台账/清单腔过重，或思考里的分析结论"
+                                "没落到回复上。请先直接回答用户当前问题、把分析结论的实质内容写到回复里，"
+                                "台账状态只能作为附属段落跟在答复之后，然后收工。"
+                            )
+                            self._append_to_history("user", _rej)
+                            self._pending_content = None
+                            self._pending_tool_calls = None
+                            self.current_depth += 1
+                            logger.debug("GATE reply-quality re-injection #1")
+                            self._emit_state_change(self.STATE_THINKING, "reply-quality re-injection")
+                            return
                     # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
                     # 激活条件（票 O8-1）：auto on 或 office on（会话级 get_office_on）。
                     # 普通模式（两者皆无）→ 整段物理跳过，连判定都不经过（零影响铁律）。
@@ -2033,10 +2076,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         except Exception:
                             pass
             # 工具调用模式 → tracker
+            self._round_had_write_tool = False  # 票 R2b：每工具轮重置，按本轮工具名重算
             if self._pending_tool_calls:
                 round_names = [tc.get("function", {}).get("name", "")
                               for tc in self._pending_tool_calls
                               if tc.get("function", {}).get("name")]
+                # 票 R2b：本回合是否含写类工具（问答回合无台账段判定；写类施工回合答复质量闸豁免）
+                _WRITE_TOOL_NAMES = {"edit_file", "file_operation", "file_writer", "delete_file"}
+                self._round_had_write_tool = any(n in _WRITE_TOOL_NAMES for n in round_names)
                 self.tracker.record_tool_pattern(round_names, self.current_user_input or "")
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
@@ -2062,6 +2109,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 # 账不平在进 RESPONDING 前已被回注；走到这里 = 闸已全过（纯放行路径）。
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
                 self._ledger_reminded = False  # 票Z：同步重置
+                self._reply_quality_reinject_count = 0  # 票 R2b：答复质量闸计数重置
+                # 注意：_round_had_write_tool 不在 RESPONDING 重置——它由 EXECUTING 每工具轮
+                # 重置重算，供本回合收尾轮判定"写类施工 vs 问答回合"（问答回合无工具轮 → 保留初始 False）。
                 # ── 票 L1：收工自动对账（堵汇报失实）──
                 # 有工具轮 → 引擎只读 git status/diff --stat 注入工作区实况。
                 # 票 LEDGER-1B：对账段改内部上下文 —— 只并入 history（供模型写汇报时
@@ -2082,7 +2132,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
                     self.proactive._last_memory_ids = []
                 # ── 票 K v2 §4 降级方案：终稿尾部附台账摘要行（面板替代） ──
-                if self.task_ledger:
+                # 票 R2b：仅写类施工回合注入；纯问答回合（无写类工具）不交账——没账可交时不交账。
+                if self.task_ledger and self._round_had_write_tool:
                     done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
                     total = len(self.task_ledger)
                     self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"

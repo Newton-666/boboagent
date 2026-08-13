@@ -338,10 +338,14 @@ class TestEngineLedgerReinjection:
     # ── 降级方案：摘要行 ──
 
     def test_summary_line_appended(self, monkeypatch):
-        """台账非空时，终稿包含 📋 摘要行。"""
-        from tests.test_engine_e2e import FakeLLMCaller
+        """写类施工回合台账非空 → 终稿包含 📋 摘要行（票 R2b：仅写类施工回合交账）。"""
+        from tests.test_engine_e2e import FakeLLMCaller, _make_tool_call
 
-        fake_llm = FakeLLMCaller([("任务进行中", None)])
+        fake_llm = FakeLLMCaller([
+            (None, [_make_tool_call("c1", "edit_file",
+                                    {"file_path": "a.py", "old_string": "x", "new_string": "y"})]),
+            ("任务进行中", None),
+        ])
         final_output = [""]
 
         def capture_complete(event_type, data):

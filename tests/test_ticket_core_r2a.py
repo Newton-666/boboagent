@@ -145,29 +145,43 @@ class TestVoluntaryLedgerGatesKept:
         assert "字段闸记录" in joined, "AUTO 模式字段闸应照常记录（pass-with-note）"
 
     def test_ledger_summary_only_when_ledger_exists(self, monkeypatch):
-        """有账 → 📋 台账 段出现在 complete；无账 → 不出现（对照）"""
-        # 有账场景
+        """写类施工回合有账 → 📋 台账 段出现；问答回合/无账 → 不出现（对照，票 R2b 语义）"""
+        # 写类施工回合有账场景 → 显示台账段
         fake_llm = FakeLLMCaller([
-            (None, [_make_tool_call("c1", "echo", {"msg": "s1"})]),
+            (None, [_make_tool_call("c1", "edit_file",
+                                    {"file_path": "a.py", "old_string": "x", "new_string": "y"})]),
             ("弄完了", None),
         ])
-        fake_tools = FakeToolExecutor({"echo": "ok"})
+        fake_tools = FakeToolExecutor({"edit_file": "ok"})
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
         engine.task_ledger = [{"id": "1", "title": "t", "status": "done",
                                "verify": "v", "evidence": "e"}]
         captured = _capture_complete(engine)
-        engine.run(user_input="干活")
+        engine.run(user_input="改文件")
         assert engine.state == engine.STATE_DONE
-        assert any("📋 台账" in c for c in captured), "有账 complete 应含台账段"
+        assert any("📋 台账" in c for c in captured), "写类施工回合有账 complete 应含台账段"
+
+        # 问答回合（无写类工具）有账 → 不显示台账段（票 R2b：没账可交时不交账）
+        fake_llm2 = FakeLLMCaller([
+            (None, [_make_tool_call("c1", "echo", {"msg": "s1"})]),
+            ("查完了", None),
+        ])
+        engine2 = _make_test_engine(fake_llm2, fake_tools, monkeypatch)
+        engine2.task_ledger = [{"id": "1", "title": "t", "status": "done",
+                                "verify": "v", "evidence": "e"}]
+        captured2 = _capture_complete(engine2)
+        engine2.run(user_input="查资料")
+        assert engine2.state == engine2.STATE_DONE
+        assert not any("📋 台账" in c for c in captured2), "问答回合 complete 不应含台账段"
 
         # 无账场景
-        fake_llm2 = FakeLLMCaller([
+        fake_llm3 = FakeLLMCaller([
             (None, [_make_tool_call("c1", "echo", {"msg": "s1"})]),
             ("弄完了", None),
         ])
-        engine2 = _make_test_engine(fake_llm2, fake_tools, monkeypatch)
-        engine2.task_ledger = []
-        captured2 = _capture_complete(engine2)
-        engine2.run(user_input="干活")
-        assert engine2.state == engine2.STATE_DONE
-        assert not any("📋 台账" in c for c in captured2), "无账 complete 不应含台账段"
+        engine3 = _make_test_engine(fake_llm3, fake_tools, monkeypatch)
+        engine3.task_ledger = []
+        captured3 = _capture_complete(engine3)
+        engine3.run(user_input="干活")
+        assert engine3.state == engine3.STATE_DONE
+        assert not any("📋 台账" in c for c in captured3), "无账 complete 不应含台账段"
