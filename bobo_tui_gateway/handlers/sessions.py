@@ -69,6 +69,8 @@ def _save_session_to_disk(sid, ctx):
             data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
             # TICKET-GUI-F7：持久化手动命名标记（保留磁盘旧值，防止内存未设置时覆盖）
             data["user_named"] = bool(session.get("user_named", data.get("user_named", False)))
+            # TICKET-DESK-V2A：持久化 pin 置顶标记（保留磁盘旧值，防内存未设置时覆盖）
+            data["pinned"] = bool(session.get("pinned", data.get("pinned", False)))
             # 票 AUTO-G2：持久化已交接水位线（保留磁盘旧值，防内存未设置时覆盖）
             if session.get("handoff_watermark") is not None:
                 data["handoff_watermark"] = session["handoff_watermark"]
@@ -80,6 +82,7 @@ def _save_session_to_disk(sid, ctx):
                 "messages": in_mem_msgs,
                 "summary": None,
                 "user_named": False,
+                "pinned": False,
                 "handoff_watermark": session.get("handoff_watermark"),
             }
     except Exception:
@@ -90,6 +93,7 @@ def _save_session_to_disk(sid, ctx):
             "messages": in_mem_msgs,
             "summary": None,
             "user_named": False,
+            "pinned": False,
             "handoff_watermark": session.get("handoff_watermark"),
         }
     mgr._write_atomic(session_path, data)
@@ -194,14 +198,19 @@ def handle_session_list(params: dict, rid: str, ctx) -> dict:
         # TICKET-GUI-F7：mgr.list_sessions 不透传 user_named，此处按 sid 补读
         # 磁盘标记（GUI 据此跳过自动命名；历史无标记会话默认 False 保留自动取名）
         user_named = False
+        pinned = False
         try:
             import json as _json
             p = mgr.session_dir / f"{s['id']}.json"
             if p.exists():
                 with open(p, "r", encoding="utf-8") as f:
-                    user_named = bool(_json.load(f).get("user_named", False))
+                    _d = _json.load(f)
+                    user_named = bool(_d.get("user_named", False))
+                    # TICKET-DESK-V2A：pin 置顶标记（mgr 不透传，按 sid 补读磁盘）
+                    pinned = bool(_d.get("pinned", False))
         except Exception:
             user_named = False
+            pinned = False
         items.append({
             "id": s["id"],
             "title": s["title"],
@@ -210,6 +219,8 @@ def handle_session_list(params: dict, rid: str, ctx) -> dict:
             "preview": s.get("title", ""),
             # TICKET-GUI-F7：手动命名标记（GUI 据此跳过自动命名）
             "user_named": user_named,
+            # TICKET-DESK-V2A：置顶标记（GUI 据此排序 + 图钉视觉）
+            "pinned": pinned,
         })
     return ok(rid, {"sessions": items})
 
@@ -361,6 +372,19 @@ def handle_session_rename(params: dict, rid: str, ctx) -> dict:
     return ok(rid, {"ok": True})
 
 
+def handle_session_pin(params: dict, rid: str, ctx) -> dict:
+    # TICKET-DESK-V2A：pin 置顶（只加字段不改语义；未命中会话返回 ok 兜底，
+    # GUI 本地渲染不依赖后端强一致）
+    sid = params.get("session_id", "")
+    pinned = bool(params.get("pinned", False))
+    with ctx.sessions_lock:
+        session = ctx.sessions.get(sid)
+    if session:
+        session["pinned"] = pinned
+        _save_session_to_disk(sid, ctx)
+    return ok(rid, {"ok": True, "pinned": pinned})
+
+
 def handle_session_interrupt(params: dict, rid: str, ctx) -> dict:
     sid = params.get("session_id", "")
     try:
@@ -432,6 +456,8 @@ def register(reg_method, ctx):
     reg_method("session.close")(lambda params, rid: handle_session_close(params, rid, ctx))
     reg_method("session.delete")(lambda params, rid: handle_session_delete(params, rid, ctx))
     reg_method("session.rename")(lambda params, rid: handle_session_rename(params, rid, ctx))
+    # TICKET-DESK-V2A：pin 置顶端点（只新增，不改既有端点语义）
+    reg_method("session.pin")(lambda params, rid: handle_session_pin(params, rid, ctx))
     reg_method("session.interrupt")(lambda params, rid: handle_session_interrupt(params, rid, ctx))
     reg_method("session.steer")(lambda params, rid: handle_session_steer(params, rid, ctx))
     reg_method("session.active_list")(lambda params, rid: handle_session_active_list(params, rid, ctx))

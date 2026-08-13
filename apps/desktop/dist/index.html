@@ -223,6 +223,84 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #stop-btn { position:absolute; right:64px; bottom:36px; width:28px; height:28px; border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; border:1px solid rgba(244,135,113,0.4); cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; }
 #stop-btn:hover { background:rgba(244,135,113,0.22); }
 #stop-btn.show { display:flex; }
+
+/* ══ TICKET-DESK-V2A：桌面端体验地基（全部新增 class/组件，零改动既有样式值）══ */
+
+/* ── V2A-1 状态覆盖层 ── */
+#overlay-root { position:fixed; inset:0; z-index:5000; display:none; align-items:center; justify-content:center; background:var(--bg); }
+#overlay-root.open { display:flex; }
+.ovl { display:none; flex-direction:column; align-items:center; gap:14px; max-width:420px; text-align:center; padding:24px; }
+.ovl.show { display:flex; animation:ovlFade 0.1s ease-out; }
+@keyframes ovlFade { from { opacity:0; } to { opacity:1; } }
+.ovl-title { font-size:17px; font-weight:600; color:var(--text); }
+.ovl-desc { font-size:13px; color:var(--text2); line-height:1.6; }
+.ovl-btn { padding:8px 20px; border-radius:8px; border:1px solid var(--border); background:var(--bg3); color:var(--text); cursor:pointer; font:inherit; font-size:13px; }
+.ovl-btn:hover { background:var(--hover); }
+.ovl-btn.primary { background:#e8913a; color:#fff; border-color:#e8913a; }
+.ovl-btn.primary:hover { opacity:0.88; }
+/* 连接中动画：三点脉冲（沿用 thinkPulse 视觉体系，色取 --text2 同族 #5b9bd5） */
+.ovl-spinner { display:inline-flex; gap:6px; }
+.ovl-spinner span { width:8px; height:8px; border-radius:50%; background:#5b9bd5; animation:ovlDot 1.2s infinite ease-in-out; }
+.ovl-spinner span:nth-child(2) { animation-delay:0.15s; }
+.ovl-spinner span:nth-child(3) { animation-delay:0.3s; }
+@keyframes ovlDot { 0%,60%,100% { opacity:0.25; transform:scale(1); } 30% { opacity:1; transform:scale(1.25); } }
+.ovl-detail-toggle { font-size:11px; color:var(--text-muted); cursor:pointer; text-decoration:underline; background:none; border:none; font:inherit; padding:0; }
+.ovl-detail-box { display:none; font-size:11px; color:var(--text-muted); font-family:monospace; background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:8px 10px; max-width:380px; word-break:break-all; max-height:120px; overflow-y:auto; white-space:pre-wrap; }
+.ovl-detail-box.open { display:block; }
+.ovl-err-icon { font-size:34px; line-height:1; }
+.ovl-warn-icon { font-size:30px; line-height:1; }
+
+/* ── V2A-3 控件 hover/focus（只补交互态，不动默认外观；focus ring 用现有强调色 #e8913a 1px 外发光）── */
+#new-chat:focus-visible, #send:focus-visible:not(:disabled), #auto-toggle:focus-visible, #session-search:focus-visible,
+.copy-btn:focus-visible, .settings-tab:focus-visible, .ovl-btn:focus-visible, .v2a-btn:focus-visible { outline:none; box-shadow:0 0 0 1px rgba(232,145,58,0.6); }
+#send:hover:not(:disabled) { opacity:0.85; }
+#session-search:hover { background:var(--bg2); }
+#settings-icon:focus-visible { outline:none; box-shadow:0 0 0 1px rgba(232,145,58,0.6); }
+
+/* ── V2A-4 Toast ── */
+#toast-root { position:fixed; top:14px; right:14px; z-index:6000; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+.toast { display:flex; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:10px 14px; font-size:13px; color:var(--text); box-shadow:0 6px 24px rgba(0,0,0,0.10); animation:toastIn 0.15s ease-out; max-width:320px; }
+.toast.success { border-left:3px solid #50a14f; }
+.toast.fail { border-left:3px solid #f48771; }
+.toast .toast-close { cursor:pointer; color:var(--text-muted); font-size:12px; margin-left:4px; flex-shrink:0; background:none; border:none; font-family:inherit; padding:0; }
+.toast .toast-close:hover { color:var(--text); }
+.toast.hide { animation:toastOut 0.15s ease-in forwards; }
+@keyframes toastIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateY(-6px); } }
+
+/* ── V2A-5 三态组件统一 ── */
+.v2a-loader { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted); padding:16px; justify-content:center; }
+.v2a-loader .sp { display:inline-flex; gap:4px; }
+.v2a-loader .sp span { width:6px; height:6px; border-radius:50%; background:#5b9bd5; animation:ovlDot 1.2s infinite ease-in-out; }
+.v2a-loader .sp span:nth-child(2) { animation-delay:0.15s; }
+.v2a-loader .sp span:nth-child(3) { animation-delay:0.3s; }
+.v2a-error { display:flex; flex-direction:column; align-items:center; gap:10px; padding:20px; text-align:center; font-size:13px; color:var(--text2); }
+.v2a-error .v2a-err-icon { font-size:26px; line-height:1; }
+.v2a-error .v2a-err-title { font-weight:600; color:var(--text); font-size:14px; }
+.v2a-error .v2a-btn { padding:6px 16px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text); cursor:pointer; font:inherit; font-size:12px; }
+.v2a-error .v2a-btn:hover { background:var(--hover); }
+.v2a-empty { display:flex; flex-direction:column; align-items:center; gap:6px; padding:24px 12px; text-align:center; font-size:12px; color:var(--text-muted); }
+.v2a-empty .v2a-empty-icon { font-size:22px; line-height:1; }
+
+/* ── V2A-2 pin 图钉 / 搜索空态 ── */
+.pin-btn { cursor:pointer; font-size:12px; color:var(--text-muted); margin-left:4px; flex-shrink:0; background:none; border:none; padding:0; font-family:inherit; line-height:1; }
+.pin-btn:hover { color:#e8913a; }
+.pin-btn.on { color:#e8913a; }
+.pin-mark { font-size:11px; color:#e8913a; margin-left:2px; flex-shrink:0; }
+.search-empty { padding:20px 8px; text-align:center; font-size:12px; color:var(--text-muted); }
+
+/* ── V2A-2 删除二次确认模态（复用 approval-modal 样式体系）── */
+#confirm-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:3000; align-items:center; justify-content:center; }
+#confirm-overlay.open { display:flex; }
+#confirm-modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:380px; max-width:90vw; padding:18px 20px; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+#confirm-modal .cf-title { font-size:14px; font-weight:600; margin-bottom:8px; color:var(--text); }
+#confirm-modal .cf-desc { font-size:12px; color:var(--text2); margin-bottom:14px; white-space:pre-wrap; word-break:break-word; }
+#confirm-modal .cf-btns { display:flex; gap:10px; justify-content:flex-end; }
+#confirm-modal .cf-btn { padding:7px 16px; border-radius:6px; border:none; cursor:pointer; font:inherit; font-size:13px; }
+#confirm-modal .cf-cancel { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+#confirm-modal .cf-cancel:hover { background:var(--hover); }
+#confirm-modal .cf-ok { background:#f48771; color:#fff; }
+#confirm-modal .cf-ok:hover { opacity:0.88; }
 </style>
 </head>
 <body>
@@ -359,6 +437,8 @@ const handlers = new Map(); let reqId = 0; const pending = new Map();
 let currentSessionId = null; let connected = false;
 function connect() {
   if (!window.boboAPI) { debug('Browser mode'); return; }
+  // TICKET-DESK-V2A：连接中全屏态（动画指示，非纯文字）
+  showOverlay('connecting');
   debug('Connecting...');
   window.boboAPI.onMessage(function(msg) {
     if (!msg || typeof msg !== 'object') return;
@@ -410,7 +490,94 @@ var sendTimeoutId = null;
 // TICKET-GUI-F3 (F3-2): 会话加载竞态序号 —— 快速连点两会话，以后一次为准（前者作废）
 var sessionLoadSeq = 0;
 
-function debug(msg) { debugEl.textContent = '[' + msg + ']'; }
+function debug(msg) {
+  debugEl.textContent = '[' + msg + ']';
+  // TICKET-DESK-V2A：调试信息同步收纳进覆盖层"详情"可展开区
+  var boxes = document.querySelectorAll('.ovl-detail-box');
+  for (var i = 0; i < boxes.length; i++) boxes[i].textContent = '[' + msg + ']';
+}
+// ── TICKET-DESK-V2A：状态覆盖层状态机 ──
+var _ovlType = null;
+function showOverlay(type) {
+  // 已显示同型则跳过（300ms 防抖窗口内不重绘）
+  if (_ovlType === type) return;
+  var root = document.getElementById('overlay-root');
+  if (!root) return;
+  var types = ['connecting', 'failed', 'disconnected'];
+  for (var i = 0; i < types.length; i++) {
+    var el = document.getElementById('ovl-' + types[i]);
+    if (el) el.classList.toggle('show', types[i] === type);
+  }
+  root.classList.add('open');
+  _ovlType = type;
+}
+function hideOverlay() {
+  var root = document.getElementById('overlay-root');
+  if (!root) return;
+  var els = root.querySelectorAll('.ovl');
+  for (var i = 0; i < els.length; i++) els[i].classList.remove('show');
+  root.classList.remove('open');
+  _ovlType = null;
+}
+function toggleOvlDetail(btn) {
+  var box = btn.nextElementSibling;
+  if (box && box.classList) box.classList.toggle('open');
+}
+function retryConnect() {
+  debug('Retrying...');
+  hideOverlay();
+  showOverlay('connecting');
+  // 触发重新探测：gateway.ready 未到则走 readyFallback 轮询
+  setConnected(false);
+  if (window.boboAPI && window.boboAPI.getPending) window.boboAPI.getPending();
+  setTimeout(function() {
+    if (window.boboAPI) {
+      call('setup.status', {}).then(function(r) {
+        if (r && typeof r === 'object' && !r.error) {
+          _everConnected = true;
+          setConnected(true);
+          hideOverlay();
+          loadSessions();
+        }
+      });
+    }
+  }, 800);
+}
+// ── TICKET-DESK-V2A：Toast（右上角，3s 自动消失 + 手动关闭）──
+function showToast(type, msg) {
+  var root = document.getElementById('toast-root');
+  if (!root) return;
+  var t = document.createElement('div');
+  t.className = 'toast ' + (type === 'fail' ? 'fail' : 'success');
+  t.innerHTML = '<span>' + esc(msg) + '</span><button class="toast-close" title="关闭">✕</button>';
+  root.appendChild(t);
+  var killed = false;
+  function remove() {
+    if (killed) return; killed = true;
+    t.classList.add('hide');
+    setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 160);
+  }
+  t.querySelector('.toast-close').onclick = remove;
+  setTimeout(remove, 3000);
+}
+// ── TICKET-DESK-V2A：删除二次确认（复用确认模态，替代原生 confirm）──
+var _confirmCb = null;
+function askConfirm(title, desc, cb) {
+  document.getElementById('cf-title').textContent = title;
+  document.getElementById('cf-desc').textContent = desc;
+  document.getElementById('cf-ok').textContent = '删除';
+  _confirmCb = cb;
+  document.getElementById('confirm-overlay').classList.add('open');
+}
+document.getElementById('cf-cancel').onclick = function() {
+  _confirmCb = null;
+  document.getElementById('confirm-overlay').classList.remove('open');
+};
+document.getElementById('cf-ok').onclick = function() {
+  var cb = _confirmCb; _confirmCb = null;
+  document.getElementById('confirm-overlay').classList.remove('open');
+  if (cb) cb();
+};
 // TICKET-D1d ④: 模式徽标（AUTO / OFFICE / 正常不显示）
 function setMode(mode) {
   var el = document.getElementById('status-mode');
@@ -434,7 +601,13 @@ function showStop(b) {
   var sb = document.getElementById('stop-btn');
   if (sb) sb.classList.toggle('show', b);
 }
+var _connTimer = null;
+// TICKET-DESK-V2A：连接态 300ms 防抖（连接抖动时 300ms 内不重绘，禁止闪烁切换）
 function setConnected(c) {
+  if (_connTimer) clearTimeout(_connTimer);
+  _connTimer = setTimeout(function() { applyConnected(c); }, 300);
+}
+function applyConnected(c) {
   connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
   var at = document.getElementById('auto-toggle'); if (at) at.disabled = !c;
   inputEl.placeholder = c ? '输入消息 (↵ 发送，Shift+↵ 换行)' : 'Connecting...';
@@ -1276,6 +1449,8 @@ function startRename(s, span) {
       s.user_named = true;
       call('session.rename', { session_id: s.id, title: t });
       renderSessions();
+      // TICKET-DESK-V2A：重命名成功 toast 接入点
+      showToast('success', '已重命名');
     } else {
       span.textContent = s.title || s.id;
     }
@@ -1293,24 +1468,52 @@ function renderSessions(filter) {
     var q = filter.toLowerCase();
     filtered = sessions.filter(function(s) { return (s.title || '').toLowerCase().indexOf(q) !== -1; });
   }
+  if (filtered.length === 0) {
+    // TICKET-DESK-V2A：无结果/无会话统一空态（EmptyState 组件，配色取现有色板）
+    var empty = document.createElement('div');
+    empty.className = 'v2a-empty';
+    empty.innerHTML = '<div class="v2a-empty-icon">' + (filter ? '🔍' : '🗂') + '</div><div>' + (filter ? '没有匹配的会话' : '暂无会话，点击「+ 新对话」开始') + '</div>';
+    sessionListEl.appendChild(empty);
+    return;
+  }
+  // TICKET-DESK-V2A：pin 置顶会话排最前，其余保持原序（稳定排序）
+  filtered.sort(function(a, b) { return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0); });
   filtered.forEach(function(s) {
     // TICKET-GUI-F3 (F3-1/F3-2): data-sid 供加载指示定位；active 类严格跟随 currentSessionId
     var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':''); div.dataset.sid = s.id;
     var span = document.createElement('span'); span.textContent = s.title || s.id; span.style.overflow='hidden'; span.style.textOverflow='ellipsis';
     span.onclick = function() { loadSession(s.id); };
+    // TICKET-DESK-V2A：pin 图钉标记（视觉仅加小图钉，不改行样式）
+    if (s.pinned) {
+      var pinMark = document.createElement('span'); pinMark.className = 'pin-mark'; pinMark.textContent = '📌';
+      span.insertBefore(pinMark, span.firstChild);
+    }
     var re = document.createElement('span'); re.textContent = '✎'; re.className = 're'; re.style.cssText = 'cursor:pointer;color:var(--text-muted);font-size:12px;margin-left:4px;flex-shrink:0;';
     re.onclick = function(e) { e.stopPropagation(); startRename(s, span); };
+    // TICKET-DESK-V2A：pin 行内按钮（hover 显示，与 ✎/✕ 同模式）
+    var pin = document.createElement('button'); pin.className = 'pin-btn' + (s.pinned ? ' on' : ''); pin.textContent = '📌'; pin.title = s.pinned ? '取消置顶' : '置顶';
+    pin.onclick = function(e) { e.stopPropagation(); togglePin(s); };
     var del = document.createElement('span'); del.className = 'del'; del.textContent = '✕';
     del.onclick = function(e) { e.stopPropagation(); deleteSession(s.id); };
-    div.appendChild(span); div.appendChild(re); div.appendChild(del);
+    div.appendChild(span); div.appendChild(re); div.appendChild(pin); div.appendChild(del);
     sessionListEl.appendChild(div);
   });
 }
+// TICKET-DESK-V2A：pin 切换（本地即时渲染 + 后端持久化；失败静默，下次 list 回源）
+function togglePin(s) {
+  s.pinned = !s.pinned;
+  call('session.pin', { session_id: s.id, pinned: s.pinned });
+  renderSessions(document.getElementById('session-search').value);
+}
 
-async function deleteSession(sid) {
-  if (!confirm('删除此会话？TUI 中也会同步删除。')) return;
+// TICKET-DESK-V2A：行内删除 → 二次确认模态（复用 approval 样式体系）+ 成功 toast
+function deleteSession(sid) {
+  askConfirm('⚠ 删除会话', '删除此会话？TUI 中也会同步删除。', function() { doDeleteSession(sid); });
+}
+async function doDeleteSession(sid) {
   await call('session.delete', { session_id: sid });
   sessions = sessions.filter(function(s) { return s.id !== sid; });
+  showToast('success', '会话已删除');
   var wasCurrent = currentSessionId === sid;
   if (wasCurrent) {
     // F3-1: 删除当前会话后落到第一个会话 —— 完整 loadSession（内容区与高亮同步切换）
@@ -1496,7 +1699,13 @@ async function newChat() {
 connect();
 
 on('gateway.ready', async function() {
-  debug('已连接，恢复会话...'); setConnected(true);
+  debug('已连接，恢复会话...');
+  // TICKET-DESK-V2A：曾处于覆盖层态（连接中/失败/断连）时，恢复后 toast 告知
+  var wasCovered = _ovlType !== null;
+  _everConnected = true;
+  setConnected(true);
+  hideOverlay();
+  if (wasCovered) showToast('success', '连接已恢复');
   await loadSessions();
   if (sessions.length > 0) {
     currentSessionId = sessions[0].id;
@@ -1732,11 +1941,14 @@ on('status.update', function(data) {
   }
   addStatus(t);
 });
+var _everConnected = false;
 on('backend.exited', function(data) {
   setConnected(false);
   debug('Backend disconnected' + (data && data.code ? ' (code ' + data.code + ')' : ''));
-  // Show setup screen on any backend crash (no .env detected)
-  showSetup();
+  // TICKET-DESK-V2A：已连接过 → 断连全屏态（明确告知 + 重启指引）；
+  // 从未连接过（首启无 key）→ 保留原 setup 配置屏
+  if (_everConnected) { showOverlay('disconnected'); }
+  else { showSetup(); }
 });
 
 // ── Setup screen (first-run config) ──
@@ -1799,6 +2011,8 @@ document.getElementById('approval-deny').onclick = function() { approvalRespond(
 on('gateway.error', function(data) {
   addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
   debug('Error: ' + (data.message || '').substring(0, 60));
+  // TICKET-DESK-V2A：后端错误 toast 接入点
+  showToast('fail', (data.message || '后端错误').substring(0, 120));
 });
 
 // ── Fallback: if gateway.ready hasn't fired within 5s, poll backend ──
@@ -1810,6 +2024,7 @@ var readyFallbackTimer = setTimeout(async function() {
     var r = await call('setup.status', {});
     if (r && typeof r === 'object' && !r.error) {
       // Backend is alive despite missing gateway.ready
+      _everConnected = true;
       setConnected(true);
       await loadSessions();
       if (sessions.length > 0) {
@@ -1821,11 +2036,18 @@ var readyFallbackTimer = setTimeout(async function() {
       }
       debug('Connected ✓');
       inputEl.focus();
+      // TICKET-DESK-V2A：fallback 恢复成功同样收覆盖层 + toast
+      hideOverlay();
+      showToast('success', '连接已恢复');
       return;
     }
     await new Promise(function(r2) { setTimeout(r2, 2000); });
   }
-  if (!connected) debug('Backend unavailable');
+  if (!connected) {
+    debug('Backend unavailable');
+    // TICKET-DESK-V2A：5 次轮询仍无后端 → 连接失败全屏态（错误图标 + 重试按钮）
+    showOverlay('failed');
+  }
 }, 5000);
 
 // ── Input ──────────────────────────────────────────────────────────────
@@ -2017,5 +2239,46 @@ document.getElementById('preview-overlay').onclick = function() {
 
 // ── Session search ──────────────────────────────────────────────────────
 </script>
+
+<!-- ══ TICKET-DESK-V2A：状态覆盖层（连接中 / 连接失败 / 断连 / 空会话引导保留欢迎页）══ -->
+<div id="overlay-root">
+  <div class="ovl" id="ovl-connecting">
+    <div class="ovl-spinner"><span></span><span></span><span></span></div>
+    <div class="ovl-title">正在连接</div>
+    <div class="ovl-desc">正在连接后端服务…</div>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-connecting"></div>
+  </div>
+  <div class="ovl" id="ovl-failed">
+    <div class="ovl-err-icon">⚠</div>
+    <div class="ovl-title">连接失败</div>
+    <div class="ovl-desc">无法连接到后端服务，请确认 Bobo 已启动。</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">重试</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-failed"></div>
+  </div>
+  <div class="ovl" id="ovl-disconnected">
+    <div class="ovl-warn-icon">⚠</div>
+    <div class="ovl-title">后端已断开</div>
+    <div class="ovl-desc">后端进程已退出。请重启 Bobo 后重试，会话数据不会丢失。</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">重新连接</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-disconnected"></div>
+  </div>
+</div>
+<!-- TICKET-DESK-V2A：Toast 通知（右上角，3s 自动消失 + 手动关闭）-->
+<div id="toast-root"></div>
+<!-- TICKET-DESK-V2A：删除二次确认模态（复用 approval 模态样式体系）-->
+<div id="confirm-overlay">
+  <div id="confirm-modal">
+    <div class="cf-title" id="cf-title">⚠ 确认操作</div>
+    <div class="cf-desc" id="cf-desc"></div>
+    <div class="cf-btns">
+      <button class="cf-btn cf-cancel" id="cf-cancel">取消</button>
+      <button class="cf-btn cf-ok" id="cf-ok">删除</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
