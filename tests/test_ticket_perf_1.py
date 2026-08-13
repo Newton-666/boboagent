@@ -176,7 +176,9 @@ class TestPerf1LengthRetry:
             posts.append(json.get("max_tokens"))
             return _FakeResp()
 
-        def fake_stream_lines(resp, read_timeout, vitals):
+        def fake_stream_lines(resp, read_timeout, vitals, _interrupt_event=None):
+            # 票 INT-1 兼容：call_llm 现以关键字传入 _interrupt_event（默认 None），
+            # mock 签名需同步吸收，否则 TypeError 被吞成 error dict（KeyError: choices）
             seq = stream_seq["n"]
             stream_seq["n"] += 1
             empty = (seq == 0 and first_empty) or (seq == 1 and second_empty)

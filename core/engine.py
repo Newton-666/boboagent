@@ -29,6 +29,7 @@ from core.command_safety import (classify_command, is_high_risk_tool, is_auto_re
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
+from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
 from core.proactive import ProactiveManager
 from core.injector import PromptInjector
 
@@ -1015,7 +1016,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
             # events.jsonl 看不到提取调用 → "尾部静默"假象。此处补写 + 限制 512 tokens
             # （提取只需 1-2 条 ≤60 字结论），实测可将 55.7s 级耗时显著压缩。
             _extract_t0 = time.time()
-            response = self.llm_caller(prompt, use_tools=False, max_tokens=512)
+            try:
+                response = self.llm_caller(
+                    prompt, use_tools=False, max_tokens=512,
+                    _interrupt_event=self._interrupt_event,  # 票 INT-1：提取同样可中断
+                )
+            except LLMInterrupted:
+                # 票 INT-1：中断时放弃沉淀（静默返回空，不留 notes.error——
+                # 用户主动 stop 不是错误；回合已在主线程正常退场）
+                return []
             event_bus.write("llm.call", {
                 "session_id": getattr(self, "sid", ""),
                 "msg_count": len(prompt),
@@ -1109,13 +1118,24 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     ]
                     _full_reply = (_ln_asst_msgs[-1] if _ln_asst_msgs
                                    else (pending_content or ""))
+                    def _ln_llm(prompt, **kw):
+                        # 票 INT-1：沉淀 LLM 调用同样接受中断——非流式入口前检查，
+                        # 置位即抛 LLMInterrupted 放弃本次沉淀（由下方 except 单独捕获）
+                        if (self._interrupt_event is not None
+                                and self._interrupt_event.is_set()):
+                            raise LLMInterrupted("interrupt during living notes")
+                        kw.setdefault("_interrupt_event", self._interrupt_event)
+                        return self.llm_caller(prompt, **kw)
                     write_living_notes(
                         takeaways,
                         _ln_user_msgs[-1] if _ln_user_msgs else "",
                         _sid,
-                        self.llm_caller,
+                        _ln_llm,
                         full_reply=_full_reply,
                     )
+                except LLMInterrupted:
+                    # 票 INT-1：中断时放弃沉淀——用户主动 stop，不留 notes.error
+                    logger.info("living notes hook interrupted (sid=%s)", _sid)
                 except Exception as _ln_err:
                     logger.warning("living notes hook failed (sid=%s): %s",
                                    _sid, _ln_err)
@@ -1266,6 +1286,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             tools_override=filtered_tools,
             session_id=self.sid,
             reasoning_callback=_on_reasoning,
+            _interrupt_event=self._interrupt_event,  # 票 INT-1：流式每 chunk 可中断
         )
         if isinstance(response, dict) and "error" in response:
             # ── 票 H 运行时孤儿防线 Layer 2：配对类 400 → 清洗重试一次 ──
@@ -1289,6 +1310,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     retry_callback=_on_retry,
                     tools_override=filtered_tools,
                     session_id=self.sid,
+                    _interrupt_event=self._interrupt_event,  # 票 INT-1：重试同样可中断
                 )
                 if not isinstance(retry_response, dict) or "error" not in retry_response:
                     # 重试成功
@@ -1437,7 +1459,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._append_to_history("user", self.current_user_input)
             self._emit_state_change(self.STATE_THINKING, "user input")
         elif self.state == self.STATE_THINKING:
-            content, tool_calls = self._call_llm()
+            try:
+                content, tool_calls = self._call_llm()
+            except LLMInterrupted:
+                # 票 INT-1：流式中断（思考中 stop）→ 走既有 interrupted 路径正常退场。
+                # 事件链 engine.cancel.requested → STATE interrupted → adapter 见
+                # interrupt_event.is_set() → thread.exit reason=interrupted。
+                self._emit_state_change(self.STATE_ERROR, "interrupted")
+                return
             self._pending_content = content
             self._pending_tool_calls = tool_calls
             if tool_calls:
