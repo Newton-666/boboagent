@@ -33,6 +33,14 @@ import urllib3.connection as _urllib3_connection
 _logger = _logging.getLogger(__name__)
 
 
+class LLMInterrupted(Exception):
+    """票 INT-1：用户中断（stop/cancel）——流式读循环发现中断标志置位时抛出。
+
+    引擎捕获后走既有 interrupted 路径（STATE interrupted、回合正常退场、
+    message.complete 带中断标记）；与网络/超时错误本质不同，绝不重试。
+    """
+
+
 def _force_close(response: requests.Response):
     """强行打断流式响应的阻塞读并关闭连接。
 
@@ -200,7 +208,7 @@ def _get_sse_read_timeout() -> int:
         return 120
 
 
-def _read_stream_lines(response: requests.Response, read_timeout: int, vitals: dict):
+def _read_stream_lines(response: requests.Response, read_timeout: int, vitals: dict, _interrupt_event=None):
     """读者线程 + 队列方式产出 SSE 原始字节行。
 
     daemon 线程在 response.raw.read(4096) 上裸阻塞（socket 无超时），
@@ -251,6 +259,12 @@ def _read_stream_lines(response: requests.Response, read_timeout: int, vitals: d
         try:
             kind, payload = q.get(timeout=1.0)
         except _queue.Empty:
+            # 票 INT-1：完全静默（模型思考中零 chunk）时，q.get 每秒空转一次——
+            # 在此检查中断标志，保证 stop 在无数据流下也 ≤1s 断流响应
+            # （推理模型思考期可能整段不发字节，仅靠循环体每 chunk 检查不够）。
+            if _interrupt_event is not None and _interrupt_event.is_set():
+                _force_close(response)
+                raise LLMInterrupted("user interrupt during stream (silent)")
             continue
         if kind == "eof":
             # 残留半行也吐出来（非 SSE 兜底需要完整字节）
@@ -383,7 +397,12 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None, _interrupt_event=None):
+        # 票 INT-1：非流式/流式共用入口前检查——中断已置位则直接抛异常短路
+        # （仿 execute_terminal 的 _interrupt_event 注入方式，tool_runner/engine 注入，
+        # 不暴露在 schema，LLM 无法伪造）
+        if _interrupt_event is not None and _interrupt_event.is_set():
+            raise LLMInterrupted("user interrupt before llm call")
         # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
         import os as _os
         _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
@@ -474,8 +493,23 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             _vitals = {"last_chunk": time.time(), "raw": bytearray()}
 
                             for _lbytes in _read_stream_lines(
-                                response, _get_sse_read_timeout(), _vitals
+                                response, _get_sse_read_timeout(), _vitals,
+                                _interrupt_event=_interrupt_event,
                             ):
+                                # ── 票 INT-1：每 chunk 查中断标志 ──
+                                # 推理模型单次思考最长 86s（2026-08-13 13:46 实证），
+                                # 期间 stop 置位无人可见 → 这里每收到一个 chunk 就检查，
+                                # 置位即断流抛 LLMInterrupted（绝不重试，走引擎 interrupted 路径）。
+                                # _force_close 先 shutdown 打断读者线程阻塞读再 close，防死锁（铁律 2）。
+                                if (_interrupt_event is not None
+                                        and _interrupt_event.is_set()):
+                                    try:
+                                        _force_close(response)
+                                    except Exception:
+                                        pass
+                                    raise LLMInterrupted(
+                                        "user interrupt during stream"
+                                    )
                                 _lstr = _lbytes.decode("utf-8", "replace")
                                 if not _lstr.startswith("data: "):
                                     continue
@@ -729,6 +763,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     continue  # 回到 for attempt 循环（attempt+1，消耗一次重试配额，_length_retried 防循环）
                 return _body
 
+            except LLMInterrupted:
+                # 票 INT-1：用户中断异常绝不重试、绝不降级为普通错误——
+                # 原样上抛给引擎走既有 interrupted 路径（STATE interrupted）。
+                raise
             except Exception as e:
                 error_type, retryable, message = _classify_error(exception=e)
                 if retryable and attempt < MAX_RETRIES:
