@@ -689,6 +689,8 @@ function addTool(name, context, toolId) {
     // 已有聚合卡：把当前最新一步收进聚合卡（吞并）
     var aggBody2 = roundAggregateHead.parentNode.querySelector('.tool-agg-body');
     roundToolEls.forEach(function(d) {
+      // TICKET-GUI-F6D：写/改类工具（编辑流）不入聚合卡 —— 思考与编辑卡+diff 全程摊开
+      if (isWriteToolEl(d)) return;
       var tb2 = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
       if (tb2) aggBody2.appendChild(tb2);
       aggBody2.appendChild(d);
@@ -697,26 +699,31 @@ function addTool(name, context, toolId) {
   }
   chatEl.appendChild(div);
   if (!roundAggregated && roundTotalCount >= 2) {
-    // 第 2 步起建聚合卡：把前一步收进去，最新一步保持摊开
-    roundAggregated = true;
-    var agg = document.createElement('div'); agg.className = 'tool-agg';
-    agg.innerHTML = '<span class="tool-agg-head">已执行 ' + roundTotalCount + ' 步操作 <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
-    agg.onclick = function(e) {
-      if (e.target.closest('.tool')) return; // 点工具卡本身不折叠（卡内自有展开逻辑）
-      var body = this.querySelector('.tool-agg-body');
-      var open = body.style.display !== 'none';
-      body.style.display = open ? 'none' : 'block';
-      this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
-    };
-    var aggBody = agg.querySelector('.tool-agg-body');
-    roundToolEls.forEach(function(d) {
-      var tb = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
-      if (tb) aggBody.appendChild(tb);
-      aggBody.appendChild(d);
-    });
-    roundToolEls = [];
-    roundAggregateHead = agg.querySelector('.tool-agg-head');
-    chatEl.insertBefore(agg, div);
+    // 第 2 步起建聚合卡：把前一步收进去，最新一步保持摊开。
+    // F6D：若全部前步都是写类工具（编辑流），无可吞元素则不建空聚合卡——编辑流全程摊开
+    var hasSwallowable = roundToolEls.some(function(d) { return !isWriteToolEl(d); });
+    if (hasSwallowable) {
+      roundAggregated = true;
+      var agg = document.createElement('div'); agg.className = 'tool-agg';
+      agg.innerHTML = '<span class="tool-agg-head">已执行 ' + roundTotalCount + ' 步操作 <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
+      agg.onclick = function(e) {
+        if (e.target.closest('.tool')) return; // 点工具卡本身不折叠（卡内自有展开逻辑）
+        var body = this.querySelector('.tool-agg-body');
+        var open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : 'block';
+        this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+      };
+      var aggBody = agg.querySelector('.tool-agg-body');
+      roundToolEls.forEach(function(d) {
+        if (isWriteToolEl(d)) return;  // F6D：写类工具卡与配对思考都留在消息流
+        var tb = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
+        if (tb) aggBody.appendChild(tb);
+        aggBody.appendChild(d);
+      });
+      roundToolEls = [];
+      roundAggregateHead = agg.querySelector('.tool-agg-head');
+      chatEl.insertBefore(agg, div);
+    }
   }
   if (roundAggregated && roundAggregateHead) {
     roundAggregateHead.textContent = '已执行 ' + roundTotalCount + ' 步操作 ' + (aggHeadArrowText());
@@ -725,16 +732,43 @@ function addTool(name, context, toolId) {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+// TICKET-GUI-F6D：写/改类工具名单 —— 配对思考不吞并（编辑流思考→编辑卡+diff 全程摊开）
+// 读/探查类不在此名单：连续调用照常吞并进聚合卡（F6C 行为）；
+// 混合序列按"被吞的那步类型"判定：吞写类步骤时思考留在原地，吞读类步骤时思考一并入卡。
+var WRITE_TOOLS = [
+  'edit_file', 'file_operation', 'refactor', 'file_writer',
+  'write_obsidian', 'append_obsidian', 'copy_to_obsidian', 'copy_to_notion',
+  'save_memory', 'save_skill', 'task_ledger', 'bobo_config',
+  'notion_setup', 'api_register',
+  'github_create_pr', 'github_create_repo', 'github_pr_comment', 'github_setup',
+  'bobo_schedule', 'wiki_rebuild',
+];
+function isWriteToolEl(el) {
+  if (!el || !el.classList || !el.classList.contains('tool')) return false;
+  var name = el.getAttribute ? (el.getAttribute('data-tool') || '') : '';
+  return WRITE_TOOLS.indexOf(name) !== -1;
+}
+
 // TICKET-GUI-F6C：工具卡被吞进聚合卡时，其前方紧邻的已折叠思考框一并移入
 // （保持"思考→工具"成对，考古展开聚合卡时每步思考与工具绑定可见）。
 // 注意：聚合卡插在"最新思考与最新工具"之间（insertBefore(agg, div)），
 // 吞并最新一步时其配对思考可能隔着一个聚合卡——向前再找一档。
+// TICKET-GUI-F6D：相邻判定跳过状态行（status 类非结构节点），直到撞上
+// 思考框/工具卡/正文/聚合卡再判定（owner 实证：状态行打断相邻判定，思考框连排成墙）。
 function swallowThinkBox(d) {
+  // F6D：写/改类工具（编辑流）思考不吞并 —— 保持摊开（owner 裁决：编辑是创作必须看清每步意图）
+  if (isWriteToolEl(d)) return null;
   var prev = d.previousElementSibling;
+  while (prev && prev.classList && prev.classList.contains('status')) {
+    prev = prev.previousElementSibling;
+  }
   if (prev && prev.classList && prev.classList.contains('think-box') &&
       prev.classList.contains('collapsed')) return prev;
   if (prev && prev.classList && prev.classList.contains('tool-agg')) {
     var prev2 = prev.previousElementSibling;
+    while (prev2 && prev2.classList && prev2.classList.contains('status')) {
+      prev2 = prev2.previousElementSibling;
+    }
     if (prev2 && prev2.classList && prev2.classList.contains('think-box') &&
         prev2.classList.contains('collapsed')) return prev2;
   }
@@ -1533,6 +1567,11 @@ on('message.delta', function(data) {
     // 则照常新建（F6 行为保留）
     if (!thinkBoxEl) {
       var lastEl = chatEl.lastElementChild;
+      // TICKET-GUI-F6D：相邻判定跳过状态行（status 类非结构节点）——状态行插在
+      // 思考框之间不再打断合并判定（owner 实证：状态行致思考框连排成墙）
+      while (lastEl && lastEl.classList && lastEl.classList.contains('status')) {
+        lastEl = lastEl.previousElementSibling;
+      }
       if (lastEl && lastEl.classList && lastEl.classList.contains('think-box') &&
           lastEl.classList.contains('collapsed')) {
         thinkBoxEl = lastEl;
