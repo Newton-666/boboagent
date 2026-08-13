@@ -156,7 +156,7 @@ class RoundTracker:
             if msg.get("role") != "tool":
                 continue
             content = msg.get("content", "")
-            if not content or len(content) < 500 or content.startswith("[RESULT]"):
+            if not content or len(content) < 500 or content.startswith(("[RESULT]", "[FULL RESULT]")):
                 continue
             marker_id = f"retro_{idx}_{hashlib.sha256(content.encode()).hexdigest()[:8]}"
             summary = _build_result_summary("tool", content)
