@@ -63,15 +63,102 @@ DANGEROUS_PATTERNS = [
 ]
 
 
+# ── 票 AUTO-G2：误伤收紧 —— 引号/heredoc 字面文本不参与危险判定 ──
+
+_HEREDOC_RE = _re.compile(r"<<-?\s*(?:['\"](?P<quoted>\w+)['\"]|(?P<bare>\w+))")
+
+
+def _split_heredoc_blocks(command: str) -> list:
+    """扫描命令，切出 heredoc 块区间。
+
+    返回 [(block_text, is_literal, keep)]：
+      block_text —— 整个 heredoc 块原文（含首行与闭合定界符行）
+      is_literal —— 定界符带引号（<<'EOF' 等，内容纯字面不展开）
+      keep       —— 是否保留参与判定（裸定界符且内容含 $/反引号 → 真执行，保留）
+    行内引号/反引号不在此处理（行级正则负责）。
+    """
+    _lines = command.split("\n")
+    _blocks: list = []
+    _i = 0
+    while _i < len(_lines):
+        _ln = _lines[_i]
+        _m = _HEREDOC_RE.search(_ln)
+        if not _m:
+            _i += 1
+            continue
+        _delim = _m.group("quoted") or _m.group("bare")
+        _is_literal = _m.group("quoted") is not None
+        # 收集块内容（首行定界符之后的行 + 到闭合定界符为止）
+        _j = _i + 1
+        _body_lines = []
+        while _j < len(_lines) and _lines[_j].strip() != _delim:
+            _body_lines.append(_lines[_j])
+            _j += 1
+        _end = _j  # 闭合定界符行（可能越界 = 未闭合）
+        _body = "\n".join(_body_lines)
+        _head_tail = _ln[_ln.find("<<"):]  # 首行定界符段（含行内跟随文本）
+        _keep = False
+        if not _is_literal and ("$" in _head_tail or "$" in _body
+                                or "`" in _head_tail or "`" in _body):
+            _keep = True  # 裸定界符内容会被 shell 展开 → 保守保留参与判定
+        # block_text 只含 `<<` 之后的定界符段 + body + 闭合行：
+        # 首行 `<<` 之前的命令部分（如 cat > /tmp/x.py）保留参与判定——
+        # 真实重定向目标（含受保护文件）不得被连带剥离（票 AUTO-G2 收紧）。
+        _block_span = _head_tail
+        if _body:
+            _block_span += "\n" + _body
+        if _end < len(_lines):
+            _block_span += "\n" + _lines[_end]
+        _blocks.append((_block_span, _is_literal, _keep))
+        _i = _end + 1
+    return _blocks
+
+
+def strip_literal_text(command: str) -> str:
+    """剥离不参与执行的引号体/heredoc 字面文本，产出黑名单判定的可执行骨架。
+
+    票 AUTO-G2 误伤源：cat > /tmp/x.py <<'EOF' 体内的 "git push --force"
+    字样是写入文件的文本、不执行，却被全串黑名单 _re.search 命中判"强制推送"。
+
+    安全语义不动（含命令替换的引号体/裸 heredoc 绝不剥离，仍参与判定）：
+      1. 单引号体 '...' —— 纯字面，剥离
+      2. 双引号体 "..." —— 内容含 $( 或反引号（shell 展开执行）→ 保留原样；
+         否则剥离
+      3. 反引号 `...` —— 真实命令替换，从不剥离
+      4. heredoc <<'EOF'（引号定界符）→ 块内容纯字面，剥离
+         heredoc <<EOF（裸定界符）→ 内容会展开：含 $ 或反引号 → 整块保留；
+         纯文本 → 剥离
+    """
+    # 1) heredoc 块（多行结构，先行级处理）
+    _blocks = _split_heredoc_blocks(command)
+    _out = command
+    for _block_text, _is_literal, _keep in _blocks:
+        if _keep:
+            continue  # 保留参与判定
+        _out = _out.replace(_block_text, "", 1)
+    # 2) 行内引号体
+    _out = _re.sub(r"'[^']*'", "", _out)          # 单引号体剥离
+    def _dq(_m):
+        _inner = _m.group(0)[1:-1]
+        if "$(" in _inner or "`" in _inner:
+            return _m.group(0)  # 含命令替换 → 保留（真执行）
+        return ""
+    _out = _re.sub(r'"[^"]*"', _dq, _out)          # 双引号体：无命令替换才剥离
+    return _out
+
+
 def is_blacklisted(command: str) -> tuple[bool, str]:
     """黑名单硬锁判定：复用 DANGEROUS_PATTERNS，split 前整条原始串检查。
 
     返回 (hit: bool, reason: str)。命中 → (True, "递归删除文件" 等黑名单原因)。
     必须在 split 前查原始串——shlex punctuation_chars 会把 `$(` 拆成
     `$` + `(`（中间带空格），段级 `\$\(` 失配（46cd0e3 教训）。
+    票 AUTO-G2：先剥离引号/heredoc 字面文本再匹配（误伤收紧——
+    cat > /tmp/x.py <<'EOF' 体内的 "git push --force" 字样不参与判定）。
     """
+    _skeleton = strip_literal_text(command)
     for pattern, reason in DANGEROUS_PATTERNS:
-        if _re.search(pattern, command):
+        if _re.search(pattern, _skeleton):
             return True, reason
     return False, ""
 
@@ -136,12 +223,17 @@ def classify_command(command: str) -> tuple[str, str]:
     cmd_clean = command.strip()
 
     # ── 第 1 步：全字符串黑名单 ──
+    # 票 AUTO-G2：误伤收紧——先剥离引号/heredoc 字面文本（骨架匹配），
+    # cat > /tmp/x.py <<'EOF' 体内的 "git push --force" 字样不参与判定
+    _skeleton = strip_literal_text(cmd_clean)
     for pattern, reason in DANGEROUS_PATTERNS:
-        if _re.search(pattern, cmd_clean):
+        if _re.search(pattern, _skeleton):
             return ("dangerous", reason)
 
     # ── 第 2 步：重定向目标 ──
-    redirect_result = check_redirect_targets(cmd_clean)
+    # 票 AUTO-G2 误伤收紧：重定向检查同样用骨架（剥离引号/heredoc 字面文本），
+    # heredoc 体内的 "> /etc/passwd" 字样是文件内容、不参与判定。
+    redirect_result = check_redirect_targets(strip_literal_text(cmd_clean))
     if redirect_result:
         return redirect_result
 
@@ -157,9 +249,9 @@ def classify_command(command: str) -> tuple[str, str]:
             seg_cmd = seg_tokens[0] if seg_tokens else ""
             if not seg_cmd:
                 continue
-            # 每段先过黑名单
+            # 每段先过黑名单（票 AUTO-G2：同样先剥离字面文本再匹配）
             for pattern, reason in DANGEROUS_PATTERNS:
-                if _re.search(pattern, seg_text):
+                if _re.search(pattern, strip_literal_text(seg_text)):
                     return ("dangerous", f"链式命令中的危险操作 — {reason}: {seg_text[:60]}")
             # 再检查白名单
             if seg_cmd in SAFE_COMMANDS:
@@ -659,12 +751,18 @@ def classify_side_effect(command: str) -> tuple[str, str]:
     全段 pure-read → pure-read。
     空命令 / 解析失败 → external-irreversible（保守弹窗，安全默认）。
     """
-    # 危险黑名单最高优先级：任何模式下命中一律转弹窗
+    # 危险黑名单最高优先级：任何模式下命中一律转弹窗。
+    # 票 AUTO-G2 误伤收紧：先剥离引号/heredoc 字面文本（骨架匹配），
+    # cat > /tmp/x.py <<'EOF' 体内的 "git push --force" 字样是文件内容、不执行、不参与判定。
+    # 注意：分段必须在剥离之后——shlex 会把 heredoc body 拍平成段内 token，
+    # 先分段再剥离则 body 中的 "git push --force" 已失去 heredoc 结构、无法再剥离
+    # （实弹取证发现，原实现 side_effect 对 heredoc 字面仍误判 external-irreversible）。
+    _skeleton = strip_literal_text(command)
     for pattern, reason in DANGEROUS_PATTERNS:
-        if _re.search(pattern, command):
+        if _re.search(pattern, _skeleton):
             return ("external-irreversible", f"危险黑名单命中 — {reason}")
 
-    segments = split_shell_segments(command.strip())
+    segments = split_shell_segments(_skeleton)
     if not segments:
         return ("external-irreversible", "空命令或解析失败，保守弹窗")
 
@@ -686,13 +784,16 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
     # 危险黑名单最高优先级：命中一律 external-irreversible 转弹窗
     # （含命令替换注入 $( / 反引号——`echo $(rm -rf x)`、`echo \`id\`` 不得
     #  借 echo/cat 纯读白名单误判 pure-read）
+    # 票 AUTO-G2 误伤收紧：先剥离引号/heredoc 字面文本（骨架匹配），
+    # heredoc/引号体内字样不参与危险判定。
     for pattern, reason in DANGEROUS_PATTERNS:
-        if _re.search(pattern, cmd):
+        if _re.search(pattern, strip_literal_text(cmd)):
             return ("external-irreversible", f"危险黑名单命中 — {reason}")
 
     # 外部不可逆模式（含 git push / curl 写 / scp 等）
+    # 票 AUTO-G2 误伤收紧：同样过骨架——heredoc/引号体内字样是文件内容不参与判定。
     for pattern, reason in _EXTERNAL_IRREVERSIBLE_PATTERNS:
-        if _re.search(pattern, cmd):
+        if _re.search(pattern, strip_literal_text(cmd)):
             return ("external-irreversible", reason)
 
     # git 命令：按子命令分 local-reversible / pure-read

@@ -184,10 +184,24 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
     command = params.get("command", "")
     sid = params.get("session_id", "")
     if command == "help":
-        return ok(rid, {"output": "可用命令: /help, /clear, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto, /office, /scan, /connect, /disconnect\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转\n/office [on|off] — OFFICE MODE：老板专用开关（员工环境拒绝），搭建/收尾走 office_manager 工具\n/scan — 侦查 tmux 内活着的 bobo/pi 并列出候选\n/connect <编号> [轮数] — 连接 /scan 候选对象，建立互传通道（默认 5 轮）\n/disconnect — 断开当前会话的互传通道"})
+        return ok(rid, {"output": "可用命令: /help, /clear, /clear-handoff, /undo, /tools, /settings, /exit, /sessions, /mode, /duo, /bobo-audit, /memory-consolidate, /auto, /office, /scan, /connect, /disconnect\n\n/duo <任务> — 双员模式：A 干活 B 验收；/duo 商讨：<问题> — 双方案辩论出决策清单\n/auto [on|off] — AUTO MODE：灰名单命令自主决策（纯读放行），/auto 单独使用为翻转\n/office [on|off] — OFFICE MODE：老板专用开关（员工环境拒绝），搭建/收尾走 office_manager 工具\n/scan — 侦查 tmux 内活着的 bobo/pi 并列出候选\n/connect <编号> [轮数] — 连接 /scan 候选对象，建立互传通道（默认 5 轮）\n/disconnect — 断开当前会话的互传通道\n/clear-handoff — 待人工清单清零：水位线推到最新，旧账不再出现"})
     elif command == "clear":
         emit("session.cleared", sid, {"session_id": sid})
         return ok(rid, {"output": ""})
+    elif command == "clear-handoff":
+        # 票 AUTO-G2：待人工清单清零——水位线推到当前时刻，此前的 auto 拒绝
+        # 全部视为"已交接"，下次收工不再列出；拒绝记录本身照记（安全语义不动）。
+        import time as _tm
+        session = ctx.sessions.get(sid)
+        if not session:
+            return ok(rid, {"output": "没有活跃的会话"})
+        _wm = _tm.time()
+        session["handoff_watermark"] = _wm
+        try:
+            ctx.save_session_to_disk(sid)
+        except Exception:
+            pass
+        return ok(rid, {"output": "待人工清单已清零（水位线推到最新，旧账不再出现）"})
     elif command.startswith("undo"):
         # /undo [N|关键词] — 回退对话
         target = command[4:].strip()
