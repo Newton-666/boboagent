@@ -50,6 +50,8 @@ def _save_session_to_disk(sid, ctx):
                 return
             data["messages"] = in_mem_msgs
             data["title"] = session.get("title", data.get("title", f"会话_{sid}"))
+            # TICKET-GUI-F7：持久化手动命名标记（保留磁盘旧值，防止内存未设置时覆盖）
+            data["user_named"] = bool(session.get("user_named", data.get("user_named", False)))
         else:
             data = {
                 "id": sid,
@@ -57,6 +59,7 @@ def _save_session_to_disk(sid, ctx):
                 "title": session.get("title", f"会话_{sid}"),
                 "messages": in_mem_msgs,
                 "summary": None,
+                "user_named": False,
             }
     except Exception:
         data = {
@@ -65,6 +68,7 @@ def _save_session_to_disk(sid, ctx):
             "title": session.get("title", f"会话_{sid}"),
             "messages": in_mem_msgs,
             "summary": None,
+            "user_named": False,
         }
     mgr._write_atomic(session_path, data)
 
@@ -140,6 +144,9 @@ def handle_session_title(params: dict, rid: str, ctx) -> dict:
         session = ctx.sessions.get(sid)
     if session and title:
         session["title"] = title
+        # TICKET-GUI-F7：手动命名路径（TUI /title）持久化 user_named=true，
+        # GUI 自动命名据此跳过，不覆盖用户命名
+        session["user_named"] = True
         _save_session_to_disk(sid, ctx)
     return ok(rid, {"title": title, "pending": False})
 
@@ -162,12 +169,25 @@ def handle_session_list(params: dict, rid: str, ctx) -> dict:
                     ts = dt.timestamp()
                 except Exception:
                     ts = 0
+        # TICKET-GUI-F7：mgr.list_sessions 不透传 user_named，此处按 sid 补读
+        # 磁盘标记（GUI 据此跳过自动命名；历史无标记会话默认 False 保留自动取名）
+        user_named = False
+        try:
+            import json as _json
+            p = mgr.session_dir / f"{s['id']}.json"
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    user_named = bool(_json.load(f).get("user_named", False))
+        except Exception:
+            user_named = False
         items.append({
             "id": s["id"],
             "title": s["title"],
             "message_count": s.get("message_count", 0),
             "started_at": ts,
             "preview": s.get("title", ""),
+            # TICKET-GUI-F7：手动命名标记（GUI 据此跳过自动命名）
+            "user_named": user_named,
         })
     return ok(rid, {"sessions": items})
 
@@ -207,6 +227,13 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         elif role == "system":
             transcript.append({"role": "system", "text": content})
 
+    # TICKET-GUI-F7：手动命名标记 —— 按消息源取对应 session 的标记（引擎忙时
+    # 内存版才是最新；空闲时磁盘版为准），GUI 据此跳过自动命名
+    if engine_busy:
+        user_named = bool((mem_session or {}).get("user_named", False))
+    else:
+        user_named = bool(session_data.get("user_named", False))
+
     # 恢复 created_at
     created_at = 0
     raw_ts = session_data.get("created_at", "")
@@ -224,6 +251,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
                 "title": session_data.get("title", sid),
                 "created_at": created_at,
                 "messages": messages,
+                # TICKET-GUI-F7：内存版也带手动命名标记（引擎忙分支 resume 读内存版）
+                "user_named": bool(session_data.get("user_named", False)),
             }
     # 引擎忙时禁止磁盘覆盖内存（丢回合风险）；但当前会话指向仍要切到该 sid
     with ctx.sessions_lock:
@@ -245,6 +274,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         "summary": session_data.get("summary") or "",
         # TICKET-GUI-F6（缺陷 2b）：引擎忙标记（前端可感知该会话仍在运行）
         "engine_busy": engine_busy,
+        # TICKET-GUI-F7：手动命名标记（GUI 据此跳过自动命名）
+        "user_named": user_named,
     })
 
 
@@ -277,6 +308,8 @@ def handle_session_rename(params: dict, rid: str, ctx) -> dict:
         session = ctx.sessions.get(sid)
     if session:
         session["title"] = title[:50]
+        # TICKET-GUI-F7：手动改名路径持久化 user_named=true（GUI 自动命名据此跳过）
+        session["user_named"] = True
         _save_session_to_disk(sid, ctx)
     return ok(rid, {"ok": True})
 
