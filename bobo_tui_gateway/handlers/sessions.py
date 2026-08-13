@@ -22,6 +22,23 @@ def _get_session_mgr():
     return _session_mgr
 
 
+# TICKET-GUI-F8：从工具消息内容提取 <<<INLINE_DIFF>>> 块（F3-5 diff 数据源，
+# 会话文件 tool 消息内含完整块，resume 时携带给 GUI 恢复红绿高亮）。
+# 只取第一个块；上限 6000 字符防 resume 响应撑爆（edit_file 实测 diff 一般 <2KB）。
+def _extract_inline_diff(content: str) -> str:
+    if not content:
+        return ""
+    start = content.find("<<<INLINE_DIFF>>>")
+    if start < 0:
+        return ""
+    body = content[start + len("<<<INLINE_DIFF>>>"):]
+    end = body.find("<<<END_INLINE_DIFF>>>")
+    if end >= 0:
+        body = body[:end]
+    body = body.strip()
+    return body[:6000]
+
+
 def _save_session_to_disk(sid, ctx):
     """将内存中的会话保存到磁盘（直接原子写入，不触碰 mgr.current_session 以避免跨会话竞态）。
 
@@ -218,6 +235,16 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         messages = session_data.get("messages", []) or []
 
     transcript = []
+    # TICKET-GUI-F8：先扫描 assistant 消息的 tool_calls 建 tool_call_id → 工具名映射
+    #（存储层 tool 消息只有 tool_call_id，工具名在发起方 assistant 的 tool_calls 里）
+    tc_name_map = {}
+    for _m in messages:
+        if _m.get("role") == "assistant":
+            for _tc in (_m.get("tool_calls") or []):
+                _tcf = _tc.get("function", {}) if isinstance(_tc, dict) else {}
+                _tcid = _tc.get("id")
+                if _tcid:
+                    tc_name_map[_tcid] = (_tcf.get("name", "") or "tool")
     for msg in messages:
         role = msg.get("role", "")
         content = msg.get("content", "")
@@ -227,8 +254,23 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
             # TICKET-GUI-F6（缺陷 2a）：transcript 带 tool_calls 字段，GUI 据此
             # 给空 assistant（纯工具回合）补"（工具调用回合）"占位（与归档同构）
             tc = msg.get("tool_calls")
+            # TICKET-GUI-F8：思考文本持久化字段（core 已随会话落盘 msg["thinking"]；
+            # GUI 历史渲染据此恢复折叠思考框。只加字段，不改 F6 tool_calls 语义）
             transcript.append({"role": "assistant", "text": content,
-                               "tool_calls": tc if tc else []})
+                               "tool_calls": tc if tc else [],
+                               "thinking": msg.get("thinking") or ""})
+        elif role == "tool":
+            # TICKET-GUI-F8：tool 角色消息进 transcript —— 携带工具名 + 截断内容 +
+            # 提取的 INLINE_DIFF 块（GUI 据此恢复 F3-5 同款红绿块；TUI 只读
+            # name/context 字段、不读 content/inline_diff，显示语义零变化）
+            _tcid = msg.get("tool_call_id", "")
+            transcript.append({
+                "role": "tool",
+                "name": tc_name_map.get(_tcid, "tool"),
+                "context": "",
+                "content": (content or "")[:800],
+                "inline_diff": _extract_inline_diff(content),
+            })
         elif role == "system":
             transcript.append({"role": "system", "text": content})
 
