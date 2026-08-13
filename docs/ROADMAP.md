@@ -10,9 +10,9 @@
 |---|---|---|---|
 | 1 | ~~DESK-V2A 体验地基~~ | ✅ 已合并（6d11d0b）：覆盖层/搜索/重命名/删除/pin/Toast/三态，CSS 零改动闸门锁死 | ✅ done |
 | 2 | ~~DESK-V2B 差异化面板~~ | ✅ 已合并（31e09cb）：工具耗时 + 上下文细条 | ✅ done |
-| 2.4 | CORE-R2a/R2b（P0 最优先） | 台账改软引导拆无账硬闸（owner 终裁：LLM 自己判断复杂度）+ 答复质量闸（先答问题再交账）——owner 实弹：简单问答被逼建账且所答非所问 | 📋 票已写（data/tickets/TICKET-CORE-R2a.md / R2b.md） |
-| 2.45 | DESK-V2B2 | 上下文进度条药丸（替代 V2B 文字细条；蓝→橙→红三色阶） | 📋 票已写（data/tickets/TICKET-DESK-V2B2.md），今晚三连包第三张 |
-| 2.5 | GUI-F9（P0 顺延） | 运行中会话切回丢进行中回合：引擎在副本上跑、回合末才写回，resume 忙分支需读活引擎 history（Kimi 已定位 engine_adapter.py:245/305） | 📋 票已写（data/tickets/TICKET-GUI-F9.md），R2a/R2b 后做 |
+| 2.4 | ~~CORE-R2a/R2b~~ | ✅ 已合并（6a62fc4 / 92d232d）：台账软引导+答复质量闸 | ✅ done |
+| 2.45 | ~~DESK-V2B2~~ | ✅ 已合并（aacdeb3）：进度药丸三色阶 | ✅ done |
+| 2.5 | GUI-F9（P0，下一张） | 运行中会话切回丢进行中回合：引擎在副本上跑、回合末才写回，resume 忙分支需读活引擎 history（Kimi 已定位 engine_adapter.py:245/305） | 📋 票已写（data/tickets/TICKET-GUI-F9.md），三连包后即刻做 |
 | 3 | DESK-V2C 锦上添花 | 流式 markdown 简版 + 记忆面板 + 中文优先排版 + 主题 token 化（不做浅色主题） | 📋 待开 |
 
 ### 第二梯队：评估与内核深化（排在 DESK-V2 之后，owner 拍板：性能在 GUI 提升后）

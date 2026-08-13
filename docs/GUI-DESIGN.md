@@ -93,5 +93,6 @@
 |---|---|---|---|---|
 | 2026-08-13 | 文档建立 | 本文件；此时点全量快照见第一~四节 | （见 git log） | — |
 | 2026-08-13 | DESK-V2A | 状态覆盖层 #overlay-root（连接中/失败/断连，z-5000 全屏，0.1s 淡入）；会话搜索 #session-search（new-chat 正下方）；pin 置顶（.pin-mark 标题左侧 + .pin-btn 行内 + 稳定排序 + session.pin API + pinned 字段落盘）；行内重命名（替代 confirm）；删除改模态二次确认；Toast #toast-root（右上 14px，success/fail 左边条，3s 自动消失）；三态组件 .v2a-loader/.ovl-*；focus-visible 1px 橙环 + #send hover；既有 CSS 零改动（测试闸门锁死，合并后基线切换 rollback 标签） | 6d11d0b + 修正 + 68373a3（DOM 顺序修复：新组件必须在 script 之前，否则顶层 JS 空指针全崩；已补回归闸 test_v2a_dom_before_script） | rollback/pre-desk-v2a |
+| 2026-08-14 | DESK-V2B2 | 上下文细条改进度药丸：圆角 999px 药丸内嵌进度条+百分比+已用/上限；三色阶 <60% 蓝 / ≥60% 橙 / ≥85% 红；context.stats 加 context_limit；点击展开明细/Esc 收起保留 | aacdeb3 | rollback/pre-desk-v2b2 |
 | 2026-08-13 | DESK-V2B | 工具卡耗时时间线（updateToolResult 对称填充，含聚合卡考古）；上下文仪表盘 #ctx-stats-bar（#input-box 正上方 22px 细条，点击展开明细/Esc 优先收起不打断中断语义；context.stats 只读端点，无轮询） | 31e09cb | rollback/pre-desk-v2b |
 | 2026-08-13 | V2A 打磨（owner 实弹反馈三条） | 确认弹窗 Enter=确认/Esc=取消+自动聚焦（对齐原生 confirm 手感）；行内三键统一 .act 体系（16px 同尺寸、紧凑右置、顺序 pin→改名→删除、默认弱色 hover 显形、删除仅 hover 变红）；emoji 图钉改细线 SVG（PIN_SVG 弱色，激活细橙）；CSS 闸门加特批豁免段（.del/.re→.act 重构） | 9a690dd | rollback/pre-v2a-polish |
