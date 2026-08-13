@@ -142,8 +142,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #send:disabled { opacity:0.3; }
 #send.loading { animation: sendPulse 1.2s ease-in-out infinite; }
 @keyframes sendPulse { 0%,100% { opacity:0.3; } 50% { opacity:0.7; } }
-/* TICKET-GUI-F2 (F2-2): 输入框旁 AUTO 模式开关 —— 沿用状态条徽标视觉体系（灰底普通态 / 橙色 auto 态） */
-#auto-toggle { position:absolute; right:64px; bottom:37px; padding:3px 10px; border-radius:6px; font-size:10px; letter-spacing:0.5px; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; }
+/* TICKET-GUI-F2 (F2-2) + F4-4: 输入框旁 AUTO 模式开关 —— 与 #stop-btn（right:64px）水平错开，
+   原 right:64px bottom:37px 与 stop-btn（right:64px bottom:36px）1px 撞车（截图实锤），
+   左移至 right:104px 与停止钮同排，右→左：AUTO开关 / 停止钮 / 发送钮 互不重叠 */
+#auto-toggle { position:absolute; right:104px; bottom:37px; padding:3px 10px; border-radius:6px; font-size:10px; letter-spacing:0.5px; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; }
 #auto-toggle:hover { background:var(--hover); }
 #auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 #debug { text-align:center; font-size:11px; color:#666; margin-top:8px; font-family:monospace; }
@@ -178,11 +180,16 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tool-detail { font-size:11px; color:var(--text2); margin:4px 0 0 24px; padding:6px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:'SF Mono',Monaco,Menlo,monospace; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto; display:none; }
 .tool-detail.open { display:block; }
 .tool-detail .td-args { color:#5b9bd5; font-weight:600; margin-bottom:2px; }
+.tool-result .td-args { color:#5b9bd5; font-weight:600; margin-bottom:2px; }
 .tool-detail .td-result { color:var(--text2); }
-.tool-detail .diff-add { color:#50a14f; }
-.tool-detail .diff-del { color:#f48771; }
-.tool-detail .diff-file { color:#5b9bd5; font-weight:600; }
+.tool-result .td-result { color:var(--text2); }
+/* F4-2: diff 红绿高亮 —— 容器实际 class 是 tool-result（updateToolResult 挂载），
+   CSS 选择器双前缀补齐，修复 -/+ 行全灰无红绿的高亮失效 */
+.tool-detail .diff-add, .tool-result .diff-add { color:#50a14f; }
+.tool-detail .diff-del, .tool-result .diff-del { color:#f48771; }
+.tool-detail .diff-file, .tool-result .diff-file { color:#5b9bd5; font-weight:600; }
 .tool-detail .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
+.tool-result .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
 /* ③ 闸确认模态卡 */
 #approval-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:3000; align-items:center; justify-content:center; }
 #approval-overlay.open { display:flex; }
@@ -620,11 +627,19 @@ function addTool(name, context, toolId) {
     var r = div.querySelector('.tool-result');
     if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; }
   };
-  // F2-3: 工具长链聚合 —— 同回合 >3 步时，前 3 步收进"已执行 N 步操作"聚合卡
+  // F4-1: 聚合卡持续吞并 —— 任何时刻屏幕只有两块：聚合卡（吞并所有中间步骤）+ 最新一步摊开
+  // 第 1 步直接铺开；第 2 步起建聚合卡；之后每步把"最新一步"收进聚合卡、新一步摊开。
+  // 标题"已执行 N 步操作"数字实时涨，点击展开全部考古。回合结束聚合卡保留。
   roundTotalCount++;
-  roundToolEls.push(div);
+  if (roundAggregated && roundAggregateHead && roundToolEls.length > 0) {
+    // 已有聚合卡：把当前最新一步收进聚合卡（吞并）
+    var aggBody2 = roundAggregateHead.parentNode.querySelector('.tool-agg-body');
+    roundToolEls.forEach(function(d) { aggBody2.appendChild(d); });
+    roundToolEls = [];
+  }
   chatEl.appendChild(div);
-  if (roundToolEls.length === 4 && !roundAggregated) {
+  if (!roundAggregated && roundTotalCount >= 2) {
+    // 第 2 步起建聚合卡：把前一步收进去，最新一步保持摊开
     roundAggregated = true;
     var agg = document.createElement('div'); agg.className = 'tool-agg';
     agg.innerHTML = '<span class="tool-agg-head">已执行 ' + roundTotalCount + ' 步操作 <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
@@ -636,13 +651,15 @@ function addTool(name, context, toolId) {
       this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
     };
     var aggBody = agg.querySelector('.tool-agg-body');
-    roundToolEls.slice(0, 3).forEach(function(d) { aggBody.appendChild(d); });
-    roundToolEls = [div]; // 最新一步保留在消息流，保持展开可见
+    roundToolEls.forEach(function(d) { aggBody.appendChild(d); });
+    roundToolEls = [];
     roundAggregateHead = agg.querySelector('.tool-agg-head');
     chatEl.insertBefore(agg, div);
-  } else if (roundAggregated && roundAggregateHead) {
+  }
+  if (roundAggregated && roundAggregateHead) {
     roundAggregateHead.textContent = '已执行 ' + roundTotalCount + ' 步操作 ' + (aggHeadArrowText());
   }
+  roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
@@ -714,12 +731,38 @@ function diffHighlight(text) {
   }
   return lines.join('\n');
 }
-// TICKET-D1d ①: 工具卡片展开内容 = 参数 + 完整结果 + INLINE_DIFF
+// TICKET-D1d ① + F4-3: 工具卡片展开内容 = 路径 + 内容预览/diff + 结果（原始 JSON 永不直接上屏）
 function renderToolDetail(args, resultText, inlineDiff) {
   var html = '';
-  var keys = Object.keys(args);
-  if (keys.length > 0) {
-    html += '<span class="td-args">参数</span>\n' + esc(JSON.stringify(args, null, 2)) + '\n';
+  // F4-3: 禁倒原始 JSON —— 大字段（path/content 等）单独提取为"路径/预览"，
+  // 绝不把整个 args JSON.stringify 糊屏
+  var pathKeys = ['path', 'file_path', 'filepath', 'filename', 'source', 'target'];
+  var contentKeys = ['content', 'new_string', 'old_string', 'text', 'note'];
+  var hideKeys = { path:1, file_path:1, filepath:1, filename:1, source:1, target:1,
+                   content:1, new_string:1, old_string:1, text:1, note:1 };
+  var pv = null;
+  for (var pi = 0; pi < pathKeys.length; pi++) {
+    var v = args[pathKeys[pi]];
+    if (typeof v === 'string' && v) { pv = { key: pathKeys[pi], val: v }; break; }
+  }
+  if (pv) {
+    html += '<span class="td-args">路径</span>\n' + esc(pv.val) + '\n';
+  }
+  // F4-3: 内容字段全部展示（edit_file 的原文/新文、write 的 content），每个独立截断预览
+  for (var ci = 0; ci < contentKeys.length; ci++) {
+    var cvv = args[contentKeys[ci]];
+    if (typeof cvv !== 'string' || !cvv) continue;
+    var previewLabel = contentKeys[ci] === 'old_string' ? '原文预览' : contentKeys[ci] === 'new_string' ? '新文预览' : '内容预览';
+    var previewText = cvv;
+    if (previewText.length > 300) previewText = previewText.substring(0, 300) + '\n...（预览截断，共 ' + cvv.length + ' 字符）';
+    html += '<span class="td-args">' + previewLabel + '</span>\n' + esc(previewText) + '\n';
+  }
+  // 其余小参数（action/recursive 等）若总量小仍显示，超限则省略（防倾泻）
+  var extra = {};
+  Object.keys(args).forEach(function(k) { if (!hideKeys[k]) extra[k] = args[k]; });
+  var extraJson = JSON.stringify(extra, null, 2);
+  if (Object.keys(extra).length > 0 && extraJson.length < 300) {
+    html += '<span class="td-args">参数</span>\n' + esc(extraJson) + '\n';
   }
   if (resultText) {
     if (html) html += '\n';
@@ -925,12 +968,32 @@ function renderTerminalPanel(el) {
     '<span style="font-size:12px;color:var(--text2);flex:1;">⚡ 终端</span>' +
     '<span onclick="clearTerminal()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">清除</span></div>';
   _terminalLogs.forEach(function(log) {
+    // F4-5: 终端面板长输出拦截 —— 超 2000 字符显示开头预览 + "显示全部/收起"按钮
+    var outText = log.output || '';
+    var isLong = outText.length > 2000;
+    var shown = isLong ? outText.substring(0, 2000) + '\n...（输出过长已收起，共 ' + outText.length + ' 字符）' : outText;
     html += '<div style="margin-bottom:8px;">' +
       '<div style="font-family:monospace;font-size:11px;color:#5b9bd5;padding:2px 0;">$ ' + esc(log.command) + '</div>' +
-      '<div style="font-family:monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;padding:4px 8px;background:var(--bg2);border-radius:4px;">' + esc(log.output) + '</div></div>';
+      '<div style="font-family:monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;padding:4px 8px;background:var(--bg2);border-radius:4px;">' + esc(shown) + '</div>' +
+      (isLong ? '<button onclick="toggleTerminalOutput(this)" data-expanded="0" data-idx="' + _terminalLogs.indexOf(log) + '" style="margin-top:4px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-family:inherit;font-size:11px;">显示全部 (' + outText.length + ' 字符)</button>' : '') +
+      '</div>';
   });
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
+}
+
+// F4-5: 终端长输出展开/收起切换（按钮内联在日志块下方）
+function toggleTerminalOutput(btn) {
+  var idx = parseInt(btn.getAttribute('data-idx'), 10);
+  var log = _terminalLogs[idx];
+  if (!log) return;
+  var expanded = btn.getAttribute('data-expanded') === '1';
+  var outText = log.output || '';
+  var shown = expanded ? outText.substring(0, 2000) + '\n...（输出过长已收起，共 ' + outText.length + ' 字符）' : outText;
+  btn.setAttribute('data-expanded', expanded ? '0' : '1');
+  btn.textContent = expanded ? '显示全部 (' + outText.length + ' 字符)' : '收起';
+  var block = btn.previousElementSibling;
+  if (block) block.textContent = shown;
 }
 
 on('terminal.output', function(payload) {
@@ -1475,11 +1538,14 @@ sendEl.addEventListener('click', function() {
   addMsg('user', text, 'user-' + Date.now());
   sendPrompt(text);
 });
-// F2-2: AUTO 开关 —— 复用后端现有 slash.exec /auto 通道（翻转会话级 AUTO MODE），
-// 后端 emit session.auto_state → setMode 联动状态条徽标与按钮自身，非仅 UI 变化
+// F2-2 + F4-6: AUTO 开关 —— 复用后端现有 slash.exec /auto 通道（翻转会话级 AUTO MODE）。
+// F4-6 修复：必须携带 session_id —— 否则后端 handle_slash_exec 取到空串 sid，
+// 翻转的是 auto_mode[""]，真实会话从未进入 AUTO → engine 走 confirm_callback 弹窗
+// （UI 显示 AUTO ✓ 与后端真实状态裂脑，即"GUI 无脑弹窗"根因）。
+// 携带 session_id 后与 TUI /auto 完全对齐：AUTO 会话零弹窗、红线自动拒绝留痕。
 document.getElementById('auto-toggle').addEventListener('click', function() {
   if (!connected || !currentSessionId) return;
-  call('slash.exec', { command: 'auto' }).then(function(r) {
+  call('slash.exec', { command: 'auto', session_id: currentSessionId }).then(function(r) {
     if (r && r.output) addStatus(r.output);
   });
 });

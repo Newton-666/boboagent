@@ -254,7 +254,7 @@ class TestF24Hierarchy:
 # ── F2-3: 工具长链聚合 ──────────────────────────────────────────────
 
 class TestF23Aggregation:
-    """F2-3 工具长链 >3 步聚合卡。"""
+    """F2-3 工具长链聚合卡（F4-1 升级为持续吞并：第 2 步起建卡，每步吞并最新一步）。"""
 
     def test_aggregation_logic_present(self):
         src = GUI_FILE.read_text(encoding="utf-8")
@@ -262,6 +262,9 @@ class TestF23Aggregation:
         assert "roundAggregated" in src
         assert "已执行 " in src
         assert "tool-agg-body" in src
-        assert "roundToolEls.length === 4" in src, "第 4 步触发聚合（前 3 步收进聚合卡）"
+        # F4-1: 聚合卡从"第 4 步触发"升级为"第 2 步起建卡 + 每步吞并最新一步"
+        # （TICKET-GUI-F4 F4-1：F2-3 只收前 3 步是 owner 实锤的实现不到位）
+        assert "roundToolEls.length === 4" not in src, "旧的第 4 步触发已被 F4-1 持续吞并替代"
+        assert "roundTotalCount >= 2" in src, "第 2 步起建聚合卡"
         # 回合结束重置
         assert "roundToolEls = []; roundAggregated = false;" in src

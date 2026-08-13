@@ -228,7 +228,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 非 terminal 文件工具：快照（复用 file_writer checkpoint 自动备份）后放行
         if tool_name in ("edit_file", "file_operation", "delete_file"):
             snapshot = self._snapshot_for_rollback(f"file:{tool_name}")
-            self._write_auto_audit("allow", tool_name, "auto 决策树 v2：文件工具（file_writer checkpoint）",
+            # TICKET-GUI-F4 F4-6（Kimi 特批）：补传缺失的 command 实参——原调用 6 参传 5，
+            # snapshot 错位进 side_effect_level，AUTO 下文件工具必 TypeError 崩溃。
+            _fcmd = str(tool_args.get("path") or tool_args.get("filepath") or tool_args.get("file_path") or tool_args.get("file") or "")[:200]
+            self._write_auto_audit("allow", tool_name, _fcmd, "auto 决策树 v2：文件工具（file_writer checkpoint）",
                                    "local-reversible", snapshot)
             return True
 
