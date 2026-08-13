@@ -497,9 +497,27 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
 
 # ── 票 A：AUTO MODE auto 决策树 v1 —— 纯读 git 命令判定 ──
 
+# TICKET-AUTO-G1（2026-08-13）：只读 git 子命令全集扩充。
+# 原集合仅 status/log/diff/show/blame/ls-files/ls-tree，导致 rev-parse/describe/
+# show-ref 等纯读命令落入"外部不可逆（无法确认可回滚）"被 AUTO 全拒。
+# 以下均为纯只读子命令（不写 refs/工作区/远程，零副作用）：
 _AUTO_READONLY_GIT_SUBCOMMANDS = frozenset({
     "status", "log", "diff", "show", "blame", "ls-files", "ls-tree",
+    "rev-parse", "describe", "show-ref", "ls-remote", "for-each-ref",
+    "name-rev", "symbolic-ref", "count-objects", "shortlog", "whatchanged",
+    "cherry", "check-ignore", "check-attr", "check-mailmap", "check-ref-format",
+    "rev-list", "cat-file", "verify-pack", "var", "version", "help",
 })
+
+# git 混合子命令的只读形式（子命令本身可读可写，不能整体进只读集合，
+# 按后续参数细分：命中以下形式 → pure-read；否则维持 local-reversible）：
+_GIT_READONLY_FORMS_BY_SUB = {
+    "branch": frozenset({"--show-current", "--list", "-a", "-r", "-v", "-vv"}),
+    "stash":  frozenset({"list", "show"}),
+    "remote": frozenset({"-v", "show"}),
+    "tag":    frozenset({"-l", "--list"}),
+    "config": frozenset({"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"}),
+}
 
 
 # 命令替换注入（$( 或反引号）绝不视为纯读——可在参数位置执行任意命令
@@ -509,8 +527,10 @@ _CMD_SUBSTITUTION_RE = _re.compile(r'\$\(|`[^`]*`')
 def is_auto_readonly_command(command: str) -> bool:
     """auto 决策树 v1：整条命令是否纯读（逐段判定，火 4）。
 
-    只读集合 v1（票 A-3）：git 只读子命令（status/log/diff/show/blame/
-    ls-files/ls-tree，范围不限 self-repo）+ 纯读白名单子集段。
+    只读集合 v1（票 A-3）+ TICKET-AUTO-G1 扩充：git 纯只读子命令（status/log/diff/
+    show/rev-parse/describe/show-ref/ls-files/ls-tree/blame 等 30+）与混合子命令
+    只读形式（branch --show-current / stash list / remote -v / tag -l /
+    config --get），范围不限 self-repo）+ 纯读白名单子集段。
     split_shell_segments 已按 | && ; 分段，任何一段非只读 → 整条不放行
     （防 `git status && rm -rf x` 借首段放行整链；`git status && echo ok`
     各段只读 → 放行）。解析失败 / 空命令 → 不放行（保守，安全默认）。
@@ -530,11 +550,43 @@ def is_auto_readonly_command(command: str) -> bool:
 
 
 def _is_auto_readonly_git_segment(cmd: str) -> bool:
-    """单段判定：段首是真实 git 命令且子命令在只读集合内。"""
+    """单段判定：段首是真实 git 命令且子命令在只读集合内（或命中只读形式）。"""
     if not _has_real_git_command(cmd):
         return False
     subcommand = _find_git_subcommand(cmd)
-    return subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS
+    if subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS:
+        return True
+    return _is_readonly_git_form(cmd, subcommand)
+
+
+def _is_readonly_git_form(command: str, subcommand: str | None) -> bool:
+    """git 混合子命令（branch/stash/remote/tag/config）只读形式判定。
+
+    TICKET-AUTO-G1：这些子命令本身可读可写（如 branch -d 删除、stash pop
+    应用并删除、remote add 写远程配置、tag -a 打标签、config 写键值），
+    不能整体进只读集合；但只读形式（branch --show-current / stash list /
+    remote -v / tag -l / config --get 等）零副作用 → pure-read。
+    - 命中只读形式 → True（pure-read）
+    - 写形式 / 无参数（如裸 git stash 省略子命令）→ False（维持原判定）
+    """
+    if not subcommand:
+        return False
+    forms = _GIT_READONLY_FORMS_BY_SUB.get(subcommand)
+    if not forms:
+        return False
+    m = _re.search(r'\bgit\b\s+(.*)', command)
+    if not m:
+        return False
+    try:
+        args = _shlex.split(m.group(1))
+    except ValueError:
+        args = m.group(1).split()
+    try:
+        idx = args.index(subcommand)
+        after = args[idx + 1:]
+    except ValueError:
+        after = args
+    return any(a in forms for a in after)
 
 
 # 白名单中的明确纯读子集（票 B 语义收紧：SAFE_COMMANDS 含 mkdir/cp/mv/pip/npm
@@ -648,6 +700,8 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
         subcommand = _find_git_subcommand(cmd)
         if subcommand in _AUTO_READONLY_GIT_SUBCOMMANDS:
             return ("pure-read", f"git {subcommand}（只读）")
+        if _is_readonly_git_form(cmd, subcommand):
+            return ("pure-read", f"git {subcommand}（只读形式）")
         if subcommand in _LOCAL_REVERSIBLE_GIT_SUBCOMMANDS:
             return ("local-reversible", f"git {subcommand}（本地可回滚）")
         # 其他 git 子命令（reset --hard / clean 等）保守视为外部不可逆级（弹窗）
