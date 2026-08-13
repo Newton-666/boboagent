@@ -3,6 +3,7 @@
 > v1.0 · 2026-08-13 建立 · 维护纪律见文末「编年史规则」
 > 适用文件：`apps/desktop/dist/index.html`（单文件 GUI，约 2000 行）
 > 对应外部参照：docs/analysis/hermes-desktop.md（Hermes 源码研读）
+> 施工必读：docs/GUI-LESSONS.md（教训册，GUI 票动工前 bobo 必读）
 
 ---
 
