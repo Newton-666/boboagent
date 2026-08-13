@@ -296,12 +296,20 @@ def test_v2a_5_three_state_static():
 
 # ── 铁律 0 闸：既有 CSS 零改动（V2A 之前的 style 段与 HEAD 逐字节一致）──
 def test_v2a_css_zero_change_on_existing():
-    """style 块中 TICKET-DESK-V2A 标记之前的所有规则，必须与 HEAD 版本完全一致。
-    只允许新增，禁止改动任何既有 CSS 属性值。"""
+    """style 块中 TICKET-DESK-V2A 标记之前的所有规则，必须与基线版本完全一致。
+    只允许新增，禁止改动任何既有 CSS 属性值。
+    基线选择：V2A 合并前 HEAD 不含 V2A 块，直接用 HEAD；合并后 HEAD 已含 V2A，
+    改用回滚标签 rollback/pre-desk-v2a 作基线（否则测试自咬，Kimi 终审修复）。"""
     head = subprocess.run(["git", "show", "HEAD:apps/desktop/dist/index.html"],
                           capture_output=True, text=True, cwd=str(ROOT))
     assert head.returncode == 0, "git show HEAD 失败"
-    old_style = re.search(r"<style[^>]*>(.*?)</style>", head.stdout, re.S).group(1)
+    base_src = head.stdout
+    if "/* ══ TICKET-DESK-V2A" in base_src:
+        tag = subprocess.run(["git", "show", "rollback/pre-desk-v2a:apps/desktop/dist/index.html"],
+                             capture_output=True, text=True, cwd=str(ROOT))
+        assert tag.returncode == 0, "合并后需以 rollback/pre-desk-v2a 标签为基线"
+        base_src = tag.stdout
+    old_style = re.search(r"<style[^>]*>(.*?)</style>", base_src, re.S).group(1)
     new_style = re.search(r"<style[^>]*>(.*?)</style>", _gui(), re.S).group(1)
     # 新 style 中 V2A 注释块起点前 = 旧 style 全文（V2A 只允许追加在末尾）
     v2a_pos = new_style.find("/* ══ TICKET-DESK-V2A")
