@@ -64,8 +64,8 @@ def test_1b_1_static_engine_callpoint():
         "LEDGER-1B: 落 history 内容先取可见回复"
     assert "if _recon:" in src and "_hist_content = (_hist_content or \"\") + _recon" in src, \
         "LEDGER-1B: 对账段应并入 history 消息"
-    assert 'self._append_to_history("assistant", _hist_content)' in src, \
-        "LEDGER-1B: 落 history 使用合并后内容"
+    assert 'self._append_to_history("assistant", _hist_content,' in src, \
+        "LEDGER-1B: 落 history 使用合并后内容（F8 起带 thinking kwargs，前缀匹配）"
 
     # _workspace_recon 本体不动（只读 git status/diff --stat 机制保留）
     assert "def _workspace_recon(self)" in src, "对账机制不动: _workspace_recon 本体保留"

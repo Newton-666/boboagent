@@ -125,8 +125,11 @@ def _node_simulation_script(with_missing_think: bool, no_think_second: bool = Fa
     # F6D 配套：提取写类名单常量 + isWriteToolEl（addTool 现在引用它，桩必须带上）
     wt_m = re.search(r"var WRITE_TOOLS = \[[^\]]*\];", src)
     assert wt_m, "F6D: 需要 var WRITE_TOOLS 名单"
+    # F8 配套：TOOL_FRIENDLY 提升为模块级后 addTool 引用它，桩必须带上
+    tf_m = re.search(r"var TOOL_FRIENDLY = \{[^;]*\};", src)
+    assert tf_m, "F8: 需要 var TOOL_FRIENDLY 映射"
     fns = "\n".join(
-        [wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
+        [tf_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
         [_extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
     )
     # 每步 (思考文本或 None, 工具 id)；默认每步带思考

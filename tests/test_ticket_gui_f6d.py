@@ -76,8 +76,11 @@ def _gui_fns() -> str:
     src = GUI_FILE.read_text(encoding="utf-8")
     wt_m = re.search(r"var WRITE_TOOLS = \[[^\]]*\];", src)
     assert wt_m, "F6D: 需要 var WRITE_TOOLS 名单"
+    # F8 配套：TOOL_FRIENDLY 提升为模块级后 addTool 引用它，桩必须带上
+    tf_m = re.search(r"var TOOL_FRIENDLY = \{[^;]*\};", src)
+    assert tf_m, "F8: 需要 var TOOL_FRIENDLY 映射"
     return "\n".join(
-        [wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
+        [tf_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
         [_extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
     )
 

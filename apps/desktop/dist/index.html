@@ -637,6 +637,24 @@ var roundAggregated = false;  // 本轮是否已聚合
 var roundTotalCount = 0;      // 本轮工具总步数
 var roundAggregateHead = null;// 聚合卡标题元素（实时更新步数）
 
+// TICKET-GUI-F8：工具友好名映射提升为模块级（历史工具 diff 渲染 renderHistToolDiff 复用）
+var TOOL_FRIENDLY = {
+  'file_operation': '写入文件', 'write_obsidian': '写入笔记', 'append_obsidian': '追加笔记',
+  'read_local_file': '读取文件', 'read_obsidian': '读取笔记',
+  'grep_code': '搜索代码', 'search_code': '搜索代码', 'search_obsidian': '搜索笔记',
+  'code_execution': '执行代码', 'execute_terminal': '终端命令',
+  'edit_file': '编辑文件', 'run_tests': '运行测试',
+  'web_search': '网络搜索', 'web_fetch': '抓取网页', 'web_extract': '提取内容',
+  'git_status': 'Git 状态', 'github_create_pr': '创建 PR', 'github_pr_diff': 'PR 差异',
+  'index_project': '项目索引', 'review_diff': '审查代码',
+  'cross_search': '跨平台搜索', 'cross_project_search': '跨项目搜索',
+  'code_to_obsidian': '保存知识', 'review_to_obsidian': '保存审查',
+  'save_memory': '保存记忆', 'search_memory': '搜索记忆',
+  'get_current_time': '获取时间', 'list_directory': '列出目录',
+  'notion_search': '搜索 Notion', 'notion_create_page': '创建 Notion 页面',
+  'search_emails': '搜索邮件', 'send_notification': '发送通知',
+};
+
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
   if (thinkBoxEl) {
@@ -645,24 +663,7 @@ function addTool(name, context, toolId) {
   }
 
   // Friendly names
-  var friendly = name;
-  var friendlyMap = {
-    'file_operation': '写入文件', 'write_obsidian': '写入笔记', 'append_obsidian': '追加笔记',
-    'read_local_file': '读取文件', 'read_obsidian': '读取笔记',
-    'grep_code': '搜索代码', 'search_code': '搜索代码', 'search_obsidian': '搜索笔记',
-    'code_execution': '执行代码', 'execute_terminal': '终端命令',
-    'edit_file': '编辑文件', 'run_tests': '运行测试',
-    'web_search': '网络搜索', 'web_fetch': '抓取网页', 'web_extract': '提取内容',
-    'git_status': 'Git 状态', 'github_create_pr': '创建 PR', 'github_pr_diff': 'PR 差异',
-    'index_project': '项目索引', 'review_diff': '审查代码',
-    'cross_search': '跨平台搜索', 'cross_project_search': '跨项目搜索',
-    'code_to_obsidian': '保存知识', 'review_to_obsidian': '保存审查',
-    'save_memory': '保存记忆', 'search_memory': '搜索记忆',
-    'get_current_time': '获取时间', 'list_directory': '列出目录',
-    'notion_search': '搜索 Notion', 'notion_create_page': '创建 Notion 页面',
-    'search_emails': '搜索邮件', 'send_notification': '发送通知',
-  };
-  if (friendlyMap[name]) friendly = friendlyMap[name];
+  var friendly = TOOL_FRIENDLY[name] || name;
 
   toolIdCounter++;
   var uniqueId = toolId + '-' + toolIdCounter;
@@ -1409,11 +1410,20 @@ async function renderFullHistory(sid, result) {
   msgs.forEach(function(m) {
     if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
     else if (m.role === 'assistant') {
+      // TICKET-GUI-F8：历史思考框渲染在该条消息上方（默认收起、点击展开，与
+      // 实时折叠思考框同款样式交互；无 thinking 字段则零变化）
+      if (m.thinking) addHistThinking(m.thinking);
       // TICKET-GUI-F6（缺陷 2a）：现存消息里空 assistant（纯工具回合）给占位，
       // 与 renderArchivedMessages 一致，消灭一屏空泡泡
       addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + Math.random());
     }
-    else if (m.role === 'tool') addTool(m.tool_name || m.text || 'Tool', '', m.tool_id || 'tool');
+    else if (m.role === 'tool') {
+      // TICKET-GUI-F8：历史工具消息 —— 含 INLINE_DIFF 的渲染工具卡一行摘要 +
+      // F3-5 同款整行底色 diff 块（与回复同级、默认展开，与实时一致）；
+      // 无 diff 的工具消息跳过（历史不堆工具噪音；归档 [RESULT] 外部化旧消息
+      // 无 diff 属预期，不补）
+      if (m.inline_diff) renderHistToolDiff(m.name || 'tool', m.inline_diff);
+    }
     else if (m.role === 'system' && m.text && m.text.length < 200) {
       // F2-4: 历史心跳残留（"仍在工作 Ns"）不恢复 —— 避免 owner 截图的多条心跳堆叠复现
       if (m.text.indexOf('仍在工作') === 0) return;
@@ -1433,6 +1443,40 @@ function renderArchivedMessages(ams, idPrefix) {
     else if (role === 'tool') addTool(m.name || m.tool_name || '工具', content, id + '-t');
     else if (role === 'system' && content && content.length < 200) addStatus(content);
   });
+}
+
+// TICKET-GUI-F8：历史折叠思考框 —— 复用 think-box.collapsed 样式（默认收起，
+// 点击 ▸ 展开/收起，与实时折叠思考框同交互）；渲染在对应 assistant 消息上方
+function addHistThinking(thinkingText) {
+  var tb = document.createElement('div');
+  tb.className = 'think-box collapsed';
+  tb.innerHTML = '<div class="think-label"><span>💭 思考过程</span><span class="tool-toggle">▸</span></div><div class="think-text"></div>';
+  var txt = tb.querySelector('.think-text');
+  if (txt) txt.textContent = thinkingText || '';
+  tb.onclick = function(e) {
+    // 点内容文本时允许选择，不触发折叠切换（与实时折叠框一致）
+    if (e && e.target && e.target.closest && e.target.closest('.think-text')) return;
+    toggleThinkBox(tb);
+  };
+  chatEl.appendChild(tb);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// TICKET-GUI-F8：历史工具 diff —— 工具卡一行摘要（done 态）+ F3-5 同款整行底色
+// 红绿块（diffBlock），独立出现在消息流对应位置，默认展开与实时一致
+function renderHistToolDiff(name, inlineDiff) {
+  var friendly = TOOL_FRIENDLY[name] || name;
+  var card = document.createElement('div'); card.className = 'tool';
+  card.setAttribute('data-tool', name);
+  card.innerHTML = '<span class="dot">●</span>' +
+    '<span class="tool-name">' + esc(friendly) + '</span>' +
+    '<span class="tool-status">done</span>' +
+    '<div class="tool-result"><div class="tool-summary">' + esc(toolSummary({}, inlineDiff)) + '</div></div>';
+  chatEl.appendChild(card);
+  var block = document.createElement('div');
+  block.innerHTML = diffBlock(inlineDiff);
+  chatEl.appendChild(block.firstChild);
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 async function newChat() {

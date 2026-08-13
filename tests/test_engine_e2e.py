@@ -492,7 +492,7 @@ class TestKillSimulation:
         original_append = engine._append_to_history
         tool_blocked = []
 
-        def crash_append(role, content=None, tool_calls=None, tool_results=None):
+        def crash_append(role, content=None, tool_calls=None, tool_results=None, thinking=None):  # thinking: F8 新增 kwargs，桩签名对齐
             if role == "tool":
                 tool_blocked.append({"results": tool_results})
                 return  # 模拟崩溃：tool 结果丢弃

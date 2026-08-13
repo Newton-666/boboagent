@@ -143,7 +143,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.task_ledger: list[dict] = []  # [{"id":str, "title":str, "status":"pending"|"in_progress"|"done"}]
         self._ledger_reinject_count: int = 0  # 连续回注计数（硬熔断 2 次）
         self._ledger_field_deny_count: int = 0  # 票 C：台账缺字段 deny 计数（独立，无熔断上限）
-        self._last_reasoning: str = ""  # 票 P：上一轮 reasoning 思考过程（展示用，不进历史）
+        self._last_reasoning: str = ""  # 票 P：上一轮 reasoning 思考过程（展示用 + TICKET-GUI-F8 落 assistant 消息 thinking 字段进历史）
         self._interrupt_event: threading.Event | None = None
         # 票 AUTO-G2：待人工清单"已交接水位线"（events.jsonl 事件 ts）。
         # 收工只列 ts > 水位线的 auto 拒绝；None = 首回合/无记录 → 列全部（兼容现状）。
@@ -1591,7 +1591,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return content or "", tool_calls
 
     def _append_to_history(self, role: str, content: str = None,
-                           tool_calls: list = None, tool_results: list = None):
+                           tool_calls: list = None, tool_results: list = None,
+                           thinking: str = None):
         if role == "user":
             self.history.append({"role": "user", "content": content})
             self._notify("user_input", {"content": content})
@@ -1604,6 +1605,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 msg["content"] = None
             if tool_calls:
                 msg["tool_calls"] = tool_calls
+            # TICKET-GUI-F8：思考文本随 assistant 消息落盘（只记录，不改 TUI 渲染路径
+            # 与思考生成逻辑；resume 时 GUI 据此恢复折叠思考框）
+            if thinking:
+                msg["thinking"] = thinking
             self.history.append(msg)
             self._record_message("assistant", content=content)
         elif role == "system":
@@ -1979,7 +1984,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         _prev_ledger, _tc_names
                     )
             self._append_to_history("assistant", self._pending_content,
-                                    tool_calls=self._pending_tool_calls)
+                                    tool_calls=self._pending_tool_calls,
+                                    thinking=self._last_reasoning or None)
             self._append_to_history("tool", tool_results=tool_results)
             # ── 票 L1：自动销账辅助（建议性，模型可推翻）──
             # 检测强完成信号：run_tests 全绿（N passed 且无 failed）→ 注入建议，
@@ -2103,7 +2109,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 _hist_content = self._pending_content
                 if _recon:
                     _hist_content = (_hist_content or "") + _recon
-                self._append_to_history("assistant", _hist_content)
+                self._append_to_history("assistant", _hist_content,
+                                        thinking=self._last_reasoning or None)
                 # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
                 if getattr(self.proactive, '_last_memory_ids', None):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
