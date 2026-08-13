@@ -1281,6 +1281,11 @@ function setSessionLoading(sid, on) {
 // 每个压缩边界插柔和分隔线。无归档/读失败则现状渲染（现有消息照常展示）。
 async function renderFullHistory(sid, result) {
   var msgs = result.messages || [];
+  // TICKET-GUI-F6（缺陷 2c）：resume 带回的压缩摘要 → 历史顶部柔和分隔摘要行
+  // （复用 addStatus 样式，不动视觉样式；有摘要才渲染，无摘要零变化）
+  if (result.summary) {
+    addStatus('📋 此前对话摘要：' + result.summary);
+  }
   if (window.boboAPI && window.boboAPI.readArchive) {
     try {
       var ar = await window.boboAPI.readArchive(sid);
@@ -1299,7 +1304,11 @@ async function renderFullHistory(sid, result) {
   }
   msgs.forEach(function(m) {
     if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
-    else if (m.role === 'assistant') addMsg('bobo', m.text, 'hist-' + Math.random());
+    else if (m.role === 'assistant') {
+      // TICKET-GUI-F6（缺陷 2a）：现存消息里空 assistant（纯工具回合）给占位，
+      // 与 renderArchivedMessages 一致，消灭一屏空泡泡
+      addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + Math.random());
+    }
     else if (m.role === 'tool') addTool(m.tool_name || m.text || 'Tool', '', m.tool_id || 'tool');
     else if (m.role === 'system' && m.text && m.text.length < 200) {
       // F2-4: 历史心跳残留（"仍在工作 Ns"）不恢复 —— 避免 owner 截图的多条心跳堆叠复现
@@ -1445,7 +1454,12 @@ on('message.start', function() {
 
 on('message.delta', function(data) {
   var t = data ? data.text || '' : '';
-  if (t && thinkBoxEl) {
+  if (t) {
+    // TICKET-GUI-F6（缺陷 1）：思考分段 —— 当前无打开思考框（已被 tool.start
+    // 收束为折叠段）时另开新框，让后续思考独立成段，与工具卡交错排列
+    if (!thinkBoxEl) {
+      thinkBoxEl = createThinkBox();
+    }
     thinkText += t;
     var txt = thinkBoxEl.querySelector('.think-text');
     if (txt) { txt.textContent = thinkText; chatEl.scrollTop = chatEl.scrollHeight; }
@@ -1466,14 +1480,18 @@ on('message.complete', function(data) {
   var body = split.body;
   var thinking = split.thinking;
   if (body && body.trim()) {
-    if (thinking && thinkBoxEl) {
+    if (thinking) {
+      // TICKET-GUI-F6（缺陷 1）：思考分段后 thinkBoxEl 可能已被 tool.start 置空，
+      // 此时 final 思考另开新框收束，保证思考段不丢
+      if (!thinkBoxEl) thinkBoxEl = createThinkBox();
       collapseThinkBox(thinkBoxEl, thinking);
     } else if (thinkBoxEl) {
       thinkBoxEl.remove(); thinkBoxEl = null;
     }
     addMsg('bobo', body, 'msg-' + Date.now());
-  } else if (thinking && thinkBoxEl) {
-    // 纯工具回合：只有思考无正文 → 保留折叠框
+  } else if (thinking) {
+    // 纯工具回合：只有思考无正文 → 保留折叠框（thinkBoxEl 可能为空，另开新框收束）
+    if (!thinkBoxEl) thinkBoxEl = createThinkBox();
     collapseThinkBox(thinkBoxEl, thinking);
   } else if (toolsWereCalled && thinkBoxEl) {
     // All tool calls done with no final text — clean up think box
@@ -1488,6 +1506,14 @@ on('message.complete', function(data) {
   loadSessions();
 });
 on('tool.start', function(data) {
+  // TICKET-GUI-F6（缺陷 1）：工具卡是天然分段点 —— 到达时把当前思考框收束为
+  // 折叠摘要段（复用 collapseThinkBox，视觉样式不动），后续 thinking.delta
+  // 另开新框，思考段与工具卡交错排列，对齐 TUI/Hermes 节奏
+  if (thinkBoxEl) {
+    collapseThinkBox(thinkBoxEl, thinkText);
+    thinkBoxEl = null;
+    thinkText = '';
+  }
   toolsCalledThisRound = true;
   addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
           data ? data.context || '' : '',
