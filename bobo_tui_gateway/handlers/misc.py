@@ -2,7 +2,7 @@
 
 import os
 
-from bobo_tui_gateway.server_utils import ok, err, emit
+from bobo_tui_gateway.server_utils import ok, err, emit, get_context_length
 
 
 def handle_shell_exec(params: dict, rid: str) -> dict:
@@ -91,6 +91,7 @@ def handle_context_stats(params: dict, rid: str, ctx) -> dict:
         "marked": marked,
         "loaded": loaded,
         "memory_injected": loaded,
+        "context_limit": get_context_length(),
     })
 
 
