@@ -91,4 +91,4 @@
 | 日期 | 票 | 新增 | commit | 回滚标签 |
 |---|---|---|---|---|
 | 2026-08-13 | 文档建立 | 本文件；此时点全量快照见第一~四节 | （见 git log） | — |
-| 2026-08-13 | DESK-V2A | 状态覆盖层 #overlay-root（连接中/失败/断连，z-5000 全屏，0.1s 淡入）；会话搜索 #session-search（new-chat 正下方）；pin 置顶（.pin-mark 标题左侧 + .pin-btn 行内 + 稳定排序 + session.pin API + pinned 字段落盘）；行内重命名（替代 confirm）；删除改模态二次确认；Toast #toast-root（右上 14px，success/fail 左边条，3s 自动消失）；三态组件 .v2a-loader/.ovl-*；focus-visible 1px 橙环 + #send hover；既有 CSS 零改动（测试闸门锁死，合并后基线切换 rollback 标签） | 6d11d0b + 修正 | rollback/pre-desk-v2a |
+| 2026-08-13 | DESK-V2A | 状态覆盖层 #overlay-root（连接中/失败/断连，z-5000 全屏，0.1s 淡入）；会话搜索 #session-search（new-chat 正下方）；pin 置顶（.pin-mark 标题左侧 + .pin-btn 行内 + 稳定排序 + session.pin API + pinned 字段落盘）；行内重命名（替代 confirm）；删除改模态二次确认；Toast #toast-root（右上 14px，success/fail 左边条，3s 自动消失）；三态组件 .v2a-loader/.ovl-*；focus-visible 1px 橙环 + #send hover；既有 CSS 零改动（测试闸门锁死，合并后基线切换 rollback 标签） | 6d11d0b + 修正 + 68373a3（DOM 顺序修复：新组件必须在 script 之前，否则顶层 JS 空指针全崩；已补回归闸 test_v2a_dom_before_script） | rollback/pre-desk-v2a |
