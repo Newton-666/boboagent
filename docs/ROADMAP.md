@@ -12,8 +12,10 @@
 | 2 | ~~DESK-V2B 差异化面板~~ | ✅ 已合并（31e09cb）：工具耗时 + 上下文细条 | ✅ done |
 | 2.4 | ~~CORE-R2a/R2b~~ | ✅ 已合并（6a62fc4 / 92d232d）：台账软引导+答复质量闸 | ✅ done |
 | 2.45 | ~~DESK-V2B2~~ | ✅ 已合并（aacdeb3）：进度药丸三色阶 | ✅ done |
-| 2.5 | GUI-F9（P0，下一张） | 运行中会话切回丢进行中回合：引擎在副本上跑、回合末才写回，resume 忙分支需读活引擎 history（Kimi 已定位 engine_adapter.py:245/305） | 📋 票已写（data/tickets/TICKET-GUI-F9.md），三连包后即刻做 |
+| 2.5 | GUI-F9（P0，下一张） | 运行中会话切回丢进行中回合：引擎在副本上跑、回合末才写回，resume 忙分支需读活引擎 history（Kimi 已定位 engine_adapter.py:245/305） | 📋 票已写（data/tickets/TICKET-GUI-F9.md），三连包后即刻做；之后接 DESK-V2B3 |
 | 3 | DESK-V2C 锦上添花 | 流式 markdown 简版 + 记忆面板 + 中文优先排版 + 主题 token 化（不做浅色主题） | 📋 待开 |
+
+| 2.6 | DESK-V2B3 | 桌面端斜杠路由 + "/" 命令面板（过滤/补全/Esc；owner 前提：全部施工交流默认在桌面端） | 📋 票已写（data/tickets/TICKET-DESK-V2B3.md），F9 后 |
 
 ### 第二梯队：评估与内核深化（排在 DESK-V2 之后，owner 拍板：性能在 GUI 提升后）
 
