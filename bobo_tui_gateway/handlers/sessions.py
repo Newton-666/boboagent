@@ -179,7 +179,19 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
     if not session_data:
         return err(rid, -32000, f"会话不存在: {sid}")
 
-    messages = session_data.get("messages", [])
+    # TICKET-GUI-F6（缺陷 2b）：时序竞争修复 —— 该 sid 引擎正跑回合（有未落盘
+    # 消息）时，resume 返回内存版最新消息，禁止磁盘版覆盖运行中会话（否则最近
+    # 对话"消失"且丢回合）。仅在引擎空闲时才允许磁盘版覆盖内存（原行为）。
+    from core.engine_adapter import is_running
+
+    engine_busy = is_running(sid)
+    if engine_busy:
+        with ctx.sessions_lock:
+            mem_session = ctx.sessions.get(sid)
+        messages = (mem_session.get("messages", []) or []) if mem_session else (session_data.get("messages", []) or [])
+    else:
+        messages = session_data.get("messages", []) or []
+
     transcript = []
     for msg in messages:
         role = msg.get("role", "")
@@ -187,7 +199,11 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         if role == "user":
             transcript.append({"role": "user", "text": content})
         elif role == "assistant":
-            transcript.append({"role": "assistant", "text": content})
+            # TICKET-GUI-F6（缺陷 2a）：transcript 带 tool_calls 字段，GUI 据此
+            # 给空 assistant（纯工具回合）补"（工具调用回合）"占位（与归档同构）
+            tc = msg.get("tool_calls")
+            transcript.append({"role": "assistant", "text": content,
+                               "tool_calls": tc if tc else []})
         elif role == "system":
             transcript.append({"role": "system", "text": content})
 
@@ -201,13 +217,16 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         except Exception:
             created_at = 0
 
+    if not engine_busy:
+        with ctx.sessions_lock:
+            ctx.sessions[sid] = {
+                "id": sid,
+                "title": session_data.get("title", sid),
+                "created_at": created_at,
+                "messages": messages,
+            }
+    # 引擎忙时禁止磁盘覆盖内存（丢回合风险）；但当前会话指向仍要切到该 sid
     with ctx.sessions_lock:
-        ctx.sessions[sid] = {
-            "id": sid,
-            "title": session_data.get("title", sid),
-            "created_at": created_at,
-            "messages": messages,
-        }
         ctx.set_current_sid(sid)
 
     return ok(rid, {
@@ -221,6 +240,11 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         "auto_state": bool(ctx.auto_mode.get(sid, False)),
         # TICKET-O2：resume 时带回 office 状态（底栏 OFFICE 指示跟随会话）
         "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
+        # TICKET-GUI-F6（缺陷 2c）：带回压缩摘要（有则 GUI 渲染分隔摘要行；
+        # 无则空串，前端零变化）
+        "summary": session_data.get("summary") or "",
+        # TICKET-GUI-F6（缺陷 2b）：引擎忙标记（前端可感知该会话仍在运行）
+        "engine_busy": engine_busy,
     })
 
 
