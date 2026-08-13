@@ -11,6 +11,13 @@ import time as _time
 _running: dict[str, threading.Event] = {}
 _running_lock = threading.Lock()
 
+# TICKET-GUI-F9：活引擎实例注册表（sid → Engine 实例）。
+# current_engines 存的是 interrupt_event（threading.Event），不是引擎实例；
+# resume 忙分支要读"进行中回合"的 history，必须拿到活 Engine 本身。
+# 只做只读暴露：get_live_history() 返回 history 浅拷贝，不触碰引擎内部状态。
+_live_engines: dict[str, object] = {}
+_live_engines_lock = threading.Lock()
+
 
 def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool:
     """等待用户确认（票 B-3 可测化）。
@@ -39,6 +46,24 @@ def is_running(sid: str) -> bool:
     """检查指定会话的 engine 是否正在执行。"""
     with _running_lock:
         return sid in _running
+
+
+def get_live_history(sid: str):
+    """TICKET-GUI-F9：只读暴露活引擎的 history 浅拷贝。
+
+    引擎正在跑回合时，session["messages"] 是旧的（回合末才写回），
+    resume 忙分支必须读这里才能拿到进行中的用户消息与工具步骤。
+    取不到活引擎（竞态窗口/引擎恰好退出）返回 None，调用方回退内存版。
+    禁止抛异常打断 resume —— 任何异常都折返 None。
+    """
+    try:
+        with _live_engines_lock:
+            engine = _live_engines.get(sid)
+        if engine is None:
+            return None
+        return list(engine.history)
+    except Exception:
+        return None
 
 
 def run_engine(
@@ -237,6 +262,10 @@ def run_engine(
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
         engine.sid = sid
+        # TICKET-GUI-F9：注册活引擎实例（resume 忙分支只读 history 用）。
+        # 与 current_engines（interrupt_event）并列维护，互不干扰。
+        with _live_engines_lock:
+            _live_engines[sid] = engine
         engine.proactive.load_config()
         # ── 票 AUTO-G2：注入会话级"已交接水位线"（None=首回合列全部）──
         engine.handoff_watermark = session.get("handoff_watermark")
@@ -424,3 +453,6 @@ def run_engine(
             _running.pop(sid, None)
         with current_engines_lock:
             current_engines.pop(sid, None)
+        # TICKET-GUI-F9：活引擎实例同步清理（防 get_live_history 读到僵尸引擎）
+        with _live_engines_lock:
+            _live_engines.pop(sid, None)
