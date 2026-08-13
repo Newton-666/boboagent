@@ -2091,15 +2091,19 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._ledger_reinject_count = 0  # 干净收工时重置计数
                 self._ledger_reminded = False  # 票Z：同步重置
                 # ── 票 L1：收工自动对账（堵汇报失实）──
-                # 有工具轮 → 引擎只读 git status/diff --stat 注入工作区实况，
-                # 终稿强制携带对账段：台账与汇报必须与工作区实况一致。
+                # 有工具轮 → 引擎只读 git status/diff --stat 注入工作区实况。
+                # 票 LEDGER-1B：对账段改内部上下文 —— 只并入 history（供模型写汇报时
+                # 对账），不再拼进用户可见终稿；git 原文不上屏，可见回复只留模型
+                # 自己组织的自然语言对账说明。对账机制/汇报质量标准不动。
                 # 工作区干净 → _workspace_recon 返回 ""，零注入零开销。
+                _recon = ""
                 if self.current_tool_round > 0:
                     _recon = self._workspace_recon()
-                    if _recon:
-                        self._pending_content = (self._pending_content or "") + _recon
                 # ── 所有闸通过，内容落 history ──
-                self._append_to_history("assistant", self._pending_content)
+                _hist_content = self._pending_content
+                if _recon:
+                    _hist_content = (_hist_content or "") + _recon
+                self._append_to_history("assistant", _hist_content)
                 # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
                 if getattr(self.proactive, '_last_memory_ids', None):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
