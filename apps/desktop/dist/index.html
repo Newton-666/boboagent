@@ -688,7 +688,11 @@ function addTool(name, context, toolId) {
   if (roundAggregated && roundAggregateHead && roundToolEls.length > 0) {
     // 已有聚合卡：把当前最新一步收进聚合卡（吞并）
     var aggBody2 = roundAggregateHead.parentNode.querySelector('.tool-agg-body');
-    roundToolEls.forEach(function(d) { aggBody2.appendChild(d); });
+    roundToolEls.forEach(function(d) {
+      var tb2 = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
+      if (tb2) aggBody2.appendChild(tb2);
+      aggBody2.appendChild(d);
+    });
     roundToolEls = [];
   }
   chatEl.appendChild(div);
@@ -705,7 +709,11 @@ function addTool(name, context, toolId) {
       this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
     };
     var aggBody = agg.querySelector('.tool-agg-body');
-    roundToolEls.forEach(function(d) { aggBody.appendChild(d); });
+    roundToolEls.forEach(function(d) {
+      var tb = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
+      if (tb) aggBody.appendChild(tb);
+      aggBody.appendChild(d);
+    });
     roundToolEls = [];
     roundAggregateHead = agg.querySelector('.tool-agg-head');
     chatEl.insertBefore(agg, div);
@@ -715,6 +723,22 @@ function addTool(name, context, toolId) {
   }
   roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
   chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// TICKET-GUI-F6C：工具卡被吞进聚合卡时，其前方紧邻的已折叠思考框一并移入
+// （保持"思考→工具"成对，考古展开聚合卡时每步思考与工具绑定可见）。
+// 注意：聚合卡插在"最新思考与最新工具"之间（insertBefore(agg, div)），
+// 吞并最新一步时其配对思考可能隔着一个聚合卡——向前再找一档。
+function swallowThinkBox(d) {
+  var prev = d.previousElementSibling;
+  if (prev && prev.classList && prev.classList.contains('think-box') &&
+      prev.classList.contains('collapsed')) return prev;
+  if (prev && prev.classList && prev.classList.contains('tool-agg')) {
+    var prev2 = prev.previousElementSibling;
+    if (prev2 && prev2.classList && prev2.classList.contains('think-box') &&
+        prev2.classList.contains('collapsed')) return prev2;
+  }
+  return null;
 }
 
 function aggHeadArrowText() {
