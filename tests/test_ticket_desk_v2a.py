@@ -329,3 +329,18 @@ def test_v2a_md5_gate():
         assert f.exists(), f"{f} 不存在"
         assert len(hashlib.md5(f.read_bytes()).hexdigest()) == 32, f"{f} 读取失败"
         assert f.stat().st_size > 0, f"{f} 为空文件"
+
+
+# ── 终审修复回归闸（2026-08-13 桌面端 connecting 卡死案）────────────────
+def test_v2a_dom_before_script():
+    """V2A 新增 DOM（overlay-root/toast-root/confirm-overlay）必须出现在 <script> 之前。
+    bobo 初版把它们追加在 </script> 之后 → 顶层 JS getElementById('cf-cancel').onclick
+    抛 TypeError → 整个脚本死亡 → 桌面端永久卡 Connecting。此闸防回归。"""
+    src = _gui()
+    script_pos = src.find("<script>")
+    assert script_pos > 0
+    for dom_id in ('id="overlay-root"', 'id="toast-root"', 'id="confirm-overlay"',
+                   'id="cf-cancel"', 'id="ovl-connecting"'):
+        pos = src.find(dom_id)
+        assert pos > 0, f"{dom_id} 缺失"
+        assert pos < script_pos, f"{dom_id} 在 <script> 之后，顶层 JS 将空指针崩溃"

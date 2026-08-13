@@ -431,6 +431,47 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     </div>
   </div>
 </div>
+
+<!-- ══ TICKET-DESK-V2A：状态覆盖层（连接中 / 连接失败 / 断连 / 空会话引导保留欢迎页）══ -->
+<div id="overlay-root">
+  <div class="ovl" id="ovl-connecting">
+    <div class="ovl-spinner"><span></span><span></span><span></span></div>
+    <div class="ovl-title">正在连接</div>
+    <div class="ovl-desc">正在连接后端服务…</div>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-connecting"></div>
+  </div>
+  <div class="ovl" id="ovl-failed">
+    <div class="ovl-err-icon">⚠</div>
+    <div class="ovl-title">连接失败</div>
+    <div class="ovl-desc">无法连接到后端服务，请确认 Bobo 已启动。</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">重试</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-failed"></div>
+  </div>
+  <div class="ovl" id="ovl-disconnected">
+    <div class="ovl-warn-icon">⚠</div>
+    <div class="ovl-title">后端已断开</div>
+    <div class="ovl-desc">后端进程已退出。请重启 Bobo 后重试，会话数据不会丢失。</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">重新连接</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-detail-box" id="ovl-detail-disconnected"></div>
+  </div>
+</div>
+<!-- TICKET-DESK-V2A：Toast 通知（右上角，3s 自动消失 + 手动关闭）-->
+<div id="toast-root"></div>
+<!-- TICKET-DESK-V2A：删除二次确认模态（复用 approval 模态样式体系）-->
+<div id="confirm-overlay">
+  <div id="confirm-modal">
+    <div class="cf-title" id="cf-title">⚠ 确认操作</div>
+    <div class="cf-desc" id="cf-desc"></div>
+    <div class="cf-btns">
+      <button class="cf-btn cf-cancel" id="cf-cancel">取消</button>
+      <button class="cf-btn cf-ok" id="cf-ok">删除</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
@@ -2239,46 +2280,5 @@ document.getElementById('preview-overlay').onclick = function() {
 
 // ── Session search ──────────────────────────────────────────────────────
 </script>
-
-<!-- ══ TICKET-DESK-V2A：状态覆盖层（连接中 / 连接失败 / 断连 / 空会话引导保留欢迎页）══ -->
-<div id="overlay-root">
-  <div class="ovl" id="ovl-connecting">
-    <div class="ovl-spinner"><span></span><span></span><span></span></div>
-    <div class="ovl-title">正在连接</div>
-    <div class="ovl-desc">正在连接后端服务…</div>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
-    <div class="ovl-detail-box" id="ovl-detail-connecting"></div>
-  </div>
-  <div class="ovl" id="ovl-failed">
-    <div class="ovl-err-icon">⚠</div>
-    <div class="ovl-title">连接失败</div>
-    <div class="ovl-desc">无法连接到后端服务，请确认 Bobo 已启动。</div>
-    <button class="ovl-btn primary" onclick="retryConnect()">重试</button>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
-    <div class="ovl-detail-box" id="ovl-detail-failed"></div>
-  </div>
-  <div class="ovl" id="ovl-disconnected">
-    <div class="ovl-warn-icon">⚠</div>
-    <div class="ovl-title">后端已断开</div>
-    <div class="ovl-desc">后端进程已退出。请重启 Bobo 后重试，会话数据不会丢失。</div>
-    <button class="ovl-btn primary" onclick="retryConnect()">重新连接</button>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
-    <div class="ovl-detail-box" id="ovl-detail-disconnected"></div>
-  </div>
-</div>
-<!-- TICKET-DESK-V2A：Toast 通知（右上角，3s 自动消失 + 手动关闭）-->
-<div id="toast-root"></div>
-<!-- TICKET-DESK-V2A：删除二次确认模态（复用 approval 模态样式体系）-->
-<div id="confirm-overlay">
-  <div id="confirm-modal">
-    <div class="cf-title" id="cf-title">⚠ 确认操作</div>
-    <div class="cf-desc" id="cf-desc"></div>
-    <div class="cf-btns">
-      <button class="cf-btn cf-cancel" id="cf-cancel">取消</button>
-      <button class="cf-btn cf-ok" id="cf-ok">删除</button>
-    </div>
-  </div>
-</div>
-
 </body>
 </html>
