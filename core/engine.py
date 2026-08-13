@@ -994,7 +994,22 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 )},
                 {"role": "user", "content": context},
             ]
-            response = self.llm_caller(prompt, use_tools=False)
+            # ── ENG-1：提取 LLM 调用补 llm.call 事件（观测盲区修复）+ 小 max_tokens 提速 ──
+            # 盲区：_extract_takeaways 直接调 self.llm_caller，绕过了 _call_llm 的事件写入点，
+            # events.jsonl 看不到提取调用 → "尾部静默"假象。此处补写 + 限制 512 tokens
+            # （提取只需 1-2 条 ≤60 字结论），实测可将 55.7s 级耗时显著压缩。
+            _extract_t0 = time.time()
+            response = self.llm_caller(prompt, use_tools=False, max_tokens=512)
+            event_bus.write("llm.call", {
+                "session_id": getattr(self, "sid", ""),
+                "msg_count": len(prompt),
+                "has_tool_calls": False,
+                "duration_ms": int((time.time() - _extract_t0) * 1000),
+                "stage": "takeaway_extract",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            })
             if isinstance(response, dict) and "error" in response:
                 # ── 票 E4a：LLM 提取失败留痕，不静默 ──
                 logger.warning("takeaway extract llm error (sid=%s): %s",
