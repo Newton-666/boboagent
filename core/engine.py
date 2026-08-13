@@ -116,6 +116,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.current_user_input = None
         self.current_depth = 0
         self.current_tool_round = 0
+        # 票 CORE-R1：60% 水位提示只发一次（默认 150 轮的 90 轮）
+        self._watermark_notified = False
         self._pending_content = None
         self._pending_tool_calls = None
         self._step_count = 0
@@ -852,21 +854,152 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # - 同文件/搜索重复 ≥3 次 → 重读文件有合法理由
         # - current_depth 35/45 步提醒 → LLM 无法理解步数含义
         # 保留：
-        # - current_tool_round > 90 → 确实跑太久了，提醒收束
+        # - current_tool_round 分流（票 CORE-R1：60% 水位早提示 + 150 线死循环/在推进分流）
         # - current_depth > 200 → 终极保险丝，防止真正的死循环
+        # 铁律不动：200 深度硬断、500 步保险丝（MAX_STEPS）、收工闸语义。
 
-        if self.current_tool_round > 90:
-            summary = (
-                "你已达到最大工具调用轮次上限。请提供最终回复，"
-                "总结你已完成的内容，不需要再调用工具。"
+        _max_rounds = self._max_tool_rounds()
+
+        # ── 60% 水位早提示：只提示不限制（记 round.watermark，只发一次）──
+        _watermark_round = max(1, int(_max_rounds * 0.6))
+        if not self._watermark_notified and self.current_tool_round >= _watermark_round:
+            self._watermark_notified = True
+            _hint = (
+                f"轮次过半（{self.current_tool_round}/{_max_rounds}）："
+                "请合并工具调用、批量操作、优先完成最小闭环。"
             )
-            self._append_to_history("user", summary)
+            self._append_to_history("user", _hint)
+            event_bus.write("round.watermark", {
+                "round": self.current_tool_round,
+                "max": _max_rounds,
+                "pct": 60,
+                "watermark_round": _watermark_round,
+            })
+            logger.debug("ROUND watermark at %s/%s", self.current_tool_round, _max_rounds)
+
+        # ── 撞线分流：死循环硬掐 / 仍在推进软着陆（记 loop.verdict）──
+        if self.current_tool_round > _max_rounds:
+            _verdict, _reason = self._judge_loop_verdict()
+            event_bus.write("loop.verdict", {
+                "round": self.current_tool_round,
+                "max": _max_rounds,
+                "verdict": _verdict,
+                "reason": _reason,
+            })
+            if _verdict == "stuck":
+                _summary = (
+                    f"你已达到最大工具调用轮次上限（{_max_rounds} 轮），"
+                    "且检测到死循环（连续 5 轮同模式或无推进信号）。"
+                    "强制收尾：请立即停止工具调用，给出最终回复。"
+                )
+            else:
+                _summary = (
+                    f"你已进入长回合收尾阶段（{_max_rounds} 轮）："
+                    "请先完成当前子任务并整理台账，然后收工。"
+                )
+            self._append_to_history("user", _summary)
             self.current_depth += 1
             return False
         if self.current_depth > 200:
             self._notify("error", {"content": "已达最大循环深度"})
             return True
         return False
+
+    # ── 票 CORE-R1：轮次上限与死循环判定 ──────────────────────────────
+
+    def _max_tool_rounds(self) -> int:
+        """BOBO_MAX_TOOL_ROUNDS 环境变量（默认 150，非法值回退 150）。"""
+        raw = os.environ.get("BOBO_MAX_TOOL_ROUNDS", "").strip()
+        if not raw:
+            return 150
+        try:
+            v = int(raw)
+        except (TypeError, ValueError):
+            return 150
+        return v if v > 0 else 150
+
+    def _round_sig(self, tool_calls: list) -> str:
+        """规范化一轮工具调用的签名（同名同参 → 相同签名）。
+
+        arguments 做 json 规范化（键序无关），排序后连接——顺序不同但
+        工具集相同视为同模式（pattern 签名）。
+        """
+        _parts = []
+        for _tc in tool_calls:
+            _fn = _tc.get("function", {})
+            _name = _fn.get("name", "")
+            _args = _fn.get("arguments", "{}")
+            try:
+                _args = json.dumps(json.loads(_args), sort_keys=True, ensure_ascii=False)
+            except Exception:
+                pass
+            _parts.append(f"{_name}|{_args}")
+        return "::".join(sorted(_parts))
+
+    def _last_n_tool_rounds(self, n: int = 5) -> list:
+        """从 history 取最近 n 轮（带 tool_calls 的 assistant 消息）的签名与工具名。"""
+        _rounds = []
+        for _m in reversed(self.history):
+            if _m.get("role") == "assistant" and _m.get("tool_calls"):
+                _names = [_tc.get("function", {}).get("name", "")
+                          for _tc in _m["tool_calls"]
+                          if _tc.get("function", {}).get("name")]
+                _rounds.append({
+                    "sig": self._round_sig(_m["tool_calls"]),
+                    "names": _names,
+                })
+                if len(_rounds) >= n:
+                    break
+        return _rounds
+
+    def _has_progress_signal(self, recent: list) -> tuple[bool, str]:
+        """最近 n 轮是否有推进信号：文件写入/diff、台账变更、新工具种类。
+
+        轮级判定全部从 history 最近 n 轮取（recent 参数）——tracker._change_log
+        是会话累计列表，不能直接判"本轮有写入"（累计非空 ≠ 最近 n 轮有推进）。
+        保守方向：宁可判 progressing（软提醒）也不误掐正在推进的回合。
+        """
+        # 1) 文件写入/diff / 台账变更：最近 n 轮内出现写类工具调用
+        #    （file_operation 可能 action=read，保守算推进——误判 progressing 比误掐安全）
+        _WRITE_TOOLS = {"edit_file", "file_operation", "file_writer", "task_ledger"}
+        for _r in recent:
+            for _name in _r["names"]:
+                if _name in _WRITE_TOOLS:
+                    return True, f"写类工具调用: {_name}"
+        # 2) 新工具种类：最近 n 轮用过的工具名集合 ⊄ 更早轮次集合
+        _recent_names = {n for r in recent for n in r["names"]}
+        _earlier = set()
+        _count = 0
+        for _m in reversed(self.history):
+            if _m.get("role") == "assistant" and _m.get("tool_calls"):
+                if _count >= len(recent):
+                    for _tc in _m["tool_calls"]:
+                        _nm = _tc.get("function", {}).get("name", "")
+                        if _nm:
+                            _earlier.add(_nm)
+                _count += 1
+        _new = _recent_names - _earlier
+        # 更早轮次为空（会话刚开始即撞线，无从对比）→ 不判"新工具种类"推进
+        if _earlier and _new:
+            return True, f"新工具种类: {sorted(_new)[:3]}"
+        return False, ""
+
+    def _judge_loop_verdict(self) -> tuple[str, str]:
+        """死循环判定：连续 5 轮同模式 或 无推进信号 → stuck，否则 progressing。"""
+        _recent = self._last_n_tool_rounds(5)
+        _reasons: list[str] = []
+        _same = False
+        if len(_recent) >= 5:
+            _sigs = [r["sig"] for r in _recent]
+            _same = all(s == _sigs[0] for s in _sigs)
+            if _same:
+                _reasons.append(f"连续{len(_recent)}轮同模式({_sigs[0][:60]})")
+        _progress, _p_reason = self._has_progress_signal(_recent)
+        if not _progress:
+            _reasons.append("最近5轮无推进信号（无文件写入/台账变更/新工具种类）")
+        if _same or not _progress:
+            return ("stuck", "；".join(_reasons) or "连续同模式/无推进")
+        return ("progressing", f"仍在推进（{_p_reason}）")
 
     # ── 阶段管理与上下文交接 ──────────────────────────────────────────
 
