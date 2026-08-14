@@ -13,7 +13,7 @@
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
 | 0 | GOV-1 能力内化 | 纪律注入 + 收工自审固化 + 新人开箱测试 | ✅ 已合并 2edb207（含打回重修：discipline 段曾致 prompt.budget 事件被丢；教训册 +L13 且已进 wrapup 注入清单） |
-| 1 | DESK-V4 桌面小组件（owner 22:33 拍板：提至 GOV-1 后第一顺位；22:59 钉死**第一铁律：只读投影、零干涉**） | **定位=桌面端的只读映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，只映射「我的要求 + bobo 的执行」（当前任务/工具调用链/药丸水位/连接态），**不显示 session 侧栏、不显示 plugins 面板**；样式与桌面端同色系板零偏差；数据全部只读自取 gateway 现成数据流，**不改桌面端任何状态/布局/行为，主窗关掉小组件、关掉小组件主窗，互不干涉**；审批时橙边轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | 📋 下一票 |
+| 1 | DESK-V4 桌面小组件（owner 22:33 拍板：提至 GOV-1 后第一顺位；22:59 钉死**第一铁律：只读投影、零干涉**） | **定位=桌面端的只读映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，显示「我的要求 + bobo 的执行」（**不显示 session 侧栏、不显示 plugins 面板**）+ **diff 完整渲染（owner 23:03 拍板：diff 必须有，高亮底色 1:1 带进小窗）**；**窗口可拖拽调大小、内容自适应铺开、最小尺寸锁定**（owner 23:03）；样式与桌面端 1:1 同渲染管线零偏差；数据全部只读自取 gateway 现成数据流，**不改桌面端任何状态/布局/行为，主窗关掉小组件、关掉小组件主窗，互不干涉**；审批时橙边轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | 📋 下一票 |
 | 2 | DESK-CLI `bobo desktop` 子命令（owner 22:33 拍板：**紧随小组件**——"下次我自己终端输 bobo desktop 也会快很多"） | CLI 加 desktop 子命令：检测 node_modules→缺则自动 npm install→npm start 拉起 Electron；配套新人上手 README（clone→pip install -e .→bobo / bobo desktop 全流程） | 📋 第二顺位 |
 | 3 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
 | 4 | DESK-V2D 美学微票串（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D1 回复正文 Charter 衬线（一处 font-family 变量）→ D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise）→ D5 药丸升认知状态条（水位+记忆数+工具数） | 📋 逐票精调 |
