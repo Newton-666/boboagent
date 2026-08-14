@@ -116,6 +116,8 @@ const assert = require('assert');
 const rendered = [];
 let sessions = [];
 function renderSessions() {{ rendered.push(sessions.map(s => s.title).join('|')); }}
+// TICKET-GUI-F11：updateSessionTitle 现走 session.rename auto 通道，桩化 call
+function call() {{}}
 {fn}
 // 场景 A：手动命名过（user_named=true）→ 自动命名不得覆盖
 sessions = [{{ id: 's1', title: '我的手动命名', user_named: true }}];

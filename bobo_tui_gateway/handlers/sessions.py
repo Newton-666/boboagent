@@ -375,12 +375,18 @@ def handle_session_delete(params: dict, rid: str, ctx) -> dict:
 def handle_session_rename(params: dict, rid: str, ctx) -> dict:
     sid = params.get("session_id", "")
     title = params.get("title", "").strip() or "未命名"
+    auto = bool(params.get("auto", False))
     with ctx.sessions_lock:
         session = ctx.sessions.get(sid)
     if session:
+        # TICKET-GUI-F11：auto=true 为自动命名通道 —— 落盘标题但不置 user_named
+        #（用户命名优先不破；已 user_named 的会话拒绝 auto 覆盖，返回 ok 不动标题）
+        if auto and session.get("user_named", False):
+            return ok(rid, {"ok": True, "skipped": True})
         session["title"] = title[:50]
-        # TICKET-GUI-F7：手动改名路径持久化 user_named=true（GUI 自动命名据此跳过）
-        session["user_named"] = True
+        if not auto:
+            # TICKET-GUI-F7：手动改名路径持久化 user_named=true（GUI 自动命名据此跳过）
+            session["user_named"] = True
         _save_session_to_disk(sid, ctx)
     return ok(rid, {"ok": True})
 
