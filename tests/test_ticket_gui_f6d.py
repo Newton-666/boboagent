@@ -79,9 +79,12 @@ def _gui_fns() -> str:
     # F8 配套：TOOL_FRIENDLY 提升为模块级后 addTool 引用它，桩必须带上
     tf_m = re.search(r"var TOOL_FRIENDLY = \{[^;]*\};", src)
     assert tf_m, "F8: 需要 var TOOL_FRIENDLY 映射"
+    # V2D25 配套：TOOL_ICONS/toolIcon/prefersReducedMotion（addTool 引用，桩必须带上）
+    ic_m = re.search(r"var TOOL_ICONS = \{[^;]*\};", src)
+    assert ic_m, "V2D25: 需要 var TOOL_ICONS 映射"
     return "\n".join(
-        [tf_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
-        [_extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
+        [tf_m.group(0), ic_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
+        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
     )
 
 
@@ -308,7 +311,8 @@ function maxConsecThink(el) {{
   return best;
 }}
 function kidsOf(el) {{
-  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : c.className);
+  // V2D25 演进：工具卡 className 含 'shimmer' 附加 token，按 'tool' token 判定
+  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : (c.classList.contains('tool') ? 'tool' : c.className));
 }}
 
 // 思考1 → 状态行 → 读类工具1 → 状态行 → 思考2 → 读类工具2 → 思考3 → 读类工具3
@@ -327,7 +331,7 @@ const kids = chatEl._children;
 const agg = kids.find(c => c.className === 'tool-agg');
 assert(agg, '应建聚合卡');
 const aggBody = agg.querySelector('.tool-agg-body');
-const order = aggBody._children.map(c => c._thinkText || c.className);
+const order = aggBody._children.map(c => c._thinkText || (c.classList.contains('tool') ? 'tool' : c.className));
 assert(JSON.stringify(order) === JSON.stringify(["思考1", "tool", "思考2", "tool"]),
   '聚合卡体应含 思考1→工具1→思考2→工具2: ' + JSON.stringify(order));
 // 状态行仍在消息流（位置与显示不动）
@@ -362,7 +366,8 @@ function thinkBox(text) {{
   return el;
 }}
 function kidsOf(el) {{
-  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : c.className);
+  // V2D25 演进：工具卡 className 含 'shimmer' 附加 token，按 'tool' token 判定
+  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : (c.classList.contains('tool') ? 'tool' : c.className));
 }}
 
 // 编辑流：思考1+edit_file → 思考2+edit_file → 思考3+file_operation
@@ -406,7 +411,8 @@ function thinkBox(text) {{
   return el;
 }}
 function kidsOf(el) {{
-  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : c.className);
+  // V2D25 演进：工具卡 className 含 'shimmer' 附加 token，按 'tool' token 判定
+  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : (c.classList.contains('tool') ? 'tool' : c.className));
 }}
 function toolName(el) {{
   return el.getAttribute('data-tool') || '';
@@ -435,7 +441,7 @@ assert(!inAggStr.includes('edit_file') && !inAggStr.includes('file_operation'), 
 // 写类思考+卡留消息流
 const msgs = kidsOf(chatEl);
 assert(msgs.includes('think:思考2') && msgs.includes('think:思考4'), '写类思考摊开: ' + JSON.stringify(msgs));
-const openTools = kids.filter(c => c.className === 'tool').map(toolName);
+const openTools = kids.filter(c => c.classList.contains('tool')).map(toolName);
 assert(openTools.includes('edit_file') && openTools.includes('file_operation'),
   '写类编辑卡摊开: ' + JSON.stringify(openTools));
 

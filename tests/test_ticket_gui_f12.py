@@ -143,7 +143,7 @@ def test_f12_2_hist_replay_aggregation_node():
     for fn in ("renderFullHistory", "renderHistAggCard", "renderHistToolFlat",
                "renderHistToolDiff", "addHistThinking", "buildHistThinkBox",
                "buildHistToolCard", "diffBlock",
-               "toolSummary", "diffStats", "esc"):
+               "toolSummary", "diffStats", "esc", "toolIcon"):
         funcs.append(_extract_func(src, fn))
 
     transcript = [
@@ -250,7 +250,7 @@ function addMsg(kind, text, id) {
   const el = makeEl('div'); el.className = 'msg ' + kind; el.textContent = text;
   chatEl.appendChild(el);
 }
-""" + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
+""" + "\n" + _extract_var(src, "TOOL_ICONS") + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
 
 // 桩覆盖：addHistThinking 记录 thinkLog（真实实现只 appendChild，无法观测调用）
 function addHistThinking(t) {
@@ -342,7 +342,7 @@ def test_f12_4_review_fixes_node():
     funcs = []
     for fn in ("renderFullHistory", "renderHistAggCard", "renderHistToolFlat",
                "renderHistToolDiff", "addHistThinking", "buildHistThinkBox",
-               "buildHistToolCard", "diffBlock", "toolSummary", "diffStats", "esc"):
+               "buildHistToolCard", "diffBlock", "toolSummary", "diffStats", "esc", "toolIcon"):
         funcs.append(_extract_func(src, fn))
 
     # 问题1 transcript：两回合，前回合收聚合卡（含思考框），最新轮平铺
@@ -445,7 +445,7 @@ function addMsg(kind, text, id) {
   const el = makeEl('div'); el.className = 'msg ' + kind; el.textContent = text;
   chatEl.appendChild(el);
 }
-""" + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
+""" + "\n" + _extract_var(src, "TOOL_ICONS") + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
 
 (async () => {
   // ── 问题1：点思考框不误收聚合卡 ──

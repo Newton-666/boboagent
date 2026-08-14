@@ -395,6 +395,32 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .hist-agg .tool-agg-body .think-box { margin:4px 10px 0; }
 .hist-agg .tool-agg-body .diff-block { margin:2px 10px 6px; }
 /* === end F12 历史聚合 === */
+/* === V2D25 工具卡 === */
+/* D2.5-1 细线 SVG 图标：14px、currentColor 继承文字色（stroke 由 svg 内联属性给定 1.25px） */
+.tool .tool-ic { flex-shrink:0; color:var(--text-muted); display:inline-block; vertical-align:-2px; }
+/* D2.5-2 状态语义：运行中=橙色细圈 1.6s 呼吸脉冲；完成=灰绿实心点；失败=红点定住（不脉冲） */
+.tool .dot.ring { width:8px; height:8px; border-radius:50%; border:1.25px solid #e8913a; animation:v2d25Breathe 1.6s ease-in-out infinite; }
+.tool .dot.done { background:#50a14f; border:none; }
+.tool .dot.fail { background:#f48771; border:none; }
+@keyframes v2d25Breathe { 0%,100% { opacity:.45; transform:scale(.82); } 50% { opacity:1; transform:scale(1); } }
+/* 上下文收进等宽弱色 chip：--bg3 底、圆角 4px、SF Mono 10px */
+.tool .tool-context { background:var(--bg3); border-radius:4px; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:10px; padding:1px 6px; }
+/* 耗时列淡入（完成/失败时 class .in 才可见，transition 纯 CSS） */
+.tool .tool-time { opacity:0; transition:opacity .45s ease; }
+.tool .tool-time.in { opacity:1; }
+/* D2.5-3 流光：运行中斜向柔光 2s 一轮（25-35% 透明度），完成即收（JS 移除 class），纯 CSS animation 禁 JS 定时器 */
+.tool.shimmer { position:relative; overflow:hidden; }
+.tool.shimmer::after { content:''; position:absolute; top:-2px; left:0; width:100%; height:calc(100% + 4px); pointer-events:none;
+  background:linear-gradient(115deg, transparent 32%, rgba(255,255,255,.32) 50%, rgba(232,145,58,.10) 60%, transparent 72%);
+  background-size:220% 100%; animation:v2d25Shimmer 2s linear infinite; }
+@keyframes v2d25Shimmer { 0% { background-position:130% 0; } 100% { background-position:-30% 0; } }
+/* 考古/历史卡不带流光：聚合卡体内流光覆盖禁用；reduced-motion 下流光与脉冲全禁用（无障碍纪律） */
+.tool-agg .tool.shimmer::after { display:none; }
+@media (prefers-reduced-motion: reduce) {
+  .tool .dot.ring { animation:none; opacity:.6; }
+  .tool.shimmer::after { animation:none; display:none; }
+}
+/* === end V2D25 === */
 </style>
 </head>
 <body>
@@ -1118,6 +1144,27 @@ var TOOL_FRIENDLY = {
   'search_emails': '搜索邮件', 'send_notification': '发送通知',
 };
 
+// TICKET-DESK-V2D25：细线 SVG 图标映射（D2.5-1）——14px / 1.25px 描边 / fill:none /
+// currentColor 继承文字色；映射集中本对象，未知工具回退 _default 小方块（不许空白）
+var TOOL_ICONS = {
+  'execute_terminal': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.75" width="10.5" height="8.5" rx="1.5"/><path d="M4.25 5.25 L6 7 L4.25 8.75"/><path d="M7.5 8.75 h2.25"/></svg>',
+  'read_local_file': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75 h3.5 l3.25 3.25 V12.25 H4 Z"/><path d="M7.25 1.75 v3.5 h3.5"/></svg>',
+  'edit_file': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'grep_code': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.4"/><path d="M8.6 8.6 L11.5 11.5"/></svg>',
+  'save_memory': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'load_result': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'task_ledger': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.25 h8 M3 7 h8 M3 9.75 h8"/></svg>',
+  'run_tests': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.5 L5.5 10.25 L11.25 3.75"/></svg>',
+  'web_search': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M2.75 7 h8.5 M7 2.75 c-1.2 1.35 -1.2 6.15 0 8.5 M7 2.75 c1.2 1.35 1.2 6.15 0 8.5"/></svg>',
+  '_default': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.25"/></svg>'
+};
+// 图标取映射，未知工具回退 _default（不许空白）；reduced-motion 下运行卡不加 shimmer class
+function toolIcon(name) { return TOOL_ICONS[name] || TOOL_ICONS['_default']; }
+function prefersReducedMotion() {
+  return !!(typeof window !== 'undefined' && window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
   if (thinkBoxEl) {
@@ -1133,13 +1180,17 @@ function addTool(name, context, toolId) {
   var div = document.createElement('div'); div.className = 'tool';
   div.id = 'tool-' + uniqueId;
   div.setAttribute('data-tool', toolId);
-  div.innerHTML = '<span class="dot">●</span>' +
+  // TICKET-DESK-V2D25：状态属性化（data-state），DOM 无 running 裸文本——视觉由 .dot/流光表达
+  div.setAttribute('data-state', 'running');
+  div.innerHTML = toolIcon(name) +
+    '<span class="dot ring"></span>' +
     '<span class="tool-name">' + esc(friendly) + '</span>' +
     (context && context !== name ? '<span class="tool-context">' + esc(context) + '</span>' : '') +
-    '<span class="tool-status">running</span>' +
     '<span class="tool-time"></span>' +
     '<span class="tool-toggle" style="display:none">▸</span>' +
     '<div class="tool-result"></div>';
+  // TICKET-DESK-V2D25：运行中流光（D2.5-3）——纯 CSS animation，reduced-motion 不加 class
+  if (!prefersReducedMotion()) div.classList.add('shimmer');
   div.onclick = function(e) {
     // Don't toggle when clicking result text — allows text selection
     if (e.target.closest('.tool-result')) return;
@@ -1252,12 +1303,10 @@ function updateToolResult(toolId, data) {
   var allEntries = chatEl.querySelectorAll('.tool[data-tool="' + toolId + '"]');
   var div = null;
   for (var i = 0; i < allEntries.length; i++) {
-    var s = allEntries[i].querySelector('.tool-status');
-    if (s && s.textContent === 'running') { div = allEntries[i]; break; }
+    if (allEntries[i].getAttribute('data-state') === 'running') { div = allEntries[i]; break; }
   }
   if (!div) return;
   var dot = div.querySelector('.dot');
-  var statusEl = div.querySelector('.tool-status');
   var toggleEl = div.querySelector('.tool-toggle');
   var resultEl = div.querySelector('.tool-result');
   var error = data ? data.error || '' : '';
@@ -1266,21 +1315,22 @@ function updateToolResult(toolId, data) {
   var args = (data && data.arguments) ? data.arguments : {};
   var inlineDiff = data ? data.inline_diff || '' : '';
 
+  // TICKET-DESK-V2D25：完成/失败瞬间移除流光 class（光停）
+  div.classList.remove('shimmer');
+
   if (error) {
     dot.className = 'dot fail';
-    statusEl.textContent = 'failed';
-    statusEl.style.color = '#f48771';
+    div.setAttribute('data-state', 'failed');
     var timeElF = div.querySelector('.tool-time');
-    if (timeElF) timeElF.textContent = '—';
+    if (timeElF) { timeElF.textContent = '—'; timeElF.classList.add('in'); }
     resultEl.className = 'tool-result error open';
     resultEl.textContent = error.substring(0, 200);
   } else {
     dot.className = 'dot done';
+    div.setAttribute('data-state', 'done');
     // TICKET-DESK-V2B：耗时从状态文本迁出为独立时间列（.tool-time 44px 等宽右对齐）
-    statusEl.textContent = 'done';
     var timeEl = div.querySelector('.tool-time');
-    if (timeEl) timeEl.textContent = duration ? duration.toFixed(1) + 's' : '—';
-    statusEl.style.color = '#50a14f';
+    if (timeEl) { timeEl.textContent = duration ? duration.toFixed(1) + 's' : '—'; timeEl.classList.add('in'); }
     // TICKET-D1d ①② + F3-5: 有 diff 时工具卡只留一行摘要，diff 本体搬出为独立区块
     if (resultText || Object.keys(args).length > 0) {
       resultEl.className = 'tool-result';
@@ -1299,7 +1349,7 @@ function updateToolResult(toolId, data) {
     // Notify when a tool > 2s completes
     if (duration > 2 && Notification.permission !== 'denied') {
       if (Notification.permission === 'granted') {
-        new Notification('Bobo', { body: friendlyMap[toolId] || toolId + ' 完成 (' + duration.toFixed(1) + 's)' });
+        new Notification('Bobo', { body: TOOL_FRIENDLY[toolId] || toolId + ' 完成 (' + duration.toFixed(1) + 's)' });
       } else if (Notification.permission === 'default') {
         Notification.requestPermission();
       }
@@ -2075,9 +2125,11 @@ function buildHistToolCard(name, summary) {
   var friendly = TOOL_FRIENDLY[name] || name;
   var card = document.createElement('div'); card.className = 'tool';
   card.setAttribute('data-tool', name);
-  card.innerHTML = '<span class="dot">●</span>' +
+  // TICKET-DESK-V2D25：历史卡带细线图标 + 完成态实心点（灰绿）；历史是静的，不带流光
+  card.setAttribute('data-state', 'done');
+  card.innerHTML = toolIcon(name) +
+    '<span class="dot done"></span>' +
     '<span class="tool-name">' + esc(friendly) + '</span>' +
-    '<span class="tool-status">done</span>' +
     '<div class="tool-result"><div class="tool-summary">' + esc(summary) + '</div></div>';
   return card;
 }

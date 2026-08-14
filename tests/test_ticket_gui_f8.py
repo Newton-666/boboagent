@@ -302,7 +302,7 @@ def test_f8_3_gui_node_render_hist_tool_diff():
     src = GUI_FILE.read_text(encoding="utf-8")
     funcs = []
     for fn in ("renderHistToolDiff", "buildHistToolCard", "diffBlock",
-               "toolSummary", "diffStats", "esc"):
+               "toolSummary", "diffStats", "esc", "toolIcon"):
         funcs.append(_extract_func(src, fn))
     js = r"""
 // 最小 DOM 桩：记录 appendChild 的树，支持 firstChild（innerHTML 解析后手动挂）
@@ -314,7 +314,7 @@ function makeEl(tag) {
 const chatEl = makeEl('div'); chatEl.scrollTop = 0; chatEl.scrollHeight = 0;
 const document = { createElement: makeEl };
 const welcomeEl = { style: {} };
-""" + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
+""" + "\n" + _extract_var(src, "TOOL_ICONS") + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
 // 渲染含 diff 的工具消息（模拟 resume transcript 的 inline_diff）
 renderHistToolDiff('edit_file', '@@ -1,3 +1,3 @@\n-旧行\n+新行\n 上下文');
 // 收集产物：工具卡（一行摘要）；diff 块挂载由浏览器原生 innerHTML→firstChild
