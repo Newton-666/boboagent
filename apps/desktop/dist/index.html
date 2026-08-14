@@ -320,6 +320,15 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .ctx-detail .ctx-row { display:flex; justify-content:space-between; gap:16px; font-size:11px; color:var(--text); padding:3px 0; font-family:'SF Mono',Monaco,Menlo,monospace; }
 .ctx-detail .ctx-row span { color:var(--text-muted); font-family:-apple-system,'PingFang SC',sans-serif; }
 .ctx-detail .ctx-note { font-size:10px; color:var(--text-muted); margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-family:-apple-system,'PingFang SC',sans-serif; }
+/* TICKET-DESK-V2B3：斜杠命令面板（新增规则，全部取色板；既有规则零改动）
+   位置：#input-box 正上方（bottom:100%）、左对齐输入框左缘（left:0）、宽=输入框宽（width:100%）
+   视觉：--bg2 底、--border 发丝线、圆角 8px、选中行 --bg3（与色板严格一致） */
+#slash-panel { position:absolute; bottom:100%; left:0; width:100%; max-height:260px; overflow-y:auto; background:var(--bg2); border:1px solid var(--border); border-radius:8px; z-index:70; font-size:13px; color:var(--text); margin-bottom:4px; animation:fadeIn 0.25s ease-out; }
+#slash-panel .sp-item { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 12px; cursor:pointer; }
+#slash-panel .sp-item.sp-active { background:var(--bg3); }
+#slash-panel .sp-name { font-weight:600; white-space:nowrap; color:var(--text); }
+#slash-panel .sp-desc { color:var(--text2); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+#slash-panel .sp-empty { padding:8px 12px; color:var(--text-muted); }
 </style>
 </head>
 <body>
@@ -368,6 +377,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       </div>
     </div>
     <div id="input-box">
+      <!-- TICKET-DESK-V2B3：斜杠命令面板（输入框正上方，左对齐；内容 JS 渲染） -->
+      <div id="slash-panel" style="display:none"></div>
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
       <button id="auto-toggle" title="AUTO 模式开关（点击切换，回车=发送 / Shift+回车=换行）" disabled>AUTO</button>
       <button id="send" disabled>↑</button>
@@ -1845,6 +1856,7 @@ on('gateway.ready', async function() {
   document.getElementById('body-plugin').classList.add('closed');
   document.getElementById('arr-plugin').classList.add('closed');
   refreshCtxStats();   // TICKET-DESK-V2B：就绪后初始刷新上下文仪表盘
+  loadSlashCatalog();  // TICKET-DESK-V2B3：就绪后拉取命令目录（命令面板数据源）
   debug('Ready'); inputEl.focus();
 });
 
@@ -2202,6 +2214,114 @@ function handleSlash(cmd) {
   return false;
 }
 
+// TICKET-DESK-V2B3：斜杠命令路由 + "/" 命令面板
+// 数据源：后端 commands.catalog（commands 结构 + descs 说明字段，只读，启动拉一次）
+var slashPanelEl = document.getElementById('slash-panel');
+var slashCommands = [];
+var slashSel = -1;
+
+function execSlash(cmd) {
+  // V2B3 斜杠路由：未本地处理的 "/" 输入一律走后端 slash.exec（携带 session_id），
+  // 结果显示为系统消息（.status），不进 LLM
+  if (!connected || !currentSessionId) { addStatus('命令未执行：未连接或未选会话'); return; }
+  call('slash.exec', { command: cmd, session_id: currentSessionId }).then(function(r) {
+    if (r && r.output) { addStatus(r.output); }
+    else if (r && r.error) { addStatus('命令执行失败: ' + r.error); }
+  });
+}
+
+function loadSlashCatalog() {
+  call('commands.catalog', {}).then(function(r) {
+    var cmds = (r && r.commands) || {};
+    var descs = (r && r.descs) || {};
+    slashCommands = [];
+    Object.keys(cmds).forEach(function(group) {
+      var items = cmds[group] || {};
+      Object.keys(items).forEach(function(name) {
+        slashCommands.push({ name: name, usage: items[name], desc: descs[name] || '' });
+      });
+    });
+  });
+}
+
+function slashFilter(q) {
+  var kw = (q || '').slice(1).toLowerCase();
+  var out = [];
+  if (!slashCommands.length) return out;
+  for (var i = 0; i < slashCommands.length; i++) {
+    var c = slashCommands[i];
+    var n = c.name.toLowerCase();
+    if (!kw || n.indexOf('/' + kw) === 0 || n.indexOf(kw) >= 0) {
+      out.push(c);
+      if (out.length >= 8) break;
+    }
+  }
+  return out;
+}
+
+function hideSlashPanel() {
+  if (slashPanelEl) slashPanelEl.style.display = 'none';
+  slashSel = -1;
+}
+
+function renderSlashPanel(q) {
+  if (!slashPanelEl) return;
+  var list = slashFilter(q);
+  if (!list.length) { hideSlashPanel(); return; }
+  if (slashSel < 0) slashSel = 0;
+  if (slashSel >= list.length) slashSel = list.length - 1;
+  slashPanelEl.innerHTML = list.map(function(c, i) {
+    return '<div class="sp-item' + (i === slashSel ? ' sp-active' : '') + '" data-idx="' + i + '">' +
+      '<span class="sp-name">' + esc(c.name) + '</span>' +
+      '<span class="sp-desc">' + esc(c.desc || c.usage || '') + '</span></div>';
+  }).join('');
+  slashPanelEl.style.display = 'block';
+}
+
+function moveSlashSel(d) {
+  var list = slashFilter(inputEl.value);
+  if (!list.length) return;
+  slashSel += d;
+  if (slashSel < 0) slashSel = 0;
+  if (slashSel >= list.length) slashSel = list.length - 1;
+  // 只更新高亮 class，不整表重绘（防闪烁）
+  var items = slashPanelEl.querySelectorAll('.sp-item');
+  for (var i = 0; i < items.length; i++) {
+    items[i].className = 'sp-item' + (i === slashSel ? ' sp-active' : '');
+  }
+}
+
+function acceptSlashSel() {
+  // Enter/Tab/点击：把选中命令补全进输入框（不自动发送，便于追加参数），光标移到末尾
+  var list = slashFilter(inputEl.value);
+  if (!list.length || slashSel < 0) return;
+  var full = list[slashSel].name;
+  inputEl.value = full + ' ';
+  var len = inputEl.value.length;
+  try { inputEl.setSelectionRange(len, len); } catch (e) {}
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+  hideSlashPanel();
+  inputEl.focus();
+}
+
+slashPanelEl.addEventListener('mouseover', function(e) {
+  var t = e.target;
+  while (t && t !== slashPanelEl && !(t.classList && t.classList.contains('sp-item'))) t = t.parentNode;
+  if (t && t.classList && t.classList.contains('sp-item')) {
+    var idx = parseInt(t.getAttribute('data-idx'), 10);
+    if (idx !== slashSel) moveSlashSel(idx - slashSel);
+  }
+});
+slashPanelEl.addEventListener('click', function(e) {
+  var t = e.target;
+  while (t && t !== slashPanelEl && !(t.classList && t.classList.contains('sp-item'))) t = t.parentNode;
+  if (t && t.classList && t.classList.contains('sp-item')) {
+    slashSel = parseInt(t.getAttribute('data-idx'), 10);
+    acceptSlashSel();
+  }
+});
+
 // TICKET-GUI-F1 (F1-1): 输入法组词标志 —— 组词中任何回车/发送都不触发，交给 IME 上屏
 var imeComposing = false;
 inputEl.addEventListener('compositionstart', function() { imeComposing = true; });
@@ -2213,8 +2333,13 @@ sendEl.addEventListener('click', function() {
   var text = inputEl.value.trim(); if (!text || !connected || messaging) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
+  hideSlashPanel();
   if (text.startsWith('/')) {
+    // TICKET-DESK-V2B3：斜杠路由 —— 本地快速命令（clear 需清 UI）走 handleSlash；
+    // 其余一律走后端 slash.exec（携带 session_id），结果显示为系统消息，不再进 LLM
     if (handleSlash(text.slice(1))) return;
+    execSlash(text.slice(1));
+    return;
   }
   addMsg('user', text, 'user-' + Date.now());
   sendPrompt(text);
@@ -2233,6 +2358,15 @@ document.getElementById('auto-toggle').addEventListener('click', function() {
 inputEl.addEventListener('keydown', function(e) {
   // F1-1: 组词中（isComposing / keyCode 229 / imeComposing 任一命中）回车不发送，上屏选词交给输入法
   if (e.isComposing || e.keyCode === 229 || imeComposing) return;
+  // TICKET-DESK-V2B3：命令面板键（↑↓ 选择 / Enter|Tab 补全 / Esc 关闭）——
+  // 位于 IME 守卫之后，组词中绝不触发面板操作
+  var spOpen = slashPanelEl && slashPanelEl.style.display !== 'none';
+  if (spOpen) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSlashSel(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveSlashSel(-1); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acceptSlashSel(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); hideSlashPanel(); return; }
+  }
   if (e.key === 'Enter') {
     // F2-1: Shift+回车 = 换行（textarea 默认插入 \n，不拦截）
     if (e.shiftKey) return;
@@ -2246,6 +2380,9 @@ inputEl.addEventListener('keydown', function(e) {
 inputEl.addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+  // TICKET-DESK-V2B3：首字符 "/" 弹命令面板（实时过滤；组词中不弹）
+  if (this.value.charAt(0) === '/' && connected && !imeComposing) renderSlashPanel(this.value);
+  else hideSlashPanel();
 });
 
 // ── Settings ────────────────────────────────────────────────────────────
@@ -2333,6 +2470,9 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'n' && mod) { e.preventDefault(); newChat(); }
   if (e.key === ',' && mod) { e.preventDefault(); document.getElementById('settings-icon').click(); }
   if (e.key === 'Escape') {
+    // TICKET-DESK-V2B3：命令面板开着时 Esc 优先关闭（不触发明细卡/中断）
+    var spEl = document.getElementById('slash-panel');
+    if (spEl && spEl.style.display !== 'none') { spEl.style.display = 'none'; return; }
     // TICKET-DESK-V2B：明细卡开着时 Esc 优先收起（不触发中断）
     var ctxDet = document.getElementById('ctx-stats-detail');
     if (ctxDet && ctxDet.style.display !== 'none') { ctxDet.style.display = 'none'; }

@@ -666,10 +666,32 @@ _COMMANDS = {
     }
 }
 
+# TICKET-DESK-V2B3：命令面板一句话说明（只加不改——descs 与 commands 并列返回，
+# 不动 _COMMANDS 结构；缺说明的命令前端回退用 usage 文本）
+_COMMAND_DESC = {
+    "/bobo-audit": "运行 bobo 全量审计",
+    "/memory-consolidate": "整理长期记忆",
+    "/mode": "切换主动模式 off|subtle|full",
+    "/help": "显示全部可用命令与用法",
+    "/clear": "清除当前对话",
+    "/undo": "回退上一步操作（可带 N 或关键词）",
+    "/tools": "列出全部工具",
+    "/settings": "查看当前配置",
+    "/exit": "退出当前会话",
+    "/sessions": "列出所有会话",
+    "/duo": "双员模式：A 干活 B 验收",
+    "/provider": "列出/切换提供商",
+    "/auto": "AUTO MODE 开关（单独使用为翻转）",
+    "/office": "OFFICE MODE 老板专用开关",
+    "/scan": "侦查 tmux 内活着的 bobo/pi",
+    "/connect": "连接 /scan 候选对象建立互传",
+    "/disconnect": "断开当前互传通道",
+}
+
 
 def handle_commands_catalog(params: dict, rid: str) -> dict:
-    """返回所有可用命令列表"""
-    return ok(rid, {"commands": _COMMANDS})
+    """返回所有可用命令列表（commands 结构不变；descs 为 V2B3 新增说明字段）"""
+    return ok(rid, {"commands": _COMMANDS, "descs": _COMMAND_DESC})
 
 
 # ── 注册 ──
