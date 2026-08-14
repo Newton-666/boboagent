@@ -128,9 +128,12 @@ def _node_simulation_script(with_missing_think: bool, no_think_second: bool = Fa
     # F8 配套：TOOL_FRIENDLY 提升为模块级后 addTool 引用它，桩必须带上
     tf_m = re.search(r"var TOOL_FRIENDLY = \{[^;]*\};", src)
     assert tf_m, "F8: 需要 var TOOL_FRIENDLY 映射"
+    # V2D25 配套：TOOL_ICONS/toolIcon/prefersReducedMotion（addTool 引用，桩必须带上）
+    ic_m = re.search(r"var TOOL_ICONS = \{[^;]*\};", src)
+    assert ic_m, "V2D25: 需要 var TOOL_ICONS 映射"
     fns = "\n".join(
-        [tf_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
-        [_extract_func(src, n) for n in ("esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
+        [tf_m.group(0), ic_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
+        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
     )
     # 每步 (思考文本或 None, 工具 id)；默认每步带思考
     steps = [(f"思考{i}", f"t{i}") for i in range(1, 6)]
@@ -248,7 +251,8 @@ function maxConsecThink(el) {{
   return best;
 }}
 function directClasses(el) {{
-  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : c.className);
+  // V2D25 演进：工具卡 className 含 'shimmer' 附加 token，按 'tool' token 判定
+  return el._children.map(c => c.classList.contains('think-box') ? 'think:' + (c._thinkText || '') : (c.classList.contains('tool') ? 'tool' : c.className));
 }}
 
 // ── 模拟 5 步施工流（每步：思考折叠 → 工具卡；think=null 则无思考）──
@@ -277,7 +281,7 @@ assert(head.textContent.includes('已执行 5 步操作'), '标题应计 5 步: 
 
 // ── 聚合卡体内：思考→工具 成对顺序 ──
 const aggBody = kids[0].querySelector('.tool-agg-body');
-const order = aggBody._children.map(c => c._thinkText || c.className);
+const order = aggBody._children.map(c => c._thinkText || (c.classList.contains('tool') ? 'tool' : c.className));
 const expectOrder = {body_json};
 assert(JSON.stringify(order) === JSON.stringify(expectOrder),
   '聚合卡体应为 ' + JSON.stringify(expectOrder) + '，实际: ' + JSON.stringify(order));

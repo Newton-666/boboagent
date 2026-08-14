@@ -81,14 +81,18 @@ def _make_ctx():
 # ── V2B-1：工具时间线静态闸 ────────────────────────────────────────────
 def test_v2b_1_tool_timeline_static():
     src = _gui()
-    # addTool：工具卡内联 tool-time 元素（status 之后、toggle 之前 → 行内最右）
+    # addTool：工具卡内联 tool-time 元素（toggle 之前 → 行内最右）
     at = _extract_func(src, "addTool")
     assert "tool-time" in at, "addTool 应生成 .tool-time 元素"
-    assert at.index("tool-status") < at.index("tool-time") < at.index("tool-toggle"), \
-        "tool-time 必须位于 status 与 toggle 之间（行内最右，status 左侧）"
-    # updateToolResult：耗时写入 tool-time，status 简化为纯状态词（不再内嵌耗时）
+    assert at.index("tool-time") < at.index("tool-toggle"), \
+        "tool-time 必须位于 toggle 之前（行内最右）"
+    # V2D25 演进：状态属性化（data-state），DOM 无 running 裸文本（tool-status 元素已移除）
+    assert "setAttribute('data-state', 'running')" in at, "V2D25: 运行态应写 data-state 属性"
+    assert ">running<" not in at, "V2D25: addTool 不得输出 running 裸文本"
+    # updateToolResult：耗时写入 tool-time，状态走 data-state（V2D25 语义替代裸文本）
     ur = _extract_func(src, "updateToolResult")
-    assert "statusEl.textContent = 'done'" in ur, "成功态 status 应为纯 'done'（耗时迁出）"
+    assert "data-state', 'done'" in ur, "成功态应写 data-state=done"
+    assert "data-state', 'failed'" in ur, "失败态应写 data-state=failed"
     assert "timeEl.textContent = duration ? duration.toFixed(1) + 's' : '—'" in ur, \
         "耗时应写入 tool-time（等宽数字）"
     assert "timeElF.textContent = '—'" in ur, "失败态 tool-time 应显示 —"
@@ -108,45 +112,47 @@ def test_v2b_1_tool_timeline_node():
     src = _gui()
     ur = _extract_func(src, "updateToolResult")
     js = r"""
-function makeEl(selMap) {
-  return { textContent: '', className: '', innerHTML: '', style: {},
-    classList: { add() {}, toggle() {} }, setAttribute() {}, querySelector(s) { return selMap[s] || null; } };
-}
-const timeEl = { textContent: '', style: {} };
-const statusEl = { textContent: 'running', style: {} };
+// V2D25 演进桩：data-state 属性 + classList.remove（shimmer 移除）记录
+const timeEl = { textContent: '', style: {}, classList: { add() {} } };
 const dot = { className: '', style: {} };
 const toggleEl = { textContent: '', style: {}, classList: { add() {} } };
 const resultEl = { className: '', textContent: '', innerHTML: '', classList: { add() {} } };
-const card = makeEl({});
-card.querySelector = function(s) {
-  if (s === '.tool-status') return statusEl;
-  if (s === '.tool-time') return timeEl;
-  if (s === '.dot') return dot;
-  if (s === '.tool-toggle') return toggleEl;
-  if (s === '.tool-result') return resultEl;
-  return null;
+const card = {
+  _attrs: {}, removed: [],
+  getAttribute(k) { return this._attrs[k] || null; },
+  setAttribute(k, v) { this._attrs[k] = v; },
+  classList: { add() {}, toggle() {}, remove(c) { card.removed.push(c); } },
+  querySelector(s) {
+    if (s === '.tool-time') return timeEl;
+    if (s === '.dot') return dot;
+    if (s === '.tool-toggle') return toggleEl;
+    if (s === '.tool-result') return resultEl;
+    return null;
+  }
 };
+card.setAttribute('data-state', 'running');
 const chatEl = { querySelectorAll() { return [card]; } };
-// 聚合卡考古场景：卡已吞入 tool-agg-body（仍在 chatEl 下），同一 div 带 time
 global.chatEl = chatEl;
 global.Notification = { permission: 'denied', requestPermission() {} };
 global.friendlyMap = {};
 """ + ur + r"""
-// 成功路径：duration 12.345 → status 'done'，time '12.3s'
+// 成功路径：duration 12.345 → data-state done，time '12.3s'，dot done，shimmer 移除
 updateToolResult('read_local_file', { duration: 12.345, arguments: {}, result_text: '' });
-if (statusEl.textContent !== 'done') throw new Error('成功态 status 应为 done，实际: ' + statusEl.textContent);
+if (card.getAttribute('data-state') !== 'done') throw new Error('成功态 data-state 应为 done，实际: ' + card.getAttribute('data-state'));
 if (timeEl.textContent !== '12.3s') throw new Error('tool-time 应为 12.3s，实际: ' + timeEl.textContent);
 if (dot.className !== 'dot done') throw new Error('成功态 dot 应为 dot done');
+if (card.removed.indexOf('shimmer') === -1) throw new Error('完成应移除 shimmer class');
 // 无 duration → '—'
-statusEl.textContent = 'running'; timeEl.textContent = '';
+card.setAttribute('data-state', 'running'); timeEl.textContent = '';
 updateToolResult('read_local_file', { duration: 0, arguments: {}, result_text: '' });
 if (timeEl.textContent !== '—') throw new Error('无 duration 应为 —，实际: ' + timeEl.textContent);
-// 失败路径：error → status failed，time '—'
-statusEl.textContent = 'running'; timeEl.textContent = '';
+// 失败路径：error → data-state failed，time '—'，dot fail，shimmer 移除
+card.setAttribute('data-state', 'running'); timeEl.textContent = '';
 updateToolResult('read_local_file', { error: 'boom', duration: 3, arguments: {} });
-if (statusEl.textContent !== 'failed') throw new Error('失败态 status 应为 failed');
+if (card.getAttribute('data-state') !== 'failed') throw new Error('失败态 data-state 应为 failed');
 if (timeEl.textContent !== '—') throw new Error('失败态 time 应为 —');
 if (dot.className !== 'dot fail') throw new Error('失败态 dot 应为 dot fail');
+if (card.removed.filter(function(c) { return c === 'shimmer'; }).length < 2) throw new Error('失败也应移除 shimmer');
 console.log('NODE_V2B1_TIMELINE_OK');
 """
     out = _run_node(js)
