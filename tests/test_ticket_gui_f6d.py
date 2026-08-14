@@ -237,6 +237,17 @@ function createThinkBox() {{
   el._thinkText = '';
   return el;
 }}
+// TICKET-GUI-F10 兼容桩：真实 delta 块首行 isForeignSession 闸门（F10 新增），
+// 本测试全部调用均不带 session_id（无 sid 恒放行），放行桩与真实语义等价（闸门语义由 test_f10_1 守住）
+let currentSessionId = null;
+function markBgActive() {{}}
+function isForeignSession(data) {{
+  var sid = data && data.session_id;
+  if (!sid || sid === currentSessionId) return false;
+  markBgActive(sid);
+  return true;
+}}
+
 {handler}
 
 // 场景：思考1 → 状态行 → 新思考 → 应合并进思考1（跳过状态行），不新建
