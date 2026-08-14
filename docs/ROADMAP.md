@@ -22,6 +22,7 @@
 
 | 票 | 合并 |
 |---|---|
+| DESK-V2D25 工具卡精致化 | 9a168e0（细线 SVG 图标 TOOL_ICONS+_default 回退/data-state 三态/shimmer 流光+reduced-motion 禁用；CSS 全进锚点段零新增颜色；顺手修复 friendlyMap 未定义 ReferenceError；附带补票 INT-1 漏网测试入库；全量 2476 passed；回滚标签 rollback/pre-desk-v2d25） |
 | GUI-F12 历史聚合渲染 | 2db1b6c（过往回合思考+工具链收聚合卡/最新一轮平铺/diff 语义保留；自审四修复：冒泡误收/空链丢思考/histLatest 重置/reflow 统一；抽 buildHistThinkBox/buildHistToolCard 公函数） |
 | GUI-F11 自动命名持久化 | 6415ded（rename 加 auto 通道：落盘不置 user_named，已命名拒绝覆盖，TUI 天然同步） |
 | DESK-V2C12 Markdown+衬线 | 420bf8a（marked+DOMPurify+highlight.js 全 vendor 本地含 LICENSE；渲染仅 .msg.bobo .txt 一处；Charter 四件 woff2 + --font-reply 中落宋体；CSS 全在锚点段；全量 2459 passed） |
