@@ -114,6 +114,7 @@ def _post_with_headers_watchdog(
     headers_timeout=None,
     event_bus=None,
     session_id=None,
+    _interrupt_event=None,
 ):
     """在 headers 阶段总预算保护下执行 requests.post。
 
@@ -158,7 +159,23 @@ def _post_with_headers_watchdog(
 
         _t = _threading.Thread(target=_worker)
         _t.start()
-        _t.join(timeout=headers_timeout)
+        # 票 INT2：join 改短超时轮询 —— headers 阶段不再是无检查点黑洞。
+        # 原实现 join(timeout=headers_timeout) 期间中断信号无人响应（实测 Stop 后
+        # 最长 129s 才断流：90s join 耗尽 + 尾段）；现在每 0.5s 醒一次，中断置位
+        # 立即 shutdown socket + 抛 LLMInterrupted，≤0.5s 响应。
+        _deadline = time.time() + headers_timeout
+        while True:
+            _remaining = _deadline - time.time()
+            if _remaining <= 0:
+                break
+            _t.join(timeout=min(0.5, _remaining))
+            if not _t.is_alive():
+                break
+            if _interrupt_event is not None and _interrupt_event.is_set():
+                _sock = _sock_holder.get("sock")
+                if _sock is not None:
+                    _close_socket(_sock)
+                raise LLMInterrupted("user interrupt during headers (silent)")
 
         if not _t.is_alive():
             # 正常完成（或 worker 自己先抛异常）
@@ -451,6 +468,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     headers_timeout=_get_headers_timeout(),
                     event_bus=_event_bus,
                     session_id=session_id,
+                    _interrupt_event=_interrupt_event,
                 )
 
                 # ── HTTP 状态码检查 ──

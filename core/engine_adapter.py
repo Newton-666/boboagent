@@ -30,16 +30,36 @@ def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool
 
 def cancel(sid: str):
     """请求中断指定会话的 engine 执行。"""
+    # 票 INT2：requested 无条件留痕 —— 原实现只在 _running 命中时写，
+    # sid 错位/miss 路径完全静默（无声死亡）。现在无论命中与否都记，miss 附注册表快照。
+    try:
+        from core.event_bus import event_bus as _ebus
+        _ebus.write("engine.cancel.requested", {"session_id": sid})
+    except Exception:
+        pass
     with _running_lock:
         event = _running.get(sid)
-    if event:
-        event.set()
-        # 票 W：cancel 通道必须留痕（无声死亡案的头号嫌疑通道）
-        try:
-            from core.event_bus import event_bus as _ebus
-            _ebus.write("engine.cancel.requested", {"session_id": sid})
-        except Exception:
-            pass
+        if event is None:
+            try:
+                from core.event_bus import event_bus as _ebus
+                _ebus.write("engine.cancel.miss", {
+                    "session_id": sid,
+                    "running_sids": sorted(_running.keys()),
+                })
+            except Exception:
+                pass
+            return
+    try:
+        from core.event_bus import event_bus as _ebus
+        _ebus.write("engine.cancel.found", {"session_id": sid})
+    except Exception:
+        pass
+    event.set()
+    try:
+        from core.event_bus import event_bus as _ebus
+        _ebus.write("engine.cancel.set", {"session_id": sid})
+    except Exception:
+        pass
 
 
 def is_running(sid: str) -> bool:
