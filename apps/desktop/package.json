@@ -11,7 +11,8 @@
   },
   "devDependencies": {
     "electron": "^43.4.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "jsdom": "^30.0.1"
   },
   "build": {
     "appId": "com.bobo.agent",
@@ -29,17 +30,23 @@
       {
         "from": "../../bobo_tui_gateway",
         "to": "bobo-backend/bobo_tui_gateway",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../../core",
         "to": "bobo-backend/core",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../../tools",
         "to": "bobo-backend/tools",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../../config.py",
