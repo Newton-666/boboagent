@@ -159,6 +159,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._ledger_backfill_suspect: bool = False  # 票 O8-2：事后补账嫌疑（工具轮批量创建即全 done）
         self._reply_quality_reinject_count: int = 0  # 票 R2b：答复质量闸打回计数（每回合至多 1 次，防死循环）
         self._round_had_write_tool: bool = False  # 票 R2b：本回合是否含写类工具（问答回合无台账段判定）
+        self._round_tool_exec_count: int = 0  # 票 R3-b：本轮工具执行次数（读/查施工豁免证据）
         # 主动模式管理器（含记忆连接 + 参与度追踪）
         self.proactive = ProactiveManager(llm_caller=self.llm_caller)
         # 技能标准加载器
@@ -662,11 +663,22 @@ class Engine(ContextMixin, ToolRunnerMixin):
         补账特征：本工具轮含 task_ledger 调用，且创建前台账为空（无历史轮次 = 非 resume），
         轮末新台账 >=2 项且 done 占比 >=80%（全部/大部直接标 done，创建与 done 无中间轮次）。
         resume 恢复既有台账（create 前已有非空台账 = 有历史轮次）→ 豁免，返回 False。
+        票 R3-a：施工证据豁免——create 后存在任何非 ledger 工具轮（真实施工痕迹）→
+        全 done 不算补账。补账的本质是"没干活直接标 done"，不是"干完活再登记"。
         """
         if "task_ledger" not in tool_names:
             return False
         if prev_ledger or len(self.task_ledger) < 2:
             return False
+        # 票 R3-a：施工证据豁免——历史中任意非 ledger 工具轮 = 真实施工痕迹
+        for _m in getattr(self, "history", []) or []:
+            _tc = _m.get("tool_calls") if isinstance(_m, dict) else None
+            if not _tc:
+                continue
+            for _call in _tc:
+                _fn = (_call.get("function") or {}).get("name", "") if isinstance(_call, dict) else ""
+                if _fn and _fn != "task_ledger":
+                    return False
         done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
         return done_cnt >= max(1, int(len(self.task_ledger) * 0.8))
 
@@ -1691,7 +1703,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         self._pending_content = err_msg
                         self._emit_state_change(self.STATE_RESPONDING, "response error")
                 # 检查是否需要验证：LLM 声称完成但没有使用任何工具
-                elif self.verifier.check_and_inject(self.history, content):
+                # 票 R3-c：仅当声称完成且本回合零 tool.exec 才触发（干完活正常收尾不误伤）
+                elif self.verifier.check_and_inject(self.history, content,
+                                                    tool_exec_count=self._round_tool_exec_count):
                     self._pending_content = None
                     self._pending_tool_calls = None
                     self.current_depth += 1
@@ -1765,7 +1779,17 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         "session_id": getattr(self, "sid", ""),
                                         "content_snippet": self._pending_content[:100],
                                     })
-                                    if self._ledger_reinject_count < 2:
+                                    # 票 R3-d：熔断前开确认通道——检测到施工证据（写类工具/多次工具执行）
+                                    # 直接放行，不逼模型"继续"（有真实施工痕迹就不是空口承诺）。
+                                    if self._round_had_write_tool or self._round_tool_exec_count >= 3:
+                                        event_bus.write("goal_gate.released", {
+                                            "session_id": getattr(self, "sid", ""),
+                                            "reason": "construction_evidence",
+                                            "tool_exec_count": self._round_tool_exec_count,
+                                        })
+                                        warning = "\n\n⚠️ 施工证据已确认，引擎放行"
+                                        self._pending_content = (self._pending_content or "") + warning
+                                    elif self._ledger_reinject_count < 2:
                                         self._ledger_reinject_count += 1
                                         rej_msg = "检测到未完成的承诺。请继续执行，不要说明、不要道歉，直接继续。"
                                         self._append_to_history("user", rej_msg)
@@ -1790,8 +1814,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     # 2) 思考落纸：thinking 有实质分析（≥60 字）但回复过短（<80 字）→ 分析没落到回复
                     # 打回每回合至多一次（_reply_quality_reinject_count，防死循环）；
                     # 写类施工回合豁免（施工收尾以交账为主，不误伤）。
+                    # 票 R3-b：豁免面扩大——本轮 tool.exec ≥3 次即豁免（读/查施工同样有实质干活，
+                    # 不再只认写类工具；有实际执行就不算空口台账腔）。
                     if (self._pending_content and not self._reply_quality_reinject_count
-                            and not self._round_had_write_tool):
+                            and not self._round_had_write_tool
+                            and self._round_tool_exec_count < 3):
                         _content = self._pending_content
                         _len = len(_content)
                         _stripped = _content.strip()
@@ -1890,7 +1917,25 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
                     pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
                     if pending_items:
-                        if self._ledger_reinject_count < 2:
+                        # 票 R3-d：熔断前开确认通道——检测到施工证据（写类工具/多次工具执行）
+                        # 直接放行，不逼模型"继续"（有真实施工痕迹就不是空口承诺）。
+                        if self._round_had_write_tool or self._round_tool_exec_count >= 3:
+                            pending_titles = ", ".join(
+                                f'"{e["title"][:30]}"' for e in pending_items
+                            )
+                            event_bus.write("goal_gate.released", {
+                                "session_id": getattr(self, "sid", ""),
+                                "reason": "construction_evidence",
+                                "tool_exec_count": self._round_tool_exec_count,
+                                "pending_items": len(pending_items),
+                            })
+                            warning = (
+                                f"\n\n⚠️ 施工证据已确认，引擎放行（台账 {len(pending_items)} 项未销账：{pending_titles}）"
+                            )
+                            self._pending_content = (self._pending_content or "") + warning
+                            logger.debug("GATE ledger construction-evidence release: %d pending",
+                                         len(pending_items))
+                        elif self._ledger_reinject_count < 2:
                             # 回注次数 < 2 → 回注一条 user 消息，回到 THINKING
                             self._ledger_reinject_count += 1
                             titles = ", ".join(f'"{e["title"][:30]}"' for e in pending_items)
@@ -2084,6 +2129,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 # 票 R2b：本回合是否含写类工具（问答回合无台账段判定；写类施工回合答复质量闸豁免）
                 _WRITE_TOOL_NAMES = {"edit_file", "file_operation", "file_writer", "delete_file"}
                 self._round_had_write_tool = any(n in _WRITE_TOOL_NAMES for n in round_names)
+                # 票 R3-b：本回合 tool.exec 累计次数（读/查施工也算，≥阈值豁免 R2b 质量闸；
+                # 累计而非每轮重置，保证多轮施工后收尾回复仍能豁免）
+                self._round_tool_exec_count += len(round_names)
                 self.tracker.record_tool_pattern(round_names, self.current_user_input or "")
             self._notify("thinking", {"phase": "continuing", "message": "工具执行完成"})
             self._pending_content = None
@@ -2168,6 +2216,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._exit_reason = "completed"
         self._all_confirmed = False
         self.verifier.attempted = False
+        # 票 R3-b/c：每回合重置本轮工具执行计数（防上一回合残留值污染本轮判定）
+        self._round_tool_exec_count = 0
 
         if self.history and not self._compressing:
             from core.context import _estimate_tokens, _get_context_budget

@@ -66,9 +66,15 @@ class FakeToolExecutor:
     def __init__(self, responses: dict = None):
         self.responses = responses or {}
         self.calls: list[tuple] = []
+        self.ledger_engine = None  # 设置后 task_ledger 走真实 execute（写 engine.task_ledger）
 
     def __call__(self, tool_name: str, args: dict) -> str:
         self.calls.append((tool_name, args))
+        if tool_name == "task_ledger" and self.ledger_engine is not None:
+            from tools.task_ledger import execute as _ledger_execute
+            return _ledger_execute(action=args.get("action"),
+                                   items=args.get("items"),
+                                   _engine=self.ledger_engine)
         if tool_name in self.responses:
             return self.responses[tool_name]
         return f"[fake result of {tool_name}: {args}]"
