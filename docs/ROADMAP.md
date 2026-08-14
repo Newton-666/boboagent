@@ -12,11 +12,12 @@
 
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
-| 1 | COST-1a 工具画像+外置实验（owner 11:38/11:40 拍板：**实验最优先，先于样式票**；Worker 冻结；**难点不在"少=快"的公理，在砍哪把刀**） | ✅ 第一步挖矿完成（reports/tool_profile_report.md：82 工具 64% 税白交、死工具 51 个、重复调用 4.4%、空回复 11.6%、平均 5 万 tokens/轮）→ ✅ 挖矿完成 → ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存（owner 14:08 拍板：先转视觉线） |
-| 3.5 | RESEARCH-DSH | bobo 亲拆 DeepSeek Harness 源码（一切皆插件/9 子代理/PTC/缓存键/Session Log），产出对照笔记入 library，兼作研究能力测试 | ✅ 已完工（笔记 182 行带源码行号，Kimi 抽查引用属实）；可移植清单待消化进 WORKER-V1/TOOL-OPT/COST-1a/EV-2 |
-| 4 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
-| 6 | DESK-V4 桌面小组件（owner 15:26/15:28 拍板：**排在所有票之后**，好做就直接做掉） | **定位=桌面端的映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，状态/任务/药丸/最近工具全从 gateway 现成数据流映射，零业务逻辑；审批时变橙轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | 📋 队列末尾 |
-| 5 | DESK-V2D 美学微票串（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D1 回复正文 Charter 衬线（一处 font-family 变量）→ D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise）→ D5 药丸升认知状态条（水位+记忆数+工具数） | 📋 V2C1+C2 之后，逐票精调 |
+| 0 | GOV-1 能力内化 | 纪律注入 + 收工自审固化 + 新人开箱测试 | 🔨 施工中（feat/ticket-gov-1） |
+| 1 | DESK-V4 桌面小组件（owner 22:33 拍板：**提至 GOV-1 后第一顺位**） | **定位=桌面端的映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，状态/任务/药丸/最近工具全从 gateway 现成数据流映射，零业务逻辑；审批时变橙轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | 📋 下一票 |
+| 2 | DESK-CLI `bobo desktop` 子命令（owner 22:33 拍板：**紧随小组件**——"下次我自己终端输 bobo desktop 也会快很多"） | CLI 加 desktop 子命令：检测 node_modules→缺则自动 npm install→npm start 拉起 Electron；配套新人上手 README（clone→pip install -e .→bobo / bobo desktop 全流程） | 📋 第二顺位 |
+| 3 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
+| 4 | DESK-V2D 美学微票串（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D1 回复正文 Charter 衬线（一处 font-family 变量）→ D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise）→ D5 药丸升认知状态条（水位+记忆数+工具数） | 📋 逐票精调 |
+| ⏸ | COST-1a 工具画像+外置实验 | ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存 |
 
 **✅ 已完成（近期，新→旧）**
 
