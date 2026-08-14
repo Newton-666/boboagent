@@ -22,6 +22,8 @@
 
 | 票 | 合并 |
 |---|---|
+| GUI-F12 历史聚合渲染 | 2db1b6c（过往回合思考+工具链收聚合卡/最新一轮平铺/diff 语义保留；自审四修复：冒泡误收/空链丢思考/histLatest 重置/reflow 统一；抽 buildHistThinkBox/buildHistToolCard 公函数） |
+| GUI-F11 自动命名持久化 | 6415ded（rename 加 auto 通道：落盘不置 user_named，已命名拒绝覆盖，TUI 天然同步） |
 | DESK-V2C12 Markdown+衬线 | 420bf8a（marked+DOMPurify+highlight.js 全 vendor 本地含 LICENSE；渲染仅 .msg.bobo .txt 一处；Charter 四件 woff2 + --font-reply 中落宋体；CSS 全在锚点段；全量 2459 passed） |
 | TOOL-PARK-1 工具外挂仓 | b325736（51 死工具打包 data/tool_park.json 出链：schema 税 8353→4026 tokens/轮（-52%），函数保留可执行 + describe_tool 可取件；全量 2426 passed） |
 | COST-1a-SANDBOX 四档实验 | fc75bed（100 次真实 API：B 合并档=平衡点——成功率 100% 持平全量档且比现状省 37% tokens；C 极简最省但笔记能力掉；B 档 action 选错率 27% 可自愈。报告 reports/cost1a_sandbox_report.md） |
