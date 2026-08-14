@@ -1,6 +1,6 @@
 # ROADMAP — bobo 体系作战地图
 
-> v4.4 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
+> v4.5 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
 
 ## 当前队列（按执行顺序）
 
@@ -14,7 +14,6 @@
 |---|---|---|---|
 | 1 | COST-1a 工具画像+外置实验（owner 11:38/11:40 拍板：**实验最优先，先于样式票**；Worker 冻结；**难点不在"少=快"的公理，在砍哪把刀**） | ✅ 第一步挖矿完成（reports/tool_profile_report.md：82 工具 64% 税白交、死工具 51 个、重复调用 4.4%、空回复 11.6%、平均 5 万 tokens/轮）→ ✅ 挖矿完成 → ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存（owner 14:08 拍板：先转视觉线） |
 | 3.5 | RESEARCH-DSH | bobo 亲拆 DeepSeek Harness 源码（一切皆插件/9 子代理/PTC/缓存键/Session Log），产出对照笔记入 library，兼作研究能力测试 | ✅ 已完工（笔记 182 行带源码行号，Kimi 抽查引用属实）；可移植清单待消化进 WORKER-V1/TOOL-OPT/COST-1a/EV-2 |
-| 1.5 | DESK-V2C1+C2 样式票（**视觉线启动，owner 14:08 拍板**） | 完整 Markdown 渲染（粗斜下划线/表格/代码高亮，owner 要求 99% 成功率）+ 回复正文衬线（Charter 类，Anthropic Serif 有版权坑不捆）；双语通用排版不针对单语言；样式票独立回溯纪律已立（GUI-DESIGN 规则 6） | 📋 待开 |
 | 4 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
 | 5 | DESK-V2D 美学微票串（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D1 回复正文 Charter 衬线（一处 font-family 变量）→ D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise）→ D5 药丸升认知状态条（水位+记忆数+工具数） | 📋 V2C1+C2 之后，逐票精调 |
 
@@ -22,6 +21,7 @@
 
 | 票 | 合并 |
 |---|---|
+| DESK-V2C12 Markdown+衬线 | 420bf8a（marked+DOMPurify+highlight.js 全 vendor 本地含 LICENSE；渲染仅 .msg.bobo .txt 一处；Charter 四件 woff2 + --font-reply 中落宋体；CSS 全在锚点段；全量 2459 passed） |
 | TOOL-PARK-1 工具外挂仓 | b325736（51 死工具打包 data/tool_park.json 出链：schema 税 8353→4026 tokens/轮（-52%），函数保留可执行 + describe_tool 可取件；全量 2426 passed） |
 | COST-1a-SANDBOX 四档实验 | fc75bed（100 次真实 API：B 合并档=平衡点——成功率 100% 持平全量档且比现状省 37% tokens；C 极简最省但笔记能力掉；B 档 action 选错率 27% 可自愈。报告 reports/cost1a_sandbox_report.md） |
 | CORE-R3 四刀拆闸 | 7b8e96f（补账豁免/质量闸扩面≥3次执行/完成词短语化+零工具才触发/熔断前施工证据确认通道；全量 2409 passed） |
