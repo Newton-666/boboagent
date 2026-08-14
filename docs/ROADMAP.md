@@ -12,7 +12,7 @@
 
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
-| 0 | GOV-1 能力内化 | 纪律注入 + 收工自审固化 + 新人开箱测试 | 🔨 施工中（feat/ticket-gov-1） |
+| 0 | GOV-1 能力内化 | 纪律注入 + 收工自审固化 + 新人开箱测试 | ✅ 已合并 2edb207（含打回重修：discipline 段曾致 prompt.budget 事件被丢；教训册 +L13 且已进 wrapup 注入清单） |
 | 1 | DESK-V4 桌面小组件（owner 22:33 拍板：**提至 GOV-1 后第一顺位**） | **定位=桌面端的映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，状态/任务/药丸/最近工具全从 gateway 现成数据流映射，零业务逻辑；审批时变橙轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | 📋 下一票 |
 | 2 | DESK-CLI `bobo desktop` 子命令（owner 22:33 拍板：**紧随小组件**——"下次我自己终端输 bobo desktop 也会快很多"） | CLI 加 desktop 子命令：检测 node_modules→缺则自动 npm install→npm start 拉起 Electron；配套新人上手 README（clone→pip install -e .→bobo / bobo desktop 全流程） | 📋 第二顺位 |
 | 3 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
