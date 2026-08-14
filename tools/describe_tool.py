@@ -11,7 +11,7 @@
 import difflib
 import json
 
-from tools import TOOLS_SCHEMA
+from tools import TOOLS_SCHEMA, ALL_TOOLS_SCHEMA
 
 TOOL_NAME = "describe_tool"
 
@@ -20,8 +20,15 @@ _SUMMARY_MAX_CHARS = 800
 
 
 def _find_schema(tool_name: str) -> dict | None:
-    """从 TOOLS_SCHEMA 按 function.name 精确查找。"""
+    """从 TOOLS_SCHEMA 按 function.name 精确查找。
+
+    票 TOOL-PARK-1：仓内工具 schema 不进 TOOLS_SCHEMA（不 advertised），
+    但 describe_tool 是它们的取件入口——未命中时回退 ALL_TOOLS_SCHEMA（全量快照）。
+    """
     for tool in TOOLS_SCHEMA:
+        if tool.get("function", {}).get("name", "") == tool_name:
+            return tool
+    for tool in ALL_TOOLS_SCHEMA:
         if tool.get("function", {}).get("name", "") == tool_name:
             return tool
     return None
@@ -73,8 +80,9 @@ def describe_tool(tool_name: str, _engine=None) -> str:
         sid = ""
 
     if schema is None:
-        # 未知名 → difflib 最接近 3 个建议
-        all_names = [t.get("function", {}).get("name", "") for t in TOOLS_SCHEMA]
+        # 未知名 → difflib 最接近 3 个建议（含仓内工具名，全量去重）
+        all_names = sorted({t.get("function", {}).get("name", "")
+                            for t in list(TOOLS_SCHEMA) + list(ALL_TOOLS_SCHEMA)})
         suggestions = difflib.get_close_matches(tool_name, all_names, n=3)
         try:
             from core.event_bus import event_bus
