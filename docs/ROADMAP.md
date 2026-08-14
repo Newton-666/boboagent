@@ -1,6 +1,6 @@
 # ROADMAP — bobo 体系作战地图
 
-> v2.3 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
+> v2.4 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
 
 ## 当前队列（按执行顺序）
 
@@ -8,27 +8,37 @@
 
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
-| 1 | ~~DESK-V2A 体验地基~~ | ✅ 已合并（6d11d0b）：覆盖层/搜索/重命名/删除/pin/Toast/三态，CSS 零改动闸门锁死 | ✅ done |
-| 2 | ~~DESK-V2B 差异化面板~~ | ✅ 已合并（31e09cb）：工具耗时 + 上下文细条 | ✅ done |
-| 2.4 | ~~CORE-R2a/R2b~~ | ✅ 已合并（6a62fc4 / 92d232d）：台账软引导+答复质量闸 | ✅ done |
-| 2.45 | ~~DESK-V2B2~~ | ✅ 已合并（aacdeb3）：进度药丸三色阶 | ✅ done |
-| 2.5 | ~~GUI-F9~~ | ✅ 已合并（1e29018）：活引擎 history 注册表，运行中切走切回不丢进行中回合 | ✅ done |
-| 2.8 | GUI-F10（P0，下下张） | 事件流串台：前端所有事件回调不过滤 session_id，A 会话运行流渲染进 B 窗口（Kimi 已定位：emit 带 sid 但前端不查） | 📋 票已写 |
-| 2.9 | CORE-INT2（P0，与 F10 同包派） | 中断切不断取证+修复：cancel 全链路打点 → 实弹定位断环（头号嫌疑：双进程孤岛/sid 错位/引擎副本 Event 错位）→ 按结论修 | 📋 票已写 |
-| 2.7 | ~~DESK-V2B4~~ | ✅ 已合并（71de7ec）：kimi-k3 补 1M + 药丸数据源切活引擎 + 实况折叠卡；教训册 +L12（汇报正文人话摘要） | ✅ done |
-| 3 | DESK-V2C1+C2 样式票 | 完整 Markdown 渲染（粗斜下划线/表格/代码高亮，owner 要求 99% 成功率）+ 回复正文衬线（Charter 类，Anthropic Serif 有版权坑不捆）；双语通用排版不针对单语言；**样式票独立回溯纪律已立（GUI-DESIGN 规则 6）** | 📋 V2B4 后施工 |
-| 3.5 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
+**▶ 待施工（按执行顺序）**
 
-| 2.6 | ~~DESK-V2B3~~ | ✅ 已合并（59d23a0）：斜杠路由 + 命令面板 + IME 保护；教训册 +L10/L11 | ✅ done |
+| 序 | 票 | 干什么 | 状态 |
+|---|---|---|---|
+| 1 | GUI-F10（P0） | 事件流串台：前端所有事件回调不过滤 session_id，A 会话运行流渲染进 B 窗口（Kimi 已定位：emit 带 sid 但前端不查） | 📋 票已写，已派 |
+| 2 | CORE-INT2（P0） | 中断切不断取证+修复：cancel 全链路打点 → 实弹定位断环（头号嫌疑：双进程孤岛/sid 错位/引擎副本 Event 错位）→ 按结论修 | 📋 票已写，已派（F10 后） |
+| 3 | RESEARCH-DSH | bobo 亲拆 DeepSeek Harness 源码（一切皆插件/9 子代理/PTC/缓存键/Session Log），产出对照笔记入 library，兼作研究能力测试 | 📋 F10/INT2 终审后派 |
+| 4 | DESK-V2C1+C2 样式票 | 完整 Markdown 渲染（粗斜下划线/表格/代码高亮，owner 要求 99% 成功率）+ 回复正文衬线（Charter 类，Anthropic Serif 有版权坑不捆）；双语通用排版不针对单语言；样式票独立回溯纪律已立（GUI-DESIGN 规则 6） | 📋 待开 |
+| 5 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
+
+**✅ 已完成（近期，新→旧）**
+
+| 票 | 合并 |
+|---|---|
+| DESK-V2B4 药丸修复包 | 71de7ec（kimi-k3 1M + 活引擎数据源 + 实况折叠卡；教训册 +L12） |
+| DESK-V2B3 斜杠命令面板 | 59d23a0（斜杠路由 + 命令面板 + IME 保护；+L10/L11） |
+| GUI-F9 丢回合修复 | 1e29018（活引擎 history 注册表） |
+| DESK-V2B2 进度药丸 | aacdeb3（三色阶） |
+| CORE-R2a/R2b 台账软引导+答复质量闸 | 6a62fc4 / 92d232d |
+| DESK-V2B 差异化面板 | 31e09cb（工具耗时 + 上下文细条） |
+| DESK-V2A 体验地基 | 6d11d0b（覆盖层/搜索/重命名/删除/pin/Toast/三态） |
 
 ### 第二梯队：评估与内核深化（排在 DESK-V2 之后，owner 拍板：性能在 GUI 提升后）
 
 | 票 | 干什么 | 状态 |
 |---|---|---|
 | EV-2 | 评估跑道升级：轨迹回放 + mock 驱动；复活 BLOCKED 的 A5/A7 题；A1 新规则（≤2 次工具）复测；B2 的 test_archive_file_exists 定位 | 📋 排队 |
-| COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。产出：测量报告 → 优化票 | 📋 GUI 梯队收官后启动 |
+| COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。**速度与成本同一杠杆：前缀缓存命中率（标杆 Pi 99.93%、P99 -42%）+ PTC 减少模型往返 + prompt 瘦身**。产出：测量报告 → 优化票 |
+| COST-1a 外置变量实验沙盒（owner 立规：**核心引擎零改动，实验全外置**） | 独立目录搭模拟栈：可调 N 工具/N skill/N 段注入 prompt，实测缓存命中率与速度提升，找 efficiency×ability 平衡点；报告出来前核心一行不动 | 📋 COST-1 第一子票 |
+| COST-1b 三端功耗体检 | 桌面端 Electron 常驻内存/CPU + TUI + gateway 常驻开销测量 | 📋 随 COST-1 | 📋 GUI 梯队收官后启动 |
 | TOOL-OPT 实验线 | 工具调用效率（COST-1 的子线）：读文件缓存/同回合去重/纯读结果复用；借鉴 DeepSeek Harness PTC 程序化工具调用 → EV-2 轨迹回放做 A/B | 📋 并入 COST-1 |
-| RESEARCH-DSH（owner 2026-08-14 拍板：**交给 bobo 自己做**，兼作能力测试） | DeepSeek Harness（2026-08-13 开源，MIT）源码分析：clone 到 data/skill-standards/deepseek-harness/，bobo 亲拆——一切皆插件/Cordis 可回滚/9 子代理分工（喂 WORKER-V1）/PTC（喂 TOOL-OPT）/缓存键设计（喂 COST-1a）。产出对照笔记入 library/ | 📋 V2B4 终审后派 |
 | EVAL 体验题 | 同一真实任务 Hermes/bobo 桌面端对照跑，体验差距量化 | 📋 待开 |
 | vitest 存量 13 失败 | gatewayClient websocket 10 个等陈年老账立案清理 | 📋 排队 |
 
@@ -76,4 +86,4 @@ owner 实弹抓问题 / 队列取票
 
 D-1 桌面复活（审计/通电/Electron 43/共享后端/GUI 平齐）→ GUI-F1（输入法/thinking/轰炸）→ ENG-2（防僵尸+终端复位，破崩溃案）→ ENG-1（答完不收工）→ GUI-F2（发送键/AUTO开关/聚合/层级）→ GUI-F4（聚合吞并/diff 高亮/JSON/撞车/面板/AUTO 对齐+内核缺参修复）→ OBS-1（load_result 套娃）→ GUI-F3（会话一等公民/diff 同级整行底色/thinking 分段/空落盘兜底）→ DESKTOP_VISION 成文 → AUTO-G1（git 只读误杀）→ GUI-F6（thinking 分段+历史恢复）→ GUI-F7（手动命名优先）→ GUI-F6B（连续思考合并）→ PERF-1（收尾黑洞+空回复自愈+沉淀后台化）→ INT-1（Interrupt 一刀切）→ AUTO-G2（清单增量+折叠卡+清零命令+heredoc 收紧）→ CORE-R1（150 轮+死循环硬掐/推进软着陆+60% 水位）→ F6C（思考随工具吞并）→ LEDGER-1（台账重构+对账+汇报质量）→ F6D（状态行跳过+写类工具思考摊开）→ LEDGER-1B（对账段改内部注入）→ GUI-F8（历史 diff 恢复+思考持久化）；Hermes 桌面端源码研读完成（差距清单 A/B 两类，A 类追平立项 DESK-V2A/B/C）
 
-当前 main: 3b5f951 · 测试基线 2329 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+当前 main: 4fb8237 · 测试基线 2386 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
