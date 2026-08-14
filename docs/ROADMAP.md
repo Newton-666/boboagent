@@ -1,6 +1,6 @@
 # ROADMAP — bobo 体系作战地图
 
-> v4.1 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
+> v4.2 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
 
 ## 当前队列（按执行顺序）
 
@@ -12,7 +12,7 @@
 
 | 序 | 票 | 干什么 | 状态 |
 |---|---|---|---|
-| 1 | COST-1a 工具画像+外置实验（owner 11:38/11:40 拍板：**实验最优先，先于样式票**；Worker 冻结；**难点不在"少=快"的公理，在砍哪把刀**） | ✅ 第一步挖矿完成（reports/tool_profile_report.md：82 工具 64% 税白交、死工具 51 个、重复调用 4.4%、空回复 11.6%、平均 5 万 tokens/轮）→ ✅ 第一步挖矿完成；**第二步沙盒票已写（TICKET-COST-1A-SANDBOX：四档配置×五道固定题×5 次，测缓存命中率/耗时/成功率/action 选错率，DeepSeek usage 原生 prompt_cache_hit_tokens；核心引擎零改动）** | 📋 票已写，即刻可派 |
+| 1 | COST-1a 工具画像+外置实验（owner 11:38/11:40 拍板：**实验最优先，先于样式票**；Worker 冻结；**难点不在"少=快"的公理，在砍哪把刀**） | ✅ 第一步挖矿完成（reports/tool_profile_report.md：82 工具 64% 税白交、死工具 51 个、重复调用 4.4%、空回复 11.6%、平均 5 万 tokens/轮）→ ✅ 第一步挖矿完成 → ✅ 第二步沙盒完成（结论：B 合并档平衡点）→ 第三步：PARK-2 落地合并方案 + /tools 管理指令 | 📋 第三步待派 |
 | 3.5 | RESEARCH-DSH | bobo 亲拆 DeepSeek Harness 源码（一切皆插件/9 子代理/PTC/缓存键/Session Log），产出对照笔记入 library，兼作研究能力测试 | ✅ 已完工（笔记 182 行带源码行号，Kimi 抽查引用属实）；可移植清单待消化进 WORKER-V1/TOOL-OPT/COST-1a/EV-2 |
 | 3 | DESK-V2C1+C2 样式票 | 完整 Markdown 渲染（粗斜下划线/表格/代码高亮，owner 要求 99% 成功率）+ 回复正文衬线（Charter 类，Anthropic Serif 有版权坑不捆）；双语通用排版不针对单语言；样式票独立回溯纪律已立（GUI-DESIGN 规则 6） | 📋 待开 |
 | 4 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
@@ -23,6 +23,7 @@
 | 票 | 合并 |
 |---|---|
 | TOOL-PARK-1 工具外挂仓 | b325736（51 死工具打包 data/tool_park.json 出链：schema 税 8353→4026 tokens/轮（-52%），函数保留可执行 + describe_tool 可取件；全量 2426 passed） |
+| COST-1a-SANDBOX 四档实验 | fc75bed（100 次真实 API：B 合并档=平衡点——成功率 100% 持平全量档且比现状省 37% tokens；C 极简最省但笔记能力掉；B 档 action 选错率 27% 可自愈。报告 reports/cost1a_sandbox_report.md） |
 | CORE-R3 四刀拆闸 | 7b8e96f（补账豁免/质量闸扩面≥3次执行/完成词短语化+零工具才触发/熔断前施工证据确认通道；全量 2409 passed） |
 | GUI-F10 事件流 sid 过滤 | a916d41（串台修复 + 后台活动圆点 + 审批应答回来源会话） |
 | CORE-INT2 中断黑洞修复 | 5077771（headers 阶段 join 黑洞补 0.5s 轮询 ≤0.5s 响应 + cancel 四打点；取证：39 次 cancel 对齐，129s 黑洞实锤） |
