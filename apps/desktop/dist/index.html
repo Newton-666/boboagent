@@ -339,6 +339,56 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .v2b4-wt-arrow { color:var(--text-muted); font-size:12px; }
 .v2b4-wt-body { display:none; padding:10px 12px; margin:0; background:var(--bg3); border-top:1px solid var(--border); font-family:SF Mono, Monaco, Menlo, monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; word-break:break-all; color:var(--text2); }
 /* === end V2B4 === */
+/* === V2C1 markdown ===
+ * TICKET-DESK-V2C12（样式票，独立回溯）：完整 Markdown 渲染 + Charter 衬线正文。
+ * 本段为外科式摘除单元：删除本段（含下方 @font-face / --font-reply）即完整回滚 V2C1/C2。
+ * 作用域仅 .msg.bobo .txt（助手正文气泡一处）；工具卡/思考框/diff 块/实况折叠卡/用户消息不碰。
+ * 取色只用 GUI-DESIGN 色板 token + 既有语义色（橙 #e8913a / 思考蓝 #5b9bd5 / 成功绿 #50a14f / 错误红 #f48771）。
+ */
+/* C2: Bitstream Charter（X11 许可，可捆包）四件 woff2 本地 vendor —— 仅 --font-reply 引用 */
+@font-face { font-family:'Charter'; src:url('fonts/Charter-Regular.woff2') format('woff2'); font-weight:400; font-style:normal; font-display:swap; }
+@font-face { font-family:'Charter'; src:url('fonts/Charter-Italic.woff2') format('woff2'); font-weight:400; font-style:italic; font-display:swap; }
+@font-face { font-family:'Charter'; src:url('fonts/Charter-Bold.woff2') format('woff2'); font-weight:700; font-style:normal; font-display:swap; }
+@font-face { font-family:'Charter'; src:url('fonts/Charter-BoldItalic.woff2') format('woff2'); font-weight:700; font-style:italic; font-display:swap; }
+:root { --font-reply:'Charter','Songti SC','Noto Serif CJK SC',serif; }
+.msg.bobo .txt { font-family:var(--font-reply); }
+/* C1: 完整 markdown 渲染（marked 输出元素样式；UI/代码/数据字体一律不动） */
+.msg.bobo .txt h1 { font-size:20px; font-weight:700; margin:18px 0 6px; }
+.msg.bobo .txt h2 { font-size:18px; font-weight:700; margin:16px 0 5px; }
+.msg.bobo .txt h3 { font-size:16px; font-weight:700; margin:14px 0 4px; }
+.msg.bobo .txt h4 { font-size:15px; font-weight:700; margin:12px 0 3px; }
+.msg.bobo .txt h5, .msg.bobo .txt h6 { font-size:14px; font-weight:700; margin:10px 0 3px; color:var(--text2); }
+.msg.bobo .txt p { margin:4px 0; }
+.msg.bobo .txt ul, .msg.bobo .txt ol { margin:6px 0; padding-left:24px; }
+.msg.bobo .txt li { margin:2px 0; }
+.msg.bobo .txt blockquote { border-left:3px solid #e8913a; margin:8px 0; padding:2px 12px; color:var(--text2); background:var(--bg2); border-radius:0 6px 6px 0; }
+.msg.bobo .txt blockquote p { margin:2px 0; }
+.msg.bobo .txt pre { background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:12px 14px; overflow-x:auto; }
+.msg.bobo .txt pre code { background:none; border:none; padding:0; font-size:13px; }
+.msg.bobo .txt code { background:var(--bg3); border:1px solid var(--border); padding:1px 5px; border-radius:3px; font-size:13px; }
+.msg.bobo .txt table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
+.msg.bobo .txt th, .msg.bobo .txt td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
+.msg.bobo .txt th { background:var(--bg3); font-weight:600; }
+.msg.bobo .txt tr:nth-child(even) td { background:var(--bg2); }
+.msg.bobo .txt a { color:#5b9bd5; text-decoration:none; }
+.msg.bobo .txt a:hover { text-decoration:underline; }
+.msg.bobo .txt hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+.msg.bobo .txt del { color:var(--text2); }
+.msg.bobo .txt u { text-decoration:underline; }
+/* highlight.js 高亮主题（取色只用色板 + 既有语义色） */
+.msg.bobo .txt .hljs { color:var(--text); background:transparent; }
+.msg.bobo .txt .hljs-comment, .msg.bobo .txt .hljs-quote { color:var(--text-muted); font-style:italic; }
+.msg.bobo .txt .hljs-keyword, .msg.bobo .txt .hljs-selector-tag, .msg.bobo .txt .hljs-built_in { color:#e8913a; }
+.msg.bobo .txt .hljs-string, .msg.bobo .txt .hljs-regexp, .msg.bobo .txt .hljs-addition { color:#50a14f; }
+.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:#5b9bd5; }
+.msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:#5b9bd5; }
+.msg.bobo .txt .hljs-variable, .msg.bobo .txt .hljs-template-variable { color:var(--text2); }
+.msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:#5b9bd5; }
+.msg.bobo .txt .hljs-deletion { color:#f48771; }
+.msg.bobo .txt .hljs-meta { color:var(--text-muted); }
+.msg.bobo .txt .hljs-emphasis { font-style:italic; }
+.msg.bobo .txt .hljs-strong { font-weight:700; }
+/* === end V2C1 === */
 </style>
 </head>
 <body>
@@ -522,6 +572,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   </div>
 </div>
 
+<!-- TICKET-DESK-V2C12: vendor 本地引入（不走 CDN，桌面端离线可用；LICENSE 见 apps/desktop/vendor/） -->
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
 <script>
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
@@ -963,15 +1017,73 @@ function md(s) {
   return s;
 }
 
+// TICKET-DESK-V2C12 (C1)：助手正文专用完整 Markdown 管线 —— marked + DOMPurify + highlight.js（vendor 本地）。
+// 仅 addMsg('bobo', ...) 走此管线；工具卡/思考框/diff 块/实况折叠卡/用户消息一律不碰。
+// 流式半截语法（表格/代码块未闭合）由 marked 容错 + DOMPurify 兜底，绝不 throw；
+// 历史重放（resume）与新消息同走 addMsg → 同一路径。vendor 未就绪时回退 md()，正文不丢。
+var _mdReplyInit = false;
+function mdReply(s) {
+  s = (s == null) ? '' : String(s);
+  try {
+    // 折叠卡（AUTO-G2 待人工清单 / V2B4 工作区实况）先抽离、渲染后还原 —— 与 md() 同构，保结构化组件不被 markdown 打散
+    var handoffCard = buildHandoffCard(s);
+    if (handoffCard) { s = handoffCard.head + '\n\n%%HANDOFF_CARD%%'; }
+    var worktreeCard = buildWorktreeCard(s);
+    if (worktreeCard) { s = worktreeCard.head + '\n\n%%WORKTREE_CARD%%'; }
+    var out;
+    if (window.marked && window.DOMPurify) {
+      if (!_mdReplyInit) {
+        _mdReplyInit = true;
+        window.marked.setOptions({
+          gfm: true,
+          breaks: false,
+          renderer: (function() {
+            var r = new window.marked.Renderer();
+            // 代码块高亮：highlight.js 本地 vendor，只对已注册语言着色，未知语言原样转义
+            r.code = function(code, lang) {
+              var l = (lang || '').trim().toLowerCase();
+              var html;
+              if (window.hljs && l && window.hljs.getLanguage(l)) {
+                try { html = window.hljs.highlight(code, { language: l, ignoreIllegals: true }).value; }
+                catch (e) { html = esc(code); }
+              } else { html = esc(code); }
+              return '<pre><code' + (l ? ' class="language-' + esc(l) + '"' : '') + '>' + html + '</code></pre>';
+            };
+            return r;
+          })()
+        });
+      }
+      out = window.marked.parse(s);
+      // DOMPurify 始终过一遍（XSS 剥离：<script>/on* 事件/iframe 等一律清除）
+      out = window.DOMPurify.sanitize(out, { USE_PROFILES: { html: true } });
+    } else {
+      // vendor 未就绪（理论不发生：本地引入）：回退既有简渲染
+      out = md(s);
+    }
+    if (handoffCard) { out = out.replace(/%%HANDOFF_CARD%%/g, handoffCard.card); }
+    if (worktreeCard) { out = out.replace(/%%WORKTREE_CARD%%/g, worktreeCard.card); }
+    return out;
+  } catch (e) {
+    // 兜底：任何异常不回退页面 —— 先试既有管线，再退纯文本转义
+    try { return md(s); } catch (e2) { return esc(s); }
+  }
+}
+
 // ── Messages ───────────────────────────────────────────────────────────
 function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
 
 function addMsg(role, text, id, append) {
   welcomeEl.style.display = 'none';
+  // TICKET-DESK-V2C12 (C1)：仅助手正文气泡（bobo）走完整 markdown 管线；用户消息保持既有简渲染
+  var render = (role === 'bobo') ? mdReply : md;
   var existing = document.getElementById(id);
-  if (existing) { existing.querySelector('.txt').innerHTML = append ? existing.querySelector('.txt').innerHTML + md(text) : md(text); return; }
+  if (existing) {
+    var t = existing.querySelector('.txt');
+    t.innerHTML = append ? t.innerHTML + render(text) : render(text);
+    return;
+  }
   var div = document.createElement('div'); div.id = id; div.className = 'msg ' + role;
-  div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + md(text) + '</div>';
+  div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + render(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
 }
 var toolResults = {};
