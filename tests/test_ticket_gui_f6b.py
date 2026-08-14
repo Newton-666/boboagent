@@ -146,6 +146,17 @@ function bodyMsg() {{
   return {{ className: 'msg', classList: {{ contains(c) {{ return c === 'msg'; }} }} }};
 }}
 
+// TICKET-GUI-F10 兼容桩：真实 delta 块首行 isForeignSession 闸门（F10 新增），
+// 本测试全部调用均不带 session_id（无 sid 恒放行），放行桩与真实语义等价（闸门语义由 test_f10_1 守住）
+let currentSessionId = null;
+function markBgActive() {{}}
+function isForeignSession(data) {{
+  var sid = data && data.session_id;
+  if (!sid || sid === currentSessionId) return false;
+  markBgActive(sid);
+  return true;
+}}
+
 {handler}
 
 // ── 场景 A：末尾紧邻折叠思考框（中间无工具卡）→ 追加合并，不新建 ──

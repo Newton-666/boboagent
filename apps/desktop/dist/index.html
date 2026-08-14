@@ -535,7 +535,13 @@ function connect() {
     if (!msg || typeof msg !== 'object') return;
     if (msg.method === 'event' && msg.params && msg.params.type) {
       var h = handlers.get(msg.params.type);
-      if (h) h(msg.params.payload || msg.params);
+      if (h) {
+        // TICKET-GUI-F10：sid 在 params 顶层（server_utils.emit 结构），注入回调数据，
+        // 供各渲染回调按会话过滤 —— 杜绝 A 会话事件流渲染进 B 窗口
+        var evData = msg.params.payload || msg.params;
+        if (msg.params.session_id) evData = Object.assign({}, evData, { session_id: msg.params.session_id });
+        h(evData);
+      }
       return;
     }
     if (msg.id) { var r = pending.get(msg.id); if (r) { pending.delete(msg.id); r(msg.result || msg.error || {}); } }
@@ -546,6 +552,31 @@ function connect() {
   if (window.boboAPI.getPending) window.boboAPI.getPending();
 }
 function on(e, h) { handlers.set(e, h); }
+// TICKET-GUI-F10：后台会话事件统一闸门 —— 事件带 session_id 且非当前会话 → 不渲染
+// （sid 由分发层注入，见 connect()；无 sid 的全局事件如 gateway.ready/backend.exited 恒放行）
+function isForeignSession(data) {
+  var sid = data && data.session_id;
+  if (!sid || sid === currentSessionId) return false;
+  markBgActive(sid);
+  return true;
+}
+// TICKET-GUI-F10（加分项）：后台活动中会话标记 —— 轻量只记活跃位，不做事件缓存；
+// 切回时 F9 resume 全量拉取兜底（loadSession 里 clearBgActive）
+var bgActiveSids = {};
+function markBgActive(sid) {
+  if (!bgActiveSids[sid]) {
+    bgActiveSids[sid] = 1;
+    var sv = document.getElementById('session-search');
+    renderSessions(sv ? sv.value : '');
+  }
+}
+function clearBgActive(sid) {
+  if (bgActiveSids[sid]) {
+    delete bgActiveSids[sid];
+    var sv = document.getElementById('session-search');
+    renderSessions(sv ? sv.value : '');
+  }
+}
 function call(m, p) {
   if (!window.boboAPI) return Promise.resolve({});
   return new Promise(function(resolve) {
@@ -1517,6 +1548,7 @@ function toggleTerminalOutput(btn) {
 }
 
 on('terminal.output', function(payload) {
+  if (isForeignSession(payload)) return;
   if (!payload || !payload.command) return;
   _terminalLogs.push({ command: payload.command, output: payload.output || '' });
   if (_terminalLogs.length > 100) _terminalLogs.shift();
@@ -1668,6 +1700,13 @@ function renderSessions(filter) {
     // TICKET-GUI-F3 (F3-1/F3-2): data-sid 供加载指示定位；active 类严格跟随 currentSessionId
     var div = document.createElement('div'); div.className = 'session-item' + (s.id===currentSessionId?' active':''); div.dataset.sid = s.id;
     var span = document.createElement('span'); span.textContent = s.title || s.id; span.className = 'stitle';
+    // TICKET-GUI-F10（加分项）：后台活动中圆点指示（弱色取色板 --text-muted，标题前；
+    // 样式走内联 style —— V2A/V2B CSS 零改动闸门约束，不新增全局 CSS 规则）
+    if (bgActiveSids[s.id]) {
+      var bgDot = document.createElement('span'); bgDot.className = 'bg-active-dot'; bgDot.title = '后台运行中';
+      bgDot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--text-muted);display:inline-block;margin-right:6px;flex-shrink:0;';
+      span.insertBefore(bgDot, span.firstChild);
+    }
     span.onclick = function() { loadSession(s.id); };
     // V2A 打磨：pin 标记改细 SVG 弱色图钉（弃用 emoji 图钉，渲染大红太扎眼）
     if (s.pinned) {
@@ -1757,6 +1796,8 @@ async function loadSession(sid) {
   // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
   setMode(result.auto_state ? 'auto' : '');
   call('session.activate', { session_id: sid });
+  // TICKET-GUI-F10：切回即清"后台活动中"标记（resume 全量已拉取，圆点无意义）
+  clearBgActive(sid);
   renderSessions();
   // Update title with first user message
   // TICKET-GUI-F7：自动命名闸门 —— 用户手动命名过（user_named=true）则不覆盖；
@@ -1989,7 +2030,8 @@ function stopThinking() {
   addStatus('Stopped');
 }
 
-on('message.start', function() {
+on('message.start', function(data) {
+  if (isForeignSession(data)) return;
   if (sendTimeoutId) { clearTimeout(sendTimeoutId); sendTimeoutId = null; }
   messaging = true; sendEl.classList.add('loading'); debug('Receiving...');
   setBusy(true); showStop(true);   // TICKET-D1d ④⑤
@@ -2001,6 +2043,7 @@ on('message.start', function() {
 });
 
 on('message.delta', function(data) {
+  if (isForeignSession(data)) return;
   var t = data ? data.text || '' : '';
   if (t) {
     // TICKET-GUI-F6（缺陷 1）：思考分段 —— 当前无打开思考框（已被 tool.start
@@ -2031,6 +2074,7 @@ on('message.delta', function(data) {
   }
 });
 on('message.complete', function(data) {
+  if (isForeignSession(data)) return;
   messaging = false; sendEl.classList.remove('loading'); debug('Connected ✓');
   setBusy(false); showStop(false);   // TICKET-D1d ④⑤
   var toolsWereCalled = toolIdCounter > 0;
@@ -2072,6 +2116,7 @@ on('message.complete', function(data) {
   refreshCtxStats();   // TICKET-DESK-V2B：回合结束刷新上下文仪表盘
 });
 on('tool.start', function(data) {
+  if (isForeignSession(data)) return;
   // TICKET-GUI-F6（缺陷 1）：工具卡是天然分段点 —— 到达时把当前思考框收束为
   // 折叠摘要段（复用 collapseThinkBox，视觉样式不动），后续 thinking.delta
   // 另开新框，思考段与工具卡交错排列，对齐 TUI/Hermes 节奏
@@ -2086,6 +2131,7 @@ on('tool.start', function(data) {
           data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
 });
 on('tool.complete', function(data) {
+  if (isForeignSession(data)) return;
   var tid = data ? data.tool_id || '' : '';
   if (tid) updateToolResult(tid, data);
   // TICKET-DESK-V2B4 ②：回合中每次 tool.complete 后轻量刷新上下文药丸
@@ -2104,8 +2150,8 @@ on('tool.complete', function(data) {
   }
 });
 // TICKET-D1d ④: 模式徽标 —— AUTO / OFFICE 实时指示（对齐 TUI 底部状态栏）
-on('session.auto_state', function(data) { setMode(data && data.on ? 'auto' : ''); });
-on('session.office_state', function(data) { setMode(data && data.on ? 'office' : ''); });
+on('session.auto_state', function(data) { if (isForeignSession(data)) return; setMode(data && data.on ? 'auto' : ''); });
+on('session.office_state', function(data) { if (isForeignSession(data)) return; setMode(data && data.on ? 'office' : ''); });
 // TICKET-GUI-F1 (F1-3): 引擎内部诊断类状态不进消息区 —— thinking 阶段（tool_filter/calling_llm/
 // executing_tools/executing/continuing/compressing/cross_search）由 engine_adapter 转发为
 // status.update，TUI 侧只在思考区/状态栏快闪；GUI 若 addStatus 会每轮永久堆积成状态轰炸。
@@ -2115,6 +2161,7 @@ var STATUS_DIAG_KINDS = {
   continuing: 1, compressing: 1, cross_search: 1
 };
 on('status.update', function(data) {
+  if (isForeignSession(data)) return;
   var t = data ? data.text || '' : ''; if (!t) return;
   var kind = data ? data.kind || '' : '';
   if (STATUS_DIAG_KINDS[kind]) return;
@@ -2185,7 +2232,11 @@ document.getElementById('setup-save').onclick = function() {
   });
 };
 
+var _approvalSid = null;   // TICKET-GUI-F10：当前审批弹窗来源会话（应答回正确会话，防切窗错配）
 on('approval.request', function(data) {
+  // TICKET-GUI-F10：审批是引擎全局单队列（不吞弹窗），但应答必须回弹窗来源会话，
+  // 不能跟 currentSessionId —— 否则 A 会话的审批会在切到 B 后被错配到 B
+  _approvalSid = (data && data.session_id) || currentSessionId;
   // TICKET-D1d ③: 模态卡替代原生 confirm —— 立即呈现、操作预览、无超时自动拒绝
   var cmd = data.command || data.description || 'unknown';
   var desc = data.description || '';
@@ -2197,13 +2248,14 @@ on('approval.request', function(data) {
 function approvalRespond(choice) {
   document.getElementById('approval-overlay').classList.remove('open');
   if (window.boboAPI) {
-    window.boboAPI.send({ jsonrpc:'2.0', id:'approval-resp-'+(++reqId), method:'approval.respond', params:{ session_id: currentSessionId, choice: choice } });
+    window.boboAPI.send({ jsonrpc:'2.0', id:'approval-resp-'+(++reqId), method:'approval.respond', params:{ session_id: _approvalSid, choice: choice } });
   }
   if (choice === 'deny') addStatus('已拒绝操作');
 }
 document.getElementById('approval-allow').onclick = function() { approvalRespond('once'); };
 document.getElementById('approval-deny').onclick = function() { approvalRespond('deny'); };
 on('gateway.error', function(data) {
+  if (isForeignSession(data)) return;
   addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
   debug('Error: ' + (data.message || '').substring(0, 60));
   // TICKET-DESK-V2A：后端错误 toast 接入点
