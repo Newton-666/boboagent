@@ -389,6 +389,12 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg.bobo .txt .hljs-emphasis { font-style:italic; }
 .msg.bobo .txt .hljs-strong { font-weight:700; }
 /* === end V2C1 === */
+/* === F12 历史聚合 === */
+/* 历史重放聚合卡：复用 .tool-agg 组件（F2/F6C），仅补考古内思考框/diff 块间距；
+   全部取色走既有色板 token，零新增颜色 */
+.hist-agg .tool-agg-body .think-box { margin:4px 10px 0; }
+.hist-agg .tool-agg-body .diff-block { margin:2px 10px 6px; }
+/* === end F12 历史聚合 === */
 </style>
 </head>
 <body>
@@ -1952,29 +1958,79 @@ async function renderFullHistory(sid, result) {
       addStatus('⚠ 归档读取失败，仅展示当前消息：' + ((e && e.message) || e));
     }
   }
-  msgs.forEach(function(m) {
-    if (m.role === 'user') addMsg('user', m.text, 'hist-' + Math.random());
+  // TICKET-GUI-F12：预扫描"最新一轮"起点 —— 最后一条带 tool_calls 的 assistant
+  // 消息索引（纯文本回复不是工具链起点）。其后的工具链保持完整平铺
+  //（让用户看到"最近一次干了什么"）；更早回合的"思考→工具×N"链收进
+  // 聚合卡（考古模式，F6C 组件复用）。
+  var histLatestStart = -1;
+  for (var hi = msgs.length - 1; hi >= 0; hi--) {
+    if (msgs[hi].role === 'assistant' && msgs[hi].tool_calls && msgs[hi].tool_calls.length) {
+      histLatestStart = hi; break;
+    }
+  }
+  // 聚合缓冲：当前链的思考文本 + 收集中的工具消息（非最新一轮时启用）
+  var aggThink = null;
+  var aggTools = [];
+  function flushHistAgg() {
+    if (aggTools.length === 0) {
+      // TICKET-GUI-F12（审查修复）：assistant 声明 tool_calls 但工具消息缺失
+      //（归档裁剪/异常）时思考不丢 —— 单独平铺；纯文本链 aggThink 为空零影响
+      if (aggThink) addHistThinking(aggThink);
+      aggThink = null;
+      return;
+    }
+    renderHistAggCard(aggThink, aggTools);
+    aggThink = null;
+    aggTools = [];
+  }
+  var histLatest = false;  // 当前消息是否处于最新一轮（完整平铺）
+  msgs.forEach(function(m, idx) {
+    if (m.role === 'user') {
+      flushHistAgg();
+      // TICKET-GUI-F12（审查修复）：user 边界重置 —— 孤儿 tool 消息（归档异常）
+      // 跨 user 时不再被误判为最新一轮而平铺
+      histLatest = false;
+      addMsg('user', m.text, 'hist-' + Math.random());
+    }
     else if (m.role === 'assistant') {
-      // TICKET-GUI-F8：历史思考框渲染在该条消息上方（默认收起、点击展开，与
-      // 实时折叠思考框同款样式交互；无 thinking 字段则零变化）
-      if (m.thinking) addHistThinking(m.thinking);
+      flushHistAgg();
+      histLatest = (idx === histLatestStart);
+      if (histLatest) {
+        // TICKET-GUI-F8：最新一轮思考照常平铺（默认收起、点击展开，与实时同款）
+        if (m.thinking) addHistThinking(m.thinking);
+      } else if (m.tool_calls && m.tool_calls.length) {
+        // TICKET-GUI-F12：过往回合"思考→工具链"的思考先进聚合缓冲（随链进考古卡）；
+        // 纯文本回复（无工具链）的思考仍照常平铺（F8 语义不破）
+        aggThink = m.thinking || '';
+      } else {
+        if (m.thinking) addHistThinking(m.thinking);
+      }
       // TICKET-GUI-F6（缺陷 2a）：现存消息里空 assistant（纯工具回合）给占位，
       // 与 renderArchivedMessages 一致，消灭一屏空泡泡
       addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + Math.random());
     }
     else if (m.role === 'tool') {
-      // TICKET-GUI-F8：历史工具消息 —— 含 INLINE_DIFF 的渲染工具卡一行摘要 +
-      // F3-5 同款整行底色 diff 块（与回复同级、默认展开，与实时一致）；
-      // 无 diff 的工具消息跳过（历史不堆工具噪音；归档 [RESULT] 外部化旧消息
-      // 无 diff 属预期，不补）
-      if (m.inline_diff) renderHistToolDiff(m.name || 'tool', m.inline_diff);
+      if (histLatest) {
+        // TICKET-GUI-F12：最新一轮完整展开 —— 带 diff 保留 F3-5 红绿块（F8 语义），
+        // 无 diff 的普通工具调用也渲染工具卡（历史不再丢调用）
+        if (m.inline_diff) renderHistToolDiff(m.name || 'tool', m.inline_diff);
+        else renderHistToolFlat(m.name || 'tool', m.content || '');
+      } else {
+        // TICKET-GUI-F12：过往回合工具收进聚合缓冲（点击考古展开）
+        aggTools.push(m);
+      }
     }
     else if (m.role === 'system' && m.text && m.text.length < 200) {
+      flushHistAgg();
       // F2-4: 历史心跳残留（"仍在工作 Ns"）不恢复 —— 避免 owner 截图的多条心跳堆叠复现
       if (m.text.indexOf('仍在工作') === 0) return;
       addStatus(m.text);
     }
   });
+  flushHistAgg();
+  // TICKET-GUI-F12（审查修复）：scrollTop 统一到末尾滚一次 —— 循环内渲染函数
+  // 不再逐条 scroll（长历史避免多次 reflow）
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 // F3-3: 渲染归档消息（role: user/assistant/system/tool；assistant 纯工具回合给占位）
@@ -1990,9 +2046,10 @@ function renderArchivedMessages(ams, idPrefix) {
   });
 }
 
-// TICKET-GUI-F8：历史折叠思考框 —— 复用 think-box.collapsed 样式（默认收起，
-// 点击 ▸ 展开/收起，与实时折叠思考框同交互）；渲染在对应 assistant 消息上方
-function addHistThinking(thinkingText) {
+// TICKET-GUI-F12（审查修复）：历史思考折叠框构造 —— 复用 think-box.collapsed 样式
+//（默认收起、点击 ▸ 展开/收起，与实时折叠思考框同交互）；返回 DOM 由调用方 append。
+// addHistThinking / renderHistAggCard 共用，消除双份维护
+function buildHistThinkBox(thinkingText) {
   var tb = document.createElement('div');
   tb.className = 'think-box collapsed';
   tb.innerHTML = '<div class="think-label"><span>💭 思考过程</span><span class="tool-toggle">▸</span></div><div class="think-text"></div>';
@@ -2003,25 +2060,77 @@ function addHistThinking(thinkingText) {
     if (e && e.target && e.target.closest && e.target.closest('.think-text')) return;
     toggleThinkBox(tb);
   };
-  chatEl.appendChild(tb);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  return tb;
 }
 
-// TICKET-GUI-F8：历史工具 diff —— 工具卡一行摘要（done 态）+ F3-5 同款整行底色
-// 红绿块（diffBlock），独立出现在消息流对应位置，默认展开与实时一致
-function renderHistToolDiff(name, inlineDiff) {
+// TICKET-GUI-F12（审查修复）：历史工具卡构造 —— 一行摘要（done 态），返回 DOM
+// 由调用方 append。renderHistToolDiff / renderHistToolFlat / renderHistAggCard 共用
+function buildHistToolCard(name, summary) {
   var friendly = TOOL_FRIENDLY[name] || name;
   var card = document.createElement('div'); card.className = 'tool';
   card.setAttribute('data-tool', name);
   card.innerHTML = '<span class="dot">●</span>' +
     '<span class="tool-name">' + esc(friendly) + '</span>' +
     '<span class="tool-status">done</span>' +
-    '<div class="tool-result"><div class="tool-summary">' + esc(toolSummary({}, inlineDiff)) + '</div></div>';
-  chatEl.appendChild(card);
+    '<div class="tool-result"><div class="tool-summary">' + esc(summary) + '</div></div>';
+  return card;
+}
+
+// TICKET-GUI-F8：历史折叠思考框 —— 复用 think-box.collapsed 样式（默认收起，
+// 点击 ▸ 展开/收起，与实时折叠思考框同交互）；渲染在对应 assistant 消息上方
+function addHistThinking(thinkingText) {
+  chatEl.appendChild(buildHistThinkBox(thinkingText));
+}
+
+// TICKET-GUI-F8：历史工具 diff —— 工具卡一行摘要（done 态）+ F3-5 同款整行底色
+// 红绿块（diffBlock），独立出现在消息流对应位置，默认展开与实时一致
+//（TICKET-GUI-F12 审查修复：工具卡构造复用 buildHistToolCard；scrollTop 交由
+// renderFullHistory 末尾统一滚动）
+function renderHistToolDiff(name, inlineDiff) {
+  chatEl.appendChild(buildHistToolCard(name, toolSummary({}, inlineDiff)));
   var block = document.createElement('div');
   block.innerHTML = diffBlock(inlineDiff);
   chatEl.appendChild(block.firstChild);
-  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// TICKET-GUI-F12：最新一轮无 diff 工具卡平铺 —— 历史不再丢普通工具调用
+//（工具卡一行摘要 + done 态；无 inline_diff 不产红绿块，语义零新增）
+function renderHistToolFlat(name, content) {
+  chatEl.appendChild(buildHistToolCard(name, String(content).substring(0, 120)));
+}
+
+// TICKET-GUI-F12：历史聚合卡 —— 过往回合"思考→工具×N"链收进考古卡（复用 F6C
+// .tool-agg 组件：头点击展开/收起，body 内思考框（think-box collapsed）+ 逐个工具卡，
+// 带 inline_diff 的附 F3-5 整行红绿 diff 块，红绿语义与实时一致；零新增颜色）
+//（审查修复：onclick guard 补 .think-box/.diff-block —— 点思考框展开时事件冒泡到
+// 聚合卡头会误收整卡；构造复用 buildHistThinkBox/buildHistToolCard；scrollTop 交由
+// renderFullHistory 末尾统一滚动）
+function renderHistAggCard(thinkText, toolMsgs) {
+  var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
+  var headLabel = (thinkText ? '思考 + ' : '') + toolMsgs.length + ' 个工具';
+  agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
+  agg.onclick = function(e) {
+    if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
+    var body = this.querySelector('.tool-agg-body');
+    var open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+  };
+  var aggBody = agg.querySelector('.tool-agg-body');
+  // 思考框进考古卡（同 addHistThinking：默认收起、点击展开）
+  if (thinkText) aggBody.appendChild(buildHistThinkBox(thinkText));
+  toolMsgs.forEach(function(m) {
+    var name = m.name || 'tool';
+    var inlineDiff = m.inline_diff || '';
+    aggBody.appendChild(buildHistToolCard(name, inlineDiff ? toolSummary({}, inlineDiff) : String(m.content || '').substring(0, 120)));
+    // F3-5 红绿块语义不变：diff 同级独立块，整行底色
+    if (inlineDiff) {
+      var block = document.createElement('div');
+      block.innerHTML = diffBlock(inlineDiff);
+      aggBody.appendChild(block.firstChild);
+    }
+  });
+  chatEl.appendChild(agg);
 }
 
 async function newChat() {
