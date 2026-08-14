@@ -18,6 +18,9 @@ __pycache__/
 *.broken
 *.refactor
 *_副本*
+
+# ── COST-1A 沙盒实验输出（票：results/ 进 .gitignore）──
+experiments/cost1a/results/
 *副本*
 
 # ── 备份目录 ──
