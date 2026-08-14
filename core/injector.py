@@ -172,6 +172,152 @@ def _read_note_frontmatter(path) -> dict:
     return fm
 
 
+# ── 票 GOV-1：纪律注入（GUI-LESSONS + 工作流纪律，场景触发）──
+# 场景：施工类回合注入施工纪律（L1-L10 + 六步工作流），收工类回合注入收工纪律
+# （L8/L11/L12 + git diff 逐 hunk 自审）；无触发零注入（对照组铁律）。
+# 预算：≤ _DISCIPLINE_BUDGET_CHARS 字符（≈800 tokens，中文按 2 chars/token 保守折算），
+# 超限逐条截断压缩；注入长度计入 prompt.budget 事件 discipline 段。
+_GUI_LESSONS_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "docs", "GUI-LESSONS.md")
+_GUI_LESSONS_CACHE: dict = {"mtime": -1, "content": None}
+_DISCIPLINE_BUDGET_CHARS = 1600  # ≈800 tokens 预算上限（中文 2 chars/token 保守折算）
+_DISCIPLINE_LINE_MAX = 120       # 压缩时单行上限
+
+# 施工场景固定工作流（硬纪律，不依赖 lessons 文件存在）
+_WORKFLOW_DISCIPLINE = (
+    "【施工工作流纪律】（票 GOV-1 内化，不靠人盯）多步施工任务按此流程走：\n"
+    "1. 先建台账：task_ledger create，每项当场带 verify（怎么算做完）与 evidence（完成证据）\n"
+    "2. 读码定位：先 read_local_file 读目标文件再动手，禁止凭记忆猜\n"
+    "3. 施工：edit_file 精确替换；一次可并行多个不冲突编辑\n"
+    "4. 专项测试：先跑本票对应测试文件确认通过\n"
+    "5. 全量回归：run_tests 确认零破坏\n"
+    "6. 五查汇报：改动文件+行数 / 测试原话 / md5 / git 状态 / 风险，缺一项终审打回"
+)
+
+# 收工自审 + 汇报纪律（票 GOV-1 ②：收工自审固化）
+_WRAPUP_DISCIPLINE = (
+    "【收工自审纪律】（票 GOV-1 内化）：声明完工前必须：\n"
+    "1. git diff 逐 hunk 自审一遍（实证：F12 自审自抓 4 个 bug），不审不算完\n"
+    "2. 自审发现的问题先修再汇报，不许带着已知 bug 收工\n"
+    "3. 汇报数字必须可复现：贴本地实跑原话输出，跑不动就如实说跑不动（L8）\n"
+    "4. 收工汇报正文给人看：分条人话摘要 + 测试数字一行 + 风险 + 下一步；\n"
+    "   git 实况 / md5 / 测试原始输出落盘 library 完成报告或票据附录，正文不糊原始输出（L12）"
+)
+
+# 场景裁剪表：场景 → 保留的 L 块号（与 GUI-LESSONS.md 同源，Kimi 更新后自动跟进）
+_SCENE_LESSONS = {
+    "work":   ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10"),
+    "wrapup": ("L8", "L11", "L12", "L13"),
+}
+
+# 场景触发关键词（命中 user_input 或最近 3 轮 history；收工优先）
+_WRAPUP_KEYWORDS = ("收工", "汇报", "总结", "销账", "五查", "终审", "收尾")
+_WORK_KEYWORDS = ("施工", "建账", "改码", "修 bug", "bug", "实现", "开发", "测试", "票 ")
+
+
+def _load_gui_lessons() -> str | None:
+    """模块级缓存读 docs/GUI-LESSONS.md（mtime 变化才重读），缺失/不可读返回 None。
+
+    与 _load_guidance 同模式：每轮只做一次 _os.stat，文件不变不重复读盘。
+    """
+    try:
+        st = _os.stat(_GUI_LESSONS_PATH)
+    except OSError:
+        _GUI_LESSONS_CACHE["content"] = None
+        _GUI_LESSONS_CACHE["mtime"] = -1
+        return None
+    if st.st_mtime != _GUI_LESSONS_CACHE.get("mtime"):
+        try:
+            with open(_GUI_LESSONS_PATH, encoding="utf-8") as f:
+                _GUI_LESSONS_CACHE["content"] = f.read()
+            _GUI_LESSONS_CACHE["mtime"] = st.st_mtime
+        except OSError:
+            _GUI_LESSONS_CACHE["content"] = None
+            _GUI_LESSONS_CACHE["mtime"] = -1
+            return None
+    return _GUI_LESSONS_CACHE["content"]
+
+
+def _extract_lessons_sections(text: str) -> dict:
+    """按 '### Lx. 标题' 切块，返回 {L号: 块文本}。"""
+    sections: dict = {}
+    current = None
+    buf: list = []
+    for line in text.splitlines():
+        m = _re.match(r"^###\s+(L\d+)\.", line)
+        if m:
+            if current and buf:
+                sections[current] = "\n".join(buf)
+            current = m.group(1)
+            buf = [line]
+        elif current:
+            buf.append(line)
+    if current and buf:
+        sections[current] = "\n".join(buf)
+    return sections
+
+
+def _detect_round_scene(user_input: str, history: list) -> str:
+    """按输入与最近 3 轮 history 判定回合场景：'work' | 'wrapup' | ''。
+
+    收工关键词优先（收工回合也是施工回合的收尾）；无命中零注入（对照组铁律）。
+    """
+    haystack = " ".join(
+        str(m.get("content", "")) for m in (history or [])[-3:]
+    ) + " " + (user_input or "")
+    haystack_l = haystack.lower()
+    if any(k in haystack_l for k in _WRAPUP_KEYWORDS):
+        return "wrapup"
+    if any(k in haystack_l for k in _WORK_KEYWORDS):
+        return "work"
+    return ""
+
+
+def _compress_discipline(text: str, max_chars: int) -> tuple:
+    """超预算压缩：先逐行截断，仍超则整体截断并标注。返回 (文本, 是否截断)。"""
+    if len(text) <= max_chars:
+        return text, False
+    lines = [
+        line if len(line) <= _DISCIPLINE_LINE_MAX
+        else line[:_DISCIPLINE_LINE_MAX - 1] + "…"
+        for line in text.splitlines()
+    ]
+    out = "\n".join(lines)
+    if len(out) > max_chars:
+        out = out[: max_chars - 12] + "\n…（纪律已压缩）"
+    return out, True
+
+
+def _summarize_lesson_block(block: str) -> str:
+    """L 块摘要：保留标题行与 '规则：' 行（信息密度优先），丢弃事故描述/回归闸行。
+
+    预算内装下更多规则：规则句是教训的结论，事故背景是佐证，超预算时先丢佐证。
+    """
+    keep = [
+        line for line in block.splitlines()
+        if line.startswith("###") or "规则：" in line
+    ]
+    return "\n".join(keep)
+
+
+def _build_discipline_text(scene: str, lessons_text: str | None) -> tuple:
+    """按场景组装纪律段：固定纪律段 + lessons 对应 L 块摘要（同源），预算内压缩。
+
+    返回 (文本, 是否截断)。lessons 缺失时仅固定纪律段（静默降级不炸）。
+    """
+    parts: list = []
+    parts.append(_WORKFLOW_DISCIPLINE if scene == "work" else _WRAPUP_DISCIPLINE)
+    if lessons_text:
+        sections = _extract_lessons_sections(lessons_text)
+        for lnum in _SCENE_LESSONS.get(scene, ()):
+            block = sections.get(lnum)
+            if block:
+                parts.append(_summarize_lesson_block(block))
+    text = "\n\n".join(parts)
+    return _compress_discipline(text, _DISCIPLINE_BUDGET_CHARS)
+
+
 class PromptInjector:
     """从 engine 状态构建完整的 messages 列表（system prompt + 所有注入 + history）。
 
@@ -274,6 +420,27 @@ class PromptInjector:
                 "content": _guidance,
             })
             budget_stats["guidance"] = {"chars": len(_guidance)}
+
+        # ── 票 GOV-1：纪律注入（GUI-LESSONS + 工作流纪律，场景触发）──
+        # 施工类回合 → 施工纪律（六步工作流 + L1-L10）；收工类回合 → 收工自审
+        # + 汇报纪律（L8/L11/L12 + git diff 逐 hunk 自审）；无触发零注入（对照组铁律）。
+        # 预算 ≤1600 字符（≈800 tokens），超限压缩；记账走事件顶层 discipline 字段
+        # （不进 sections：LN-4 验收口径 sections 精确九段，且防 payload 超限被丢弃）。
+        _discipline_stats = None
+        _discipline_scene = _detect_round_scene(user_input, engine.history)
+        if _discipline_scene:
+            _disc_text, _disc_truncated = _build_discipline_text(
+                _discipline_scene, _load_gui_lessons())
+            if _disc_text:
+                messages.insert(5, {
+                    "role": "system",
+                    "content": _disc_text,
+                })
+                _discipline_stats = {
+                    "chars": len(_disc_text),
+                    "scene": _discipline_scene,
+                    "truncated": _disc_truncated,
+                }
 
         # ── 票 G1-2：章节触发展开（L1，SELF.md §2 架构/§4 边界/§5 自救）──
         # 关键词命中 user_input 或最近 4 轮 history 才注入该章全文；无触发零注入。
@@ -477,6 +644,9 @@ class PromptInjector:
                 "pool_total": pool.total,
                 "pool_source": pool.source,
                 "sections": budget_stats,
+                # 票 GOV-1：纪律记账在事件顶层（不进 sections——LN-4 九段口径）；
+                # 仅实际注入时带 discipline 字段，未注入不写空壳（payload 最小化）
+                **({"discipline": _discipline_stats} if _discipline_stats else {}),
             })
             event_bus.write("prompt.budget.decision", {
                 "sid": session_id,

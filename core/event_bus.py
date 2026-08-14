@@ -25,6 +25,12 @@ _MAX_SIZE_BYTES = 10 * 1024 * 1024   # 10 MB
 _MAX_BACKUPS = 3                       # 保留 3 代
 _SINGLE_EVENT_MAX_CHARS = 500          # 单条事件上限（摘要+指针原则）
 
+# 审计类事件放宽上限：预算记账（prompt.budget*）是结构化审计数据，必须完整落盘，
+# 不能被"摘要+指针"原则以 payload_too_large 丢弃（票 GOV-1 修复：TICKET-GOV-1 终审打回，
+# discipline 段曾把 prompt.budget 推过 500 导致整条事件被丢，审计缺失=违背记账语义）。
+_AUDIT_EVENTS = ("prompt.budget", "prompt.budget.decision")
+_AUDIT_MAX_CHARS = 2000                 # 审计事件单条上限（结构化记账户，含嵌套 sections）
+
 
 def _truncate(text: str, max_chars: int) -> str:
     """截断文本到 max_chars，末尾加 … 标记。"""
@@ -75,13 +81,15 @@ class EventBus:
             self._truncate_fields(event)
             payload = json.dumps(event, ensure_ascii=False, default=str, separators=(",", ":"))
             # 仍超长 → 删除 bulk 字段，而不是切 JSON 字符串
-            if len(payload) > _SINGLE_EVENT_MAX_CHARS:
+            # 审计类事件（prompt.budget*）用放宽上限，不走丢弃路径
+            limit = _AUDIT_MAX_CHARS if event_type in _AUDIT_EVENTS else _SINGLE_EVENT_MAX_CHARS
+            if len(payload) > limit:
                 event["_truncated"] = True
                 for drop_key in ["args_summary", "result_summary", "error_detail"]:
                     event.pop(drop_key, None)
                 payload = json.dumps(event, ensure_ascii=False, default=str, separators=(",", ":"))
                 # 丢字段后还超长？放弃本条（但写一条标记替代，不写坏行）
-                if len(payload) > _SINGLE_EVENT_MAX_CHARS:
+                if len(payload) > limit:
                     payload = json.dumps({
                         "ts": time.time(), "type": "event_bus.dropped",
                         "session_id": event.get("session_id", ""),
