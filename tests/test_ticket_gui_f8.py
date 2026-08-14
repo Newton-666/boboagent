@@ -269,12 +269,16 @@ def test_f8_3_gui_gate_static_asserts():
         "历史 tool 消息应按 inline_diff 渲染"
 
     # 复用点：toggleThinkBox / diffBlock / toolSummary / esc 均被历史函数引用
+    # （TICKET-GUI-F12 审查修复：思考框构造抽公用函数 buildHistThinkBox，
+    #  折叠交互与样式断言改指向它；addHistThinking 复用其构造）
     hist_think = _extract_func(src, "addHistThinking")
-    assert "toggleThinkBox(tb)" in hist_think
-    assert "think-box collapsed" in hist_think
+    assert "buildHistThinkBox(thinkingText)" in hist_think, "addHistThinking 应复用 buildHistThinkBox"
+    think_builder = _extract_func(src, "buildHistThinkBox")
+    assert "toggleThinkBox(tb)" in think_builder, "折叠交互应留在 buildHistThinkBox"
+    assert "think-box collapsed" in think_builder, "折叠样式应留在 buildHistThinkBox"
     hist_diff = _extract_func(src, "renderHistToolDiff")
     assert "diffBlock(inlineDiff)" in hist_diff
-    assert "toolSummary({}, inlineDiff)" in hist_diff
+    assert "buildHistToolCard(name, toolSummary({}, inlineDiff))" in hist_diff
 
     # 样式复用而非新增：.diff-block / .think-box.collapsed 为既有样式
     assert ".diff-block" in src and ".think-box.collapsed" in src
@@ -297,7 +301,8 @@ def test_f8_3_gui_node_render_hist_tool_diff():
     无头环境用最小 DOM 桩（与 F7 node 实跑同款零漂移）。"""
     src = GUI_FILE.read_text(encoding="utf-8")
     funcs = []
-    for fn in ("renderHistToolDiff", "diffBlock", "toolSummary", "diffStats", "esc"):
+    for fn in ("renderHistToolDiff", "buildHistToolCard", "diffBlock",
+               "toolSummary", "diffStats", "esc"):
         funcs.append(_extract_func(src, fn))
     js = r"""
 // 最小 DOM 桩：记录 appendChild 的树，支持 firstChild（innerHTML 解析后手动挂）
