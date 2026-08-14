@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" /><title>Bobo 执行实况</title>
+<style>
+/* TICKET-DESK-V4：小组件小窗 —— 只读投影。色值全部取自主窗现有色板/既有色值，零新增颜色。 */
+:root { --bg: #faf9f2; --bg2: #f2f1e8; --bg3: #eae8dc; --text: #2d2d2d; --text2: #777; --text-muted: #999; --border: #e0ded4; --hover: #e8e6da; --green: #4caf50; }
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; }
+body {
+  background:rgba(250,249,242,0.92); color:var(--text);
+  font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-size:11px; line-height:1.45;
+  border:1px solid var(--border); border-radius:10px;
+  display:flex; flex-direction:column;
+  -webkit-app-region:drag; user-select:none; cursor:default;
+}
+/* 审批待审：边框橙闪（复用主窗品牌橙，纯 CSS 动画；reduced-motion 禁用） */
+body.approval { border-color:#e8913a; animation:v4ApprovalFlash 1.2s ease-in-out infinite; }
+@keyframes v4ApprovalFlash { 0%,100% { border-color:#e8913a; box-shadow:0 0 0 0 rgba(232,145,58,0.25); } 50% { border-color:rgba(232,145,58,0.4); box-shadow:0 0 8px 1px rgba(232,145,58,0.35); } }
+@media (prefers-reduced-motion: reduce) { body.approval { animation:none; } }
+#w-head { display:flex; align-items:center; gap:6px; padding:6px 10px 4px; }
+#w-dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); flex-shrink:0; }
+#w-dot.green { background:var(--green); }
+#w-dot.red { background:#f44336; }
+#w-title { font-weight:600; font-size:11px; color:var(--text); letter-spacing:0.3px; }
+#w-badge { margin-left:auto; font-size:9px; color:#e8913a; background:rgba(232,145,58,0.15); border:1px solid rgba(232,145,58,0.4); border-radius:5px; padding:0 6px; display:none; -webkit-app-region:no-drag; }
+#w-body { flex:1; display:flex; flex-direction:column; gap:3px; padding:2px 10px 4px; min-height:0; }
+.w-row { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text2); }
+.w-row b { color:var(--text); font-weight:600; }
+#w-approval { display:none; padding:4px 8px; border-radius:6px; background:rgba(232,145,58,0.15); border:1px solid rgba(232,145,58,0.4); color:var(--text); font-size:10px; margin:2px 10px 4px; cursor:pointer; -webkit-app-region:no-drag; }
+#w-approval:hover { background:var(--hover); }
+#w-tools { display:flex; flex-direction:column; gap:2px; min-height:0; }
+.w-tool { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--text2); white-space:nowrap; overflow:hidden; }
+.w-tool svg { width:12px; height:12px; flex-shrink:0; color:var(--text-muted); }
+.w-tool .wt-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+.w-tool .wt-time { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:9px; color:var(--text-muted); flex-shrink:0; }
+.w-tool .wt-st { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.w-tool.running .wt-st { border:1.25px solid #e8913a; animation:v4Breathe 1.6s ease-in-out infinite; }
+.w-tool.done .wt-st { background:#50a14f; border:none; }
+.w-tool.fail .wt-st { background:#f48771; border:none; }
+@keyframes v4Breathe { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+.w-empty { font-size:9px; color:var(--text-muted); }
+/* TICKET-DESK-V4 追加①：diff 完整渲染 —— 与主窗 dist/index.html diffBlock 同 class 体系
+   1:1（.diff-block .df / .dl.add / .dl.del / .dl.ctx），整行高亮底色同源；
+   长行 pre-wrap 自动换行不截断（与主窗同款）；容器高度不足时纵向滚动，不裁切内容。 */
+#w-diff { flex:1; min-height:0; overflow-y:auto; margin:1px -2px 0; }
+.diff-block { border:1px solid var(--border); border-radius:6px; overflow:hidden; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:10px; line-height:1.5; background:var(--bg2); }
+.diff-block .df { display:block; padding:3px 10px; background:var(--bg3); color:var(--text2); font-weight:600; white-space:pre-wrap; word-break:break-all; }
+.diff-block .dl { display:block; padding:2px 10px; white-space:pre-wrap; word-break:break-all; }
+.diff-block .dl.add { background:rgba(80,161,79,0.20); color:#2c5e2b; }
+.diff-block .dl.del { background:rgba(244,135,113,0.20); color:#8a3a2c; }
+.diff-block .dl.ctx { color:var(--text2); }
+#w-foot { display:flex; align-items:center; gap:6px; padding:4px 10px 6px; border-top:1px solid var(--border); }
+#w-pill { flex:1; height:5px; border-radius:3px; background:var(--bg3); overflow:hidden; }
+#w-pill-fill { height:100%; width:0; background:#5b9bd5; border-radius:3px; }
+#w-pill-text { font-size:9px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; flex-shrink:0; }
+</style>
+</head>
+<body>
+  <div id="w-head">
+    <span id="w-dot"></span>
+    <span id="w-title">Bobo 执行实况</span>
+    <span id="w-badge">待审批</span>
+  </div>
+  <div id="w-body">
+    <div class="w-row" id="w-user"><b>指令</b> <span id="w-user-text">—</span></div>
+    <div class="w-row" id="w-task"><b>任务</b> <span id="w-task-text">空闲</span></div>
+    <div id="w-tools"><div class="w-empty">暂无工具调用</div></div>
+    <div id="w-diff" style="display:none"></div>
+  </div>
+  <div id="w-approval" title="点击唤起主窗处理审批">⚠ 待审批操作，点击唤起主窗</div>
+  <div id="w-foot">
+    <span id="w-pill-text">ctx —</span>
+    <span id="w-pill"><span id="w-pill-fill"></span></span>
+  </div>
+<script>
+// ── TICKET-DESK-V4：小窗渲染（只渲染不响应；唯一交互=点击唤起主窗处理审批）──
+// V2D25 工具图标映射复用（与主窗 dist/index.html TOOL_ICONS 同源同值）
+var TOOL_ICONS = {
+  'execute_terminal': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="10.5" height="8.5" rx="1.5"/><path d="M4.25 5.25 L6 7 L4.25 8.75"/><path d="M7.5 8.75 h2.25"/></svg>',
+  'read_local_file': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.75 h3.5 l3.25 3.25 V12.25 H4 Z"/><path d="M7.25 1.75 v3.5 h3.5"/></svg>',
+  'edit_file': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'grep_code': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3.4"/><path d="M8.6 8.6 L11.5 11.5"/></svg>',
+  'save_memory': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'load_result': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'task_ledger': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.25 h8 M3 7 h8 M3 9.75 h8"/></svg>',
+  'run_tests': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.75 7.5 L5.5 10.25 L11.25 3.75"/></svg>',
+  'web_search': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.25"/><path d="M2.75 7 h8.5 M7 2.75 c-1.2 1.35 -1.2 6.15 0 8.5 M7 2.75 c1.2 1.35 1.2 6.15 0 8.5"/></svg>',
+  '_default': '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.25"/></svg>'
+};
+function toolIcon(name) { return TOOL_ICONS[name] || TOOL_ICONS['_default']; }
+
+// ── TICKET-DESK-V4 追加①：diff 完整渲染 —— esc 与 diffBlock 与主窗 dist/index.html 同源同字节
+// （复用同一份渲染代码，禁止简化：整行高亮 .dl.add/.dl.del/.dl.ctx/.df 1:1）
+function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function diffBlock(text) {
+  var lines = esc(text).split('\n');
+  var html = '<div class="diff-block">';
+  lines.forEach(function(l) {
+    if (/^@@/.test(l)) html += '<div class="df">' + l + '</div>';
+    else if (/^\+/.test(l) && !/^\+\+\+/.test(l)) html += '<div class="dl add">' + l + '</div>';
+    else if (/^-/.test(l) && !/^---/.test(l)) html += '<div class="dl del">' + l + '</div>';
+    else html += '<div class="dl ctx">' + (l ? l : '&nbsp;') + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+function renderDiff(inlineDiff) {
+  var box = document.getElementById('w-diff');
+  if (!box) return;
+  if (!inlineDiff) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="w-row"><b>diff</b></div>' + diffBlock(inlineDiff);
+  box.style.display = 'block';
+}
+
+var _approvalSid = null;
+var _tools = [];
+var MAX_TOOLS = 4;
+
+function setConn(ok) {
+  var d = document.getElementById('w-dot');
+  d.className = ok ? 'green' : 'red';
+}
+function setTask(t) {
+  document.getElementById('w-task-text').textContent = (t || '空闲').slice(0, 80);
+}
+function setUser(t) {
+  document.getElementById('w-user-text').textContent = (t || '—').slice(0, 60);
+}
+function renderTools() {
+  var box = document.getElementById('w-tools');
+  if (!_tools.length) { box.innerHTML = '<div class="w-empty">暂无工具调用</div>'; return; }
+  box.innerHTML = _tools.slice(-MAX_TOOLS).map(function(t) {
+    return '<div class="w-tool ' + t.state + '">' +
+      toolIcon(t.name) +
+      '<span class="wt-st"></span>' +
+      '<span class="wt-name">' + t.name + '</span>' +
+      (t.state !== 'running' ? '<span class="wt-time">' + t.time + '</span>' : '') +
+      '</div>';
+  }).join('');
+}
+function toolStart(data) {
+  var name = data.name || data.tool_id || 'tool';
+  _tools.push({ name: name, state: 'running', time: '' });
+  renderTools();
+}
+function toolComplete(data) {
+  var name = data.name || data.tool_id || 'tool';
+  // 找到最后一个同名的 running 项标记完成（与主窗 updateToolResult 同思路）
+  for (var i = _tools.length - 1; i >= 0; i--) {
+    if (_tools[i].name === name && _tools[i].state === 'running') {
+      _tools[i].state = data.error ? 'fail' : 'done';
+      _tools[i].time = data.duration ? Number(data.duration).toFixed(1) + 's' : '—';
+      break;
+    }
+  }
+  renderTools();
+  // TICKET-DESK-V4 追加①：工具带 inline_diff → 完整渲染进小窗（整行高亮 1:1，不截断）
+  if (data.inline_diff) renderDiff(data.inline_diff);
+}
+function showApproval(data) {
+  _approvalSid = data.session_id || '';
+  document.body.classList.add('approval');
+  document.getElementById('w-approval').style.display = 'block';
+  document.getElementById('w-badge').style.display = 'inline';
+}
+function hideApproval() {
+  document.body.classList.remove('approval');
+  document.getElementById('w-approval').style.display = 'none';
+  document.getElementById('w-badge').style.display = 'none';
+}
+// 审批被处理（引擎继续产出事件）即清除橙闪；后端无 approval.respond 事件，靠活动事件自然消退
+function onActivity() {
+  if (_approvalSid) { _approvalSid = null; hideApproval(); }
+}
+function renderCtx(d) {
+  var limit = (typeof d.context_limit === 'number' && d.context_limit > 0) ? d.context_limit : 128000;
+  var used = (typeof d.token_estimate === 'number') ? d.token_estimate : 0;
+  var pct = Math.min(100, Math.round(used * 100 / limit));
+  var fill = document.getElementById('w-pill-fill');
+  fill.style.width = pct + '%';
+  // 三色阶与主窗 refreshCtxStats 同源（<60% 思考蓝 / ≥60% 品牌橙 / ≥85% 语义红）
+  fill.style.background = pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5');
+  var kb = function(n) { return (n >= 1000) ? Math.round(n / 1000) + 'K' : String(n); };
+  document.getElementById('w-pill-text').textContent = pct + '% · ' + kb(used) + '/' + kb(limit);
+}
+
+// 审批点击 → 唤起主窗并跳到对应会话（只调主窗现成入口）
+document.getElementById('w-approval').addEventListener('click', function() {
+  if (window.widgetAPI) window.widgetAPI.approvalFocus(_approvalSid);
+});
+
+if (window.widgetAPI) {
+  widgetAPI.onEvent(function(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.method !== 'event' || !msg.params || !msg.params.type) return;
+    var t = msg.params.type;
+    var d = msg.params.payload || msg.params;
+    if (t === 'gateway.ready') { setConn(true); setTask('已连接'); return; }
+    if (t === 'gateway.error') { onActivity(); setTask('出错：' + String(d.message || '').slice(0, 60)); return; }
+    if (t === 'message.start') { onActivity(); setTask('正在回复…'); return; }
+    if (t === 'message.delta') { onActivity(); setTask('正在回复：' + String(d.text || '').slice(0, 50)); return; }
+    if (t === 'message.complete') { onActivity(); setTask('回复完成'); return; }
+    if (t === 'status.update') { onActivity(); setTask(String(d.text || '').slice(0, 60)); return; }
+    if (t === 'tool.start') { onActivity(); toolStart(d); return; }
+    if (t === 'tool.complete') { onActivity(); toolComplete(d); return; }
+    if (t === 'approval.request') { showApproval(d); return; }
+    if (t === 'session.cleared') { onActivity(); setTask('对话已清除'); return; }
+  });
+  widgetAPI.onCtxStats(function(d) { if (d) renderCtx(d); });
+  widgetAPI.onUserMsg(function(text) { setUser(text); });
+  widgetAPI.onStatus(function(data) {
+    if (data && data.status === 'exited') { setConn(false); setTask('后端已退出'); }
+  });
+} else {
+  setConn(true);
+}
+</script>
+</body>
+</html>
