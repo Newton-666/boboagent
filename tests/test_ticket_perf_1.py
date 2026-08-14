@@ -172,7 +172,8 @@ class TestPerf1LengthRetry:
         stream_seq = {"n": 0}
 
         def fake_post(api_url, json=None, headers=None, timeout=None, stream=None,
-                      headers_timeout=None, event_bus=None, session_id=None):
+                      headers_timeout=None, event_bus=None, session_id=None,
+                      _interrupt_event=None):
             posts.append(json.get("max_tokens"))
             return _FakeResp()
 
