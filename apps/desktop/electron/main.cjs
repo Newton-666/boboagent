@@ -6,8 +6,11 @@ const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+// TICKET-DESK-V4: 小组件开关状态 + 窗口尺寸持久化（纯 Node 模块）
+const { readWidgetEnabled, writeWidgetEnabled, readWidgetSize, writeWidgetSize } = require('./widget-config.cjs')
 
 let mainWindow = null
+let widgetWindow = null   // TICKET-DESK-V4: 只读投影小组件小窗（独立生命周期，不波及主窗/后端）
 let backendProcess = null
 let backendBuffer = ''
 let backendRestartCount = 0
@@ -124,8 +127,13 @@ function startBackend() {
   backendProcess.on('exit', (code) => {
     console.log(`[bobo-desktop] Backend exited with code ${code}`)
     backendProcess = null
+    const exitMsg = { status: 'exited', code, message: code !== 0 ? `后端进程异常退出 (代码: ${code})` : '' }
     if (mainWindow) {
-      mainWindow.webContents.send('backend-status', { status: 'exited', code, message: code !== 0 ? `后端进程异常退出 (代码: ${code})` : '' })
+      mainWindow.webContents.send('backend-status', exitMsg)
+    }
+    // TICKET-DESK-V4: 小窗同步连接状态（只读投影，不响应）
+    if (widgetWindow) {
+      widgetWindow.webContents.send('backend-status', exitMsg)
     }
     // Auto-restart with backoff (up to MAX_BACKEND_RESTARTS times)
     if (code !== 0 && backendRestartCount < MAX_BACKEND_RESTARTS) {
@@ -164,6 +172,10 @@ function startBackend() {
           mainWindow.webContents.send('backend-message', msg)
         } else {
           pendingMessages.push(msg)
+        }
+        // TICKET-DESK-V4: 只读投影 —— 同一条现成事件流镜像给小组件（只监听不响应）
+        if (widgetWindow) {
+          widgetWindow.webContents.send('backend-message', msg)
         }
       } catch {
         process.stderr.write(`[bobo-desktop] Unparseable backend output: ${line.slice(0, 100)}\n`)
@@ -246,7 +258,87 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    // TICKET-DESK-V4: 主窗关闭即销毁小窗（零残留），保证 window-all-closed 触发退出；
+    // 反之小窗关闭不波及主窗/后端（独立生命周期）。
+    destroyWidgetWindow()
   })
+}
+
+// ── TICKET-DESK-V4: 只读投影小组件小窗 ─────────────────────────────────
+// 第一铁律：只读投影，零干涉。小窗独立 BrowserWindow，独立开关/生命周期；
+// 关闭=当场销毁（不是隐藏）；崩溃/关闭不波及主窗与后端。
+function createWidgetWindow() {
+  if (widgetWindow) return widgetWindow
+  // TICKET-DESK-V4 追加②：尺寸持久化恢复（重启回上次大小；无配置回默认 280×160）
+  const size = readWidgetSize(getDataDir())
+  widgetWindow = new BrowserWindow({
+    width: size.width,
+    height: size.height,
+    frame: false,
+    transparent: true,
+    // TICKET-DESK-V4 追加②：可拖拽 resize（拖边/角拉大）；最小尺寸限制，拖到最小即停
+    resizable: true,
+    minWidth: 240,
+    minHeight: 150,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    title: 'Bobo 执行实况',
+    webPreferences: {
+      preload: path.join(__dirname, 'widget-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  widgetWindow.setAlwaysOnTop(true, 'floating')
+  widgetWindow.loadFile(path.join(__dirname, 'widget.html'))
+  widgetWindow.on('closed', () => {
+    widgetWindow = null
+  })
+  // TICKET-DESK-V4 追加②：resize 时持久化尺寸（与开关状态同文件，重启恢复）
+  widgetWindow.on('resize', () => {
+    try {
+      const [w, h] = widgetWindow.getSize()
+      writeWidgetSize(getDataDir(), { width: w, height: h })
+    } catch (_) {}
+  })
+  // 小窗自身崩溃/异常不影响主窗与后端（不弹错误框）
+  widgetWindow.webContents.on('render-process-gone', () => {
+    try { widgetWindow && widgetWindow.destroy() } catch (_) {}
+  })
+  return widgetWindow
+}
+
+function destroyWidgetWindow() {
+  if (widgetWindow) {
+    const w = widgetWindow
+    widgetWindow = null
+    try { w.destroy() } catch (_) {}
+  }
+}
+
+function toggleWidget() {
+  if (widgetWindow) {
+    destroyWidgetWindow()
+  } else {
+    createWidgetWindow()
+  }
+  writeWidgetEnabled(getDataDir(), !!widgetWindow)
+  return { enabled: !!widgetWindow }
+}
+
+function widgetStatus() {
+  return { enabled: !!widgetWindow }
+}
+
+function ensureWidgetByConfig() {
+  // 重启桌面端按持久化状态自动恢复；默认关（配置不存在时 readWidgetEnabled 返回 false）
+  if (readWidgetEnabled(getDataDir())) {
+    createWidgetWindow()
+  }
 }
 
 // ── IPC handlers ───────────────────────────────────────────────────────
@@ -257,6 +349,32 @@ ipcMain.on('backend-send', (_event, msg) => {
 
 ipcMain.handle('backend-send-sync', async (_event, msg) => {
   return sendToBackend(msg)
+})
+
+// ── TICKET-DESK-V4: 小组件 IPC（开关/状态/审批联动/只读广播）──
+ipcMain.handle('widget-toggle', () => {
+  return toggleWidget()
+})
+
+ipcMain.handle('widget-status', () => {
+  return widgetStatus()
+})
+
+// 小窗点击审批 → 唤起主窗并跳到对应会话（只调主窗现成的聚焦/切会话入口，不自建通道）
+ipcMain.on('widget-approval-focus', (_event, sid) => {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  if (sid) mainWindow.webContents.send('widget-focus-session', String(sid))
+})
+
+// 主窗只读广播 → 小窗（上下文药丸 / 用户指令）
+ipcMain.on('widget-ctx-stats', (_event, data) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-ctx-stats', data)
+})
+ipcMain.on('widget-user-msg', (_event, text) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-user-msg', String(text))
 })
 
 // ── First-run config ──
@@ -411,9 +529,13 @@ app.whenReady().then(() => {
   } catch (_) {}
   startBackend()
   createWindow()
+  // TICKET-DESK-V4: 重启按持久化开关自动恢复小组件（默认关）
+  ensureWidgetByConfig()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // macOS Dock 激活恢复主窗后，同步恢复小组件（配置开启时）
+    ensureWidgetByConfig()
   })
 })
 

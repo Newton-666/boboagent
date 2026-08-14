@@ -421,6 +421,14 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   .tool.shimmer::after { animation:none; display:none; }
 }
 /* === end V2D25 === */
+/* === DESK-V4 小组件 ===
+ * 侧栏底部小组件开关 —— 与 #auto-toggle 同 toggle 体系（padding 3px 10px / radius 6px /
+ * 10px 字号 / 色板取色；.on 橙态同源 rgba(232,145,58,…)）。窗口级控制，侧栏底部自然位置。
+ * 全部取色板 token，零新增色值。 */
+#widget-toggle { padding:3px 10px; border-radius:6px; font-size:10px; letter-spacing:0.5px; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; margin-left:auto; }
+#widget-toggle:hover { background:var(--hover); }
+#widget-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
+/* === end DESK-V4 === */
 </style>
 </head>
 <body>
@@ -444,7 +452,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div class="section-bd" id="body-plugin">
       <div id="plugin-list"></div>
     </div>
-    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="status-mode"></span><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
+    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="status-mode"></span><button id="widget-toggle" title="执行实况小组件（只读投影）">小组件</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
   </div>
   <div id="main">
     <div id="welcome">
@@ -1105,6 +1113,10 @@ function mdReply(s) {
 function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
 
 function addMsg(role, text, id, append) {
+  // TICKET-DESK-V4: 用户指令只读广播给小窗（投影数据源；不改任何渲染行为/状态）
+  if (role === 'user' && text && typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetUserMsg) {
+    window.boboAPI.widgetUserMsg(text);
+  }
   welcomeEl.style.display = 'none';
   // TICKET-DESK-V2C12 (C1)：仅助手正文气泡（bobo）走完整 markdown 管线；用户消息保持既有简渲染
   var render = (role === 'bobo') ? mdReply : md;
@@ -1361,6 +1373,8 @@ function refreshCtxStats() {
   call('context.stats', { session_id: currentSessionId || '' }).then(function(res) {
     var d = res && res.result ? res.result : null;
     if (!d) return;
+    // TICKET-DESK-V4: 药丸统计只读广播给小窗（投影数据源；不改主窗任何行为）
+    if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCtxStats) window.boboAPI.widgetCtxStats(d);
     var fmt = function(n) { return (typeof n === 'number') ? String(n) : '—'; };
     // 药丸进度：百分比 = token 估算 / context_limit（context.stats 现返回上限，128K 兜底）
     var limit = (typeof d.context_limit === 'number' && d.context_limit > 0) ? d.context_limit : 128000;
@@ -2578,8 +2592,40 @@ var readyFallbackTimer = setTimeout(async function() {
 
 // ── Input ──────────────────────────────────────────────────────────────
 document.getElementById('new-chat').addEventListener('click', newChat);
+
+// TICKET-DESK-V4: 小组件开关（侧栏按钮 ↔ /widget 命令 ↔ 持久化 三向同步同源）
+// 真实窗口状态以主进程为准（widget-toggle IPC 返回），本地按钮只投影主进程状态。
+var widgetBtn = document.getElementById('widget-toggle');
+function syncWidgetBtn(enabled) {
+  if (!widgetBtn) return;
+  widgetBtn.classList.toggle('on', !!enabled);
+  widgetBtn.textContent = enabled ? '小组件 ✓' : '小组件';
+  widgetBtn.title = enabled ? '关闭执行实况小组件' : '打开执行实况小组件（只读投影）';
+}
+function widgetToggle() {
+  if (window.boboAPI && window.boboAPI.widgetToggle) {
+    window.boboAPI.widgetToggle().then(function(r) {
+      syncWidgetBtn(r && r.enabled);
+      addStatus(r && r.enabled ? '执行实况小组件已打开（只读投影）' : '执行实况小组件已关闭');
+    });
+  } else {
+    addStatus('执行实况小组件仅桌面端可用（浏览器模式不支持）');
+  }
+}
+if (widgetBtn) widgetBtn.addEventListener('click', widgetToggle);
+// 启动恢复按钮态（默认关；真实状态以主进程持久化配置为准）
+if (window.boboAPI && window.boboAPI.widgetStatus) {
+  window.boboAPI.widgetStatus().then(function(r) { syncWidgetBtn(r && r.enabled); });
+}
+// TICKET-DESK-V4: 审批联动落地 —— 小窗点击 → 主进程唤起主窗 → 这里跳对应会话（现成 loadSession）
+if (window.boboAPI && window.boboAPI.onWidgetFocusSession) {
+  window.boboAPI.onWidgetFocusSession(function(sid) {
+    if (sid && sid !== currentSessionId) loadSession(sid);
+  });
+}
+
 function handleSlash(cmd) {
-  if (cmd === 'help') { addMsg('bobo', '**可用命令:**\n- /help — 显示帮助\n- /clear — 清除当前对话\n- /undo — 回退上一步\n- /tools — 列出工具\n- /settings — 查看配置\n\n或说 "切换到 OpenAI" 来换模型', 'help-'+Date.now()); return true; }
+  if (cmd === 'help') { addMsg('bobo', '**可用命令:**\n- /help — 显示帮助\n- /clear — 清除当前对话\n- /undo — 回退上一步\n- /tools — 列出工具\n- /settings — 查看配置\n- /widget — 切换执行实况小组件\n\n或说 "切换到 OpenAI" 来换模型', 'help-'+Date.now()); return true; }
   if (cmd === 'clear') { clearChat(); welcomeEl.style.display = 'flex'; addStatus('对话已清除'); return true; }
   if (cmd === 'tools') {
     call('tools.list', {}).then(function(r) {
@@ -2596,6 +2642,8 @@ function handleSlash(cmd) {
     return true;
   }
   if (cmd === 'undo') { addStatus('请使用 Ctrl+Z 或在 TUI 中用 /undo'); return true; }
+  // TICKET-DESK-V4: /widget 本地命令 —— 与侧栏开关同源（同一 widgetToggle 入口）
+  if (cmd === 'widget') { widgetToggle(); return true; }
   return false;
 }
 
