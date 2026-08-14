@@ -67,11 +67,21 @@ def handle_context_stats(params: dict, rid: str, ctx) -> dict:
     """
     sid = params.get("session_id", "")
     token_estimate = 0
-    if sid and sid in ctx.sessions:
+    if sid:
         try:
             from core.context import _estimate_tokens
-            msgs = ctx.sessions.get(sid, {}).get("messages", []) or []
-            token_estimate = _estimate_tokens(msgs)
+            # TICKET-DESK-V2B4：优先活引擎 history（F9 后引擎跑在活副本上，
+            # gateway 那份 messages 回合中/重启后可能为空 → 永远 0）。
+            # 双兜底与 F9 resume 同款思路：活引擎取不到（竞态/引擎已退出）回退内存版。
+            msgs = None
+            try:
+                from core.engine_adapter import get_live_history
+                msgs = get_live_history(sid)
+            except Exception:
+                msgs = None
+            if not msgs:
+                msgs = ctx.sessions.get(sid, {}).get("messages", []) or []
+            token_estimate = _estimate_tokens(msgs or [])
         except Exception:
             token_estimate = 0
     saved_chars = 0

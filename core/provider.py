@@ -60,7 +60,7 @@ PROVIDERS = {
         "base_url": "https://api.moonshot.cn/v1/chat/completions",
         "models": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code-highspeed"],
         "context_length": 1048576,  # k3=1M
-        "model_context": {"kimi-k2.6": 262144, "kimi-k2.7-code-highspeed": 262144},
+        "model_context": {"kimi-k3": 1000000, "kimi-k2.6": 262144, "kimi-k2.7-code-highspeed": 262144},
         "temperature": 1.0,
         "max_tokens": 32768,
     },
