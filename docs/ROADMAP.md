@@ -1,6 +1,6 @@
 # ROADMAP — bobo 体系作战地图
 
-> v2.0 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
+> v2.1 · 2026-08-14 · 随每票终审合并滚动更新；发现新问题/新想法 → 补进本文件对应梯队
 
 ## 当前队列（按执行顺序）
 
@@ -26,7 +26,7 @@
 | EV-2 | 评估跑道升级：轨迹回放 + mock 驱动；复活 BLOCKED 的 A5/A7 题；A1 新规则（≤2 次工具）复测；B2 的 test_archive_file_exists 定位 | 📋 排队 |
 | COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。产出：测量报告 → 优化票 | 📋 GUI 梯队收官后启动 |
 | TOOL-OPT 实验线 | 工具调用效率（COST-1 的子线）：读文件缓存/同回合去重/纯读结果复用；借鉴 DeepSeek Harness PTC 程序化工具调用 → EV-2 轨迹回放做 A/B | 📋 并入 COST-1 |
-| RESEARCH-DSH | DeepSeek Harness（2026-08-13 开源，MIT，一切皆插件/Cordis 可回滚/9 子代理分工/PTC/Session Log 回放）对照研究：clone 到 data/skill-standards/，重点拆子代理分工（喂 WORKER-V1）与 PTC（喂 TOOL-OPT） | 📋 随 COST-1 启动 |
+| RESEARCH-DSH（owner 2026-08-14 拍板：**交给 bobo 自己做**，兼作能力测试） | DeepSeek Harness（2026-08-13 开源，MIT）源码分析：clone 到 data/skill-standards/deepseek-harness/，bobo 亲拆——一切皆插件/Cordis 可回滚/9 子代理分工（喂 WORKER-V1）/PTC（喂 TOOL-OPT）/缓存键设计（喂 COST-1a）。产出对照笔记入 library/ | 📋 V2B4 终审后派 |
 | EVAL 体验题 | 同一真实任务 Hermes/bobo 桌面端对照跑，体验差距量化 | 📋 待开 |
 | vitest 存量 13 失败 | gatewayClient websocket 10 个等陈年老账立案清理 | 📋 排队 |
 
