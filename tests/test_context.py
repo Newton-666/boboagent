@@ -79,8 +79,8 @@ class TestToolFiltering:
         filtered = engine._get_filtered_tools()
         if filtered is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered]
-            # Web tools should be present
-            web_tools = ["web_search", "web_fetch", "web_extract", "open_url"]
+            # Web tools should be present（PARK-1：只断言在线工具；web_extract 等已外挂不进分类池）
+            web_tools = ["web_search", "web_fetch"]
             for wt in web_tools:
                 assert wt in names
 
@@ -90,10 +90,9 @@ class TestToolFiltering:
         if filtered is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered]
             # Check for tools that ARE in the code category per TOOL_CATEGORIES
+            # （PARK-1：github 系/restore_checkpoint 已外挂，只断言在线 code 工具）
             code_tools = ["code_execution", "execute_terminal",
-                         "refactor", "git_status", "github_create_repo",
-                         "github_create_pr", "github_pr_diff", "github_pr_comment",
-                         "restore_checkpoint"]
+                         "refactor", "git_status"]
             for ct in code_tools:
                 assert ct in names
 
@@ -102,7 +101,16 @@ class TestToolFiltering:
         filtered = engine._get_filtered_tools()
         if filtered is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered]
-            assert "send_notification" in names
+            # PARK-1：macos 7 个工具全部外挂 → 分类池在线为空；
+            # 结果 = 在线 ∩ (macos ∪ general fallback ∪ 元工具)；
+            # 断言机制正确性：不带出 web/code/email 等无关分类工具
+            macos_cat = ContextMixin.TOOL_CATEGORIES.get("macos", [])
+            general_cat = ContextMixin.TOOL_CATEGORIES.get("general", [])
+            meta = ContextMixin._META_TOOLS
+            allowed = set(macos_cat) | set(general_cat) | set(meta)
+            assert all(n in allowed for n in names), (
+                f"macos 查询带出无关分类工具: {[n for n in names if n not in allowed]}"
+            )
 
     def test_obsidian_query_does_not_filter(self, engine):
         # Obsidian queries use all tools since it's in _NO_FILTER_CATEGORIES

@@ -3,6 +3,7 @@
 import sys
 import logging
 import importlib.util
+import json
 import re
 from pathlib import Path
 
@@ -10,9 +11,40 @@ logger = logging.getLogger(__name__)
 
 TOOL_FUNCTIONS = {}
 TOOLS_SCHEMA = []
+ALL_TOOLS_SCHEMA = []  # 全量快照（含外挂仓内工具），describe_tool 回退查询用（票 TOOL-PARK-1）
 TOOL_CHECKS = {}  # tool_name -> callable returning bool
 
 _LOAD_ERRORS: list[tuple[str, str]] = []  # (文件名, 错误摘要) — 加载失败的工具
+
+# ── 票 TOOL-PARK-1：工具外挂仓 ──
+_PARK_FILE = Path(__file__).resolve().parent.parent / "data" / "tool_park.json"
+
+
+def load_tool_park(park_path=None) -> set[str]:
+    """读外挂仓单（data/tool_park.json）：{"parked": [工具名...]}。
+
+    仓单缺失/损坏 → 返回空集（兜底：全部工具照常上线，宁多勿缺，不许启动失败）。
+    """
+    path = Path(park_path) if park_path else _PARK_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        parked = data.get("parked", [])
+        if not isinstance(parked, list):
+            return set()
+        return {str(n).strip() for n in parked if str(n).strip()}
+    except Exception:
+        return set()
+
+
+def _park_filter(schemas, parked: set[str]) -> list[dict]:
+    """剔除仓内工具的 schema（保持顺序）。
+
+    仓内工具只是不 advertised（不进 prompt schema），函数照常注册可执行。
+    """
+    if not parked:
+        return list(schemas)
+    return [t for t in schemas
+            if t.get("function", {}).get("name", "") not in parked]
 
 def report_load_errors() -> str:
     """返回工具加载失败的启动警告文本；无失败时返回空串。"""
@@ -92,3 +124,13 @@ else:
     print(f" 已加载 {len(TOOLS_SCHEMA)} 个有效工具（去重后）", file=sys.stderr)
 
 TOOLS_SCHEMA[:] = gated_schemas
+
+# ── 票 TOOL-PARK-1：外挂仓装配（在 check_fn 过滤后执行） ──
+# 1. 全量快照先留——describe_tool 对仓内工具仍返回完整 schema（验收③）
+ALL_TOOLS_SCHEMA[:] = list(gated_schemas)
+# 2. 仓内工具 schema 不进 prompt（每轮省 ≈4,279 tokens），函数照常可执行（外挂不是禁用）
+PARKED_TOOLS = load_tool_park()
+TOOLS_SCHEMA[:] = _park_filter(gated_schemas, PARKED_TOOLS)
+if PARKED_TOOLS:
+    print(f" 外挂仓 {len(PARKED_TOOLS)} 个工具已打包（不进 prompt，仍可执行），"
+          f"上线 {len(TOOLS_SCHEMA)} 个", file=sys.stderr)

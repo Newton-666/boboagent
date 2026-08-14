@@ -47,12 +47,13 @@ class TestToolRegistry:
         assert len(dupes) == 0, f"Duplicate tool names found: {set(dupes)}"
 
     def test_core_tools_present(self):
-        """Verify essential tools are registered."""
-        from tools import TOOLS_SCHEMA
-        names = set()
-        for tool in TOOLS_SCHEMA:
-            fn = tool.get("function", tool)
-            names.add(fn.get("name", ""))
+        """Verify essential tools are registered.
+
+        PARK-1：仓内工具注册不删（可执行），只是不进 prompt schema——
+        断言对象为 TOOL_FUNCTIONS（注册表）。
+        """
+        from tools import TOOL_FUNCTIONS
+        names = set(TOOL_FUNCTIONS.keys())
 
         essential = [
             "get_current_time",
@@ -80,11 +81,8 @@ class TestToolRegistry:
             assert name in names, f"Essential tool '{name}' not found in registry"
 
     def test_obsidian_tools_registered(self):
-        from tools import TOOLS_SCHEMA
-        names = set()
-        for tool in TOOLS_SCHEMA:
-            fn = tool.get("function", tool)
-            names.add(fn.get("name", ""))
+        from tools import TOOL_FUNCTIONS
+        names = set(TOOL_FUNCTIONS.keys())
 
         obsidian_tools = [
             "read_obsidian", "write_obsidian", "search_obsidian",
@@ -96,11 +94,8 @@ class TestToolRegistry:
             assert name in names, f"Obsidian tool '{name}' not found"
 
     def test_github_tools_registered(self):
-        from tools import TOOLS_SCHEMA
-        names = set()
-        for tool in TOOLS_SCHEMA:
-            fn = tool.get("function", tool)
-            names.add(fn.get("name", ""))
+        from tools import TOOL_FUNCTIONS
+        names = set(TOOL_FUNCTIONS.keys())
 
         github_tools = [
             "github_create_repo", "github_create_pr",
@@ -111,11 +106,8 @@ class TestToolRegistry:
             assert name in names, f"GitHub tool '{name}' not found"
 
     def test_macos_tools_registered(self):
-        from tools import TOOLS_SCHEMA
-        names = set()
-        for tool in TOOLS_SCHEMA:
-            fn = tool.get("function", tool)
-            names.add(fn.get("name", ""))
+        from tools import TOOL_FUNCTIONS
+        names = set(TOOL_FUNCTIONS.keys())
 
         macos_tools = [
             "send_notification", "read_clipboard", "write_clipboard",
@@ -147,8 +139,13 @@ class TestToolRegistry:
         # Should be in TOOL_FUNCTIONS
         assert name_before in TOOL_FUNCTIONS
 
-        # Clean up — this tool won't have a schema with .get('function') returning
-        # useful data post-discovery, but the registration mechanism works
+        # Clean up — 注册的临时工具必须从注册表和 schema 移除，
+        # 否则污染模块级全局状态（TOOLS_SCHEMA 数量断言会漂移）
+        del TOOL_FUNCTIONS[name_before]
+        TOOLS_SCHEMA[:] = [t for t in TOOLS_SCHEMA
+                           if t.get("function", {}).get("name") != name_before]
+        assert name_before not in TOOL_FUNCTIONS
+        assert name_before not in [t.get("function", {}).get("name", "") for t in TOOLS_SCHEMA]
 
     def test_tool_checks_are_registered(self):
         from tools import TOOL_CHECKS
