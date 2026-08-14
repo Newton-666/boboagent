@@ -118,7 +118,12 @@ def test_v2b3_2_panel_dom_and_css():
     assert "border-radius:8px" in src
     assert "#slash-panel .sp-item.sp-active { background:var(--bg3); }" in src
     # 颜色闸：V2B3 新增样式块内不得出现新 #hex 色值（全部取色板 token）
-    block = src[src.index("/* TICKET-DESK-V2B3：斜杠命令面板"):src.index("</style>")]
+    # L3：区间终点优先取下一个票锚点段（V2B4 插入后），否则 </style>（V2B4 合并前）
+    block_start = src.index("/* TICKET-DESK-V2B3：斜杠命令面板")
+    block_end = src.find("/* === V2B4 实况折叠卡 ===", block_start)
+    if block_end < 0:
+        block_end = src.index("</style>")
+    block = src[block_start:block_end]
     hex_colors = re.findall(r"#[0-9a-fA-F]{3,8}\b", block)
     assert not hex_colors, f"V2B3 样式块不得新增色值: {hex_colors}"
 

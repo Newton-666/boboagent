@@ -329,6 +329,16 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #slash-panel .sp-name { font-weight:600; white-space:nowrap; color:var(--text); }
 #slash-panel .sp-desc { color:var(--text2); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 #slash-panel .sp-empty { padding:8px 12px; color:var(--text-muted); }
+/* === V2B4 实况折叠卡 ===
+   收工汇报"工作区实况"区块 → 默认折叠卡片（标题一行 + 点击展开）。
+   取色仅用色板：--bg2 头底 / --bg3 体底 / --border 发丝线 / --text-muted 弱箭头；等宽原样保留。 */
+.v2b4-wt-card { border:1px solid var(--border); border-left:3px solid #e8913a; border-radius:8px; margin:8px 0; overflow:hidden; animation:fadeIn 0.25s ease-out; }
+.v2b4-wt-head { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--bg2); cursor:pointer; font-weight:600; font-size:13px; color:var(--text); }
+.v2b4-wt-head:hover { background:var(--hover); }
+.v2b4-wt-title { display:inline-flex; align-items:center; gap:6px; }
+.v2b4-wt-arrow { color:var(--text-muted); font-size:12px; }
+.v2b4-wt-body { display:none; padding:10px 12px; margin:0; background:var(--bg3); border-top:1px solid var(--border); font-family:SF Mono, Monaco, Menlo, monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; word-break:break-all; color:var(--text2); }
+/* === end V2B4 === */
 </style>
 </head>
 <body>
@@ -762,6 +772,42 @@ function highlight(code, lang) {
   return result;
 }
 // ── 票 AUTO-G2：待人工清单折叠卡片（默认收起，点开展开完整列表）──
+// TICKET-DESK-V2B4 ③：收工实况区块 → 默认折叠卡（与 AUTO-G2 同构：抽离 → 占位符 → md 处理后还原）。
+// 检测特征：── 工作区实况 / ── 实况对账 / 工作区实况（收工对账 等分隔线起始；
+// 区块结束：下一个行首 ── 分隔线 或 消息结尾。历史重放与流式同走 md() → 同路径折叠。
+function buildWorktreeCard(text) {
+  var WORKTREE_MARKERS = ['── 工作区实况', '── 实况对账', '工作区实况（收工对账'];
+  var idx = -1;
+  for (var i = 0; i < WORKTREE_MARKERS.length; i++) {
+    var f = text.indexOf(WORKTREE_MARKERS[i]);
+    if (f >= 0 && (idx < 0 || f < idx)) idx = f;
+  }
+  if (idx < 0) return null;
+  var lineStart = text.lastIndexOf('\n', idx - 1) + 1; // 标记所在行行首
+  var head = text.slice(0, lineStart).replace(/[ \t]+\n/g, '\n');
+  var rest = text.slice(lineStart);
+  var lines = rest.split('\n');
+  var end = lines.length;
+  for (var j = 1; j < lines.length; j++) {
+    if (/^─{2,}/.test(lines[j])) { end = j; break; } // 下一个同级分隔线
+  }
+  var block = lines.slice(0, end).join('\n');
+  var tail = lines.slice(end).join('\n').replace(/^[ \t]+$/gm, '');
+  return { head: head + (tail ? tail + '\n' : ''), card:
+    '<div class="v2b4-wt-card">' +
+    '<div class="v2b4-wt-head" onclick="toggleWorktree(this)">' +
+    '<span class="v2b4-wt-title">📋 工作区实况对账</span><span class="v2b4-wt-arrow">▸</span></div>' +
+    '<pre class="v2b4-wt-body" style="display:none">' + esc(block) + '</pre>' +
+    '</div>' };
+}
+function toggleWorktree(headEl) {
+  var body = headEl.parentNode.querySelector('.v2b4-wt-body');
+  var arrow = headEl.querySelector('.v2b4-wt-arrow');
+  if (!body || !arrow) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  arrow.textContent = open ? '▸' : '▾';
+}
 function buildHandoffCard(text) {
   var marker = '📋 待人工执行清单';
   var idx = text.indexOf(marker);
@@ -802,6 +848,10 @@ function md(s) {
   // 票 AUTO-G2：待人工清单 → 默认收起的折叠卡片（先抽离，markdown 处理后还原）
   var handoffCard = buildHandoffCard(s);
   if (handoffCard) { s = handoffCard.head + '\n\n%%HANDOFF_CARD%%'; }
+  // TICKET-DESK-V2B4 ③：工作区实况区块 → 默认收起的折叠卡（与 AUTO-G2 同构抽离/还原；
+  // 历史重放（resume/重启加载）与流式消息都经 md()，两边同路径折叠）
+  var worktreeCard = buildWorktreeCard(s);
+  if (worktreeCard) { s = worktreeCard.head + '\n\n%%WORKTREE_CARD%%'; }
   var codeBlocks = [];
   s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
     var rawCode = code.trim();
@@ -878,6 +928,7 @@ function md(s) {
   s = s.replace(/%%CODEBLOCK(\d+)%%/g, function(_, i) { return codeBlocks[+i]; });
   s = s.replace(/%%TABLE(\d+)%%/g, function(_, i) { return tables[+i]; });
   if (handoffCard) { s = s.replace(/%%HANDOFF_CARD%%/g, handoffCard.card); }
+  if (worktreeCard) { s = s.replace(/%%WORKTREE_CARD%%/g, worktreeCard.card); }
   return s;
 }
 
@@ -2037,6 +2088,9 @@ on('tool.start', function(data) {
 on('tool.complete', function(data) {
   var tid = data ? data.tool_id || '' : '';
   if (tid) updateToolResult(tid, data);
+  // TICKET-DESK-V2B4 ②：回合中每次 tool.complete 后轻量刷新上下文药丸
+  // （context.stats 只读毫秒级估算，无轮询；配合后端活引擎取数，药丸随回合实时涨）
+  refreshCtxStats();
   // 联动：Bobo 读文件 → 自动在项目面板显示
   var name = data ? data.name : '';
   if (name === 'read_local_file') {
