@@ -72,6 +72,7 @@
 |---|---|
 | Apple Developer 签名发布 | 桌面端成为每日主力后再买（$99），不提前 |
 | DESK-V3 Automation 侧栏 | 定时任务进侧栏（对标 Hermes CRON JOBS，我们体系现成） |
+| DESK-V4 桌面小组件（owner 15:26 想法） | bobo 心跳窗：Electron frameless 半透明小窗贴桌面——状态呼吸灯/当前任务/迷你药丸/最近工具滚动/审批时变橙轻闪点击跳主窗；复用全部现成组件；WidgetKit 原生版等 Apple 签名后 |
 | 造 Agent 方向讨论 | 战略级对话，等桌面端稳定后展开 |
 | 电脑操控方向（BROWSER-1→COMPUTER-1） | 2026-08-13 讨论后 owner 拍板"先放着"：真实浏览器 CDP 驱动（可并行多窗口）→ 像素级操控（串行、需签名权限）；重启讨论前不动 |
 | iPhone 版 bobo（owner 15:17 长远想法） | 可行路径=iPhone 做瘦客户端连家中 Mac 的 gateway（我们 JSON-RPC/WebSocket 架构现成，桌面端本身就是这么连的）；手机端不做本地 agent（无文件系统/终端），定位=远程监视+指令+审批。等桌面端稳定 + Apple 签名后展开 |
