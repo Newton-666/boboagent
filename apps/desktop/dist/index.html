@@ -325,6 +325,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .ctx-detail .ctx-row { display:flex; justify-content:space-between; gap:16px; font-size:11px; color:var(--text); padding:3px 0; font-family:'SF Mono',Monaco,Menlo,monospace; }
 .ctx-detail .ctx-row span { color:var(--text-muted); font-family:-apple-system,'PingFang SC',sans-serif; }
 .ctx-detail .ctx-note { font-size:10px; color:var(--text-muted); margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-family:-apple-system,'PingFang SC',sans-serif; }
+/* ══ TICKET-DESK-V2D5：认知状态条（药丸升级 —— 水位 + 本轮记忆注入条数 + 本轮工具调用数）
+   仍是那一条精致药丸：meta 段弱化小字（--text-muted 派生 opacity），色板零新增 ══ */
+.ctx-pill-text .v2d5-meta { opacity:0.75; }
+/* end V2D5 */
 /* TICKET-DESK-V2B3：斜杠命令面板（新增规则，全部取色板；既有规则零改动）
    位置：#input-box 正上方（bottom:100%）、左对齐输入框左缘（left:0）、宽=输入框宽（width:100%）
    视觉：--bg2 底、--border 发丝线、圆角 8px、选中行 --bg3（与色板严格一致） */
@@ -698,6 +702,8 @@ function call(m, p) {
 function sendPrompt(text) {
   if (!currentSessionId || !window.boboAPI) { debug('Cannot send: no session or API'); return; }
   debug('Sent ✓');
+  // TICKET-DESK-V2D5：新回合开始 —— 重置本轮认知计数（记忆增量基线 + 工具调用数）
+  roundMemBaseline = null; roundMemInjected = 0; roundToolCount = 0;
   // Timeout: if backend doesn't respond within 15s, notify user
   if (sendTimeoutId) clearTimeout(sendTimeoutId);
   sendTimeoutId = setTimeout(function() {
@@ -1400,10 +1406,20 @@ function updateToolResult(toolId, data) {
   }
 }
 // TICKET-DESK-V2B2：上下文仪表盘 —— 进度药丸刷新 + 明细卡展开/收起
+// TICKET-DESK-V2D5 修复（实弹断点）：call() 的 resolve 已是 result（pending 剥壳传 msg.result），
+// 历史代码再取 res.result 二次剥壳 → d 恒 null → 药丸永停硬编码初值 0% · 0/128K
 function refreshCtxStats() {
   call('context.stats', { session_id: currentSessionId || '' }).then(function(res) {
-    var d = res && res.result ? res.result : null;
+    var d = res || null;
     if (!d) return;
+    // TICKET-DESK-V2D5：本轮记忆注入条数 = memory_injected（工作区累计值）回合内增量
+    if (typeof d.memory_injected === 'number') {
+      if (roundMemBaseline === null) { roundMemBaseline = d.memory_injected; roundMemInjected = 0; }
+      else {
+        roundMemInjected = d.memory_injected - roundMemBaseline;
+        if (roundMemInjected < 0) { roundMemInjected = 0; roundMemBaseline = d.memory_injected; }
+      }
+    }
     // TICKET-DESK-V4: 药丸统计只读广播给小窗（投影数据源；不改主窗任何行为）
     // V4B: 带会话 sid（小窗按钉选过滤，药丸不跨会话串台）
     if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCtxStats) window.boboAPI.widgetCtxStats(d, currentSessionId);
@@ -1417,7 +1433,11 @@ function refreshCtxStats() {
     var pillText = document.getElementById('ctx-pill-text');
     if (pillText) {
       var kb = function(n) { return (n >= 1000) ? Math.round(n / 1000) + 'K' : String(n); };
-      pillText.textContent = pct + '% · ' + kb(used) + '/' + kb(limit);
+      // TICKET-DESK-V2D5：认知状态条 —— 水位 + 本轮记忆注入 + 本轮工具调用（一条药丸，meta 弱化小字）
+      var meta = '';
+      if (roundMemInjected > 0) meta += ' <span class="v2d5-meta">· 记忆+' + roundMemInjected + '</span>';
+      if (roundToolCount > 0) meta += ' <span class="v2d5-meta">· 工具' + roundToolCount + '</span>';
+      pillText.innerHTML = pct + '% · ' + kb(used) + '/' + kb(limit) + meta;
       // 三色阶（色板取色）：<60% 思考蓝 / ≥60% 品牌橙 / ≥85% 语义红
       var color = pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5');
       if (fill) fill.style.background = color;
@@ -1429,7 +1449,9 @@ function refreshCtxStats() {
       '<div class="ctx-row"><span>压缩节省（字符）</span><b>' + fmt(d.saved_chars) + '</b></div>' +
       '<div class="ctx-row"><span>结果标记条数</span><b>' + fmt(d.marked) + '</b></div>' +
       '<div class="ctx-row"><span>记忆注入条数</span><b>' + fmt(d.memory_injected) + '</b></div>' +
-      '<div class="ctx-note">token 由当前会话消息估算；压缩节省与注入条数为工作区累计值。</div>';
+      '<div class="ctx-row"><span>本轮记忆注入</span><b>' + roundMemInjected + '</b></div>' +
+      '<div class="ctx-row"><span>本轮工具调用</span><b>' + roundToolCount + '</b></div>' +
+      '<div class="ctx-note">token 由当前会话消息估算；压缩节省与注入条数为工作区累计值，本轮两项为回合内增量。</div>';
   });
 }
 function toggleCtxStats() {
@@ -2306,6 +2328,10 @@ var streamingId = null;
 var thinkText = '';
 var toolsCalledThisRound = false;
 var thinkBoxEl = null;
+// TICKET-DESK-V2D5：认知状态条 —— 本轮记忆注入条数（memory_injected 回合内增量）+ 本轮工具调用数（tool.start 计数）
+var roundMemBaseline = null;
+var roundMemInjected = 0;
+var roundToolCount = 0;
 
 function createThinkBox() {
   var tb = document.createElement('div');
@@ -2477,6 +2503,8 @@ on('tool.start', function(data) {
     thinkText = '';
   }
   toolsCalledThisRound = true;
+  // TICKET-DESK-V2D5：本轮工具调用计数（认知状态条数据源）
+  roundToolCount++;
   addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
           data ? data.context || '' : '',
           data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
