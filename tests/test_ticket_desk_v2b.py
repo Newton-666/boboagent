@@ -201,16 +201,27 @@ def test_v2b_2_ctx_dashboard_node():
     js = r"""
 const els = {};
 function makeEl(id) {
-  return { id, textContent: '', innerHTML: '', style: { display: 'none', width: '', background: '' } };
+  return {
+    id, textContent: '', style: { display: 'none', width: '', background: '' }, _html: '',
+    // 模拟真实 DOM：innerHTML 赋值后 textContent 反映纯文本（V2D5 meta span 剥离）
+    get innerHTML() { return this._html; },
+    set innerHTML(v) { this._html = v; this.textContent = v.replace(/<[^>]*>/g, ''); },
+  };
 }
 ['ctx-pill-fill', 'ctx-pill-text', 'ctx-stats-detail'].forEach(function(id) { els[id] = makeEl(id); });
 global.document = { getElementById: function(id) { return els[id] || null; } };
 global.currentSessionId = 'v2b_s_001';
+// TICKET-DESK-V2D5：认知状态条新增全局（桩同步）
+global.roundMemBaseline = null;
+global.roundMemInjected = 0;
+global.roundToolCount = 0;
 global.call = function(m, p) {
   if (m !== 'context.stats') throw new Error('应调用 context.stats，实际: ' + m);
   if (p.session_id !== 'v2b_s_001') throw new Error('session_id 应透传');
-  return Promise.resolve({ result: {
-    token_estimate: 41000, saved_chars: 56789, marked: 12, loaded: 8, memory_injected: 8, context_limit: 128000 } });
+  // TICKET-DESK-V2D5：call() 的 resolve 已是 result（pending 剥壳传 msg.result）——
+  // 旧桩带 result 包装模拟的是修复前的双重剥壳错误语义，现对齐真实链路
+  return Promise.resolve({
+    token_estimate: 41000, saved_chars: 56789, marked: 12, loaded: 8, memory_injected: 8, context_limit: 128000 });
 };
 """ + refresh + "\n" + toggle + r"""
 // 展开 → 显示 + 拉最新

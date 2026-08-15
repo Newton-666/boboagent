@@ -255,6 +255,8 @@ const document = {{
   getElementById: (id) => (id === 'session-search' ? {{ value: '' }} : null),
 }};
 let thinkBoxEl = null, thinkText = '', toolsCalledThisRound = false, messaging = false;
+// TICKET-DESK-V2D5：认知状态条新增全局（桩同步，防 ReferenceError）
+let roundMemBaseline = null, roundMemInjected = 0, roundToolCount = 0;
 let toolIdCounter = 0, streamingId = null, sendTimeoutId = null;
 function createThinkBox() {{ return miniEl('think-box show'); }}
 function collapseThinkBox() {{}}
