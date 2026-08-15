@@ -231,7 +231,7 @@ Promise.resolve().then(function() {
   if (els['ctx-pill-fill'].style.width !== '32%') throw new Error('填充宽度应 32%: ' + els['ctx-pill-fill'].style.width);
   if (els['ctx-pill-text'].textContent.indexOf('32%') === -1) throw new Error('药丸文字应含 32%: ' + els['ctx-pill-text'].textContent);
   if (els['ctx-pill-text'].textContent.indexOf('41K/128K') === -1) throw new Error('药丸文字应含 41K/128K: ' + els['ctx-pill-text'].textContent);
-  if (els['ctx-pill-fill'].style.background !== '#5b9bd5') throw new Error('32% 应取思考蓝: ' + els['ctx-pill-fill'].style.background);
+  if (els['ctx-pill-fill'].style.background !== 'rgba(45,45,45,0.12)') throw new Error('32% 应取文字墨痕: ' + els['ctx-pill-fill'].style.background);
   if (els['ctx-stats-detail'].innerHTML.indexOf('上下文 token 估算') === -1) throw new Error('明细卡应含明细行');
   // 再点 → 收起
   toggleCtxStats();
@@ -340,8 +340,25 @@ def test_v2b_css_zero_change_on_existing():
     done_rule = ".think-box.done { animation:fadeIn 0.2s ease-out; }\n"
     assert done_rule in new_pre, "新版中应能找到 .think-box.done 新增规则"
     new_pre = new_pre.replace(done_rule, "")
+    # V2D7 特批豁免（owner 票钉死）：药丸墨痕化 + 信息蓝全面退役迁移既有 CSS 值。
+    # 双向剔除 V2D7 改动的规则行（V2A 标记之前部分）后，其余既有 CSS 仍逐字节锁死。
+    V2D7_PAIRS = (
+        r"\.msg \.txt \.diff-file \{ [^}]* \}\n",
+        r"\.msg \.txt th \{ [^}]* \}\n",
+        r"\.preview-btn \{ [^}]* \}\n",
+        r"\.tool-detail \.td-args \{ [^}]* \}\n",
+        r"\.tool-result \.td-args \{ [^}]* \}\n",
+        r"\.tool-detail \.diff-file, \.tool-result \.diff-file \{ [^}]* \}\n",
+        r"#status-mode\.office \{ [^}]* \}\n",
+    )
+    for pat in V2D7_PAIRS:
+        m_old = re.search(pat, old_style)
+        m_new = re.search(pat, new_pre)
+        assert m_old and m_new, f"V2D7 豁免规则应在基线/新版中同时存在: {pat}"
+        old_style = old_style.replace(m_old.group(0), "")
+        new_pre = new_pre.replace(m_new.group(0), "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6 豁免段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7 豁免段外零改动）"
 
 
 # ── 铁律 0 补充闸：V2B diff 不得删除任何 style 块内规则（V2A 段同样）───
@@ -363,6 +380,20 @@ def test_v2b_css_no_deletion_in_style():
         ".think-dot {",
         ".ovl-spinner span {",
         ".v2a-loader .sp span {",
+        # V2D7 特批豁免（owner 票钉死）：药丸墨痕化 + 信息蓝全面退役迁移既有 CSS 值
+        ".ctx-pill-fill {",
+        ".ctx-pill-text {",
+        ".msg .txt .diff-file {",
+        ".msg .txt th {",
+        ".preview-btn {",
+        ".tool-detail .td-args {",
+        ".tool-result .td-args {",
+        ".tool-detail .diff-file,",
+        "#status-mode.office {",
+        ".msg.bobo .txt a {",
+        ".msg.bobo .txt .hljs-number,",
+        ".msg.bobo .txt .hljs-title,",
+        ".msg.bobo .txt .hljs-type,",
     )
     bad = []
     in_style = False

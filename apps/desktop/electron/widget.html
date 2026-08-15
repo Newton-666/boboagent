@@ -57,8 +57,8 @@ body.approval { border-color:#e8913a; animation:v4ApprovalFlash 1.2s ease-in-out
 .diff-block .dl.ctx { color:var(--text2); }
 #w-foot { display:flex; align-items:center; gap:6px; padding:4px 10px 6px; border-top:1px solid var(--border); }
 #w-pill { flex:1; height:5px; border-radius:3px; background:var(--bg3); overflow:hidden; }
-#w-pill-fill { height:100%; width:0; background:#5b9bd5; border-radius:3px; }
-#w-pill-text { font-size:9px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; flex-shrink:0; }
+#w-pill-fill { height:100%; width:0; background:color-mix(in srgb, var(--text) 12%, transparent); border-radius:3px; }
+#w-pill-text { font-size:9px; color:var(--text); font-family:'SF Mono',Monaco,Menlo,monospace; flex-shrink:0; }
 </style>
 </head>
 <body>
@@ -261,8 +261,8 @@ function renderCtx(d) {
   var pct = Math.min(100, Math.round(used * 100 / limit));
   var fill = document.getElementById('w-pill-fill');
   fill.style.width = pct + '%';
-  // 三色阶与主窗 refreshCtxStats 同源（<60% 思考蓝 / ≥60% 品牌橙 / ≥85% 语义红）
-  fill.style.background = pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5');
+  // 三色阶与主窗 refreshCtxStats 同源墨痕化（<60% 文字墨痕 12% / ≥60% 品牌橙 15% / ≥85% 语义红 15%）
+  fill.style.background = pct >= 85 ? 'rgba(244,135,113,0.15)' : (pct >= 60 ? 'rgba(232,145,58,0.15)' : 'rgba(45,45,45,0.12)');
   var kb = function(n) { return (n >= 1000) ? Math.round(n / 1000) + 'K' : String(n); };
   document.getElementById('w-pill-text').textContent = pct + '% · ' + kb(used) + '/' + kb(limit);
 }

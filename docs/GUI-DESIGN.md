@@ -37,7 +37,7 @@
 | 色 | 值 | 语义 |
 |---|---|---|
 | 品牌橙 | #e8913a | 强调：focus ring、ASCII logo、active tab 下划线、AUTO 开启态、粗体 |
-| 思考蓝 | #5b9bd5 | 上下文药丸 <60% 水位（信息语义；原 think-box 过程蓝已退役，V2D6） |
+| 思考蓝 | #5b9bd5 | 已全面退役（V2D6 过程面 + V2D7 药丸墨痕化，界面零残留）；色彩体系收口：纸色底 / 墨痕数据 / 橙=bobo 手笔 |
 | 成功绿 | #50a14f | 工具完成点、diff-add 文字（tool 卡内） |
 | 错误红 | #f48771 | 错误/diff-del/stop 按钮（rgba 0.12~0.22 透明度底） |
 | diff 整行底色 | 加 `rgba(80,161,79,.20)` 底 #2c5e2b 字 / 删 `rgba(244,135,113,.20)` 底 #8a3a2c 字 | F3-5 diff-block，**owner 点名保护对象** |
@@ -106,6 +106,7 @@
 | 2026-08-14 | DESK-V4 | 执行实况小组件（只读投影零干涉铁律）：侧栏底部 #widget-toggle 开关（AUTO 同 toggle 体系，色板零新增）↔ /widget 命令 ↔ widget-config.cjs 持久化三向同步，默认关；独立 frameless 小窗 widget.html（280×160，resizable min 240×150，尺寸持久化）；内容圈定=用户指令/任务/工具链/药丸/连接态（无 session 栏无 plugins）；diff 完整渲染 1:1 同源主窗（.dl.add/.dl.del/.dl.ctx 逐字节一致）；审批橙边轻闪（reduced-motion 禁用）点击跳主窗会话；CSS 进 /* === DESK-V4 小组件 === */ 锚点段 | db5876d | rollback/pre-desk-v4 |
 | 2026-08-15 | DESK-V2D5 | 药丸修复+认知状态条：修复 refreshCtxStats 双重剥壳（d 恒 null 永停初值）；药丸加本轮记忆注入/本轮工具调用 meta 弱字（.v2d5-meta opacity 派生，色板零新增）；明细卡 +2 行；CSS 进 V2D5 锚点段；e2e_pill_probe.py 实弹探针入库 | c6a8d5e | rollback/pre-desk-v2d5 |
 | 2026-08-15 | DESK-V4B | 会话钉选（"第二只眼睛"）：_pinnedSid 单一事实源，主窗行内投影按钮/小窗点击轮换/删除回落三向同步；#w-pin 弱色会话指示（.pinned 橙）；不钉=跟随主窗。BUSYGATE 忙碌隔离：_busySids 按 sid 登记 + renderBusyUI 唯一出口（锚点段 /* ===BUSYGATE-START=== */），发送闸门/loading/状态条/停止键全部按当前显示会话刷新；切会话 6 刷新点 | 07b0f20 | rollback/pre-desk-v4b |
+| 2026-08-15 | DESK-V2D7 | 药丸墨痕重设计（owner 钦定方案 A）：① .ctx-pill-fill 实心蓝废除 → 文字色 12% 透明度墨痕填充（color-mix 派生自 var(--text)，水位=淡墨痕变长）；② 文字永远清晰（.ctx-pill-text 迁 var(--text) 深色，填充透明度 ≤0.2 不干扰阅读，四水位可读）；③ 阈值警示墨痕化（≥60% 品牌橙 15% / ≥85% 语义红 15% 透明度派生，零新色相，JS 三色阶同步）；④ 思考蓝 #5b9bd5 界面零残留（药丸最后据点墨痕化 + 信息蓝迁 var(--text2) 墨痕系：diff 文件名/表头/td-args/链接/hljs/命令日志；office 模式/保存按钮迁品牌橙），色彩体系收口：纸色底/墨痕数据/橙=bobo 手笔；⑤ widget.html 小窗药丸 1:1 同步墨痕化（#w-pill-fill/#w-pill-text/renderCtx 三色阶）；CSS 锚点段 /* === V2D7 药丸墨痕 === */ | （未 commit，等终审） | — |
 | 2026-08-15 | DESK-V2D6 | 思考框中性化：① 完成态标签纯 thinking（无 💭 无 思考过程 无 Thought，历史重放统一 thinking），完成瞬间 fadeIn 0.2s 淡入无跳变（.think-box.done）；② 思考框去蓝迁米白灰系（底 var(--bg2) 深半阶 / 边 var(--border) 发丝线 / 标签 var(--text-muted)，思考中三跳点弱橙 #e8913a 呼吸）；③ 折叠聚合卡 .tool-agg/.hist-agg 同族同阶同组值；④ 思考蓝 #5b9bd5 仅保留药丸 <60% 水位（信息语义），ovl-spinner/v2a-loader 过程动画同步退役为 var(--text2)；色板零新增色值族；CSS 锚点段 /* === V2D6 思考框中性化 === */ | 419e450 | rollback/pre-desk-v2d6 |
 | 2026-08-13 | DESK-V2B | 工具卡耗时时间线（updateToolResult 对称填充，含聚合卡考古）；上下文仪表盘 #ctx-stats-bar（#input-box 正上方 22px 细条，点击展开明细/Esc 优先收起不打断中断语义；context.stats 只读端点，无轮询） | 31e09cb | rollback/pre-desk-v2b |
 | 2026-08-13 | V2A 打磨（owner 实弹反馈三条） | 确认弹窗 Enter=确认/Esc=取消+自动聚焦（对齐原生 confirm 手感）；行内三键统一 .act 体系（16px 同尺寸、紧凑右置、顺序 pin→改名→删除、默认弱色 hover 显形、删除仅 hover 变红）；emoji 图钉改细线 SVG（PIN_SVG 弱色，激活细橙）；CSS 闸门加特批豁免段（.del/.re→.act 重构） | 9a690dd | rollback/pre-v2a-polish |

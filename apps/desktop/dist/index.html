@@ -142,11 +142,11 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* Diff */
 .msg .txt .diff-add { color:#7ec87b; }
 .msg .txt .diff-del { color:#f48771; }
-.msg .txt .diff-file { color:#5b9bd5; font-weight:600; }
+.msg .txt .diff-file { color:var(--text2); font-weight:600; }
 /* Tables */
 .msg .txt table { border-collapse:collapse; margin:8px 0; font-size:13px; width:100%; }
 .msg .txt th, .msg .txt td { border:1px solid var(--border); padding:6px 12px; text-align:left; }
-.msg .txt th { background:var(--bg3); color:#5b9bd5; font-weight:600; }
+.msg .txt th { background:var(--bg3); color:var(--text2); font-weight:600; }
 .msg .txt tr:nth-child(even) { background:rgba(255,255,255,0.03); }
 #input-box { padding:12px 16px 24px; position:relative; }
 #input { width:100%; padding:14px 48px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
@@ -187,21 +187,21 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #preview-close { background:none; border:none; cursor:pointer; font-size:16px; color:var(--text2); padding:4px 8px; border-radius:4px; }
 #preview-close:hover { background:var(--hover); }
 #preview-iframe { flex:1; border:none; background:#fff; }
-.preview-btn { background:#5b9bd5; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; padding:2px 8px; font-family:inherit; margin-right:4px; }
+.preview-btn { background:var(--bg3); color:var(--text2); border:none; border-radius:4px; cursor:pointer; font-size:11px; padding:2px 8px; font-family:inherit; margin-right:4px; }
 .preview-btn:hover { opacity:0.85; }
 /* ── TICKET-D1d 新增模块（不动现有样式）── */
 /* ① 工具卡片展开：参数 + 结果 + diff */
 .tool-detail { font-size:11px; color:var(--text2); margin:4px 0 0 24px; padding:6px 10px; background:rgba(0,0,0,0.02); border-radius:4px; font-family:'SF Mono',Monaco,Menlo,monospace; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto; display:none; }
 .tool-detail.open { display:block; }
-.tool-detail .td-args { color:#5b9bd5; font-weight:600; margin-bottom:2px; }
-.tool-result .td-args { color:#5b9bd5; font-weight:600; margin-bottom:2px; }
+.tool-detail .td-args { color:var(--text2); font-weight:600; margin-bottom:2px; }
+.tool-result .td-args { color:var(--text2); font-weight:600; margin-bottom:2px; }
 .tool-detail .td-result { color:var(--text2); }
 .tool-result .td-result { color:var(--text2); }
 /* F4-2: diff 红绿高亮 —— 容器实际 class 是 tool-result（updateToolResult 挂载），
    CSS 选择器双前缀补齐，修复 -/+ 行全灰无红绿的高亮失效 */
 .tool-detail .diff-add, .tool-result .diff-add { color:#50a14f; }
 .tool-detail .diff-del, .tool-result .diff-del { color:#f48771; }
-.tool-detail .diff-file, .tool-result .diff-file { color:#5b9bd5; font-weight:600; }
+.tool-detail .diff-file, .tool-result .diff-file { color:var(--text2); font-weight:600; }
 .tool-detail .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
 .tool-result .inline-diff { margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; color:var(--text2); }
 /* TICKET-GUI-F3 (F3-5): diff 区块与回复同级 —— 独立出现在消息流，整行底色高亮（绿底新增/红底删除），工具卡片只留一行摘要 */
@@ -229,7 +229,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #status-mode { font-size:10px; padding:1px 6px; border-radius:3px; letter-spacing:0.5px; margin-left:auto; display:none; }
 #status-mode.on { display:inline-block; }
 #status-mode.auto { background:rgba(232,145,58,0.15); color:#e8913a; border:1px solid rgba(232,145,58,0.4); }
-#status-mode.office { background:rgba(91,155,213,0.15); color:#5b9bd5; border:1px solid rgba(91,155,213,0.4); }
+#status-mode.office { background:rgba(232,145,58,0.15); color:#e8913a; border:1px solid rgba(232,145,58,0.4); }
 /* ⑤ 中断按钮 */
 #stop-btn { position:absolute; right:64px; bottom:36px; width:28px; height:28px; border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; border:1px solid rgba(244,135,113,0.4); cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; }
 #stop-btn:hover { background:rgba(244,135,113,0.22); }
@@ -319,8 +319,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .ctx-bar { padding:4px 16px; cursor:pointer; user-select:none; }
 .ctx-bar:hover { opacity:0.9; }
 .ctx-pill { position:relative; overflow:hidden; border-radius:999px; background:var(--bg3); height:16px; display:flex; align-items:center; }
-.ctx-pill-fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:#5b9bd5; transition:width 0.3s ease; }
-.ctx-pill-text { position:relative; z-index:1; padding:0 10px; font-size:10px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; white-space:nowrap; }
+.ctx-pill-fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:color-mix(in srgb, var(--text) 12%, transparent); transition:width 0.3s ease; }
+.ctx-pill-text { position:relative; z-index:1; padding:0 10px; font-size:10px; color:var(--text); font-family:'SF Mono',Monaco,Menlo,monospace; white-space:nowrap; }
 /* 明细卡：向上展开（bottom:100% 不遮盖输入框），300ms 内入场（fadeIn 0.25s 既有动效） */
 .ctx-detail { position:absolute; bottom:100%; left:0; right:0; margin-bottom:4px; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; z-index:60; animation:fadeIn 0.25s ease-out; }
 .ctx-detail .ctx-row { display:flex; justify-content:space-between; gap:16px; font-size:11px; color:var(--text); padding:3px 0; font-family:'SF Mono',Monaco,Menlo,monospace; }
@@ -353,7 +353,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
  * TICKET-DESK-V2C12（样式票，独立回溯）：完整 Markdown 渲染 + Charter 衬线正文。
  * 本段为外科式摘除单元：删除本段（含下方 @font-face / --font-reply）即完整回滚 V2C1/C2。
  * 作用域仅 .msg.bobo .txt（助手正文气泡一处）；工具卡/思考框/diff 块/实况折叠卡/用户消息不碰。
- * 取色只用 GUI-DESIGN 色板 token + 既有语义色（橙 #e8913a / 思考蓝 #5b9bd5 仅药丸水位 / 成功绿 #50a14f / 错误红 #f48771）。
+ * 取色只用 GUI-DESIGN 色板 token + 既有语义色（橙 #e8913a / 思考蓝已全面退役（V2D7） / 成功绿 #50a14f / 错误红 #f48771）。
  */
 /* C2: Bitstream Charter（X11 许可，可捆包）四件 woff2 本地 vendor —— 仅 --font-reply 引用 */
 @font-face { font-family:'Charter'; src:url('fonts/Charter-Regular.woff2') format('woff2'); font-weight:400; font-style:normal; font-display:swap; }
@@ -380,7 +380,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg.bobo .txt th, .msg.bobo .txt td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
 .msg.bobo .txt th { background:var(--bg3); font-weight:600; }
 .msg.bobo .txt tr:nth-child(even) td { background:var(--bg2); }
-.msg.bobo .txt a { color:#5b9bd5; text-decoration:none; }
+.msg.bobo .txt a { color:var(--text2); text-decoration:underline; }
 .msg.bobo .txt a:hover { text-decoration:underline; }
 .msg.bobo .txt hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
 .msg.bobo .txt del { color:var(--text2); }
@@ -390,10 +390,10 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .msg.bobo .txt .hljs-comment, .msg.bobo .txt .hljs-quote { color:var(--text-muted); font-style:italic; }
 .msg.bobo .txt .hljs-keyword, .msg.bobo .txt .hljs-selector-tag, .msg.bobo .txt .hljs-built_in { color:#e8913a; }
 .msg.bobo .txt .hljs-string, .msg.bobo .txt .hljs-regexp, .msg.bobo .txt .hljs-addition { color:#50a14f; }
-.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:#5b9bd5; }
-.msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:#5b9bd5; }
+.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:var(--text2); }
+.msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:var(--text2); }
 .msg.bobo .txt .hljs-variable, .msg.bobo .txt .hljs-template-variable { color:var(--text2); }
-.msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:#5b9bd5; }
+.msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:var(--text2); }
 .msg.bobo .txt .hljs-deletion { color:#f48771; }
 .msg.bobo .txt .hljs-meta { color:var(--text-muted); }
 .msg.bobo .txt .hljs-emphasis { font-style:italic; }
@@ -445,10 +445,19 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
  *    标签 var(--text-muted)；思考中三跳点弱橙 #e8913a 呼吸"活着"，完成态回灰
  * ③ 折叠聚合卡 .tool-agg/.hist-agg 同族同阶：底 var(--bg2)/边 var(--border)/文字 var(--text2)，
  *    与思考框完全相同的一组值——过程性内容一眼同族
- * ④ 思考蓝 #5b9bd5 仅保留药丸 <60% 水位（信息语义）；ovl-spinner 连接动画同步退役为 --text2
+ * ④ 思考蓝 #5b9bd5 仅保留药丸 <60% 水位（信息语义）；ovl-spinner 连接动画同步退役为 --text2；
+ *    V2D7 药丸墨痕化后思考蓝全面退役（界面零残留，色彩体系收口：纸色底 / 墨痕数据 / 橙=bobo 手笔）
  * 色板零新增色值族（#e8913a 为既有品牌橙） */
 .think-box.done { animation:fadeIn 0.2s ease-out; }
 /* === end V2D6 === */
+/* === V2D7 药丸墨痕 ===
+ * ① 药丸填充实心蓝废除 → 墨痕填充：文字色 12% 透明度（color-mix 派生自 var(--text)），水位=淡墨痕变长
+ * ② 文字永远清晰：.ctx-pill-text var(--text) 深色，填充透明度 ≤0.2（12%/15%）不干扰阅读
+ * ③ 阈值警示墨痕化：≥60% 品牌橙 15% 透明度派生 / ≥85% 语义红 15% 透明度派生（零新色相）；JS 三色阶同步
+ * ④ 思考蓝 #5b9bd5 界面零残留（药丸最后据点已墨痕化）；信息蓝（diff 文件名/表头/td-args/链接/hljs/命令日志）
+ *    一并迁 var(--text2) 墨痕系；office 模式/保存按钮迁品牌橙；色彩体系收口：纸色底 / 墨痕数据 / 橙=bobo 手笔
+ * ⑤ 小窗 widget.html 药丸同款 1:1 墨痕化（#w-pill-fill / #w-pill-text / renderCtx 三色阶） */
+/* === end V2D7 === */
 </style>
 </head>
 <body>
@@ -562,7 +571,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
         </div>
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
-        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#5b9bd5;color:#fff;">保存</button>
+        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">保存</button>
         <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">取消</button>
       </div>
     </div>
@@ -1083,9 +1092,9 @@ function md(s) {
   s = s.replace(/^\- (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
   s = s.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
   // Quotes
-  s = s.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:2px solid #5b9bd5;padding-left:12px;color:var(--text2);margin:4px 0;">$1</blockquote>');
+  s = s.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:2px solid var(--border);padding-left:12px;color:var(--text2);margin:4px 0;">$1</blockquote>');
   // Links [text](url)
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#5b9bd5;">$1</a>');
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--text2);text-decoration:underline;">$1</a>');
   // Inline code, bold
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -1449,8 +1458,8 @@ function refreshCtxStats() {
       if (roundMemInjected > 0) meta += ' <span class="v2d5-meta">· 记忆+' + roundMemInjected + '</span>';
       if (roundToolCount > 0) meta += ' <span class="v2d5-meta">· 工具' + roundToolCount + '</span>';
       pillText.innerHTML = pct + '% · ' + kb(used) + '/' + kb(limit) + meta;
-      // 三色阶（色板取色）：<60% 思考蓝 / ≥60% 品牌橙 / ≥85% 语义红
-      var color = pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5');
+      // 三色阶墨痕化（色板派生零新色相）：<60% 文字墨痕 12% / ≥60% 品牌橙 15% / ≥85% 语义红 15%
+      var color = pct >= 85 ? 'rgba(244,135,113,0.15)' : (pct >= 60 ? 'rgba(232,145,58,0.15)' : 'rgba(45,45,45,0.12)');
       if (fill) fill.style.background = color;
     }
     var det = document.getElementById('ctx-stats-detail');
@@ -1771,7 +1780,7 @@ function renderTerminalPanel(el) {
     var isLong = outText.length > 2000;
     var shown = isLong ? outText.substring(0, 2000) + '\n...（输出过长已收起，共 ' + outText.length + ' 字符）' : outText;
     html += '<div style="margin-bottom:8px;">' +
-      '<div style="font-family:monospace;font-size:11px;color:#5b9bd5;padding:2px 0;">$ ' + esc(log.command) + '</div>' +
+      '<div style="font-family:monospace;font-size:11px;color:var(--text2);padding:2px 0;">$ ' + esc(log.command) + '</div>' +
       '<div style="font-family:monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;padding:4px 8px;background:var(--bg2);border-radius:4px;">' + esc(shown) + '</div>' +
       (isLong ? '<button onclick="toggleTerminalOutput(this)" data-expanded="0" data-idx="' + _terminalLogs.indexOf(log) + '" style="margin-top:4px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-family:inherit;font-size:11px;">显示全部 (' + outText.length + ' 字符)</button>' : '') +
       '</div>';
