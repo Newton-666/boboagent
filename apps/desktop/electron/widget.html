@@ -24,6 +24,10 @@ body.approval { border-color:#e8913a; animation:v4ApprovalFlash 1.2s ease-in-out
 #w-dot.green { background:var(--green); }
 #w-dot.red { background:#f44336; }
 #w-title { font-weight:600; font-size:11px; color:var(--text); letter-spacing:0.3px; }
+/* TICKET-DESK-V4B 会话钉选：当前钉住会话指示（弱色 10px 级，不喧宾夺主；点击轮换活跃会话） */
+#w-pin { font-size:9px; color:var(--text-muted); -webkit-app-region:no-drag; cursor:pointer; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
+#w-pin:hover { color:var(--text2); }
+#w-pin.pinned { color:#e8913a; }
 #w-badge { margin-left:auto; font-size:9px; color:#e8913a; background:rgba(232,145,58,0.15); border:1px solid rgba(232,145,58,0.4); border-radius:5px; padding:0 6px; display:none; -webkit-app-region:no-drag; }
 #w-body { flex:1; display:flex; flex-direction:column; gap:3px; padding:2px 10px 4px; min-height:0; }
 .w-row { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text2); }
@@ -61,6 +65,7 @@ body.approval { border-color:#e8913a; animation:v4ApprovalFlash 1.2s ease-in-out
   <div id="w-head">
     <span id="w-dot"></span>
     <span id="w-title">Bobo 执行实况</span>
+    <span id="w-pin" title="点击轮换钉住的会话">跟随主窗</span>
     <span id="w-badge">待审批</span>
   </div>
   <div id="w-body">
@@ -112,6 +117,82 @@ function renderDiff(inlineDiff) {
   if (!inlineDiff) { box.style.display = 'none'; box.innerHTML = ''; return; }
   box.innerHTML = '<div class="w-row"><b>diff</b></div>' + diffBlock(inlineDiff);
   box.style.display = 'block';
+}
+
+// ── TICKET-DESK-V4B：会话钉选 —— 从"镜子"升级"第二只眼睛" ──────────────
+// 钉住后小窗只渲染该 session 的实况；不钉 = 跟随主窗当前会话（V4 现行为）。
+// 单一事实源：主窗行内按钮 / 小窗点击轮换 / 删除回落 三处共同维护 _pinnedSid。
+var _pinnedSid = null;      // 钉住的 session_id（null = 跟随主窗）
+var _currentSid = '';       // 主窗当前会话（onCurrentSession 广播）
+var _sessionTitles = {};    // sid → title（onSessions 广播维护；自定义名优先）
+var _activeSids = {};       // sid → 最近活跃时间戳（tool/message 活动事件维护）
+var _activeOrder = [];      // 活跃会话候选（按最近活跃倒序，轮换用）
+
+// 事件是否属于小窗当前显示会话：钉住 = 只渲染钉住 sid；跟随 = 主窗当前 sid；
+// 无 sid 的全局事件（gateway.ready 等）恒放行；启动早期主窗当前会话未知 → 放行（V4 兼容）
+function shouldRender(sid) {
+  if (!sid) return true;
+  if (_pinnedSid) return sid === _pinnedSid;
+  if (_currentSid) return sid === _currentSid;
+  return true;
+}
+
+// 标记会话活跃（轮换候选；会话删除后由 onSessions 列表兜底剔除）
+function markActive(sid) {
+  if (!sid) return;
+  _activeSids[sid] = Date.now();
+  _activeOrder = Object.keys(_activeSids).sort(function(a, b) { return _activeSids[b] - _activeSids[a]; });
+}
+
+// 钉选设置：本地态 + 会话指示 + 切换时清旧会话残留 + 上报主窗（三向一致）
+function setPinned(sid) {
+  var next = sid || null;
+  var changed = (_pinnedSid !== next);
+  _pinnedSid = next;
+  renderPinInd();
+  if (changed) resetDisplay();
+  if (window.widgetAPI && window.widgetAPI.pinChanged) window.widgetAPI.pinChanged(sid || '');
+}
+
+// 切换钉住会话：清空旧会话的指令/任务/工具链/diff/审批残留（不留上一会话数据）
+function resetDisplay() {
+  _tools = []; renderTools();
+  setUser('—'); setTask('空闲');
+  renderDiff('');
+  _approvalSid = null; hideApproval();
+}
+
+// 会话指示：钉住 → "钉 · 会话名"（品牌橙）；跟随 → "跟随主窗"（弱色）
+function renderPinInd() {
+  var el = document.getElementById('w-pin');
+  if (!el) return;
+  if (_pinnedSid) {
+    var t = _sessionTitles[_pinnedSid] || _pinnedSid;
+    el.textContent = '钉 · ' + t;
+    el.className = 'pinned';
+    el.title = '已钉住：' + t + '（点击轮换到下一个活跃会话）';
+  } else {
+    el.textContent = '跟随主窗';
+    el.className = '';
+    el.title = '跟随主窗当前会话（点击钉住下一个活跃会话）';
+  }
+}
+
+// 点击会话名轮换：活跃会话（有活动事件且仍在列表）循环；钉住最后一个 → 回落跟随
+function cyclePin() {
+  if (_currentSid) markActive(_currentSid);
+  var cands = _activeOrder.filter(function(sid) { return _sessionTitles[sid] !== undefined; });
+  if (cands.length === 0) return;
+  if (!_pinnedSid) { setPinned(cands[0]); return; }
+  var idx = cands.indexOf(_pinnedSid);
+  if (idx >= 0 && idx < cands.length - 1) setPinned(cands[idx + 1]);
+  else setPinned(''); // 钉住最后一个活跃 → 回落跟随主窗
+}
+
+// 删除/关闭回落兜底：钉住会话不在会话列表 → 自动回落跟随（不留僵尸投影）
+function checkPinAlive() {
+  if (_pinnedSid && !_sessionTitles[_pinnedSid]) setPinned('');
+  renderPinInd();
 }
 
 var _approvalSid = null;
@@ -186,10 +267,12 @@ function renderCtx(d) {
   document.getElementById('w-pill-text').textContent = pct + '% · ' + kb(used) + '/' + kb(limit);
 }
 
-// 审批点击 → 唤起主窗并跳到对应会话（只调主窗现成入口）
+// 审批点击 → 唤起主窗并跳到对应会话；V4B：钉住时跳到钉住会话（不是主窗当前会话）
 document.getElementById('w-approval').addEventListener('click', function() {
-  if (window.widgetAPI) window.widgetAPI.approvalFocus(_approvalSid);
+  if (window.widgetAPI) window.widgetAPI.approvalFocus(_pinnedSid || _approvalSid);
 });
+// TICKET-DESK-V4B：点击会话名 → 轮换钉住的活跃会话
+document.getElementById('w-pin').addEventListener('click', function() { cyclePin(); });
 
 if (window.widgetAPI) {
   widgetAPI.onEvent(function(msg) {
@@ -199,20 +282,51 @@ if (window.widgetAPI) {
     var d = msg.params.payload || msg.params;
     if (t === 'gateway.ready') { setConn(true); setTask('已连接'); return; }
     if (t === 'gateway.error') { onActivity(); setTask('出错：' + String(d.message || '').slice(0, 60)); return; }
-    if (t === 'message.start') { onActivity(); setTask('正在回复…'); return; }
-    if (t === 'message.delta') { onActivity(); setTask('正在回复：' + String(d.text || '').slice(0, 50)); return; }
+    // TICKET-DESK-V4B：带 sid 的会话事件先过钉选过滤（A 的事件不泄漏到钉 B 的小窗）
+    if (!shouldRender(d.session_id)) return;
+    if (t === 'message.start') { onActivity(); markActive(d.session_id); setTask('正在回复…'); return; }
+    if (t === 'message.delta') { onActivity(); markActive(d.session_id); setTask('正在回复：' + String(d.text || '').slice(0, 50)); return; }
     if (t === 'message.complete') { onActivity(); setTask('回复完成'); return; }
-    if (t === 'status.update') { onActivity(); setTask(String(d.text || '').slice(0, 60)); return; }
-    if (t === 'tool.start') { onActivity(); toolStart(d); return; }
+    if (t === 'status.update') { onActivity(); markActive(d.session_id); setTask(String(d.text || '').slice(0, 60)); return; }
+    if (t === 'tool.start') { onActivity(); markActive(d.session_id); toolStart(d); return; }
     if (t === 'tool.complete') { onActivity(); toolComplete(d); return; }
     if (t === 'approval.request') { showApproval(d); return; }
     if (t === 'session.cleared') { onActivity(); setTask('对话已清除'); return; }
   });
-  widgetAPI.onCtxStats(function(d) { if (d) renderCtx(d); });
-  widgetAPI.onUserMsg(function(text) { setUser(text); });
+  widgetAPI.onCtxStats(function(d, sid) {
+    if (!shouldRender(sid)) return; // V4B：药丸按钉选过滤，不跨会话串台
+    if (d) renderCtx(d);
+  });
+  widgetAPI.onUserMsg(function(text, sid) {
+    if (!shouldRender(sid)) return; // V4B：指令按钉选过滤
+    setUser(text);
+  });
   widgetAPI.onStatus(function(data) {
     if (data && data.status === 'exited') { setConn(false); setTask('后端已退出'); }
   });
+  // ── TICKET-DESK-V4B：钉选三向同步 ──
+  // 主窗行内按钮 → 钉选/回落
+  if (widgetAPI.onPinSession) {
+    widgetAPI.onPinSession(function(sid) { setPinned(sid); });
+  }
+  // 主窗当前会话广播 → 跟随模式基准 + 会话名
+  if (widgetAPI.onCurrentSession) {
+    widgetAPI.onCurrentSession(function(sid, title) {
+      _currentSid = sid;
+      if (sid && title) _sessionTitles[sid] = title;
+      renderPinInd();
+      // 跟随模式下主窗切会话 → 清旧会话残留（不混显上一会话数据）
+      if (!_pinnedSid) resetDisplay();
+    });
+  }
+  // 主窗会话列表广播 → 会话名映射 + 删除回落兜底（钉住会话被删 → 回落跟随）
+  if (widgetAPI.onSessions) {
+    widgetAPI.onSessions(function(list) {
+      _sessionTitles = {};
+      list.forEach(function(s) { _sessionTitles[s.id] = s.title || s.id; });
+      checkPinAlive();
+    });
+  }
 } else {
   setConn(true);
 }
