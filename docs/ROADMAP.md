@@ -82,6 +82,7 @@
 | Apple Developer 签名发布 | **仅打包分发（.dmg 直接下载/自动更新/iPhone 版）才需要**（$99），不提前；开源路径免签——新人 clone repo → `pip install -e .` → `bobo desktop` 即可拉起桌面端（dist/ 与 vendor/字体均已强制入库，Electron 走 npm 官方签名包，Gatekeeper 不介入用户自跑开发命令）；待办票：新人上手 README + `bobo desktop` 子命令（检测 node_modules→自动 npm install→npm start） |
 | DESK-V3 Automation 侧栏 | 定时任务进侧栏（对标 Hermes CRON JOBS，我们体系现成） |
 | 造 Agent 方向讨论 | 战略级对话，等桌面端稳定后展开 |
+| **产品纲领（owner 20:28 拍板）：一切都可见，一切都透明** | bobo 的差异化路线：不只心理安全感，而是 workflow/工具调用/执行历史/策略全部可见——药丸（上下文可见）→ 小组件（执行可见）→ F13（历史可见）→ 审计事件流（尸检可见）→ DESK-V1 票据面板（治理可见，待开）都是这条线的果实；后续讨论再展开，不着急 |
 | 电脑操控方向（BROWSER-1→COMPUTER-1） | 2026-08-13 讨论后 owner 拍板"先放着"：真实浏览器 CDP 驱动（可并行多窗口）→ 像素级操控（串行、需签名权限）；重启讨论前不动 |
 | iPhone 版 bobo（owner 15:17 长远想法） | 可行路径=iPhone 做瘦客户端连家中 Mac 的 gateway（我们 JSON-RPC/WebSocket 架构现成，桌面端本身就是这么连的）；手机端不做本地 agent（无文件系统/终端），定位=远程监视+指令+审批。等桌面端稳定 + Apple 签名后展开 |
 
