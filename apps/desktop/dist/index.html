@@ -28,6 +28,11 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .session-item .act.del:hover { color:#f44336; }
 .session-item .act.pin.on { visibility:visible; color:#e8913a; }
 .session-item .act svg { display:block; }
+/* === DESK-V4B 会话钉选 === */
+/* 行内"投影到小组件"入口：L5 体系（16px 同尺寸、hover 显形、色板取色，零新增色值），
+   顺序 pin→改名→删除→投影；on 态亮品牌橙（与 pin.on 同款）；SVG 眼睛图标 */
+.session-item .act.proj.on { visibility:visible; color:#e8913a; }
+/* === end DESK-V4B === */
 .session-item .stitle { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 #sidebar-footer { margin-top:auto; padding:12px; font-size:12px; color:var(--text2); border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; }
 #sidebar-footer .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
@@ -620,6 +625,17 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 // ── Gateway ────────────────────────────────────────────────────────────
 const handlers = new Map(); let reqId = 0; const pending = new Map();
 let currentSessionId = null; let connected = false;
+// TICKET-DESK-V4B: 小窗当前钉住的会话（null = 跟随主窗）。单一事实源：
+// 主窗行内按钮 / 小窗轮换上报 / 删除回落 三处共同维护，供行内按钮 on 态与删除回落判断。
+let _widgetPinnedSid = null;
+// TICKET-DESK-V4B: 行内"投影到小组件"入口（L5 体系；SVG 眼睛，与 PIN_SVG 同款细线风）
+var PROJECT_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2.3"/></svg>';
+// TICKET-DESK-V4B: 投影钉选 —— 本地态 + 广播小窗（sid 空串 = 回落跟随主窗）
+function widgetPinSession(sid) {
+  _widgetPinnedSid = sid || null;
+  renderSessions();
+  if (window.boboAPI && window.boboAPI.widgetPinSession) window.boboAPI.widgetPinSession(sid || '');
+}
 function connect() {
   if (!window.boboAPI) { debug('Browser mode'); return; }
   // TICKET-DESK-V2A：连接中全屏态（动画指示，非纯文字）
@@ -816,16 +832,30 @@ function setMode(mode) {
     at.textContent = mode === 'auto' ? 'AUTO ✓' : 'AUTO';
   }
 }
-// TICKET-D1d ④: 状态条 running 状态
-function setBusy(busy) {
-  if (!connected) return;
-  statusText.textContent = busy ? 'Running' : 'Ready';
-}
+// TICKET-D1d ④: 状态条 running 状态 —— 已由 TICKET-DESK-V4B⓪ renderBusyUI 取代
+// （原全局 setBusy 改为按会话隔离：statusText 只反映当前显示会话的运行态）
 // TICKET-D1d ⑤: 中断按钮显隐
 function showStop(b) {
   var sb = document.getElementById('stop-btn');
   if (sb) sb.classList.toggle('show', b);
 }
+// TICKET-DESK-V4B⓪：忙碌态按会话隔离 —— A 运行中切到 B，B 的输入框/发送键/状态条
+// 显示空闲态可独立发消息；切回 A 恢复 A 的运行态。F10 事件闸门已按会话过滤渲染，
+// 这里补上"忙碌"这一全局副作用（loading 动画/状态条 Running/停止键/发送闸门）的隔离。
+/* ===BUSYGATE-START=== */
+var _busySids = {};
+function isSidBusy(sid) { return !!_busySids[sid]; }
+function setSidBusy(sid, busy) { if (busy) _busySids[sid || ''] = 1; else delete _busySids[sid || '']; }
+function currentBusy() { return isSidBusy(currentSessionId) || isSidBusy(''); }
+function renderBusyUI() {
+  var busy = currentBusy();
+  messaging = busy;
+  if (!connected) return;   // 未连接不刷状态条（applyConnected 管显示）
+  sendEl.classList.toggle('loading', busy);
+  statusText.textContent = busy ? 'Running' : 'Ready';
+  showStop(busy);
+}
+/* ===BUSYGATE-END=== */
 var _connTimer = null;
 // TICKET-DESK-V2A：连接态 300ms 防抖（连接抖动时 300ms 内不重绘，禁止闪烁切换）
 function setConnected(c) {
@@ -1114,8 +1144,9 @@ function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; 
 
 function addMsg(role, text, id, append) {
   // TICKET-DESK-V4: 用户指令只读广播给小窗（投影数据源；不改任何渲染行为/状态）
+  // V4B: 带会话 sid（小窗按钉选过滤，A 的指令不泄漏到钉 B 的小窗）
   if (role === 'user' && text && typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetUserMsg) {
-    window.boboAPI.widgetUserMsg(text);
+    window.boboAPI.widgetUserMsg(text, currentSessionId);
   }
   welcomeEl.style.display = 'none';
   // TICKET-DESK-V2C12 (C1)：仅助手正文气泡（bobo）走完整 markdown 管线；用户消息保持既有简渲染
@@ -1374,7 +1405,8 @@ function refreshCtxStats() {
     var d = res && res.result ? res.result : null;
     if (!d) return;
     // TICKET-DESK-V4: 药丸统计只读广播给小窗（投影数据源；不改主窗任何行为）
-    if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCtxStats) window.boboAPI.widgetCtxStats(d);
+    // V4B: 带会话 sid（小窗按钉选过滤，药丸不跨会话串台）
+    if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCtxStats) window.boboAPI.widgetCtxStats(d, currentSessionId);
     var fmt = function(n) { return (typeof n === 'number') ? String(n) : '—'; };
     // 药丸进度：百分比 = token 估算 / context_limit（context.stats 现返回上限，128K 兜底）
     var limit = (typeof d.context_limit === 'number' && d.context_limit > 0) ? d.context_limit : 128000;
@@ -1903,9 +1935,16 @@ function renderSessions(filter) {
     re.onclick = function(e) { e.stopPropagation(); startRename(s, span); };
     var del = document.createElement('button'); del.className = 'act del'; del.textContent = '✕'; del.title = '删除';
     del.onclick = function(e) { e.stopPropagation(); deleteSession(s.id); };
-    div.appendChild(span); div.appendChild(pin); div.appendChild(re); div.appendChild(del);
+    // TICKET-DESK-V4B：行内四键统一 .act（顺序 pin→改名→删除→投影到小组件；on 态亮品牌橙）
+    var proj = document.createElement('button'); proj.className = 'act proj' + (_widgetPinnedSid === s.id ? ' on' : ''); proj.innerHTML = PROJECT_SVG; proj.title = '投影到小组件';
+    proj.onclick = function(e) { e.stopPropagation(); widgetPinSession(_widgetPinnedSid === s.id ? '' : s.id); };
+    div.appendChild(span); div.appendChild(pin); div.appendChild(re); div.appendChild(del); div.appendChild(proj);
     sessionListEl.appendChild(div);
   });
+  // TICKET-DESK-V4B：会话列表广播给小窗（会话名映射 + 钉住会话被删时小窗回落兜底）
+  if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetSessions) {
+    window.boboAPI.widgetSessions(sessions.map(function(x) { return { id: x.id, title: x.title || x.id }; }));
+  }
 }
 // V2A 打磨：细线 SVG 图钉（替代 📌 emoji，视觉克制）
 var PIN_SVG = '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.6 1.2l5.2 5.2-1.1 1.1-1.7-.4-2.7 2.7.4 3.6-1.1 1.1L5.5 11.4l-3.6 3.6-.7-.7 3.6-3.6-3.1-3.1 1.1-1.1 3.6.4 2.7-2.7-.4-1.7z"/></svg>';
@@ -1924,6 +1963,8 @@ async function doDeleteSession(sid) {
   await call('session.delete', { session_id: sid });
   sessions = sessions.filter(function(s) { return s.id !== sid; });
   showToast('success', '会话已删除');
+  // TICKET-DESK-V4B：删的是小窗钉住的会话 → 自动回落跟随主窗（不留僵尸投影）
+  if (_widgetPinnedSid === sid) widgetPinSession('');
   var wasCurrent = currentSessionId === sid;
   if (wasCurrent) {
     // F3-1: 删除当前会话后落到第一个会话 —— 完整 loadSession（内容区与高亮同步切换）
@@ -1933,6 +1974,10 @@ async function doDeleteSession(sid) {
       await loadSession(sessions[0].id);
     } else {
       renderSessions();
+      // V4B: 当前会话清空广播（小窗跟随模式基准复位）
+      if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCurrentSession) {
+        window.boboAPI.widgetCurrentSession('', '');
+      }
     }
   } else {
     renderSessions();
@@ -1958,6 +2003,7 @@ async function loadSession(sid) {
   if (currentSessionId !== sid) {
     currentSessionId = sid;
     renderSessions();
+    renderBusyUI();   // V4B⓪：切会话立即按新会话忙碌态刷新输入区/状态条/停止键
   }
   // F3-2 竞态：本次加载序号；期间再点其他会话，本次结果作废
   var mySeq = ++sessionLoadSeq;
@@ -1987,6 +2033,12 @@ async function loadSession(sid) {
   // TICKET-GUI-F10：切回即清"后台活动中"标记（resume 全量已拉取，圆点无意义）
   clearBgActive(sid);
   renderSessions();
+  renderBusyUI();   // V4B⓪：resume 完成后按新会话忙碌态最终刷新一次（兜底 gateway.ready 预赋值路径）
+  // TICKET-DESK-V4B：当前会话广播给小窗（跟随模式对照基准；title 供会话指示显示）
+  if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCurrentSession) {
+    var cur = sessions.find(function(x) { return x.id === sid; });
+    window.boboAPI.widgetCurrentSession(sid, cur ? (cur.title || sid) : sid);
+  }
   // Update title with first user message
   // TICKET-GUI-F7：自动命名闸门 —— 用户手动命名过（user_named=true）则不覆盖；
   // 未手动命名的会话仍保留自动取名行为
@@ -2212,6 +2264,11 @@ async function newChat() {
     clearChat();
     sessions.unshift({ id: result.session_id, title: 'New Chat' });
     renderSessions();
+    renderBusyUI();   // V4B⓪：新会话即空闲态（不继承旧会话忙碌）
+    // TICKET-DESK-V4B：新会话即当前会话，广播给小窗（跟随模式基准）
+    if (typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetCurrentSession) {
+      window.boboAPI.widgetCurrentSession(result.session_id, 'New Chat');
+    }
     // F2-2: 新会话默认非 AUTO（后端 auto_mode 新会话默认 False）
     setMode('');
     call('session.activate', { session_id: result.session_id });
@@ -2314,6 +2371,7 @@ function toggleThinkBox(tb) {
 }
 function stopThinking() {
   showStop(false);   // TICKET-D1d ⑤
+  setSidBusy(currentSessionId, false); renderBusyUI();   // V4B⓪：中断后立即恢复当前会话空闲态
   if (thinkBoxEl) {
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
@@ -2326,8 +2384,8 @@ function stopThinking() {
 on('message.start', function(data) {
   if (isForeignSession(data)) return;
   if (sendTimeoutId) { clearTimeout(sendTimeoutId); sendTimeoutId = null; }
-  messaging = true; sendEl.classList.add('loading'); debug('Receiving...');
-  setBusy(true); showStop(true);   // TICKET-D1d ④⑤
+  setSidBusy(data ? data.session_id : '', true);   // V4B⓪：忙碌按会话登记
+  renderBusyUI(); debug('Receiving...');           // V4B⓪：UI 按当前显示会话刷新
   thinkText = '';
   toolsCalledThisRound = false;
   streamingId = null;
@@ -2368,8 +2426,8 @@ on('message.delta', function(data) {
 });
 on('message.complete', function(data) {
   if (isForeignSession(data)) return;
-  messaging = false; sendEl.classList.remove('loading'); debug('Connected ✓');
-  setBusy(false); showStop(false);   // TICKET-D1d ④⑤
+  setSidBusy(data ? data.session_id : '', false);   // V4B⓪：清该会话忙碌位
+  renderBusyUI(); debug('Connected ✓');             // V4B⓪：UI 按当前显示会话刷新
   var toolsWereCalled = toolIdCounter > 0;
   thinkText = '';
   if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
@@ -2571,6 +2629,7 @@ var readyFallbackTimer = setTimeout(async function() {
         currentSessionId = sessions[0].id;
         call('session.activate', { session_id: sessions[0].id });
         renderSessions();
+        renderBusyUI();   // V4B⓪：fallback 路径同样按当前会话刷新忙碌态
       } else {
         await newChat();
       }
@@ -2621,6 +2680,13 @@ if (window.boboAPI && window.boboAPI.widgetStatus) {
 if (window.boboAPI && window.boboAPI.onWidgetFocusSession) {
   window.boboAPI.onWidgetFocusSession(function(sid) {
     if (sid && sid !== currentSessionId) loadSession(sid);
+  });
+}
+// TICKET-DESK-V4B: 小窗钉选变化（点击会话名轮换/回落）→ 主窗同步行内按钮态（三向一致）
+if (window.boboAPI && window.boboAPI.onWidgetPinChanged) {
+  window.boboAPI.onWidgetPinChanged(function(sid) {
+    _widgetPinnedSid = sid || null;
+    renderSessions();
   });
 }
 
@@ -2888,6 +2954,7 @@ document.getElementById('settings-clear').onclick = function() {
   currentSessionId = null;
   clearChat();
   renderSessions();
+  renderBusyUI();   // V4B⓪：无当前会话 → 空闲态（清理全局忙碌残留）
   addStatus('所有会话已删除');
   document.getElementById('settings-modal').classList.remove('open');
 };

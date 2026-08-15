@@ -92,9 +92,10 @@ def test_v4_1_engine_gateway_tui_zero_diff():
 def test_v4_1_widget_no_write_channel():
     """小窗只读：preload 无 send/call/写通道；widget.html 无 fetch/XHR/WebSocket/localStorage。"""
     pre = WIDGET_PRELOAD_CJS.read_text(encoding="utf-8")
-    # approvalFocus 是唯一 send，且只发 widget-approval-focus（唤起主窗）
+    # V4: approvalFocus 是唯一 send；V4B: 增 pinChanged 上报钉选变化（两 send 均只发主窗，无后端写通道）
     assert "widget-approval-focus" in pre
-    assert pre.count("ipcRenderer.send(") == 1, "小窗只允许一个 send：唤起主窗审批"
+    assert "widget-pin-changed" in pre
+    assert pre.count("ipcRenderer.send(") == 2, "小窗仅允许两个 send：唤起主窗审批 + 钉选变化上报"
     assert "ipcRenderer.invoke(" not in pre, "小窗不得有 invoke（无 RPC 通道）"
     html = WIDGET_HTML.read_text(encoding="utf-8")
     for banned in ["fetch(", "XMLHttpRequest", "WebSocket", "localStorage", "window.boboAPI",

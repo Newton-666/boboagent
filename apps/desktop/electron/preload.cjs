@@ -36,8 +36,9 @@ contextBridge.exposeInMainWorld('boboAPI', {
   widgetStatus: () => ipcRenderer.invoke('widget-status'),
 
   // TICKET-DESK-V4: 只读广播（主窗现有数据 → 小窗镜像；不改主窗任何行为）
-  widgetCtxStats: (data) => ipcRenderer.send('widget-ctx-stats', data),
-  widgetUserMsg: (text) => ipcRenderer.send('widget-user-msg', text),
+  // V4B: 广播带会话 sid（小窗按钉选过滤，A 的事件/药丸不泄漏到钉 B 的小窗）
+  widgetCtxStats: (data, sid) => ipcRenderer.send('widget-ctx-stats', data, sid),
+  widgetUserMsg: (text, sid) => ipcRenderer.send('widget-user-msg', text, sid),
 
   // TICKET-DESK-V4: 审批联动落地 —— 小窗点击 → 主窗跳到对应会话（现成 loadSession 入口）
   onWidgetFocusSession: (callback) => {
@@ -45,4 +46,18 @@ contextBridge.exposeInMainWorld('boboAPI', {
     ipcRenderer.on('widget-focus-session', handler)
     return () => ipcRenderer.removeListener('widget-focus-session', handler)
   },
+
+  // ── TICKET-DESK-V4B 会话钉选：主窗侧 4 桥 ──────────────────────────
+  // 行内"投影到小组件"按钮 → 主进程 → 小窗（钉选/回落）
+  widgetPinSession: (sid) => ipcRenderer.send('widget-pin-session', String(sid || '')),
+  // 小窗钉选变化（点击轮换/回落）→ 主窗同步行内按钮态
+  onWidgetPinChanged: (callback) => {
+    const handler = (_event, sid) => callback(sid)
+    ipcRenderer.on('widget-pin-changed', handler)
+    return () => ipcRenderer.removeListener('widget-pin-changed', handler)
+  },
+  // 主窗当前会话广播 → 小窗（跟随模式基准；带 title 供会话指示）
+  widgetCurrentSession: (sid, title) => ipcRenderer.send('widget-current-session', String(sid || ''), String(title || '')),
+  // 主窗会话列表广播 → 小窗（会话名映射 + 删除回落兜底）
+  widgetSessions: (list) => ipcRenderer.send('widget-sessions', Array.isArray(list) ? list : []),
 })

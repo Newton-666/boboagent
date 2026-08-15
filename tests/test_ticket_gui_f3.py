@@ -175,8 +175,11 @@ class TestF31SelectionState:
     def test_load_session_syncs_selection_first(self):
         """loadSession 开头立即同步 currentSessionId + renderSessions（不等 resume 返回）。"""
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "if (currentSessionId !== sid) {\n    currentSessionId = sid;\n    renderSessions();\n  }" in src, \
+        # V4B⓪：同步选中态后追加 renderBusyUI（按新会话刷新忙碌态），语义不变（先同步再 resume）
+        assert "if (currentSessionId !== sid) {\n    currentSessionId = sid;\n    renderSessions();" in src, \
             "点击会话必须先同步选中态再请求 resume（杜绝高亮脱节）"
+        assert "renderSessions();\n    renderBusyUI();" in src, \
+            "V4B⓪：同步选中态后必须按新会话刷新忙碌态"
 
     def test_new_chat_syncs_selection(self):
         src = GUI_FILE.read_text(encoding="utf-8")

@@ -369,12 +369,30 @@ ipcMain.on('widget-approval-focus', (_event, sid) => {
   if (sid) mainWindow.webContents.send('widget-focus-session', String(sid))
 })
 
-// 主窗只读广播 → 小窗（上下文药丸 / 用户指令）
-ipcMain.on('widget-ctx-stats', (_event, data) => {
-  if (widgetWindow) widgetWindow.webContents.send('widget-ctx-stats', data)
+// 主窗只读广播 → 小窗（上下文药丸 / 用户指令；V4B 起带会话 sid，小窗按钉选过滤）
+ipcMain.on('widget-ctx-stats', (_event, data, sid) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-ctx-stats', data, sid)
 })
-ipcMain.on('widget-user-msg', (_event, text) => {
-  if (widgetWindow) widgetWindow.webContents.send('widget-user-msg', String(text))
+ipcMain.on('widget-user-msg', (_event, text, sid) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-user-msg', String(text), sid)
+})
+
+// ── TICKET-DESK-V4B 会话钉选：主窗 ⇄ 小窗 4 通道 ─────────────────────
+// 主窗行内"投影到小组件" → 小窗钉选（sid 空串 = 回落跟随主窗）
+ipcMain.on('widget-pin-session', (_event, sid) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-pin-session', String(sid || ''))
+})
+// 小窗钉选变化（点击轮换/回落）→ 主窗同步行内按钮态（三向一致）
+ipcMain.on('widget-pin-changed', (_event, sid) => {
+  if (mainWindow) mainWindow.webContents.send('widget-pin-changed', String(sid || ''))
+})
+// 主窗当前会话广播 → 小窗（跟随模式基准 + 会话指示名）
+ipcMain.on('widget-current-session', (_event, sid, title) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-current-session', String(sid || ''), String(title || ''))
+})
+// 主窗会话列表广播 → 小窗（会话名映射 + 删除回落兜底）
+ipcMain.on('widget-sessions', (_event, list) => {
+  if (widgetWindow) widgetWindow.webContents.send('widget-sessions', Array.isArray(list) ? list : [])
 })
 
 // ── First-run config ──
