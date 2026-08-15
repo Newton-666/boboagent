@@ -18,7 +18,7 @@
 | 2.5 | 黑名单硬拦 git reset --hard（owner 23:56 拍板） | DANGEROUS_PATTERNS 新增，AUTO 硬拦；soft/裸 reset 不误伤 | ✅ 已合并 122a3ec（全量 2512 passed） |
 | 3 | DESK-CLI `bobo desktop` 子命令 | 子命令分发 + node≥18 人话检测 + 自动 npm install + README 快速开始 | ✅ 已合并 be64f8c（全量 2526 passed；守卫升级为锚点段精确化——收紧非松绑；回滚标签 rollback/pre-desk-cli） |
 | 3 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
-| 4 | DESK-V2D5 药丸修复+升级（owner 08:52/10:51 拍板：**D5 提到最前，因为药丸现在根本不工作**） | ⓪ 先修：前端药丸钉死硬编码初值 0%·0/128K（Kimi 取证：后端 context.stats 实弹应答正常[limit=1M/saved=19M 全对]，前端 call 静态无 bug，断点在运行时环节，需 Playwright 实弹复现定位）→ 再升：认知状态条（水位+记忆数+工具数） | 📋 下一票 |
+| 4 | DESK-V2D5 药丸修复+升级 | ⓪ 根因实锤：refreshCtxStats 双重剥壳（call() 已剥壳又取 res.result → d 恒 null → 永停硬编码初值）→ ① 认知状态条（水位+本轮记忆注入+本轮工具调用，meta 弱字） | ✅ 已合并 c6a8d5e（实弹截图实证药丸真实上涨 87K→88K；全量 2532 passed；回滚标签 rollback/pre-desk-v2d5） |
 | 5 | DESK-V2D 美学微票串余下三张（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise） | 📋 D5 之后逐票精调 |
 | ⏸ | COST-1a 工具画像+外置实验 | ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存 |
 
