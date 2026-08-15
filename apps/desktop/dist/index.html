@@ -1186,6 +1186,7 @@ function addMsg(role, text, id, append) {
   var div = document.createElement('div'); div.id = id; div.className = 'msg ' + role;
   div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + render(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
 }
 var toolResults = {};
 var toolIdCounter = 0;
@@ -2043,6 +2044,8 @@ function updateSessionTitle(sid, text) {
 async function loadSession(sid) {
   // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
   if (currentSessionId !== sid) {
+    // TICKET-GUI-F13：离开当前会话前，把现场展开姿势落盘（重启回放按姿势还原）
+    if (currentSessionId) recordPose(currentSessionId);
     currentSessionId = sid;
     renderSessions();
     renderBusyUI();   // V4B⓪：切会话立即按新会话忙碌态刷新输入区/状态条/停止键
@@ -2066,8 +2069,15 @@ async function loadSession(sid) {
     return;
   }
   clearChat();
-  // F3-3: 归档全文 + 现存消息拼接，压缩边界给分隔线
-  await renderFullHistory(sid, result);
+  // TICKET-GUI-F13：长会话（现存消息 > HIST_WINDOW_THRESHOLD）走窗口化惰性渲染
+  //（DOM 节点硬上限 + 占位高度精确）；短会话走 renderFullHistory 全量（零变化）
+  var msgsLen = (result.messages || []).length;
+  if (msgsLen > HIST_WINDOW_THRESHOLD) {
+    await renderFullHistoryWindowed(sid, result);
+  } else {
+    // F3-3: 归档全文 + 现存消息拼接，压缩边界给分隔线
+    await renderFullHistory(sid, result);
+  }
   chatEl.scrollTop = chatEl.scrollHeight;
   // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
   setMode(result.auto_state ? 'auto' : '');
@@ -2094,6 +2104,70 @@ function setSessionLoading(sid, on) {
   var items = sessionListEl.querySelectorAll('.session-item');
   items.forEach(function(d) {
     if (d.dataset.sid === sid) d.classList.toggle('loading', !!on);
+  });
+}
+
+// TICKET-GUI-F13：考古模式开关 —— F12 历史聚合卡降级为可选"考古模式"（默认关=现场原样）。
+// 关（默认）：历史回放与实时同一条渲染链，思考框/工具卡/diff 逐个平铺，展开姿势按持久化还原；
+// 开：过往回合"思考→工具×N"链收进聚合卡（F12 行为，F6C .tool-agg 组件复用）。
+// 开关持久化 localStorage（bobo_hist_arch_mode），重启保留。
+var HIST_ARCH_MODE_KEY = 'bobo_hist_arch_mode';
+function histArchMode() {
+  try { return localStorage.getItem(HIST_ARCH_MODE_KEY) === '1'; } catch (e) { return false; }
+}
+function setHistArchMode(on) {
+  try { localStorage.setItem(HIST_ARCH_MODE_KEY, on ? '1' : '0'); } catch (e) {}
+}
+
+// TICKET-GUI-F13：视觉姿势持久化 —— 每回合最终展开姿势（哪些思考框/工具卡/聚合卡展开）
+// 随会话落盘 localStorage（bobo_hist_pose_<sid>），重启回放按姿势还原（现场原样）。
+var HIST_POSE_KEY = 'bobo_hist_pose_';
+function readPose(sid) {
+  try { return JSON.parse(localStorage.getItem(HIST_POSE_KEY + sid) || '{}'); } catch (e) { return {}; }
+}
+function writePose(sid, pose) {
+  try { localStorage.setItem(HIST_POSE_KEY + sid, JSON.stringify(pose)); } catch (e) {}
+}
+// 扫描当前 chatEl 里所有可展开元素（思考框/工具卡结果/diff/聚合卡）的展开状态，落盘。
+function recordPose(sid) {
+  var pose = {};
+  var els = chatEl.querySelectorAll('.think-box, .tool, .tool-agg');
+  els.forEach(function(el) {
+    var key = el.dataset && el.dataset.poseId;
+    if (!key) return;
+    if (el.classList.contains('think-box')) {
+      pose[key] = el.classList.contains('collapsed') ? 0 : 1;
+    } else if (el.classList.contains('tool-agg')) {
+      var body = el.querySelector('.tool-agg-body');
+      pose[key] = (body && body.style.display !== 'none') ? 1 : 0;
+    } else if (el.classList.contains('tool')) {
+      var r = el.querySelector('.tool-result');
+      pose[key] = (r && r.classList.contains('open')) ? 1 : 0;
+    }
+  });
+  writePose(sid, pose);
+}
+// 回放时按持久化姿势还原展开状态（缺失姿势的保持默认折叠，与实时同款）。
+function applyPose(sid) {
+  var pose = readPose(sid);
+  Object.keys(pose).forEach(function(key) {
+    var el = chatEl.querySelector('[data-pose-id="' + key + '"]');
+    if (!el) return;
+    var want = pose[key];
+    if (el.classList.contains('think-box')) {
+      if (want && el.classList.contains('collapsed')) toggleThinkBox(el);
+      else if (!want && !el.classList.contains('collapsed')) toggleThinkBox(el);
+    } else if (el.classList.contains('tool-agg')) {
+      var body = el.querySelector('.tool-agg-body');
+      var open = body && body.style.display !== 'none';
+      if (want && !open) { body.style.display = 'block'; var ar = el.querySelector('.tool-agg-arrow'); if (ar) ar.textContent = '▾'; }
+      else if (!want && open) { body.style.display = 'none'; var ar2 = el.querySelector('.tool-agg-arrow'); if (ar2) ar2.textContent = '▸'; }
+    } else if (el.classList.contains('tool')) {
+      var r = el.querySelector('.tool-result');
+      var t = el.querySelector('.tool-toggle');
+      if (want && r && !r.classList.contains('open')) { r.classList.add('open'); if (t) { t.textContent = '▾'; t.style.display = 'inline'; } }
+      else if (!want && r && r.classList.contains('open')) { r.classList.remove('open'); if (t) { t.textContent = '▸'; t.style.display = 'inline'; } }
+    }
   });
 }
 
@@ -2132,7 +2206,10 @@ async function renderFullHistory(sid, result) {
       histLatestStart = hi; break;
     }
   }
-  // 聚合缓冲：当前链的思考文本 + 收集中的工具消息（非最新一轮时启用）
+  // TICKET-GUI-F13：考古模式（默认关=现场原样）。关：所有消息平铺（与实时同一条
+  // 渲染链）；开：过往回合"思考→工具×N"链收进聚合卡（F12 行为）。
+  var archMode = histArchMode();
+  // 聚合缓冲：当前链的思考文本 + 收集中的工具消息（仅考古模式启用）
   var aggThink = null;
   var aggTools = [];
   function flushHistAgg() {
@@ -2154,34 +2231,45 @@ async function renderFullHistory(sid, result) {
       // TICKET-GUI-F12（审查修复）：user 边界重置 —— 孤儿 tool 消息（归档异常）
       // 跨 user 时不再被误判为最新一轮而平铺
       histLatest = false;
-      addMsg('user', m.text, 'hist-' + Math.random());
+      var uEl = addMsg('user', m.text, 'hist-' + sid + '-u' + idx);
+      if (uEl) uEl.setAttribute('data-pose-id', 'u' + idx);
     }
     else if (m.role === 'assistant') {
       flushHistAgg();
       histLatest = (idx === histLatestStart);
-      if (histLatest) {
-        // TICKET-GUI-F8：最新一轮思考照常平铺（默认收起、点击展开，与实时同款）
-        if (m.thinking) addHistThinking(m.thinking);
-      } else if (m.tool_calls && m.tool_calls.length) {
-        // TICKET-GUI-F12：过往回合"思考→工具链"的思考先进聚合缓冲（随链进考古卡）；
-        // 纯文本回复（无工具链）的思考仍照常平铺（F8 语义不破）
-        aggThink = m.thinking || '';
-      } else {
-        if (m.thinking) addHistThinking(m.thinking);
+      if (m.thinking) {
+        // TICKET-GUI-F13：现场原样 —— 思考框一律平铺（默认收起、点击展开，
+        // 与实时折叠思考框同交互）；考古模式且非最新一轮才进聚合缓冲
+        if (archMode && !histLatest && m.tool_calls && m.tool_calls.length) {
+          aggThink = m.thinking;
+        } else {
+          var tb = buildHistThinkBox(m.thinking);
+          tb.setAttribute('data-pose-id', 't' + idx);
+          chatEl.appendChild(tb);
+        }
       }
       // TICKET-GUI-F6（缺陷 2a）：现存消息里空 assistant（纯工具回合）给占位，
       // 与 renderArchivedMessages 一致，消灭一屏空泡泡
-      addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + Math.random());
+      var aEl = addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + sid + '-a' + idx);
+      if (aEl) aEl.setAttribute('data-pose-id', 'a' + idx);
     }
     else if (m.role === 'tool') {
-      if (histLatest) {
-        // TICKET-GUI-F12：最新一轮完整展开 —— 带 diff 保留 F3-5 红绿块（F8 语义），
-        // 无 diff 的普通工具调用也渲染工具卡（历史不再丢调用）
-        if (m.inline_diff) renderHistToolDiff(m.name || 'tool', m.inline_diff);
-        else renderHistToolFlat(m.name || 'tool', m.content || '');
-      } else {
-        // TICKET-GUI-F12：过往回合工具收进聚合缓冲（点击考古展开）
+      if (archMode && !histLatest) {
+        // TICKET-GUI-F12：考古模式过往回合工具收进聚合缓冲（点击考古展开）
         aggTools.push(m);
+      } else {
+        // TICKET-GUI-F13：现场原样 —— 工具卡平铺（带 diff 保留 F3-5 红绿块，
+        // 无 diff 普通工具调用也渲染工具卡，与实时同款 done 态）
+        var tc = buildHistToolCard(m.name || 'tool',
+          m.inline_diff ? toolSummary({}, m.inline_diff) : String(m.content || '').substring(0, 120));
+        tc.setAttribute('data-pose-id', 'c' + idx);
+        chatEl.appendChild(tc);
+        if (m.inline_diff) {
+          var block = document.createElement('div');
+          block.innerHTML = diffBlock(m.inline_diff);
+          block.firstChild.setAttribute('data-pose-id', 'd' + idx);
+          chatEl.appendChild(block.firstChild);
+        }
       }
     }
     else if (m.role === 'system' && m.text && m.text.length < 200) {
@@ -2192,9 +2280,272 @@ async function renderFullHistory(sid, result) {
     }
   });
   flushHistAgg();
+  // TICKET-GUI-F13：回放按持久化姿势还原展开状态（现场原样，缺失姿势保持默认折叠）
+  applyPose(sid);
   // TICKET-GUI-F12（审查修复）：scrollTop 统一到末尾滚一次 —— 循环内渲染函数
   // 不再逐条 scroll（长历史避免多次 reflow）
   chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// TICKET-GUI-F13：窗口化惰性渲染（③）—— 长会话 DOM 节点硬上限 + 滚动丝滑。
+// 数据与渲染分离：消息先转成 units 数据模型，DOM 只生成视口附近（提前量 ≥2 屏），
+// 未渲染区用占位 div（height=持久化实测高度，无实测用估算），滚动条不跳动。
+// 阈值以下（≤ HIST_WINDOW_THRESHOLD 条现存消息）走 renderFullHistory 全量路径，
+// 既有短会话行为/测试零变化；超阈值才启用窗口化。
+var HIST_WINDOW_THRESHOLD = 200;   // 现存消息超过此数启用窗口化
+var HIST_PRELOAD_SCREENS = 2;      // 渲染提前量：视口上下各 ≥2 屏
+var HIST_MAX_NODES = 600;          // chatEl 直接子节点硬上限（与会话长度无关）
+var HIST_HEIGHT_KEY = 'bobo_hist_h_';  // 实测高度持久化（占位高度精确，防滚动跳动）
+
+// 高度缓存：unit 实测 offsetHeight 落盘（bobo_hist_h_<sid> = {idx: h}）
+function histUnitH(sid, idx, def) {
+  try {
+    var m = JSON.parse(localStorage.getItem(HIST_HEIGHT_KEY + sid) || '{}');
+    var v = m['u' + idx];
+    return (v && v > 0) ? v : def;
+  } catch (e) { return def; }
+}
+function histSaveH(sid, idx, h) {
+  if (!h || h <= 0) return;
+  try {
+    var m = JSON.parse(localStorage.getItem(HIST_HEIGHT_KEY + sid) || '{}');
+    m['u' + idx] = h;
+    localStorage.setItem(HIST_HEIGHT_KEY + sid, JSON.stringify(m));
+  } catch (e) {}
+}
+
+// 估算高度（无实测时占位用；实测后以实测为准，滚动条不跳）
+function histEstimateH(unit) {
+  var k = unit.kind;
+  if (k === 'msg') return 26 + Math.ceil((unit.text || '').length / 60) * 22;
+  if (k === 'think') return 30 + (unit.text ? Math.min(120, Math.ceil(unit.text.length / 40) * 16) : 0);
+  if (k === 'tool') return 34 + (unit.inlineDiff ? Math.min(200, Math.ceil((unit.inlineDiff || '').length / 50) * 16) : 0);
+  if (k === 'status') return 24;
+  if (k === 'agg') return 40;
+  return 30;
+}
+
+// 构建 units 数据模型（与 renderFullHistory 同语义：摘要/归档/聚合开关/心跳过滤/占位）
+// 返回 units 数组；每 unit 含 kind + 渲染所需字段 + idx（对应消息索引，姿势锚点复用）。
+function buildHistUnits(sid, result) {
+  var units = [];
+  var msgs = result.messages || [];
+  if (result.summary) units.push({ kind: 'status', text: '📋 此前对话摘要：' + result.summary, idx: -1 });
+  // 归档：整段并入（短段通常已被压缩，不必逐条窗口化；超长归档也走估算占位）
+  var ar = result._archiveRecords || null;
+  if (ar && ar.length) {
+    for (var ai = 0; ai < ar.length; ai++) {
+      var ams = ar[ai].archived_messages || [];
+      ams.forEach(function(am, aidx) {
+        var role = am.role || '';
+        var content = (am.content != null && String(am.content)) || '';
+        if (role === 'user') units.push({ kind: 'msg', role: 'user', text: content, idx: -1 });
+        else if (role === 'assistant') units.push({ kind: 'msg', role: 'bobo', text: content || (am.tool_calls && am.tool_calls.length ? '（工具调用回合）' : ''), idx: -1 });
+        else if (role === 'tool') units.push({ kind: 'tool', name: am.name || am.tool_name || '工具', text: content, idx: -1 });
+        else if (role === 'system' && content && content.length < 200) units.push({ kind: 'status', text: content, idx: -1 });
+      });
+      var n = ar[ai].pre_msg_count || ams.length;
+      units.push({ kind: 'status', text: '— 此前 ' + n + ' 条消息经上下文压缩 —', idx: -1 });
+    }
+  }
+  // 现存消息：与 renderFullHistory 同语义（考古开关 + 最新一轮预扫描 + 姿势锚点）
+  var archMode = histArchMode();
+  var histLatestStart = -1;
+  for (var hi = msgs.length - 1; hi >= 0; hi--) {
+    if (msgs[hi].role === 'assistant' && msgs[hi].tool_calls && msgs[hi].tool_calls.length) {
+      histLatestStart = hi; break;
+    }
+  }
+  var aggThink = null;
+  var aggTools = [];
+  function flushAggTo(units) {
+    if (aggTools.length === 0) {
+      if (aggThink) units.push({ kind: 'think', text: aggThink, idx: -1 });
+      aggThink = null;
+      return;
+    }
+    units.push({ kind: 'agg', think: aggThink, tools: aggTools.slice(), idx: -1 });
+    aggThink = null;
+    aggTools = [];
+  }
+  var histLatest = false;
+  msgs.forEach(function(m, idx) {
+    if (m.role === 'user') {
+      flushAggTo(units);
+      histLatest = false;
+      units.push({ kind: 'msg', role: 'user', text: m.text, idx: idx, poseId: 'u' + idx });
+    }
+    else if (m.role === 'assistant') {
+      flushAggTo(units);
+      histLatest = (idx === histLatestStart);
+      if (m.thinking) {
+        if (archMode && !histLatest && m.tool_calls && m.tool_calls.length) {
+          aggThink = m.thinking;
+        } else {
+          units.push({ kind: 'think', text: m.thinking, idx: idx, poseId: 't' + idx });
+        }
+      }
+      units.push({ kind: 'msg', role: 'bobo',
+        text: m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''),
+        idx: idx, poseId: 'a' + idx });
+    }
+    else if (m.role === 'tool') {
+      if (archMode && !histLatest) {
+        aggTools.push(m);
+      } else {
+        units.push({ kind: 'tool', name: m.name || 'tool', text: String(m.content || '').substring(0, 120),
+          inlineDiff: m.inline_diff || '', idx: idx, poseId: 'c' + idx, diffPoseId: 'd' + idx });
+      }
+    }
+    else if (m.role === 'system' && m.text && m.text.length < 200) {
+      flushAggTo(units);
+      if (m.text.indexOf('仍在工作') === 0) return;
+      units.push({ kind: 'status', text: m.text, idx: -1 });
+    }
+  });
+  flushAggTo(units);
+  return units;
+}
+
+// 单 unit 渲染（与实时同一条渲染链的"历史平铺"形态：思考框/工具卡/diff 复用构造）
+function renderHistUnit(unit) {
+  var el = null;
+  if (unit.kind === 'msg') {
+    el = addMsg(unit.role, unit.text, 'hist-' + Math.random());
+    if (el && unit.poseId) el.setAttribute('data-pose-id', unit.poseId);
+  } else if (unit.kind === 'think') {
+    el = buildHistThinkBox(unit.text);
+    if (unit.poseId) el.setAttribute('data-pose-id', unit.poseId);
+    chatEl.appendChild(el);
+  } else if (unit.kind === 'tool') {
+    el = buildHistToolCard(unit.name, unit.inlineDiff ? toolSummary({}, unit.inlineDiff) : unit.text);
+    if (unit.poseId) el.setAttribute('data-pose-id', unit.poseId);
+    chatEl.appendChild(el);
+    if (unit.inlineDiff) {
+      var block = document.createElement('div');
+      block.innerHTML = diffBlock(unit.inlineDiff);
+      var diffEl = block.firstChild;
+      if (unit.diffPoseId) diffEl.setAttribute('data-pose-id', unit.diffPoseId);
+      chatEl.appendChild(diffEl);
+    }
+  } else if (unit.kind === 'status') {
+    addStatus(unit.text);
+  } else if (unit.kind === 'agg') {
+    var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
+    agg.setAttribute('data-pose-id', 'agg' + (histAggSeq++));
+    var headLabel = (unit.think ? '思考 + ' : '') + unit.tools.length + ' 个工具';
+    agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
+    agg.onclick = function(e) {
+      if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
+      var body = this.querySelector('.tool-agg-body');
+      var open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+    };
+    var aggBody = agg.querySelector('.tool-agg-body');
+    if (unit.think) aggBody.appendChild(buildHistThinkBox(unit.think));
+    unit.tools.forEach(function(tm) {
+      var inlineDiff = tm.inline_diff || '';
+      aggBody.appendChild(buildHistToolCard(tm.name || 'tool', inlineDiff ? toolSummary({}, inlineDiff) : String(tm.content || '').substring(0, 120)));
+      if (inlineDiff) {
+        var b2 = document.createElement('div');
+        b2.innerHTML = diffBlock(inlineDiff);
+        aggBody.appendChild(b2.firstChild);
+      }
+    });
+    chatEl.appendChild(agg);
+  }
+  return el;
+}
+
+// 窗口化渲染：视口 ±2 屏内真实 DOM，其余占位 div（高度=实测/估算）
+var histWindowUnits = null;  // 当前窗口化会话的 units（滚动监听引用）
+var histWindowSid = null;
+function renderHistWindow() {
+  if (!histWindowUnits) return;
+  var viewH = chatEl.clientHeight || 600;
+  var top = chatEl.scrollTop;
+  var preload = HIST_PRELOAD_SCREENS * viewH;
+  var winTop = Math.max(0, top - preload);
+  var winBottom = top + viewH + preload;
+  // 累积高度定位窗口覆盖的 unit 区间
+  var heights = histWindowUnits.map(function(u) {
+    return histUnitH(histWindowSid, u.idx, histEstimateH(u));
+  });
+  var cum = [0];
+  for (var i = 0; i < heights.length; i++) cum.push(cum[i] + heights[i]);
+  var total = cum[cum.length - 1];
+  if (total <= 0) total = viewH;
+  // 二分定位 startIdx（cum[startIdx] >= winTop 的最小下标）
+  function lowerBound(arr, val) {
+    var lo = 0, hi = arr.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (arr[mid] < val) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+  var startIdx = Math.max(0, lowerBound(cum, winTop) - 1);
+  var endIdx = Math.min(histWindowUnits.length - 1, lowerBound(cum, winBottom) + 1);
+  // 重建 chatEl：顶部占位 + 窗口内真实 unit + 底部占位
+  var topH = cum[startIdx];
+  var bottomH = total - cum[endIdx + 1];
+  chatEl.innerHTML = '';
+  if (topH > 0) {
+    var tp = document.createElement('div'); tp.className = 'hist-ph'; tp.style.height = topH + 'px';
+    chatEl.appendChild(tp);
+  }
+  for (var ui = startIdx; ui <= endIdx; ui++) {
+    var u = histWindowUnits[ui];
+    var before = chatEl.childNodes.length;
+    renderHistUnit(u);
+    // 实测高度落盘（精确占位，下次滚动不跳）
+    var rendered = chatEl.childNodes;
+    for (var ci = before; ci < rendered.length; ci++) {
+      if (rendered[ci] && rendered[ci].offsetHeight && u.idx >= 0) {
+        histSaveH(histWindowSid, u.idx, rendered[ci].offsetHeight);
+      }
+    }
+  }
+  if (bottomH > 0) {
+    var bp = document.createElement('div'); bp.className = 'hist-ph'; bp.style.height = bottomH + 'px';
+    chatEl.appendChild(bp);
+  }
+  // 姿势还原（窗口内元素）
+  applyPose(histWindowSid);
+  // 节点数硬上限：占位 2 + 窗口内单元节点（每个 unit 摊 2-4 节点）恒 ≤ HIST_MAX_NODES
+}
+
+// 窗口化滚动监听（rAF 节流，滚动丝滑不卡顿）
+var histWindowRAF = null;
+function histWindowOnScroll() {
+  if (histWindowRAF) return;
+  histWindowRAF = requestAnimationFrame(function() {
+    histWindowRAF = null;
+    if (histWindowUnits) renderHistWindow();
+  });
+}
+
+// 窗口化入口：长会话启用（数据/渲染分离），短会话走 renderFullHistory（零变化）
+async function renderFullHistoryWindowed(sid, result) {
+  // 归档记录经 boboAPI 预取（与 renderFullHistory 同路径；失败静默）
+  var ar = null;
+  if (window.boboAPI && window.boboAPI.readArchive) {
+    try {
+      var r = await window.boboAPI.readArchive(sid);
+      if (r && r.ok && r.records && r.records.length) ar = r.records;
+    } catch (e) { ar = null; }
+  }
+  result._archiveRecords = ar;
+  var units = buildHistUnits(sid, result);
+  histWindowUnits = units;
+  histWindowSid = sid;
+  renderHistWindow();
+  // 滚动监听（只绑一次，rAF 节流）
+  if (!chatEl._histWindowBound) {
+    chatEl.addEventListener('scroll', histWindowOnScroll);
+    chatEl._histWindowBound = true;
+  }
 }
 
 // F3-3: 渲染归档消息（role: user/assistant/system/tool；assistant 纯工具回合给占位）
@@ -2271,8 +2622,11 @@ function renderHistToolFlat(name, content) {
 //（审查修复：onclick guard 补 .think-box/.diff-block —— 点思考框展开时事件冒泡到
 // 聚合卡头会误收整卡；构造复用 buildHistThinkBox/buildHistToolCard；scrollTop 交由
 // renderFullHistory 末尾统一滚动）
+// TICKET-GUI-F13：聚合卡打 data-pose-id（bobo_hist_pose_<sid> 姿势还原锚点）
+var histAggSeq = 0;
 function renderHistAggCard(thinkText, toolMsgs) {
   var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
+  agg.setAttribute('data-pose-id', 'agg' + (histAggSeq++));
   var headLabel = (thinkText ? '思考 + ' : '') + toolMsgs.length + ' 个工具';
   agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
   agg.onclick = function(e) {
@@ -2511,6 +2865,8 @@ on('message.complete', function(data) {
   }
   loadSessions();
   refreshCtxStats();   // TICKET-DESK-V2B：回合结束刷新上下文仪表盘
+  // TICKET-GUI-F13：回合结束把最终展开姿势落盘（重启回放按姿势还原现场原样）
+  if (currentSessionId) recordPose(currentSessionId);
 });
 on('tool.start', function(data) {
   if (isForeignSession(data)) return;

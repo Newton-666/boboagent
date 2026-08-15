@@ -72,6 +72,11 @@ function addMsg(role, text, id, append) {{ msgs.push({{ role, text, id }}); }}
 function addTool(name, context, toolId) {{ msgs.push({{ role: 'tool', name, context, id: toolId }}); }}
 function addStatus(text) {{ statuses.push(text); }}
 const chatEl = {{ scrollTop: 0, scrollHeight: 0 }};
+// TICKET-GUI-F13：F13 新依赖 stub —— 考古模式默认关（现场原样平铺），姿势不落盘
+function histArchMode() {{ return false; }}
+function applyPose() {{}}
+function readPose() {{ return {{}}; }}
+function writePose() {{}}
 global.window = {{
   boboAPI: {{
     readArchive: async (sid) => ({{
@@ -175,9 +180,12 @@ class TestF31SelectionState:
     def test_load_session_syncs_selection_first(self):
         """loadSession 开头立即同步 currentSessionId + renderSessions（不等 resume 返回）。"""
         src = GUI_FILE.read_text(encoding="utf-8")
-        # V4B⓪：同步选中态后追加 renderBusyUI（按新会话刷新忙碌态），语义不变（先同步再 resume）
-        assert "if (currentSessionId !== sid) {\n    currentSessionId = sid;\n    renderSessions();" in src, \
+        # TICKET-GUI-F13：切会话前先落盘旧会话展开姿势（recordPose），随后同步选中态
+        # —— 语义不变（先同步再 resume），仅插入姿势持久化一行
+        assert "if (currentSessionId !== sid) {" in src, \
             "点击会话必须先同步选中态再请求 resume（杜绝高亮脱节）"
+        assert "currentSessionId = sid;\n    renderSessions();" in src, \
+            "同步选中态后必须立即 renderSessions（杜绝高亮脱节）"
         assert "renderSessions();\n    renderBusyUI();" in src, \
             "V4B⓪：同步选中态后必须按新会话刷新忙碌态"
 

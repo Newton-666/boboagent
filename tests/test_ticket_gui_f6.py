@@ -122,6 +122,11 @@ function addMsg(role, text, id, append) {{ msgs.push({{ role, text, id }}); }}
 function addTool(name, context, toolId) {{ msgs.push({{ role: 'tool', name, context, id: toolId }}); }}
 function addStatus(text) {{ statuses.push(text); }}
 const chatEl = {{ scrollTop: 0, scrollHeight: 0 }};
+// TICKET-GUI-F13：F13 新依赖 stub —— 考古模式默认关（现场原样平铺），姿势不落盘
+function histArchMode() {{ return false; }}
+function applyPose() {{}}
+function readPose() {{ return {{}}; }}
+function writePose() {{}}
 global.window = {{ boboAPI: null }};   // 无归档路径（focus 现存消息 + summary）
 {fns}
 (async () => {{

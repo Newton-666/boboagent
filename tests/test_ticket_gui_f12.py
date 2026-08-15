@@ -63,7 +63,8 @@ def _run_node(js: str) -> str:
 # ── F12-1：静态断言 ───────────────────────────────────────────────────
 
 def test_f12_1_static_asserts():
-    """现行页面含 F12 聚合渲染要素；F8 字面保留；取色走色板。"""
+    """现行页面含 F12 聚合渲染要素（考古模式分支，F13 降级为开关）；F8 字面保留；
+    取色走色板。"""
     src = GUI_FILE.read_text(encoding="utf-8")
 
     full = _extract_func(src, "renderFullHistory")
@@ -72,19 +73,22 @@ def test_f12_1_static_asserts():
     assert "histLatestStart" in full, "缺最新一轮起点预扫描"
     assert "msgs[hi].role === 'assistant'" in full, "预扫描应按 assistant 定位"
 
-    # 聚合缓冲 + flush
+    # TICKET-GUI-F13：考古模式开关（F12 聚合降级为可选，默认关=现场原样平铺）
+    assert "var archMode = histArchMode();" in full, "缺考古模式开关读取"
+    assert "function histArchMode()" in src, "缺考古模式开关函数"
+
+    # 聚合缓冲 + flush（考古模式分支内）
     assert "aggThink" in full and "aggTools" in full, "缺聚合缓冲"
     assert "renderHistAggCard(aggThink, aggTools)" in full, "缺聚合卡渲染调用"
 
-    # 最新一轮平铺分支：带 diff 保留 F8 字面；无 diff 走 renderHistToolFlat
-    assert "if (m.inline_diff) renderHistToolDiff" in full, \
-        "F8 字面（diff 渲染）必须保留"
-    assert "renderHistToolFlat(m.name || 'tool', m.content || '')" in full, \
-        "最新一轮无 diff 工具应平铺渲染"
+    # F13 现场原样平铺分支：思考框一律 buildHistThinkBox 平铺；工具卡 buildHistToolCard
+    # + diff 块（F3-5 红绿语义）；考古模式才收聚合缓冲
+    assert "archMode && !histLatest" in full, "考古模式分支应限定过往回合"
+    assert "buildHistToolCard(m.name" in full, "工具卡应走统一构造"
+    assert "diffBlock(m.inline_diff)" in full, "diff 红绿块语义不破"
 
-    # F8 字面：最新一轮思考平铺保留
-    assert "if (m.thinking) addHistThinking(m.thinking)" in full, \
-        "F8 字面（thinking 平铺）必须保留"
+    # F8 字面：历史 thinking 平铺（buildHistThinkBox）保留
+    assert "buildHistThinkBox(m.thinking)" in full, "F8 字面（thinking 平铺）必须保留"
 
     # 新函数存在
     assert "function renderHistAggCard" in src, "缺历史聚合卡函数"
@@ -251,6 +255,14 @@ function addMsg(kind, text, id) {
   chatEl.appendChild(el);
 }
 """ + "\n" + _extract_var(src, "TOOL_ICONS") + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
+// TICKET-GUI-F13：考古模式开关 stub（node 桩无 localStorage；聚合由开关控制）
+let _arch = false;
+function histArchMode() { return _arch; }
+function setHistArchMode(on) { _arch = !!on; }
+function applyPose() {}
+function readPose() { return {}; }
+function writePose() {}
+let histAggSeq = 0;
 
 // 桩覆盖：addHistThinking 记录 thinkLog（真实实现只 appendChild，无法观测调用）
 function addHistThinking(t) {
@@ -259,6 +271,8 @@ function addHistThinking(t) {
 }
 
 (async () => {
+  // TICKET-GUI-F13：F12 聚合降级为考古模式开关 —— 本测试验证考古开启时聚合行为不变
+  setHistArchMode(true);
   const result = { session_id: 's1', messages: TRANSCRIPT, user_named: false };
   await renderFullHistory('s1', result);
 
@@ -297,9 +311,14 @@ function addHistThinking(t) {
   assert(flatTools === 3, '最新一轮应平铺 3 张工具卡，实际 ' + flatTools);
   assert(flatDiffs === 1, '最新一轮应平铺 1 个 diff 块，实际 ' + flatDiffs);
 
-  // 断言 4：最新一轮思考平铺（thinkLog 捕获 addHistThinking 调用）
-  assert(thinkLog.length === 1 && thinkLog[0].indexOf('思考3') >= 0,
-    '最新一轮思考应平铺渲染，实际 ' + JSON.stringify(thinkLog));
+  // 断言 4：最新一轮思考平铺（TICKET-GUI-F13：思考框一律 buildHistThinkBox
+  //  平铺进 chatEl，不再走 addHistThinking 聚合路径；平铺框文本=思考3）
+  const flatThinks = chatEl._children.filter(c =>
+    String(c.className || '').indexOf('think-box') >= 0);
+  assert(flatThinks.length === 1, '最新一轮应平铺 1 个思考框，实际 ' + flatThinks.length);
+  const thinkText3 = flatThinks[0].querySelector('.think-text');
+  assert(thinkText3 && (thinkText3.textContent || '').indexOf('思考3') >= 0,
+    '平铺思考框内容应为思考3，实际 ' + (thinkText3 && thinkText3.textContent));
 
   // 断言 5：diffBlock 红绿语义（dl add / dl del）
   const dhtml = diffBlock('@@ -1,3 +1,3 @@\n-旧行\n+新行\n 上下文');
@@ -446,9 +465,19 @@ function addMsg(kind, text, id) {
   chatEl.appendChild(el);
 }
 """ + "\n" + _extract_var(src, "TOOL_ICONS") + "\n" + _extract_var(src, "TOOL_FRIENDLY") + "\n" + "\n".join(funcs) + r"""
+// TICKET-GUI-F13：考古模式开关 stub（node 桩无 localStorage；聚合由开关控制）
+let _arch = false;
+function histArchMode() { return _arch; }
+function setHistArchMode(on) { _arch = !!on; }
+function applyPose() {}
+function readPose() { return {}; }
+function writePose() {}
+let histAggSeq = 0;
 
 (async () => {
   // ── 问题1：点思考框不误收聚合卡 ──
+  // TICKET-GUI-F13：F12 聚合为考古模式，先开启再验证 guard
+  setHistArchMode(true);
   await renderFullHistory('s1', { session_id: 's1', messages: T1, user_named: false });
   let agg = chatEl._children.find(c => String(c.className || '').indexOf('hist-agg') >= 0);
   assert(agg, '应有聚合卡');
