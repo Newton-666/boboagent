@@ -16,7 +16,7 @@
 | 1 | DESK-V4 桌面小组件（owner 22:33 拍板：提至 GOV-1 后第一顺位；22:59 钉死**第一铁律：只读投影、零干涉**） | **定位=桌面端的只读映射投影，非独立应用**：Electron frameless 半透明小窗贴桌面，显示「我的要求 + bobo 的执行」（**不显示 session 侧栏、不显示 plugins 面板**）+ **diff 完整渲染（owner 23:03 拍板：diff 必须有，高亮底色 1:1 带进小窗）**；**窗口可拖拽调大小、内容自适应铺开、最小尺寸锁定**（owner 23:03）；样式与桌面端 1:1 同渲染管线零偏差；数据全部只读自取 gateway 现成数据流，**不改桌面端任何状态/布局/行为，主窗关掉小组件、关掉小组件主窗，互不干涉**；审批时橙边轻闪点击跳主窗；WidgetKit 原生版等 Apple 签名 | ✅ 已合并 db5876d（回滚标签 rollback/pre-desk-v4；全量 2498 passed） |
 | 2 | DESK-V4B 小组件会话钉选 + BUSYGATE 忙碌隔离 | 钉选三向同步（行内投影按钮/小窗轮换/删除回落）；**追加⓪ 忙碌态按会话隔离**——_busySids 按 sid 登记，A 跑只锁 A、B 空闲可独立开跑（owner 23:51 实弹抓的 bug 已修） | ✅ 已合并 07b0f20（全量 2510 passed；回滚标签 rollback/pre-desk-v4b） |
 | 2.5 | 黑名单硬拦 git reset --hard（owner 23:56 拍板） | DANGEROUS_PATTERNS 新增，AUTO 硬拦；soft/裸 reset 不误伤 | ✅ 已合并 122a3ec（全量 2512 passed） |
-| 3 | DESK-CLI `bobo desktop` 子命令（owner 22:33 拍板——"下次我自己终端输 bobo desktop 也会快很多"） | CLI 加 desktop 子命令：检测 node_modules→缺则自动 npm install→npm start 拉起 Electron；配套新人上手 README（clone→pip install -e .→bobo / bobo desktop 全流程） | 📋 V4B 之后 |
+| 3 | DESK-CLI `bobo desktop` 子命令 | 子命令分发 + node≥18 人话检测 + 自动 npm install + README 快速开始 | ✅ 已合并 be64f8c（全量 2526 passed；守卫升级为锚点段精确化——收紧非松绑；回滚标签 rollback/pre-desk-cli） |
 | 3 | DESK-V2C3 记忆面板 | 右侧滑出抽屉 + /memory 命令入口（摆放方案待 owner 最终点头） | 📋 待确认 |
 | 4 | DESK-V2D 美学微票串（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | D1 回复正文 Charter 衬线（一处 font-family 变量）→ D2 橙色印章语义（橙=bobo 手笔/灰=机器状态）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise）→ D5 药丸升认知状态条（水位+记忆数+工具数） | 📋 逐票精调 |
 | ⏸ | COST-1a 工具画像+外置实验 | ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存 |
