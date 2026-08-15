@@ -203,7 +203,11 @@ def test_v2c12_5_component_isolation_static():
     am = _extract_func(src, "addMsg")
     assert "var render = (role === 'bobo') ? mdReply : md;" in am, "仅 bobo 走 mdReply"
     assert src.count("function mdReply") == 1, "mdReply 必须只定义一处"
-    assert src.count("mdReply(") == 1, "mdReply( 仅函数定义一处（调用经 render 间接）"
+    # DESK-TEL 豁免：Telescope 观测台段（TICKET-DESK-TEL 锚点段）作为只读观测面板经 owner 特批
+    # 直接调 mdReply 渲染五区战报（同 V2A 豁免先例）；段外仍仅函数定义一处
+    seg = re.search(r"TICKET-DESK-TEL.*?end TICKET-DESK-TEL", src, re.S)
+    tel_calls = seg.group(0).count("mdReply(") if seg else 0
+    assert src.count("mdReply(") - tel_calls == 1, "mdReply( 段外仅函数定义一处（调用经 render 间接）"
     # 用户消息保持既有简渲染 md（不进完整管线）
     assert "? mdReply : md" in am
 

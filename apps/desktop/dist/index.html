@@ -3453,7 +3453,7 @@ document.getElementById('preview-overlay').onclick = function() {
 // ═══ TICKET-DESK-TEL：Telescope 引擎实况观测台（纯只读：只订阅事件、只读渲染，零干涉）═══
 // 铁律：不改引擎/gateway/聊天区任何现有行为；数据全部来自真实事件流
 // （message.start/delta/complete + tool.start/complete + task_ledger + usage 预算审计）；
-// 面板内容一律经 render()（marked+DOMPurify）管线，禁止 raw JSON / raw 日志直接上屏。
+// 面板内容一律经 mdReply()（marked+DOMPurify）管线，禁止 raw JSON / raw 日志直接上屏。
 
 var _telEl = null;        // 面板容器（right-content 内）
 var _telRound = 0;        // 轮次号（message.start 递增）
@@ -3732,10 +3732,10 @@ function _telRenderState(st, srcKey) {
 function _telRenderPrompt(st) {
   st = st || _telState;
   var html = '<div class="tel-sec"><div class="tel-sec-title">用户 Prompt</div>';
-  if (st.prompt) html += render(st.prompt);
+  if (st.prompt) html += mdReply(st.prompt);
   else html += '<div class="tel-muted">（本轮无用户原话快照）</div>';
   if (st.understand) {
-    html += '<div class="tel-understand">' + render('**理解为**：' + st.understand) + '</div>';
+    html += '<div class="tel-understand">' + mdReply('**理解为**：' + st.understand) + '</div>';
   }
   return html + '</div>';
 }
@@ -3747,7 +3747,7 @@ function _telRenderLedger(st) {
   st.ledger.rows.forEach(function(r, i) {
     md += '| ' + (i + 1) + ' | ' + String(r.title).replace(/\|/g, '\\|') + ' | ' + String(r.status) + ' |\n';
   });
-  return '<div class="tel-sec"><div class="tel-sec-title">Task Ledger</div>' + render(md) + '</div>';
+  return '<div class="tel-sec"><div class="tel-sec-title">Task Ledger</div>' + mdReply(md) + '</div>';
 }
 
 function _telRenderCalls(st, srcKey) {
@@ -3770,7 +3770,7 @@ function _telRenderCalls(st, srcKey) {
         md += '| `' + esc(r.name) + '` | ' + esc(r.args) + ' | ' + res + ' |\n';
       }
     });
-    html += render(md) + '</div>';
+    html += mdReply(md) + '</div>';
   });
   return html;
 }
@@ -3783,7 +3783,7 @@ function _telRenderTerminal(st, srcKey) {
   var html = '<div class="tel-sec"><div class="tel-sec-title">终端执行</div>';
   terms.forEach(function(t, i) {
     html += '<div class="tel-term" data-tel-src="' + srcKey + '">';
-    html += '<div class="tel-term-cmd">' + render('```\n$ ' + t.command + '\n```') + '</div>';
+    html += '<div class="tel-term-cmd">' + mdReply('```\n$ ' + t.command + '\n```') + '</div>';
     var code = t.exitCode === '失败' ? '失败' : '—';
     html += '<div class="tel-term-meta">耗时 ' + (t.duration ? t.duration.toFixed(1) + 's' : '—') + ' · 退出码 ' + code + '</div>';
     if (t.output) {
@@ -3833,7 +3833,7 @@ function _telRenderSummary(st) {
     lines.push('- token 占用 ' + pct);
   }
   if (st.concl) lines.push('> ' + st.concl);
-  return '<div class="tel-sec"><div class="tel-sec-title">收尾小结</div><div class="tel-summary">' + render(lines.join('\n')) + '</div></div>';
+  return '<div class="tel-sec"><div class="tel-sec-title">收尾小结</div><div class="tel-summary">' + mdReply(lines.join('\n')) + '</div></div>';
 }
 
 // ── diff 模态弹层（✕ / Esc / 点背景关闭；diff 块与主聊天区同源 diffBlock 逐字节一致）──

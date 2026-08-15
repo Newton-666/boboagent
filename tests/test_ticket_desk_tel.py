@@ -144,7 +144,10 @@ let _telRafQueue = [];
 const window = { requestAnimationFrame(cb) { _telRafQueue.push(cb); return _telRafQueue.length; } };
 const handlers = new Map();
 function isForeignSession(d) { return false; }
-function render(s) { return String(s == null ? '' : s); }  // 管线 stub：真实管线由浏览器 marked 承担（静态断言 render 调用）
+// 管线 stub：真实管线由浏览器 marked 承担。必须用真实函数名 mdReply/md ——
+// 教训（DESK-TEL 打回）：早前桩了一个并不存在的全局 render()，把"浏览器里 render is not defined"完全掩盖。
+function mdReply(s) { return String(s == null ? '' : s); }
+function md(s) { return String(s == null ? '' : s); }
 // Telescope 全局状态（对应 index.html 顶层 var；面板默认已打开）
 let _telEl = makeEl('div');
 let _telRound = 0;
@@ -185,18 +188,31 @@ def test_tel_2_five_sections():
     # 五区函数齐全
     for fn in FIVE_SECTIONS:
         assert f"function {fn}(" in src, f"缺五区渲染函数 {fn}"
-    # 面板内容一律经 render() 管线（禁止 raw JSON/日志直拼上屏）
+    # 面板内容一律经 mdReply() 真实管线（禁止 raw JSON/日志直拼上屏）
     for fn in FIVE_SECTIONS:
         body = _extract_func(src, fn)
-        assert "render(" in body, f"{fn} 必须经 render() 管线渲染"
+        assert "mdReply(" in body, f"{fn} 必须经 mdReply() 管线渲染"
     # 用户原话/Markdown 表格/代码块全走管线
     p = _extract_func(src, "_telRenderPrompt")
-    assert "render(st.prompt)" in p, "用户原话必须经管线渲染"
-    assert "render('**理解为**：" in p, "理解卡必须经管线渲染"
+    assert "mdReply(st.prompt)" in p, "用户原话必须经管线渲染"
+    assert "mdReply('**理解为**：" in p, "理解卡必须经管线渲染"
     led = _extract_func(src, "_telRenderLedger")
-    assert "render(md)" in led, "Task Ledger 必须渲染成 Markdown 表格"
+    assert "mdReply(md)" in led, "Task Ledger 必须渲染成 Markdown 表格"
     terms = _extract_func(src, "_telRenderTerminal")
-    assert "render('```" in terms, "终端命令必须渲染成代码块"
+    assert "mdReply('```" in terms, "终端命令必须渲染成代码块"
+
+
+# ── TEL-2b：守卫——Telescope 段内禁止裸 render(（该全局在浏览器不存在）────
+
+def test_tel_2b_no_phantom_render():
+    src = _gui()
+    # 抽取 TEL 段（JS 锚点注释到 end），段内不允许调用不存在的全局 render(
+    m = re.search(r"TICKET-DESK-TEL.*?end TICKET-DESK-TEL", src, re.S)
+    assert m, "缺 TEL 锚点段"
+    seg = m.group(0)
+    bare = [ln for ln in seg.split("\n")
+            if re.search(r"(?<![A-Za-z])render\(", ln) and "mdReply(" not in ln]
+    assert not bare, f"TEL 段内残留裸 render( 调用（浏览器无此全局）: {bare[:2]}"
 
 
 # ── TEL-3：活表格机制（同 category 追加，绝不新开表）──────────────────
@@ -424,11 +440,12 @@ def test_tel_8_zero_interference():
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
-    # 改动文件清单（index.html + 本测试文件）只允许 TEL 相关
+    # 改动文件清单（index.html + 本测试文件 + V2C12 豁免记账文件）只允许 TEL 相关
     for ln in changed:
         if ln.endswith("index.html"):
             continue
-        assert "test_ticket_desk_tel" in ln, f"意外改动文件: {ln}"
+        assert "test_ticket_desk_tel" in ln or "test_ticket_desk_v2c12" in ln, \
+            f"意外改动文件: {ln}"
 
 
 def test_tel_8b_event_wrap_not_overwrite():
