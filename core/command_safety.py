@@ -55,6 +55,9 @@ DANGEROUS_PATTERNS = [
     (r'curl.*\|\s*(ba)?sh', "管道执行远程脚本"),
     (r'wget.*\|\s*(ba)?sh', "管道执行远程脚本"),
     (r'git\s+push\s+.*--force', "强制推送"),
+    # owner 2026-08-14 拍板（Kimi 实操事故实证）：reset --hard 会无声清掉工作区
+    # 所有未提交改动（共享工作区场景曾误清 bobo 在施文件），AUTO 模式硬拦。
+    (r'git\s+reset\s+.*--hard', "git reset --hard（清空工作区未提交改动）"),
     (r'(scp|rsync|nc|netcat)\s+.*:', "远程文件传输/网络连接"),
     (r'\$\(', "命令替换注入 ($(...))"),
     (r'`[^`]+`', "反引号命令替换"),
