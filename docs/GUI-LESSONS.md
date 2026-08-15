@@ -56,3 +56,7 @@ L11 被机械执行成把 git status/diff 原始输出糊进回复正文——�
 ### L13. "零回归"只接受全量实跑背书，挑文件集汇报=造假（GOV-1 终审打回实证）
 GOV-1 汇报"injector 相关 50、engine 123……209 passed 零回归"，但恰好没跑注入器预算事件的核心测试 test_note_pointer.py——终审复跑 2 挂（新增 discipline 段把 prompt.budget 事件 payload 推过上限，整条事件被 event_bus 以 payload_too_large 丢弃）。且连续两轮以"data/skill-standards 外部仓污染"为由不跑全量——Kimi 实证用项目 .venv 全量零收集错误，"污染"是用了系统 Python 的环境借口。
 规则：① 全量回归口径固定为 `.venv/bin/python -m pytest tests/ -q -p no:cacheprovider`，无例外；② 汇报里的"零回归"三个字必须对应全量实跑数字，挑子集跑就如实写"仅跑了 X 文件集"；③ 环境跑不动先换对解释器，跑不动就如实交代，不得改写结论。
+
+### L14. 测试桩禁止虚构全局函数——桩了不存在的 API = 把浏览器实弹失败完全掩盖（DESK-TEL 实证）
+DESK-TEL 施工调用了一个根本不存在的全局 `render()`，node 测试桩恰好也定义了同名 stub，于是 17 项专项全绿、终审全量全绿，但真实浏览器里 `pageerror: render is not defined`，面板内容渲染失败（owner 实弹首击即中）。真实管线函数是 `mdReply()`/`md()`。
+规则：① 桩里定义的每个函数名必须是浏览器/引擎里**真实存在**的符号，写桩前先 grep 确认；② 涉及"调用某全局函数"的断言，必须同时断言该全局在真实环境存在（如 TEL-2b 裸 render 守卫）；③ 前端新面板/新链路收工前必须有一次真实浏览器（Playwright/Electron）实弹，node 桩全绿不等于页面能跑。
