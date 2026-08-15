@@ -114,12 +114,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tool-agg-body .tool-result { max-height:200px; }
 @keyframes dotPulse { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
 /* Thinking */
-.think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:rgba(91,155,213,0.04); border:1px solid rgba(91,155,213,0.12); }
+.think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:var(--bg2); border:1px solid var(--border); }
 .think-box.show { display:block; }
-.think-box .think-label { font-size:11px; color:#5b9bd5; margin-bottom:4px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.think-box.done { animation:fadeIn 0.2s ease-out; }
+.think-box .think-label { font-size:11px; color:var(--text-muted); margin-bottom:4px; font-weight:600; display:flex; align-items:center; gap:8px; }
 .think-stop { margin-left:auto; cursor:pointer; font-size:12px; color:var(--text-muted); padding:2px 6px; border-radius:4px; font-weight:400; }
 .think-stop:hover { background:rgba(244,135,113,0.1); color:#f48771; }
-.think-dot { width:5px; height:5px; border-radius:50%; background:#5b9bd5; animation:thinkPulse 1.4s infinite; display:inline-block; }
+.think-dot { width:5px; height:5px; border-radius:50%; background:#e8913a; animation:thinkPulse 1.4s infinite; display:inline-block; }
 .think-dot:nth-child(2) { animation-delay:0.2s; }
 .think-dot:nth-child(3) { animation-delay:0.4s; }
 .think-box .think-text { white-space:pre-wrap; word-break:break-word; line-height:1.5; }
@@ -248,9 +249,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .ovl-btn:hover { background:var(--hover); }
 .ovl-btn.primary { background:#e8913a; color:#fff; border-color:#e8913a; }
 .ovl-btn.primary:hover { opacity:0.88; }
-/* 连接中动画：三点脉冲（沿用 thinkPulse 视觉体系，色取 --text2 同族 #5b9bd5） */
+/* 连接中动画：三点脉冲（沿用 thinkPulse 视觉体系，色取 --text2 同族；V2D6 思考蓝退役后不再借蓝） */
 .ovl-spinner { display:inline-flex; gap:6px; }
-.ovl-spinner span { width:8px; height:8px; border-radius:50%; background:#5b9bd5; animation:ovlDot 1.2s infinite ease-in-out; }
+.ovl-spinner span { width:8px; height:8px; border-radius:50%; background:var(--text2); animation:ovlDot 1.2s infinite ease-in-out; }
 .ovl-spinner span:nth-child(2) { animation-delay:0.15s; }
 .ovl-spinner span:nth-child(3) { animation-delay:0.3s; }
 @keyframes ovlDot { 0%,60%,100% { opacity:0.25; transform:scale(1); } 30% { opacity:1; transform:scale(1.25); } }
@@ -281,7 +282,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* ── V2A-5 三态组件统一 ── */
 .v2a-loader { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted); padding:16px; justify-content:center; }
 .v2a-loader .sp { display:inline-flex; gap:4px; }
-.v2a-loader .sp span { width:6px; height:6px; border-radius:50%; background:#5b9bd5; animation:ovlDot 1.2s infinite ease-in-out; }
+.v2a-loader .sp span { width:6px; height:6px; border-radius:50%; background:var(--text2); animation:ovlDot 1.2s infinite ease-in-out; }
 .v2a-loader .sp span:nth-child(2) { animation-delay:0.15s; }
 .v2a-loader .sp span:nth-child(3) { animation-delay:0.3s; }
 .v2a-error { display:flex; flex-direction:column; align-items:center; gap:10px; padding:20px; text-align:center; font-size:13px; color:var(--text2); }
@@ -352,7 +353,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
  * TICKET-DESK-V2C12（样式票，独立回溯）：完整 Markdown 渲染 + Charter 衬线正文。
  * 本段为外科式摘除单元：删除本段（含下方 @font-face / --font-reply）即完整回滚 V2C1/C2。
  * 作用域仅 .msg.bobo .txt（助手正文气泡一处）；工具卡/思考框/diff 块/实况折叠卡/用户消息不碰。
- * 取色只用 GUI-DESIGN 色板 token + 既有语义色（橙 #e8913a / 思考蓝 #5b9bd5 / 成功绿 #50a14f / 错误红 #f48771）。
+ * 取色只用 GUI-DESIGN 色板 token + 既有语义色（橙 #e8913a / 思考蓝 #5b9bd5 仅药丸水位 / 成功绿 #50a14f / 错误红 #f48771）。
  */
 /* C2: Bitstream Charter（X11 许可，可捆包）四件 woff2 本地 vendor —— 仅 --font-reply 引用 */
 @font-face { font-family:'Charter'; src:url('fonts/Charter-Regular.woff2') format('woff2'); font-weight:400; font-style:normal; font-display:swap; }
@@ -438,6 +439,16 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #widget-toggle:hover { background:var(--hover); }
 #widget-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 /* === end DESK-V4 === */
+/* === V2D6 思考框中性化 ===
+ * ① 完成态标签纯 thinking（无 emoji 无中文，历史重放同）；完成瞬间 fadeIn 0.2s 淡入，无跳变
+ * ② 思考框去蓝：底 var(--bg2)（比页面背景 --bg 深半阶）、边 var(--border) 发丝线、
+ *    标签 var(--text-muted)；思考中三跳点弱橙 #e8913a 呼吸"活着"，完成态回灰
+ * ③ 折叠聚合卡 .tool-agg/.hist-agg 同族同阶：底 var(--bg2)/边 var(--border)/文字 var(--text2)，
+ *    与思考框完全相同的一组值——过程性内容一眼同族
+ * ④ 思考蓝 #5b9bd5 仅保留药丸 <60% 水位（信息语义）；ovl-spinner 连接动画同步退役为 --text2
+ * 色板零新增色值族（#e8913a 为既有品牌橙） */
+.think-box.done { animation:fadeIn 0.2s ease-out; }
+/* === end V2D6 === */
 </style>
 </head>
 <body>
@@ -1217,8 +1228,8 @@ function prefersReducedMotion() {
 function addTool(name, context, toolId) {
   welcomeEl.style.display = 'none';
   if (thinkBoxEl) {
-    thinkBoxEl.querySelector('.think-label').innerHTML = 'Thought';
-    thinkBoxEl.style.opacity = '0.6';
+    thinkBoxEl.querySelector('.think-label').innerHTML = 'thinking';
+    thinkBoxEl.classList.add('done');
   }
 
   // Friendly names
@@ -2196,7 +2207,7 @@ function renderArchivedMessages(ams, idPrefix) {
 function buildHistThinkBox(thinkingText) {
   var tb = document.createElement('div');
   tb.className = 'think-box collapsed';
-  tb.innerHTML = '<div class="think-label"><span>💭 思考过程</span><span class="tool-toggle">▸</span></div><div class="think-text"></div>';
+  tb.innerHTML = '<div class="think-label"><span>thinking</span><span class="tool-toggle">▸</span></div><div class="think-text"></div>';
   var txt = tb.querySelector('.think-text');
   if (txt) txt.textContent = thinkingText || '';
   tb.onclick = function(e) {
@@ -2376,7 +2387,7 @@ function collapseThinkBox(tb, thinkingText) {
   var stopBtn = tb.querySelector('.think-stop');
   if (stopBtn) stopBtn.remove();
   var label = tb.querySelector('.think-label');
-  if (label) label.innerHTML = '<span>💭 思考过程</span><span class="tool-toggle">▸</span>';
+  if (label) label.innerHTML = '<span>thinking</span><span class="tool-toggle">▸</span>';
   var txt = tb.querySelector('.think-text');
   if (txt) txt.textContent = thinkingText || '';
   tb.classList.remove('show');

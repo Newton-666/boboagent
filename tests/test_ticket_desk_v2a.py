@@ -327,8 +327,25 @@ def test_v2a_css_zero_change_on_existing():
         r"\.session-item \.stitle \{[^}]*\}\n", new_pre, re.S)
     assert new_seg, "新 style 中应能找到 .act 打磨段"
     new_pre = new_pre.replace(new_seg.group(0), "")
+    # V2D6 特批豁免（owner 票 DESK-V2D6 钉死）：思考框中性化须迁移既有 CSS
+    # （去蓝迁米白灰系/三跳点弱橙）。双向剔除 V2D6 改动的规则行后，其余既有 CSS 仍逐字节锁死。
+    V2D6_PAIRS = (
+        (r"\.think-box \{ [^}]* \}\n", r"\.think-box \{ [^}]* \}\n"),
+        (r"\.think-box \.think-label \{ [^}]* \}\n", r"\.think-box \.think-label \{ [^}]* \}\n"),
+        (r"\.think-dot \{ [^}]* \}\n", r"\.think-dot \{ [^}]* \}\n"),
+    )
+    for pat_old, pat_new in V2D6_PAIRS:
+        m_old = re.search(pat_old, old_style)
+        m_new = re.search(pat_new, new_pre)
+        assert m_old and m_new, f"V2D6 豁免规则应在基线/新版中同时存在: {pat_old}"
+        old_style = old_style.replace(m_old.group(0), "")
+        new_pre = new_pre.replace(m_new.group(0), "")
+    # .think-box.done（fadeIn 0.2s 完成态淡入）为 V2D6 新增规则，基线无 —— 仅从新版剔除
+    done_rule = ".think-box.done { animation:fadeIn 0.2s ease-out; }\n"
+    assert done_rule in new_pre, "新版中应能找到 .think-box.done 新增规则"
+    new_pre = new_pre.replace(done_rule, "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6 豁免段外零改动）"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────
