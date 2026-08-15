@@ -260,12 +260,15 @@ def test_f8_3_gui_gate_static_asserts():
     assert "TOOL_FRIENDLY[name] || name" in src, "renderHistToolDiff 应引用模块级映射"
 
     # renderFullHistory：assistant 分支按 thinking 渲染思考框
+    # （TICKET-GUI-F13：历史回放与实时同一渲染链 —— 思考框一律 buildHistThinkBox
+    #  平铺，不再走 addHistThinking 分支；考古模式才收聚合缓冲）
     full = _extract_func(src, "renderFullHistory")
-    assert "if (m.thinking) addHistThinking(m.thinking)" in full, \
+    assert "buildHistThinkBox(m.thinking)" in full, \
         "历史 assistant 应渲染思考框"
 
     # renderFullHistory：tool 分支按 inline_diff 渲染 diff 块
-    assert "if (m.inline_diff) renderHistToolDiff" in full, \
+    # （TICKET-GUI-F13：工具卡统一 buildHistToolCard + diffBlock，现场原样平铺）
+    assert "diffBlock(m.inline_diff)" in full, \
         "历史 tool 消息应按 inline_diff 渲染"
 
     # 复用点：toggleThinkBox / diffBlock / toolSummary / esc 均被历史函数引用
