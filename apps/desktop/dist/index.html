@@ -458,6 +458,36 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
  *    一并迁 var(--text2) 墨痕系；office 模式/保存按钮迁品牌橙；色彩体系收口：纸色底 / 墨痕数据 / 橙=bobo 手笔
  * ⑤ 小窗 widget.html 药丸同款 1:1 墨痕化（#w-pill-fill / #w-pill-text / renderCtx 三色阶） */
 /* === end V2D7 === */
+
+/* === TEL Telescope === */
+/* DESK-TEL：纯只读观测面板。取色只走既有色板 token（bg/bg2/bg3/border/text/text2/text-muted）
+ * + 黑色系压暗 rgba(0,0,0,*)（与 #settings-modal rgba(0,0,0,0.6) 同族）；diff 红绿块由
+ * 主聊天区 .dl 样式继承（modal 内不重复定义，1:1 同源），本段零新增色值。 */
+.tel-round { font-size:11px; color:var(--text-muted); text-align:center; letter-spacing:1.5px; padding:12px 0 4px; border-top:1px dashed var(--border); margin-top:8px; }
+.tel-sec { margin:8px 0 14px; }
+.tel-sec-title { font-size:11px; font-weight:600; color:var(--text2); margin-bottom:4px; }
+.tel-muted { font-size:11px; color:var(--text-muted); }
+.tel-understand { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin:6px 0 0; font-size:12px; color:var(--text2); }
+.tel-understand p { margin:2px 0; }
+.tel-sec table { width:100%; border-collapse:collapse; font-size:11px; margin-top:2px; }
+.tel-sec th { text-align:left; color:var(--text2); border-bottom:1px solid var(--border); padding:4px 6px; font-weight:600; white-space:nowrap; }
+.tel-sec td { padding:4px 6px; border-bottom:1px solid rgba(0,0,0,0.04); color:var(--text); vertical-align:top; }
+.tel-sec td:last-child { color:var(--text2); }
+.tel-sec td code { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:10.5px; }
+.tel-term { margin:4px 0 8px; }
+.tel-term-cmd { margin:0; }
+.tel-term-cmd pre, .tel-term-out { background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:11px; margin:4px 0; white-space:pre-wrap; word-break:break-all; color:var(--text2); }
+.tel-term-meta { font-size:10px; color:var(--text-muted); margin:2px 0 6px; font-family:'SF Mono',Monaco,Menlo,monospace; }
+.tel-term-out.collapsed { max-height:76px; overflow:hidden; }
+.tel-term-toggle { font-size:10px; padding:2px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg3); color:var(--text2); cursor:pointer; font-family:inherit; }
+.tel-summary { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; }
+.tel-summary p { margin:2px 0; }
+.tel-modal-ov { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); z-index:120; display:flex; align-items:center; justify-content:center; }
+.tel-modal { width:90%; max-width:900px; max-height:85vh; background:var(--bg); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; box-shadow:0 8px 30px rgba(0,0,0,0.25); }
+.tel-modal-head { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text2); }
+.tel-modal-x { cursor:pointer; font-size:14px; color:var(--text-muted); padding:0 4px; user-select:none; }
+.tel-modal-body { overflow:auto; padding:12px 14px; font-size:12px; }
+/* === end TEL Telescope === */
 </style>
 </head>
 <body>
@@ -1598,6 +1628,8 @@ var plugins = [
   { id:'notes', icon:'📝', name:'笔记', desc:'浏览 Obsidian 笔记' },
   { id:'project', icon:'📁', name:'项目', desc:'项目文件浏览器' },
   { id:'terminal', icon:'⚡', name:'终端', desc:'命令执行记录' },
+  // TICKET-DESK-TEL：Telescope 引擎实况观测台 —— 图标细线 SVG（V2D25 TOOL_ICONS 同款风格，非 emoji）
+  { id:'telescope', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.6" cy="3.8" r="1.7"/><path d="M5.9 5.1 L11 10.9"/><circle cx="12.4" cy="12.2" r="2.4"/><path d="M12.8 14.6 l1.9-1.9 M11.7 13.8 l-1.7 1.7"/></svg>', name:'Telescope', desc:'引擎实况观测台' },
 ];
 
 function renderPluginList() {
@@ -1628,6 +1660,7 @@ function openPlugin(id) {
   if (id === 'notes') renderNotesPanel(content, _notesTree);
   else if (id === 'project') renderProjectPanel(content);
   else if (id === 'terminal') renderTerminalPanel(content);
+  else if (id === 'telescope') renderTelescopePanel(content);
   else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>即将上线</p>';
 }
 
@@ -3416,6 +3449,432 @@ document.getElementById('preview-overlay').onclick = function() {
 };
 
 // ── Session search ──────────────────────────────────────────────────────
+
+// ═══ TICKET-DESK-TEL：Telescope 引擎实况观测台（纯只读：只订阅事件、只读渲染，零干涉）═══
+// 铁律：不改引擎/gateway/聊天区任何现有行为；数据全部来自真实事件流
+// （message.start/delta/complete + tool.start/complete + task_ledger + usage 预算审计）；
+// 面板内容一律经 render()（marked+DOMPurify）管线，禁止 raw JSON / raw 日志直接上屏。
+
+var _telEl = null;        // 面板容器（right-content 内）
+var _telRound = 0;        // 轮次号（message.start 递增）
+var _telRounds = [];      // 已归档轮历史（每轮结束推进来；上限 50 防无限增长）—— 战报从头可读
+var _telState = null;     // 当前轮观测状态
+var _telInitDone = false;
+var _telModalEl = null;   // diff 模态层（同时只开一个）
+var _telDirty = false;    // delta 节流：待渲染标记
+var _telRaf = null;       // delta 节流：rAF 句柄
+
+// 分类映射：同 category 的工具调用进同一张活表格（Skills / Memory / Tools）
+function _telCat(name) {
+  if (name === 'save_skill' || name === 'load_skill') return 'Skills';
+  if (name === 'search_memory' || name === 'save_memory') return 'Memory';
+  return 'Tools';
+}
+
+// 写入/编辑类工具（结果格渲染"查看 diff"链接，弹模态层）
+function _telIsWriteTool(name) {
+  return name === 'edit_file' || name === 'write_obsidian' || name === 'append_obsidian' ||
+         name === 'file_operation' || name === 'write';
+}
+
+// diff 增删行统计（供"写入 +N/−M 行"人话结果）
+function _telDiffStats(diff) {
+  var add = 0, del = 0;
+  String(diff || '').split('\n').forEach(function(l) {
+    if (l.indexOf('+++') === 0 || l.indexOf('---') === 0) return;
+    if (l.indexOf('+') === 0) add++;
+    else if (l.indexOf('-') === 0) del++;
+  });
+  return { add: add, del: del };
+}
+
+// 只读：取聊天区最后一条用户消息原文（不修改任何 DOM）
+function _telLastUserPrompt() {
+  if (!chatEl) return '';
+  var umsgs = chatEl.querySelectorAll('.msg.user');
+  if (!umsgs || !umsgs.length) return '';
+  var lastU = umsgs[umsgs.length - 1];
+  var txtEl = lastU.querySelector ? lastU.querySelector('.txt') : null;
+  return (txtEl && txtEl.textContent) ? String(txtEl.textContent).trim() : '';
+}
+
+function _telBlankState() {
+  return {
+    round: _telRound,
+    prompt: _telLastUserPrompt(),
+    understand: '', deltaBuf: '',
+    ledger: null,                                   // {rows:[{title,status}]}
+    calls: { Skills: [], Memory: [], Tools: [] },   // 活表格：每行 {name,args,result,dur,diff,error}
+    terminal: [],                                   // [{command,output,duration,exitCode}]
+    files: 0, addLines: 0, delLines: 0,
+    tests: '', concl: '', usage: null,
+    summaryDone: false,
+  };
+}
+
+// 归档判定：轮次必须有真实观测内容才进历史（空轮/首开空态不归档）
+function _telStateHasContent(st) {
+  if (!st) return false;
+  if (st.prompt) return true;
+  if (st.ledger && st.ledger.rows && st.ledger.rows.length) return true;
+  if (st.terminal.length) return true;
+  if (st.calls.Tools.length || st.calls.Skills.length || st.calls.Memory.length) return true;
+  if (st.summaryDone) return true;
+  return false;
+}
+
+function _telNewRound() {
+  // 上一轮有内容 → 归档进历史（整面板可读成连贯战报；上限 50 轮丢最旧）
+  if (_telStateHasContent(_telState)) {
+    _telRounds.push(_telState);
+    if (_telRounds.length > 50) _telRounds.shift();
+  }
+  _telRound++;
+  _telState = _telBlankState();
+}
+
+// ── 事件订阅（包装既有 handler：原逻辑先跑，Telescope 只追加观测，绝不覆盖）──
+function _telWrap(type, mine) {
+  var prev = handlers.get(type);
+  handlers.set(type, function(data) {
+    if (prev) prev(data);          // 原 handler 原样执行（异常照常冒泡，行为不变）
+    try { mine(data); } catch (e) {}  // 观测逻辑异常不外泄，不干扰主链路
+  });
+}
+
+function _telOnStart(data) {
+  if (!_telEl) return;               // 面板未开过不消耗
+  if (isForeignSession(data)) return;
+  _telNewRound();
+  _telRender();
+}
+function _telOnDelta(data) {
+  if (!_telEl || !_telState) return;
+  if (isForeignSession(data)) return;
+  var t = data ? data.text || '' : '';
+  if (!t) return;
+  _telState.deltaBuf += t;
+  if (!_telState.understand) _telState.understand = t.slice(0, 80);
+  _telScheduleRender();   // delta 节流：rAF 合并，长回复不逐 token 全量重建
+}
+function _telOnToolStart(data) {
+  if (!_telEl || !_telState) return;
+  if (isForeignSession(data)) return;
+  var name = data ? data.name || '' : '';
+  var args = (data && data.arguments) ? data.arguments : {};
+  var cat = _telCat(name);
+  if (name === 'execute_terminal') {
+    _telState.terminal.push({ command: String(args.command || data.context || ''), output: '', duration: 0, exitCode: null });
+    _telScheduleRender();
+    return;
+  }
+  if (name === 'task_ledger') { _telScheduleRender(); return; }  // 台账走独立 Task Ledger 区，不占 Tools 活表格
+  _telState.calls[cat].push(_telRowStart(cat, name, args, data.context));  // 活表格：同 category 追加行，绝不新开表
+  _telScheduleRender();
+}
+function _telOnToolComplete(data) {
+  if (!_telEl || !_telState) return;
+  if (isForeignSession(data)) return;
+  var name = data ? data.name || '' : '';
+  if (name === 'execute_terminal') { _telTermComplete(data); return; }
+  if (name === 'task_ledger') { _telLedgerComplete(data); return; }
+  var cat = _telCat(name);
+  var rows = _telState.calls[cat];
+  var row = rows.length ? rows[rows.length - 1] : null;
+  if (!row) return;
+  _telRowEnd(row, name, data);
+  // 收尾小结数据：改动文件数/增删行/测试数字（真实事件累加）
+  if (!data.error && _telIsWriteTool(name)) {
+    _telState.files++;
+    var st = _telDiffStats(data.inline_diff || '');
+    _telState.addLines += st.add; _telState.delLines += st.del;
+  }
+  if (name === 'run_tests' && !data.error) {
+    var m = String(data.result_text || '').match(/(\d+)\s+passed/);
+    if (m) _telState.tests = m[0];
+  }
+  _telScheduleRender();
+}
+function _telOnComplete(data) {
+  if (!_telEl || !_telState) return;
+  if (isForeignSession(data)) return;
+  _telState.summaryDone = true;
+  var ft = (data && data.final_text) ? String(data.final_text) : '';
+  // 一句人话结论：最终正文首句（思考段剥离与主聊天区同源 splitThinking）
+  var body = splitThinking(ft).body;
+  _telState.concl = body.split('\n').filter(function(l) { return l.trim(); })[0] || '';
+  if (_telState.concl.length > 120) _telState.concl = _telState.concl.substring(0, 120) + '…';
+  _telState.usage = (data && data.usage) ? data.usage : null;
+  _telScheduleRender();
+}
+
+// 活表格行构造（start 半行 + complete 补结果）
+function _telRowStart(cat, name, args, context) {
+  var argStr = '';
+  var keys = Object.keys(args || {});
+  var parts = [];
+  for (var i = 0; i < Math.min(2, keys.length); i++) {
+    var k = keys[i];
+    var v = args[k];
+    if (v == null) v = '';
+    v = String(v).replace(/\s+/g, ' ').trim();
+    if (v.length > 28) v = v.substring(0, 28) + '…';
+    parts.push(k + '=' + v);
+  }
+  argStr = parts.join(', ') || String(context || '');
+  return { name: name, args: argStr, result: '…', dur: '—', diff: '', error: false };
+}
+
+function _telRowEnd(row, name, data) {
+  row.dur = data.duration ? data.duration.toFixed(1) + 's' : '—';
+  if (data.error) { row.error = true; row.result = '失败'; return; }
+  var diff = data.inline_diff || '';
+  var rt = String(data.result_text || '');
+  if (_telIsWriteTool(name) && diff) {
+    var st = _telDiffStats(diff);
+    row.result = '写入 +' + st.add + ' / −' + st.del + ' 行';
+    row.diff = diff;
+  } else if (_telIsWriteTool(name)) {
+    row.result = '写入完成';
+  } else {
+    // 人话结果：raw JSON/日志不上屏，只取人读摘要
+    row.result = _telHuman(rt);
+  }
+}
+
+// 人话化结果文本：折叠空白 + 截断 80 字符
+function _telHuman(rt) {
+  var s = String(rt || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+  return s || '';
+}
+
+// task_ledger 工具结果 → 台账表格数据
+function _telLedgerComplete(data) {
+  var args = (data && data.arguments) ? data.arguments : {};
+  var items = args.items;
+  if (!items) return;
+  var rows = [];
+  (Array.isArray(items) ? items : [items]).forEach(function(it) {
+    if (!it) return;
+    var title = String(it.title || it.id || '');
+    var status = String(it.status || 'pending');
+    rows.push({ title: title, status: status });
+  });
+  _telState.ledger = { rows: rows };
+  _telScheduleRender();
+}
+
+// execute_terminal 补全
+function _telTermComplete(data) {
+  var terms = _telState.terminal;
+  var t = terms.length ? terms[terms.length - 1] : null;
+  if (!t) return;
+  t.output = String(data.result_text || '');
+  t.duration = data.duration || 0;
+  if (data.error) t.exitCode = '失败';
+  _telScheduleRender();
+}
+
+// ── 面板入口与五区渲染 ──
+function renderTelescopePanel(el) {
+  _telEl = el;
+  _telInitOnce();
+  if (!_telState) _telState = _telBlankState();   // 首开空态：不递增轮次（轮次只由真实 message.start 驱动）
+  _telRender();
+}
+
+function _telInitOnce() {
+  if (_telInitDone) return;
+  _telInitDone = true;
+  _telWrap('message.start', _telOnStart);
+  _telWrap('message.delta', _telOnDelta);
+  _telWrap('tool.start', _telOnToolStart);
+  _telWrap('tool.complete', _telOnToolComplete);
+  _telWrap('message.complete', _telOnComplete);
+  if (_telEl) _telEl.addEventListener('click', _telOnClick);
+}
+
+// ── delta 节流：rAF 合并渲染（理解卡只渲染一次；长回复不逐 token 全量重建）──
+function _telScheduleRender() {
+  _telDirty = true;
+  if (_telRaf) return;
+  var raf = (window && window.requestAnimationFrame)
+    ? window.requestAnimationFrame.bind(window)
+    : function(cb) { return setTimeout(cb, 16); };
+  _telRaf = raf(function() {
+    _telRaf = null;
+    if (_telDirty) _telRender();   // _telRender 消费脏标记
+  });
+}
+
+function _telRender() {
+  _telDirty = false;   // 渲染即消费脏标记（同步渲染时挂起的 rAF 不再重复渲）
+  if (!_telEl) return;
+  var html = '';
+  for (var i = 0; i < _telRounds.length; i++) html += _telRenderState(_telRounds[i], i);
+  if (_telState) html += _telRenderState(_telState, '_cur');
+  _telEl.innerHTML = html;
+}
+
+// 单轮渲染（含轮次分隔线）；srcKey 供折叠切换/diff 链接定位数据源（历史轮=数组索引，当前轮='_cur'）
+function _telRenderState(st, srcKey) {
+  if (!st) return '';
+  var html = '';
+  if (st.round > 0) html += '<div class="tel-round">── Round ' + st.round + ' ──</div>';
+  html += _telRenderPrompt(st);
+  html += _telRenderLedger(st);
+  html += _telRenderCalls(st, srcKey);
+  html += _telRenderTerminal(st, srcKey);
+  html += _telRenderSummary(st);
+  return html;
+}
+
+function _telRenderPrompt(st) {
+  st = st || _telState;
+  var html = '<div class="tel-sec"><div class="tel-sec-title">用户 Prompt</div>';
+  if (st.prompt) html += render(st.prompt);
+  else html += '<div class="tel-muted">（本轮无用户原话快照）</div>';
+  if (st.understand) {
+    html += '<div class="tel-understand">' + render('**理解为**：' + st.understand) + '</div>';
+  }
+  return html + '</div>';
+}
+
+function _telRenderLedger(st) {
+  st = st || _telState;
+  if (!st.ledger || !st.ledger.rows.length) return '';
+  var md = '| # | 事项 | 状态 |\n|---|---|---|\n';
+  st.ledger.rows.forEach(function(r, i) {
+    md += '| ' + (i + 1) + ' | ' + String(r.title).replace(/\|/g, '\\|') + ' | ' + String(r.status) + ' |\n';
+  });
+  return '<div class="tel-sec"><div class="tel-sec-title">Task Ledger</div>' + render(md) + '</div>';
+}
+
+function _telRenderCalls(st, srcKey) {
+  st = st || _telState;
+  srcKey = (srcKey == null) ? '_cur' : srcKey;
+  var heads = { Skills: 'Skill | 加载内容 | 用途', Memory: '条目 | 信号 | 注入原因', Tools: '工具 | 参数摘要 | 结果 | 耗时' };
+  var html = '';
+  ['Skills', 'Memory', 'Tools'].forEach(function(cat) {
+    var rows = st.calls[cat];
+    if (!rows.length) return;
+    html += '<div class="tel-sec"><div class="tel-sec-title">' + cat + '</div>';
+    var md = '| ' + heads[cat] + ' |\n|---|---|---|\n';
+    rows.forEach(function(r, i) {
+      var res = r.error ? '<span class="tel-muted">' + esc(r.result) + '</span>' : esc(r.result);
+      var link = '';
+      if (r.diff) link = ' <a href="#tel-diff-' + i + '" data-tel-src="' + srcKey + '">查看 diff</a>';
+      if (cat === 'Tools') {
+        md += '| `' + esc(r.name) + '` | ' + esc(r.args) + ' | ' + res + link + ' | ' + esc(r.dur) + ' |\n';
+      } else {
+        md += '| `' + esc(r.name) + '` | ' + esc(r.args) + ' | ' + res + ' |\n';
+      }
+    });
+    html += render(md) + '</div>';
+  });
+  return html;
+}
+
+function _telRenderTerminal(st, srcKey) {
+  st = st || _telState;
+  srcKey = (srcKey == null) ? '_cur' : srcKey;
+  var terms = st.terminal;
+  if (!terms.length) return '';
+  var html = '<div class="tel-sec"><div class="tel-sec-title">终端执行</div>';
+  terms.forEach(function(t, i) {
+    html += '<div class="tel-term" data-tel-src="' + srcKey + '">';
+    html += '<div class="tel-term-cmd">' + render('```\n$ ' + t.command + '\n```') + '</div>';
+    var code = t.exitCode === '失败' ? '失败' : '—';
+    html += '<div class="tel-term-meta">耗时 ' + (t.duration ? t.duration.toFixed(1) + 's' : '—') + ' · 退出码 ' + code + '</div>';
+    if (t.output) {
+      var long = t.output.length > 400;
+      var shown = long ? t.output.substring(0, 200) + '\n…（输出过长已折叠，共 ' + t.output.length + ' 字符）' : t.output;
+      html += '<div class="tel-term-out' + (long ? ' collapsed' : '') + '" data-i="' + i + '">' + esc(shown) + '</div>';
+      if (long) html += '<button class="tel-term-toggle" data-i="' + i + '" onclick="telToggleTerm(this)">展开全部 (' + t.output.length + ' 字符)</button>';
+    }
+    html += '</div>';
+  });
+  return html + '</div>';
+}
+
+// 长输出折叠/展开切换（data-tel-src 定位所属轮：历史轮索引或 '_cur'）
+function telToggleTerm(btn) {
+  var term = btn.parentNode;
+  while (term && (!term.getAttribute || !term.getAttribute('data-tel-src'))) term = term.parentNode;
+  if (!term) return;
+  var src = term.getAttribute('data-tel-src');
+  var st = (src === '_cur') ? _telState : (_telRounds[parseInt(src, 10)] || _telState);
+  var idx = parseInt(btn.getAttribute('data-i'), 10);
+  var t = st.terminal[idx];
+  if (!t) return;
+  var out = term.querySelector('.tel-term-out');
+  if (!out) return;
+  var expanded = !out.classList.contains('collapsed');
+  if (expanded) {
+    out.classList.add('collapsed');
+    out.textContent = t.output.substring(0, 200) + '\n…（输出过长已折叠，共 ' + t.output.length + ' 字符）';
+    btn.textContent = '展开全部 (' + t.output.length + ' 字符)';
+  } else {
+    out.classList.remove('collapsed');
+    out.textContent = t.output;
+    btn.textContent = '收起';
+  }
+}
+
+function _telRenderSummary(st) {
+  st = st || _telState;
+  if (!st.summaryDone) return '';
+  var lines = ['**本轮小结**'];
+  if (st.files) lines.push('- 改动文件 ' + st.files + ' 个 · 增 ' + st.addLines + ' / 删 ' + st.delLines + ' 行');
+  if (st.tests) lines.push('- 测试：' + st.tests);
+  if (st.usage) {
+    var pct = (st.usage.context_percent != null) ? st.usage.context_percent + '%'
+            : ((st.usage.total != null) ? st.usage.total : '—');
+    lines.push('- token 占用 ' + pct);
+  }
+  if (st.concl) lines.push('> ' + st.concl);
+  return '<div class="tel-sec"><div class="tel-sec-title">收尾小结</div><div class="tel-summary">' + render(lines.join('\n')) + '</div></div>';
+}
+
+// ── diff 模态弹层（✕ / Esc / 点背景关闭；diff 块与主聊天区同源 diffBlock 逐字节一致）──
+function telShowDiff(diffText) {
+  telCloseDiff();
+  var ov = document.createElement('div'); ov.className = 'tel-modal-ov';
+  var box = document.createElement('div'); box.className = 'tel-modal';
+  var head = document.createElement('div'); head.className = 'tel-modal-head';
+  head.innerHTML = '<span>Telescope · diff 详情</span><span class="tel-modal-x" onclick="telCloseDiff()">✕</span>';
+  var body = document.createElement('div'); body.className = 'tel-modal-body';
+  body.innerHTML = diffBlock(diffText);    // 同源 esc/diffBlock，与主聊天区 1:1
+  box.appendChild(head); box.appendChild(body);
+  ov.appendChild(box);
+  ov.onclick = function(e) { if (e.target === ov) telCloseDiff(); };
+  document.body.appendChild(ov);
+  _telModalEl = ov;
+}
+function telCloseDiff() {
+  if (_telModalEl && _telModalEl.parentNode) _telModalEl.parentNode.removeChild(_telModalEl);
+  _telModalEl = null;
+}
+// Esc 关闭：capture 阶段优先拦截（modal 开着时只关 modal，不触发主窗 stopThinking —— 零干涉）
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && _telModalEl) { e.stopPropagation(); telCloseDiff(); }
+}, true);
+
+// 面板内事件委托：#tel-diff-N 链接 → 弹模态层（data-tel-src 定位所属轮）
+function _telOnClick(e) {
+  var a = e && e.target;
+  while (a && a.tagName !== 'A') a = a.parentNode;
+  if (!a) return;
+  var href = (a.getAttribute && a.getAttribute('href')) || '';
+  if (href.indexOf('#tel-diff-') !== 0) return;
+  e.preventDefault();
+  var i = parseInt(href.substring('#tel-diff-'.length), 10);
+  var src = a.getAttribute('data-tel-src') || '_cur';
+  var st = (src === '_cur') ? _telState : (_telRounds[parseInt(src, 10)] || _telState);
+  var row = st.calls.Tools[i];
+  if (row && row.diff) telShowDiff(row.diff);
+}
+// ── end TICKET-DESK-TEL ──
 </script>
 </body>
 </html>
