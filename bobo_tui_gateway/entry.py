@@ -218,6 +218,13 @@ def main():
         _run_backend()
         return
 
+    # ── TICKET-DESK-CLI：`bobo desktop` 子命令 → Electron 桌面端（锚点段开始）──
+    # 新人上手路径：clone → pip install -e . → bobo desktop；不动 bobo TUI 主流程
+    if len(sys.argv) > 1 and sys.argv[1] == "desktop":
+        from bobo_tui_gateway.desktop_cli import run_desktop
+        sys.exit(run_desktop())
+    # ── end TICKET-DESK-CLI ──
+
     tui_path = _find_tui_path()
 
     if tui_path:

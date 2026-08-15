@@ -31,6 +31,43 @@ On first launch, the TUI setup wizard walks you through selecting a provider (De
 
 ---
 
+## Quick Start — Developer (from source)
+
+New to the repo? Clone, install, and you're up:
+
+```bash
+git clone https://github.com/Newton-666/boboagent.git
+cd boboagent
+pip install -e .          # installs the `bobo` CLI (Python 3.10+ required)
+bobo                      # launch the TUI
+bobo desktop              # launch the Electron desktop app
+```
+
+- `bobo desktop` auto-detects `apps/desktop/`, checks Node.js ≥ 18, and runs `npm install` on first launch if dependencies are missing (progress shown), then starts Electron. No Apple certificate needed — Electron ships with npm's official signed binary, so Gatekeeper won't block it.
+- Exit the desktop app with `Ctrl+C` — it shuts down cleanly.
+- **Prerequisites**: Python 3.10+ and Node.js v18+ (install via `brew install node` or [nodejs.org](https://nodejs.org/)).
+
+<details><summary>中文说明</summary>
+
+- **从源码开始**：`git clone` → `pip install -e .` → `bobo`（TUI）或 `bobo desktop`（桌面端）。
+- `bobo desktop` 首次运行自动检测依赖并 `npm install`（进度可见），然后拉起 Electron；无需 Apple 证书。
+- 退出桌面端用 `Ctrl+C`，干净退出。
+- 前置要求：Python 3.10+、Node.js ≥ 18（`brew install node` 或官网）。
+
+</details>
+
+### Config (.env)
+
+Point your provider and API key in `~/.bobo/.env` (or `data/.env` in dev mode) — see the [Configuration](#configuration) section below for the full list of variables. You can also use the in-TUI `/model` picker instead of editing the file by hand.
+
+<details><summary>中文说明</summary>
+
+- 在 `~/.bobo/.env`（开发模式为 `data/.env`）配置 provider 与 API key，完整变量见下方 [Configuration](#configuration) 一节；也可用 TUI 内 `/model` 交互选择，无需手改文件。
+
+</details>
+
+---
+
 ## Updating
 
 **Installed with the one-line script** (most users): re-run the same installer — it pulls the latest `main` and overwrites the old version:

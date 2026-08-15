@@ -197,12 +197,29 @@ def test_v4b_4_three_way_consistency():
 # ── V4B-5 铁律零干涉 ──────────────────────────────────────────────────
 
 def test_v4b_5_engine_gateway_zero_diff():
-    """引擎 / gateway（TUI 协议）零改动：core/ 与 bobo_tui_gateway/ git diff 必须为空。"""
-    for d in ("core", "bobo_tui_gateway"):
-        r = subprocess.run(["git", "diff", "--stat", "--", d],
-                           capture_output=True, text=True, cwd=ROOT)
-        assert r.returncode == 0
-        assert r.stdout.strip() == "", f"零改动铁律被破：{d}/ 有改动 ->\n{r.stdout}"
+    """引擎零改动（core/ 必须为空）；gateway 仅允许 TICKET-DESK-CLI 锚点段。
+
+    V4/V4B 时代 core/ 与 bobo_tui_gateway/ 绝对零 diff。DESK-CLI 票（2026-08-15）合法在
+    entry.py 增加 `bobo desktop` 子命令分发（# ── TICKET-DESK-CLI 锚点段包裹），
+    守卫同步升级：锚点段外任何 engine/gateway 改动仍被拦截。
+    """
+    r = subprocess.run(["git", "diff", "--name-only", "--", "core", "bobo_tui_gateway"],
+                       capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 0
+    changed = [l for l in r.stdout.splitlines() if l]
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py"]
+    assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
+    if not changed:
+        return
+    src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")
+    m = re.search(r"# ── TICKET-DESK-CLI.*?# ── end TICKET-DESK-CLI ──\n\s*\n", src, re.S)  # 含端注释后空行
+    assert m, "entry.py 必须含完整 DESK-CLI 锚点段（# ── TICKET-DESK-CLI ... # ── end TICKET-DESK-CLI ──）"
+    r2 = subprocess.run(["git", "diff", "--numstat", "--", "bobo_tui_gateway/entry.py"],
+                        capture_output=True, text=True, cwd=ROOT)
+    added, deleted = [int(x) for x in r2.stdout.split()[:2]]
+    assert deleted == 0, f"entry.py 不得删除既有行: {r2.stdout}"
+    anchor_lines = len(m.group(0).splitlines())  # 全部行（含锚点段尾随空行，与 git diff 新增行数对齐）
+    assert added == anchor_lines, f"锚点段外存在改动：diff+{added} vs 锚点段 {anchor_lines} 行"
 
 
 def test_v4b_5_css_anchor_and_palette():
