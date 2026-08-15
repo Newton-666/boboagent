@@ -344,8 +344,25 @@ def test_v2a_css_zero_change_on_existing():
     done_rule = ".think-box.done { animation:fadeIn 0.2s ease-out; }\n"
     assert done_rule in new_pre, "新版中应能找到 .think-box.done 新增规则"
     new_pre = new_pre.replace(done_rule, "")
+    # V2D7 特批豁免（owner 票钉死）：药丸墨痕化 + 信息蓝全面退役迁移既有 CSS 值。
+    # 双向剔除 V2D7 改动的规则行（V2A 标记之前部分）后，其余既有 CSS 仍逐字节锁死。
+    V2D7_PAIRS = (
+        r"\.msg \.txt \.diff-file \{ [^}]* \}\n",
+        r"\.msg \.txt th \{ [^}]* \}\n",
+        r"\.preview-btn \{ [^}]* \}\n",
+        r"\.tool-detail \.td-args \{ [^}]* \}\n",
+        r"\.tool-result \.td-args \{ [^}]* \}\n",
+        r"\.tool-detail \.diff-file, \.tool-result \.diff-file \{ [^}]* \}\n",
+        r"#status-mode\.office \{ [^}]* \}\n",
+    )
+    for pat in V2D7_PAIRS:
+        m_old = re.search(pat, old_style)
+        m_new = re.search(pat, new_pre)
+        assert m_old and m_new, f"V2D7 豁免规则应在基线/新版中同时存在: {pat}"
+        old_style = old_style.replace(m_old.group(0), "")
+        new_pre = new_pre.replace(m_new.group(0), "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6 豁免段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7 豁免段外零改动）"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────

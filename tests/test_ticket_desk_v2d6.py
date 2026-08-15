@@ -125,15 +125,20 @@ def test_tool_agg_same_family_same_grade():
     assert ".tool-agg-head" in src and "color:var(--text2)" in src
 
 
-# ── ④ 思考蓝仅保留药丸 <60% 一处语义；过程动画退役 ──────────────────────
+# ── ④ 思考蓝全面退役（V2D7 收口）；过程动画退役 ────────────────────────
 
-def test_blue_kept_only_pill():
-    """思考蓝 #5b9bd5 仅保留药丸 <60% 水位（.ctx-pill-fill + JS 三色阶）。"""
+def test_pill_ink_marks():
+    """V2D7 药丸墨痕化：填充=文字色 12% 透明度（color-mix 派生），透明度 ≤0.2，三色阶墨痕化（零思考蓝）。"""
     src = _gui()
     assert ".ctx-pill-fill" in src
     pill_rule = re.search(r"\.ctx-pill-fill \{ [^}]* \}", src).group(0)
-    assert "#5b9bd5" in pill_rule
-    assert "pct >= 85 ? '#f48771' : (pct >= 60 ? '#e8913a' : '#5b9bd5')" in src
+    assert "color-mix(in srgb, var(--text) 12%, transparent)" in pill_rule
+    assert "#5b9bd5" not in pill_rule
+    # JS 三色阶：<60% 文字墨痕 12% / ≥60% 品牌橙 15% / ≥85% 语义红 15%（透明度均 ≤0.2）
+    assert "pct >= 85 ? 'rgba(244,135,113,0.15)' : (pct >= 60 ? 'rgba(232,145,58,0.15)' : 'rgba(45,45,45,0.12)')" in src
+    # 文字永远清晰：药丸文字 var(--text) 深色
+    text_rule = re.search(r"\.ctx-pill-text \{ [^}]* \}", src).group(0)
+    assert "color:var(--text)" in text_rule
 
 
 def test_process_animations_deblued():
@@ -163,9 +168,9 @@ def test_anchor_section_complete():
 # ── GUI-DESIGN.md 同步标注 ─────────────────────────────────────────────
 
 def test_gui_design_synced():
-    """色板表思考蓝行语义迁移 / 组件表思考框行 / 变更历史 V2D6 行。"""
+    """色板表思考蓝行语义迁移（V2D7 收口） / 组件表思考框行 / 变更历史 V2D6 行。"""
     d = _design()
-    assert "上下文药丸 <60% 水位（信息语义；原 think-box 过程蓝已退役，V2D6）" in d
+    assert "已全面退役（V2D6 过程面 + V2D7 药丸墨痕化，界面零残留）" in d
     assert "米白灰框" in d
     assert "DESK-V2D6" in d
     assert "思考框中性化" in d
