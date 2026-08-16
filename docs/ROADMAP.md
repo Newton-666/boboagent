@@ -112,4 +112,6 @@ TEL-b 表格管道符转义 → GUI-F14 初始化链解耦（loadSession 15s 超
 
 COST-1c 度量层数据质量补强（缓存透传+逐次累计+target 抓取；真实数据验收通过：cache 1920/54445、usage_calls=35）→ GUI-F15 Plugin 图标 SVG 化
 
-当前 main: 含 GUI-F15 · 测试基线 2613 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+COST-2 前缀稳定化（小时级锚点+尾部动态块统一注入 user 消息；实测 R3 起缓存命中 99.8%，基线 3.4%——账单结构性打折落地）
+
+当前 main: 含 COST-2 · 测试基线 2621 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
