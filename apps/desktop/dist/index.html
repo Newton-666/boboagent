@@ -2731,18 +2731,38 @@ on('gateway.ready', async function() {
   hideOverlay();
   if (wasCovered) showToast('success', '连接已恢复');
   await loadSessions();
-  if (sessions.length > 0) {
-    currentSessionId = sessions[0].id;
-    await loadSession(sessions[0].id);
-    renderSessions();
-  } else {
-    await newChat();
-  }
+  // ── TICKET-GUI-F14：解耦——无依赖初始化先行，loadSession 卡死/失败不再拖死整链 ──
   renderPluginList();
   document.getElementById('body-plugin').classList.add('closed');
   document.getElementById('arr-plugin').classList.add('closed');
   refreshCtxStats();   // TICKET-DESK-V2B：就绪后初始刷新上下文仪表盘
   loadSlashCatalog();  // TICKET-DESK-V2B3：就绪后拉取命令目录（命令面板数据源）
+  // ── TICKET-GUI-F14：会话加载兜底——15s 超时 + 失败 toast + 空态可发新消息，绝不静默 ──
+  var LOAD_TIMEOUT_MS = 15000;
+  function withTimeout(p, label) {
+    return Promise.race([p, new Promise(function(_, rej) {
+      setTimeout(function() { rej(new Error(label + '超时（15s）')); }, LOAD_TIMEOUT_MS);
+    })]);
+  }
+  if (sessions.length > 0) {
+    currentSessionId = sessions[0].id;
+    try {
+      await withTimeout(loadSession(sessions[0].id), '加载会话');
+    } catch (e) {
+      var em = (e && e.message) || '未知错误';
+      showToast('fail', '会话加载失败：' + em + '，可发送新消息');
+      addStatus('⚠ 加载会话失败：' + em + '（已进入可发送新消息状态）');
+      clearChat();   // 欢迎空态：仍可发新消息
+    }
+    renderSessions();
+  } else {
+    // GUI-F14 同链路自查：newChat 分支同样不阻塞后续初始化（超时视同失败，绝不停链）
+    try {
+      await withTimeout(newChat(), '新建会话');
+    } catch (e) {
+      showToast('fail', '新建会话失败：' + ((e && e.message) || '未知错误') + '，可发送新消息');
+    }
+  }
   debug('Ready'); inputEl.focus();
 });
 
@@ -3076,6 +3096,13 @@ var readyFallbackTimer = setTimeout(async function() {
       // Backend is alive despite missing gateway.ready
       _everConnected = true;
       setConnected(true);
+      // TICKET-GUI-F14：gateway.ready 丢失时 fallback 接管——四行无依赖初始化同样必须执行
+      //（否则插件区空白/药丸恒 0%/命令目录不加载，与 loadSession 拖死同症状）
+      renderPluginList();
+      document.getElementById('body-plugin').classList.add('closed');
+      document.getElementById('arr-plugin').classList.add('closed');
+      refreshCtxStats();
+      loadSlashCatalog();
       await loadSessions();
       if (sessions.length > 0) {
         currentSessionId = sessions[0].id;
