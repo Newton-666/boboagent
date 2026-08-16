@@ -116,4 +116,6 @@ COST-2 前缀稳定化（小时级锚点+尾部动态块统一注入 user 消息
 
 SAFETY-1 进程杀灭分级（pkill/killall 黑名单 + kill PID 强制审批 + bobo 进程标识硬拦）+ 后端 code-0 自动重启 + 1345 空值守卫
 
-当前 main: 含 SAFETY-1 · 测试基线 2661 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+DIAG-1 调试纪律场景注入（复现→取证→验证→定位→修后验证 五步纪律 22 触发词）——实战验收：药丸埋雷（id 少字母 e）被独立抓出，定位精确到行，修后自发全量回归 + 排除 owner 进程
+
+当前 main: 含 DIAG-1 · 测试基线 2688 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
