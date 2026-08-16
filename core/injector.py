@@ -184,7 +184,8 @@ def _read_note_frontmatter(path) -> dict:
 
 # ── 票 GOV-1：纪律注入（GUI-LESSONS + 工作流纪律，场景触发）──
 # 场景：施工类回合注入施工纪律（L1-L10 + 六步工作流），收工类回合注入收工纪律
-# （L8/L11/L12 + git diff 逐 hunk 自审）；无触发零注入（对照组铁律）。
+# （L8/L11/L12 + git diff 逐 hunk 自审）；票 DIAG-1：调试类回合注入调试纪律
+# （先复现/先取证/假设验证/定位陈述/改后验证）；无触发零注入（对照组铁律）。
 # 预算：≤ _DISCIPLINE_BUDGET_CHARS 字符（≈800 tokens，中文按 2 chars/token 保守折算），
 # 超限逐条截断压缩；注入长度计入 prompt.budget 事件 discipline 段。
 _GUI_LESSONS_PATH = _os.path.join(
@@ -215,14 +216,38 @@ _WRAPUP_DISCIPLINE = (
     "   git 实况 / md5 / 测试原始输出落盘 library 完成报告或票据附录，正文不糊原始输出（L12）"
 )
 
+# 调试纪律（票 DIAG-1 ③：说不清的 bug 五步排查，≤1200 字符）
+# 2026-08-16 实证三起本可避免的事故：幻影 render()（假设函数存在未 grep）、
+# 药丸恒 0%（双重剥壳未逐环取证）、Plugin 空白（初始化链静默中断）。
+_DEBUG_DISCIPLINE = (
+    "【调试纪律】（票 DIAG-1 内化，说不清的 bug 按此排查，先取证后动手）：\n"
+    "1. 先复现：没亲眼看到症状不许动手。前端问题用 Playwright CDP 连真实实例\n"
+    "   （scripts/e2e_gui_f14_verify.py 等现成探针可参考）；后端问题先读\n"
+    "   data/logs/bobo.log 末尾 + data/logs/events.jsonl 尾部 + stack_dump.log\n"
+    "2. 先取证：动手前必须拿到至少一条硬证据（报错原文/日志行/事件记录/状态快照），写进台账\n"
+    "3. 假设必须验证：调用任何函数/字段/文件前，先 grep 确认它真实存在（L14：桩里禁止虚构全局）\n"
+    "4. 定位陈述：改代码前必须能说出『根因是 X 文件 Y 行，因为证据 Z』——\n"
+    "   说不出就继续查，不许猜了再改\n"
+    "5. 改后验证：症状在真实环境消失才算完，测试绿不算完（L13/L14）"
+)
+
 # 场景裁剪表：场景 → 保留的 L 块号（与 GUI-LESSONS.md 同源，Kimi 更新后自动跟进）
 _SCENE_LESSONS = {
     "work":   ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10"),
     "wrapup": ("L8", "L11", "L12", "L13"),
+    # 票 DIAG-1：调试场景关联 L2（真实可跑≠模拟通过）与 L14（桩里禁止虚构全局）
+    "debug":  ("L2", "L14"),
 }
 
-# 场景触发关键词（命中 user_input 或最近 3 轮 history；收工优先）
+# 场景触发关键词（命中 user_input 或最近 3 轮 history；收工优先，调试次之）
 _WRAPUP_KEYWORDS = ("收工", "汇报", "总结", "销账", "五查", "终审", "收尾")
+# 票 DIAG-1：调试类信号——症状描述/定位诉求/报错字样。与 work 关键词不重叠
+# （"bug" 仍归 work），命中即注入调试纪律（场景优先级 wrapup > debug > work）。
+_DEBUG_KEYWORDS = (
+    "报错", "不对", "打不开", "坏了", "崩了", "崩溃", "白屏", "无响应",
+    "卡住", "不工作", "为什么不", "怎么办", "定位", "排查", "复现", "取证",
+    "error", "exception", "traceback", "crash", "failed", "not working",
+)
 _WORK_KEYWORDS = ("施工", "建账", "改码", "修 bug", "bug", "实现", "开发", "测试", "票 ")
 
 
@@ -269,9 +294,10 @@ def _extract_lessons_sections(text: str) -> dict:
 
 
 def _detect_round_scene(user_input: str, history: list) -> str:
-    """按输入与最近 3 轮 history 判定回合场景：'work' | 'wrapup' | ''。
+    """按输入与最近 3 轮 history 判定回合场景：'work' | 'wrapup' | 'debug' | ''。
 
-    收工关键词优先（收工回合也是施工回合的收尾）；无命中零注入（对照组铁律）。
+    收工关键词优先（收工回合也是施工回合的收尾）；调试次之（症状/定位信号
+    优先于施工指令——遇到问题先按调试纪律排查）；无命中零注入（对照组铁律）。
     """
     haystack = " ".join(
         str(m.get("content", "")) for m in (history or [])[-3:]
@@ -279,6 +305,8 @@ def _detect_round_scene(user_input: str, history: list) -> str:
     haystack_l = haystack.lower()
     if any(k in haystack_l for k in _WRAPUP_KEYWORDS):
         return "wrapup"
+    if any(k in haystack_l for k in _DEBUG_KEYWORDS):
+        return "debug"
     if any(k in haystack_l for k in _WORK_KEYWORDS):
         return "work"
     return ""
@@ -317,7 +345,10 @@ def _build_discipline_text(scene: str, lessons_text: str | None) -> tuple:
     返回 (文本, 是否截断)。lessons 缺失时仅固定纪律段（静默降级不炸）。
     """
     parts: list = []
-    parts.append(_WORKFLOW_DISCIPLINE if scene == "work" else _WRAPUP_DISCIPLINE)
+    if scene == "debug":
+        parts.append(_DEBUG_DISCIPLINE)
+    else:
+        parts.append(_WORKFLOW_DISCIPLINE if scene == "work" else _WRAPUP_DISCIPLINE)
     if lessons_text:
         sections = _extract_lessons_sections(lessons_text)
         for lnum in _SCENE_LESSONS.get(scene, ()):

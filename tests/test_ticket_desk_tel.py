@@ -504,9 +504,11 @@ def test_tel_8_zero_interference():
             assert "COST-1c" in r4.stdout, f"{ln} 缺 COST-1c 特批标记，未授权改动被拦截"
             continue
         # 票 COST-2 特批：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度），diff 必须含 COST-2 标记
+        # 票 DIAG-1 特批：injector.py 新增调试纪律场景（scene=debug），diff 必须含 DIAG-1 标记
         if ln == "core/injector.py":
             r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "COST-2" in r4.stdout, f"{ln} 缺 COST-2 特批标记，未授权改动被拦截"
+            assert ("COST-2" in r4.stdout or "DIAG-1" in r4.stdout), \
+                f"{ln} 缺 COST-2/DIAG-1 特批标记，未授权改动被拦截"
             continue
         # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
         if ln == "core/command_safety.py":
