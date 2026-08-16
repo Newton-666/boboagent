@@ -142,7 +142,8 @@ def test_c4_repeat_reads_detection(tmp_path):
     rows = _read_rows(tmp_path)
     rr = rows[0]["repeat_reads"]
     assert {"target": "core/engine.py", "count": 3} in rr
-    assert {"target": "core/::def ", "count": 2} in rr
+    # COST-1c ③：grep 类 target 格式改为 pattern@path（票面口径）
+    assert {"target": "def @core/", "count": 2} in rr
     assert all(x["target"] != "a.md" for x in rr)  # 单次读取不列
 
 
@@ -342,12 +343,18 @@ console.log(out.join('\n'));
 # ── C8：引擎行为零改动守卫（铁律）──
 
 def test_c8_core_zero_diff_guard():
-    """C8：core/ 零 diff（铁律：纯度量层不得触碰引擎逻辑）。"""
+    """C8：core/ 零 diff（铁律：纯度量层不得触碰引擎逻辑）。
+
+    COST-1c 例外：core/llm_caller.py 为票面 ① 特批文件（仅加 llm.usage 事件透传，
+    零逻辑改动），其余 core/ 文件仍必须零 diff。
+    """
     r = subprocess.run(
         ["git", "diff", "--name-only", "core/"], capture_output=True, text=True, cwd=ROOT)
     r2 = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "core/"], capture_output=True, text=True, cwd=ROOT)
     changed = [x for x in (r.stdout + r2.stdout).splitlines() if x.strip()]
+    # 票 COST-1c ① 特批白名单：llm_caller.py 允许（仅加字段透传）
+    changed = [x for x in changed if x != "core/llm_caller.py"]
     assert changed == [], f"core/ 有改动，违反铁律: {changed}"
 
 
