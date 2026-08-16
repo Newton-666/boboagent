@@ -89,8 +89,17 @@ def test_v4_1_engine_gateway_tui_zero_diff():
                        capture_output=True, text=True, cwd=ROOT)
     assert r.returncode == 0
     changed = [l for l in r.stdout.splitlines() if l]
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py"]
+    # COST-1B（2026-08-16）授权：消耗度量双观测注入点，白名单文件 diff 必须含 COST-1b 标记
+    COST1B_ALLOWED = {
+        "bobo_tui_gateway/handlers/misc.py",
+        "bobo_tui_gateway/handlers/prompts.py",
+        "bobo_tui_gateway/server_utils.py",
+    }
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
+    for f in sorted(COST1B_ALLOWED & set(changed)):
+        r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "COST-1b" in r3.stdout, f"{f} 的改动缺 COST-1b 授权标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")
@@ -98,6 +107,8 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     assert m, "entry.py 必须含完整 DESK-CLI 锚点段（# ── TICKET-DESK-CLI ... # ── end TICKET-DESK-CLI ──）"
     r2 = subprocess.run(["git", "diff", "--numstat", "--", "bobo_tui_gateway/entry.py"],
                         capture_output=True, text=True, cwd=ROOT)
+    if not r2.stdout.strip():
+        return  # COST-1B：entry.py 无改动时跳过 DESK-CLI 锚点 diff 校验
     added, deleted = [int(x) for x in r2.stdout.split()[:2]]
     assert deleted == 0, f"entry.py 不得删除既有行: {r2.stdout}"
     anchor_lines = len(m.group(0).splitlines())  # 全部行（含锚点段尾随空行，与 git diff 新增行数对齐）

@@ -482,6 +482,21 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 .tel-term-toggle { font-size:10px; padding:2px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg3); color:var(--text2); cursor:pointer; font-family:inherit; }
 .tel-summary { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; }
 .tel-summary p { margin:2px 0; }
+/* COST-1b：消耗页签（战报|消耗）—— 拆解条/缓存命中率/重复劳动警示，零新增色值 */
+.tel-tabs { display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+.tel-tab { font-size:11px; padding:4px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg3); color:var(--text2); cursor:pointer; font-family:inherit; }
+.tel-tab.active { background:var(--text); color:var(--bg); font-weight:600; }
+.tel-bar-wrap { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:10px; margin:8px 0 14px; }
+.tel-bar { display:flex; height:16px; border-radius:4px; overflow:hidden; margin:6px 0 4px; }
+.tel-bar-seg { height:100%; min-width:2px; }
+.tel-bar-user { background:#b8b4a8; }                       /* 用户输入：弱灰，不计入优化口径 */
+.tel-bar-inject { background:var(--text2); }                /* 注入编排：system+discipline+memory+pointers */
+.tel-bar-sched { background:#e8913a; }                      /* 历史与工具回传：调度层（既有橙） */
+.tel-bar-legend { display:flex; gap:14px; font-size:10px; color:var(--text-muted); flex-wrap:wrap; }
+.tel-bar-legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+.tel-warn { background:rgba(0,0,0,0.10); border:1px solid rgba(0,0,0,0.35); color:#e8913a; border-radius:6px; padding:8px 10px; margin:6px 0; font-size:12px; }
+.tel-warn p { margin:2px 0; }
+.tel-cost-note { font-size:11px; color:var(--text-muted); margin:4px 0 10px; }
 .tel-modal-ov { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); z-index:120; display:flex; align-items:center; justify-content:center; }
 .tel-modal { width:90%; max-width:900px; max-height:85vh; background:var(--bg); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; box-shadow:0 8px 30px rgba(0,0,0,0.25); }
 .tel-modal-head { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text2); }
@@ -3463,6 +3478,7 @@ var _telInitDone = false;
 var _telModalEl = null;   // diff 模态层（同时只开一个）
 var _telDirty = false;    // delta 节流：待渲染标记
 var _telRaf = null;       // delta 节流：rAF 句柄
+var _telTab = 'battle';   // COST-1b：面板页签（battle=战报 | cost=消耗）
 
 // 分类映射：同 category 的工具调用进同一张活表格（Skills / Memory / Tools）
 function _telCat(name) {
@@ -3710,10 +3726,20 @@ function _telScheduleRender() {
 function _telRender() {
   _telDirty = false;   // 渲染即消费脏标记（同步渲染时挂起的 rAF 不再重复渲）
   if (!_telEl) return;
-  var html = '';
+  var active = (_telTab === 'cost') ? 'cost' : 'battle';
+  var html = '<div class="tel-tabs">'
+    + '<button class="tel-tab' + (active === 'battle' ? ' active' : '') + '" data-tab="battle">战报</button>'
+    + '<button class="tel-tab' + (active === 'cost' ? ' active' : '') + '" data-tab="cost">消耗</button>'
+    + '</div>';
+  // 战报 pane：轮次历史 + 当前轮
+  html += '<div class="tel-pane" data-pane="battle"' + (active === 'battle' ? '' : ' style="display:none"') + '>';
   for (var i = 0; i < _telRounds.length; i++) html += _telRenderState(_telRounds[i], i);
   if (_telState) html += _telRenderState(_telState, '_cur');
+  html += '</div>';
+  // 消耗 pane：占位，内容由 _telRenderCost 异步填充（COST-1b）
+  html += '<div class="tel-pane" data-pane="cost"' + (active === 'cost' ? '' : ' style="display:none"') + '></div>';
   _telEl.innerHTML = html;
+  if (active === 'cost') _telRenderCost();
 }
 
 // 单轮渲染（含轮次分隔线）；srcKey 供折叠切换/diff 链接定位数据源（历史轮=数组索引，当前轮='_cur'）
@@ -3861,8 +3887,97 @@ document.addEventListener('keydown', function(e) {
 }, true);
 
 // 面板内事件委托：#tel-diff-N 链接 → 弹模态层（data-tel-src 定位所属轮）
+// ── COST-1b：消耗页签（读 rounds.jsonl 最近 N 条，全 Markdown/图表化，零 raw）──
+function _telHtmlEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function _telRenderCost() {
+  var pane = _telEl && _telEl.querySelector('[data-pane="cost"]');
+  if (!pane) return;
+  pane.innerHTML = '<div class="tel-muted">读取消耗度量…</div>';
+  call('metrics.read', { limit: 50 }).then(function(res) {
+    if (!pane) return;
+    var rounds = (res && res.rounds) || [];
+    if (!rounds.length) {
+      pane.innerHTML = '<div class="tel-muted">暂无消耗数据（rounds.jsonl 为空，或本次运行尚无回合完成）</div>';
+      return;
+    }
+    pane.innerHTML = _telCostHtml(rounds);
+  });
+}
+function _telCostHtml(rounds) {
+  var cur = rounds[0];   // metrics.read 返回新→旧，[0]=最近一轮
+  var h = '<div class="tel-sec"><div class="tel-sec-title">本轮拆解 · Round ' + cur.round + '</div>'
+    + _telCostBar(cur) + '</div>';
+  h += '<div class="tel-sec"><div class="tel-sec-title">缓存命中率</div>' + _telCacheRate(rounds) + '</div>';
+  var warn = _telRepeatWarn(cur);
+  if (warn) h += '<div class="tel-sec"><div class="tel-sec-title">重复劳动警示</div>' + warn + '</div>';
+  h += '<div class="tel-cost-note">数据源 data/metrics/rounds.jsonl（每轮 message.complete 落一条）· 面板只读</div>';
+  return h;
+}
+function _telCostBar(r) {
+  var u = r.usage || {};
+  var prompt = u.prompt_tokens || 0;
+  var userChars = u.user_prompt_chars || 0;      // 用户输入（字符；弱灰，不计入优化口径）
+  var b = r.budget || {};
+  var inject = 0;
+  [b.system, b.discipline, b.memory, b.pointers].forEach(function(v) {
+    if (typeof v === 'number') inject += v;
+  });
+  var base = Math.max(prompt, 1);
+  var userPct = Math.min(100, Math.round(userChars / base * 100));
+  var injectPct = Math.min(100, Math.round(inject / base * 100));
+  var schedPct = Math.max(0, 100 - userPct - injectPct);
+  return '<div class="tel-bar-wrap">'
+    + '<div class="tel-bar">'
+    + '<div class="tel-bar-seg tel-bar-user" style="width:' + userPct + '%" title="用户输入 ' + userChars + ' 字符"></div>'
+    + '<div class="tel-bar-seg tel-bar-inject" style="width:' + injectPct + '%" title="注入编排 ' + inject + ' 字符"></div>'
+    + '<div class="tel-bar-seg tel-bar-sched" style="width:' + schedPct + '%" title="历史与工具回传（调度层）"></div>'
+    + '</div>'
+    + '<div class="tel-bar-legend">'
+    + '<span><i style="background:#b8b4a8"></i>用户输入 ' + userChars + '（不计入优化口径）</span>'
+    + '<span><i style="background:#777"></i>注入编排 ' + inject + '</span>'
+    + '<span><i style="background:#e8913a"></i>历史与工具回传（调度层）</span>'
+    + '</div>'
+    + '<div class="tel-muted">总 prompt tokens ' + prompt + ' · 注入=system+discipline+memory+pointers 字符合计（量级近似，字符≠token）</div>'
+    + '</div>';
+}
+function _telCacheRate(rounds) {
+  var cur = rounds[0].usage || {};
+  var hit = 0, miss = 0, n = 0;
+  rounds.slice(0, 10).forEach(function(r) {
+    var u = r.usage || {};
+    var h = u.cache_hit_tokens, m = u.cache_miss_tokens;
+    if (typeof h === 'number' && typeof m === 'number') { hit += h; miss += m; n++; }
+  });
+  var curHit = cur.cache_hit_tokens, curMiss = cur.cache_miss_tokens;
+  if (typeof curHit !== 'number' || typeof curMiss !== 'number') {
+    return '<div class="tel-warn"><p>链路未透传 DeepSeek usage 的 cache 字段（gateway 转发层未带 prompt_cache_hit_tokens / prompt_cache_miss_tokens），命中率暂不可用 —— 字段位已预留，取到即显示。</p></div>';
+  }
+  var pct = (hit + miss) > 0 ? Math.round(hit / (hit + miss) * 100) : 0;
+  var curPct = (curHit + curMiss) > 0 ? Math.round(curHit / (curHit + curMiss) * 100) : 0;
+  return '<div class="tel-muted">本轮命中 ' + curPct + '%（' + curHit + '/' + (curHit + curMiss) + '） · 近 ' + (n || 1) + ' 轮均值 ' + pct + '%</div>';
+}
+function _telRepeatWarn(r) {
+  var rr = r.repeat_reads || [];
+  if (!rr.length) return '';
+  var items = rr.map(function(x) {
+    return '<p>⚠ 重复读取 <code>' + _telHtmlEsc(x.target) + '</code> × ' + x.count + '</p>';
+  }).join('');
+  return '<div class="tel-warn">' + items + '</div>';
+}
+
 function _telOnClick(e) {
-  var a = e && e.target;
+  var t = e && e.target;
+  // COST-1b：页签切换（战报 | 消耗）
+  if (t && t.tagName === 'BUTTON' && t.getAttribute && t.getAttribute('data-tab')) {
+    var tab = t.getAttribute('data-tab');
+    if (tab === _telTab) return;
+    _telTab = tab;
+    _telRender();
+    return;
+  }
+  var a = t;
   while (a && a.tagName !== 'A') a = a.parentNode;
   if (!a) return;
   var href = (a.getAttribute && a.getAttribute('href')) || '';

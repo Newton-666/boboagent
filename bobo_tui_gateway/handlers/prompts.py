@@ -133,6 +133,13 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     if not text:
         return err(rid, -32000, "消息不能为空")
 
+    # COST-1b：记录用户输入长度（度量层只观测；message.start 事件不带 prompt 内容）
+    try:
+        from bobo_tui_gateway.metrics import metrics_sink
+        metrics_sink.record_user_prompt(sid, text)
+    except Exception:
+        pass
+
     with ctx.sessions_lock:
         session = ctx.sessions.get(sid)
     if not session:

@@ -138,6 +138,7 @@ function makeEl(tag) {
 // ── 全局桩 ──
 const USER_MSG_STUB = { querySelector: () => ({ textContent: '用户原话：查一下项目结构' }) };
 const chatEl = makeEl('div');
+let _telTab = 'battle';  // COST-1b：与 dist/index.html 全局默认一致（battle=战报 | cost=消耗）
 const document = { createElement: makeEl, body: { appendChild(c) { c.parentNode = this; }, removeChild() {} }, addEventListener() {} };
 // rAF 桩：手动队列（测试可触发），供 delta 节流验证
 let _telRafQueue = [];
@@ -435,16 +436,28 @@ console.log('NODE_TEL7C_OK');
 def test_tel_8_zero_interference():
     r = subprocess.run(["git", "diff", "--name-only", "main"], capture_output=True, text=True, cwd=ROOT)
     changed = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    # COST-1B（2026-08-16）授权：消耗度量双观测注入点，白名单文件 diff 必须含 COST-1b 标记
+    COST1B_ALLOWED = {
+        "bobo_tui_gateway/handlers/misc.py",
+        "bobo_tui_gateway/handlers/prompts.py",
+        "bobo_tui_gateway/server_utils.py",
+    }
     # 引擎 / gateway / TUI / 小组件零改动
     for ln in changed:
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
+            r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-1b" in r3.stdout, f"{ln} 缺 COST-1b 授权标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
     # 改动文件清单（index.html + 本测试文件 + V2C12 豁免记账文件）只允许 TEL 相关
     for ln in changed:
         if ln.endswith("index.html"):
             continue
-        assert "test_ticket_desk_tel" in ln or "test_ticket_desk_v2c12" in ln, \
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
+            continue
+        assert "test_ticket_desk_tel" in ln or "test_ticket_desk_v2c12" in ln or "test_ticket_desk_v4" in ln, \
             f"意外改动文件: {ln}"
 
 

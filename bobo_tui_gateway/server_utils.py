@@ -34,6 +34,12 @@ def err(rid, code: int, msg: str) -> dict:
 
 
 def emit(event: str, sid: str, payload: dict | None = None):
+    # COST-1b：度量层观测钩子（纯观测只落盘，失败静默，绝不影响事件转发）
+    try:
+        from bobo_tui_gateway.metrics import metrics_sink
+        metrics_sink.on_event(event, sid, payload)
+    except Exception:
+        pass
     write_json({
         "jsonrpc": "2.0", "method": "event",
         "params": {"type": event, "payload": payload or {}, "session_id": sid},
