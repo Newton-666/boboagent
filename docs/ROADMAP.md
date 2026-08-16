@@ -108,4 +108,6 @@ D-1 桌面复活（审计/通电/Electron 43/共享后端/GUI 平齐）→ GUI-F
 
 DESK-TEL 热修（幻影 render→mdReply，L14 立规）→ COST-1b Token 度量层（rounds.jsonl 双观测注入+重复劳动侦测+消耗页签+cost_report.py；gateway 白名单授权模式确立）
 
-当前 main: 531aafb · 测试基线 2588 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+TEL-b 表格管道符转义 → GUI-F14 初始化链解耦（loadSession 15s 超时兜底 + readyFallback 同症状补修，Plugin 空白/药丸恒 0% 根治）
+
+当前 main: 80533fc · 测试基线 2596 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
