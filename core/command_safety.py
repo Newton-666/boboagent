@@ -27,7 +27,11 @@ SAFE_COMMANDS = {
     "go", "cargo", "rustc", "make", "cmake", "docker", "ps", "top",
     "tree", "xargs", "awk", "sed", "tr",
     "open",   # macOS: open apps/files/URLs
-    "kill", "killall", "pgrep", "pkill",
+    # 票 SAFETY-1（2026-08-16 两次事故）：kill/killall/pkill 移出白名单——
+    # pkill -f 误杀自身后端（SIGTERM 优雅退出 code 0 → 桌面端不重启 → 永久断连）、
+    # SIGKILL 误杀桌面端渲染进程（白屏）。杀灭命令全部走强制审批/黑名单，
+    # 不再静默执行。pgrep（只查询不杀灭）保留白名单。
+    "pgrep",
     "osascript",    # macOS AppleScript automation
     "say",          # macOS text-to-speech
     "pbcopy", "pbpaste",  # macOS clipboard
@@ -63,6 +67,17 @@ DANGEROUS_PATTERNS = [
     (r'`[^`]+`', "反引号命令替换"),
     (r'curl.*\$\(', "curl + 命令替换"),
     (r'wget.*\$\(', "wget + 命令替换"),
+    # ── 票 SAFETY-1（2026-08-16 两次事故根治疗，与 reset --hard 同级黑名单）──
+    # 18:53 pkill -f 误杀 bobo 自身后端（SIGTERM 优雅退出 code 0 → Electron 只对
+    # 非 0 退出码重启 → owner 桌面端永久断连）；20:41 清理环境时 SIGKILL 误杀
+    # owner 正在用的桌面端渲染进程（日志实证 [renderer-gone] reason=killed
+    # exitCode=9）→ 白屏。模式匹配杀灭一律硬拦，只允许对具体数字 PID 的
+    # kill <pid> / kill -9 <pid>（且强制审批，见 classify_kill_command）。
+    (r'\bpkill\b', "进程模式匹配杀灭（pkill）"),
+    (r'\bkillall\b', "按进程名批量杀灭（killall）"),
+    # 按名 kill（kill python / kill -9 python）不在黑名单正则硬拦——信号解析
+    # 歧义（kill -s TERM 12345 中 -s 与目标都是 \w）会误伤合法数字 PID 命令。
+    # 由 classify_kill_command 统一判定（非数字目标 → dangerous，语义更准）。
 ]
 
 
@@ -211,6 +226,112 @@ def check_redirect_targets(cmd_clean: str) -> tuple | None:
     return None
 
 
+# ── 票 SAFETY-1：进程杀灭分级（kill/pkill/killall）────────────────────
+# 2026-08-16 两次事故：pkill -f 误杀自身后端（断连）、SIGKILL 误杀桌面端渲染
+# 进程（白屏）。设计：模式匹配杀灭与 bobo 相关目标 = 黑名单硬拦（dangerous）；
+# 对具体数字 PID 的 kill <pid> / kill -9 <pid> = 强制人工确认（confirm）——
+# 普通模式弹审批（提示进程身份），AUTO 模式不自动执行（拒绝+待人工清单）。
+
+_KILL_RE = _re.compile(r'\b(?:kill|pkill|killall)\b')
+
+# bobo 自身/桌面端进程标识（杀灭目标含任一 → 硬拦）。注意：检查对象是
+# kill 的目标参数，不是整条命令——`kill 12345 && echo bobo done` 的目标是
+# 数字 PID，不应被 `echo bobo` 误伤（需求"命令文本含 bobo 一律拦"落点收敛
+# 到杀灭目标，更精确且不误伤）。
+_BOBO_PROCESS_MARKERS = (
+    "bobo_tui_gateway", "boboagent_main", "electron", "bobo", "desktop",
+)
+
+
+def _kill_targets(command: str) -> list:
+    """提取杀灭命令的目标参数（去信号前缀、去链式后续命令）。
+
+    - kill -9 12345       → ['12345']
+    - kill -TERM 12345    → ['12345']
+    - kill -s TERM 12345  → ['12345']
+    - kill --signal=KILL 12345 → ['12345']
+    - kill python         → ['python']
+    - pkill -f python     → ['python']（-f 是选项，目标仍在）
+    只取链首目标（kill 的目标在第一个 && || ; | 之前）。
+    """
+    m = _KILL_RE.search(command)
+    if not m:
+        return []
+    rest = command[m.end():].strip()
+    # 去掉信号/选项前缀（kill -9 / -TERM / -s TERM / --signal=TERM / -f 等）
+    rest = _re.sub(
+        r'^(?:(?:-\d+|-s\s+\w+|--signal(?:=|\s+)\w+|-\w+)\s+)+', '', rest)
+    # 截断到链式操作符之前（目标只在链首）
+    rest = _re.split(r'\s*(?:&&|\|\||;|\|)\s*', rest)[0]
+    return rest.split()
+
+
+def classify_kill_command(command: str) -> tuple:
+    """票 SAFETY-1：进程杀灭命令分级。
+
+    返回 (level, reason)：
+    - dangerous：模式匹配杀灭（pkill/killall/按进程名 kill）、或杀灭目标含
+      bobo 自身/桌面端进程标识 → 硬拦（与 reset --hard 同级，任何模式拒绝）
+    - confirm：对具体数字 PID 的 kill <pid> / kill -9 <pid> → 强制人工确认
+      （普通模式弹审批含进程身份；AUTO 模式转 external-irreversible 拒绝）
+    - safe：不含杀灭语义（pgrep 查询等）→ 交给常规分类
+
+    先剥离引号/heredoc 字面文本（票 AUTO-G2 惯例：字样≠执行），再剥离
+    shell 注释（`kill 12345 # bobo` 的注释是说明文字，不是杀灭目标）。
+    """
+    _skeleton = strip_literal_text(command)
+    # 剥离 shell 注释（# 前有空白或行首才剥；`echo a#b` 的 # 是字面量不剥）
+    _skeleton = _re.sub(r'(^|\s)#.*$', r'\1', _skeleton, flags=_re.M)
+    if not _KILL_RE.search(_skeleton):
+        return ("safe", "")
+
+    # 1) 模式匹配杀灭：pkill / killall（DANGEROUS_PATTERNS 已硬拦，此处兜底
+    #    供 is_high_risk_tool / side_effect 分级直接复用）
+    if _re.search(r'\bpkill\b', _skeleton):
+        return ("dangerous", "pkill 模式匹配杀灭——可能误杀 bobo 自身或用户正在使用的进程（今晚已发生两次事故）")
+    if _re.search(r'\bkillall\b', _skeleton):
+        return ("dangerous", "killall 按进程名批量杀灭——可能误杀 bobo 自身或用户正在使用的进程（今晚已发生两次事故）")
+
+    targets = _kill_targets(_skeleton)
+    if not targets:
+        return ("safe", "")  # kill 无目标参数（罕见），交给常规分类
+
+    # 2) 杀灭目标含 bobo 自身/桌面端标识 → 硬拦
+    _low = " ".join(targets).lower()
+    for marker in _BOBO_PROCESS_MARKERS:
+        if marker in _low:
+            return ("dangerous", f"杀灭目标含 bobo 自身/桌面端进程标识（{marker}）——禁止自杀/误杀用户进程")
+    _root_name = _os.path.basename(_BOBO_REPO_ROOT.rstrip(_os.sep)).lower()
+    if _root_name and _root_name in _low:
+        return ("dangerous", f"杀灭目标含本项目路径标识（{_root_name}）——禁止自杀/误杀用户进程")
+
+    # 3) 数字 PID → 强制确认；非数字目标 → 按名杀灭硬拦
+    if all(t.isdigit() for t in targets):
+        return ("confirm", f"将杀进程 PID: {', '.join(targets)}")
+    return ("dangerous", f"按进程名 kill（目标非数字 PID: {targets[0]}）——须指定具体数字 PID 并说明理由")
+
+
+def _ps_lookup_pid(command: str) -> str:
+    """审批提示用：从 kill 命令提取数字 PID，ps 现场查进程身份（尽力而为）。
+
+    只读命令 ps -p <pid>，失败返回提示（审批弹窗仍会展示，用户可自行确认）。
+    """
+    m = _re.search(r'\bkill\b\s+(?:(?:-\w+|-\d+|-s\s+\w+|--signal(?:=|\s+)\w+)\s+)*(\d+)', command)
+    if not m:
+        return ""
+    pid = m.group(1)
+    try:
+        import subprocess as _sp
+        r = _sp.run(["ps", "-p", pid, "-o", "pid=,comm="],
+                    capture_output=True, text=True, timeout=3)
+        out = r.stdout.strip()
+        if out:
+            return f"目标进程: {out}"
+        return f"PID {pid} 当前不存在（可能已退出）"
+    except Exception:
+        return f"PID {pid}（ps 查询失败，请先 ps 确认身份）"
+
+
 def classify_command(command: str) -> tuple[str, str]:
     """分类命令：safe / dangerous / gray。返回 (等级, 原因)。
 
@@ -232,6 +353,14 @@ def classify_command(command: str) -> tuple[str, str]:
     for pattern, reason in DANGEROUS_PATTERNS:
         if _re.search(pattern, _skeleton):
             return ("dangerous", reason)
+
+    # ── 票 SAFETY-1：进程杀灭分级（pkill/killall/按名 kill 已入黑名单被
+    #  上一步拦截；这里处理 bobo 标识目标与数字 PID 放行审批）──
+    _kill_level, _kill_reason = classify_kill_command(cmd_clean)
+    if _kill_level == "dangerous":
+        return ("dangerous", _kill_reason)
+    if _kill_level == "confirm":
+        return ("gray", f"进程杀灭需人工确认 — {_kill_reason}")
 
     # ── 第 2 步：重定向目标 ──
     # 票 AUTO-G2 误伤收紧：重定向检查同样用骨架（剥离引号/heredoc 字面文本），
@@ -568,6 +697,21 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         if _is_self_repo_non_destructive_git_on_non_main(command):
             return False, ""
 
+        # ── 票 SAFETY-1：进程杀灭强制审批 ──
+        # pkill/killall/按名 kill 已被 classify_command 黑名单拦截（dangerous）；
+        # 这里处理对具体数字 PID 的 kill <pid>——普通模式必须弹审批，审批提示
+        # 现场 ps 查询进程身份（AUTO 模式由 classify_side_effect 转拒绝，不在此路径）。
+        _kill_level, _kill_reason = classify_kill_command(command)
+        if _kill_level == "dangerous":
+            return True, f"🚫 {_kill_reason}: {command[:60]}"
+        if _kill_level == "confirm":
+            _pid_info = _ps_lookup_pid(command)
+            return True, (
+                f"⚠ 此命令可能误杀 bobo 自身或用户正在使用的进程（今晚已发生两次事故），"
+                f"如确需清理孤儿进程请指定具体 PID 并说明理由。{_kill_reason}"
+                + (f"；{_pid_info}" if _pid_info else "")
+            )
+
         level, reason = classify_command(command)
         if level == "dangerous":
             return True, f"🚫 危险操作 — {reason}: {command[:60]}"
@@ -792,6 +936,13 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
     for pattern, reason in DANGEROUS_PATTERNS:
         if _re.search(pattern, strip_literal_text(cmd)):
             return ("external-irreversible", f"危险黑名单命中 — {reason}")
+
+    # ── 票 SAFETY-1：进程杀灭——AUTO 下不自动执行（拒绝 + 待人工清单）。
+    #  模式匹配杀灭（pkill/killall/按名 kill）已被上一步黑名单拦截；
+    #  数字 PID 的 kill <pid> 也在此强制拒绝——杀灭不可回滚，禁止 auto 静默放行。
+    _kill_level, _kill_reason = classify_kill_command(cmd)
+    if _kill_level in ("dangerous", "confirm"):
+        return ("external-irreversible", f"进程杀灭需人工确认 — {_kill_reason}")
 
     # 外部不可逆模式（含 git push / curl 写 / scp 等）
     # 票 AUTO-G2 误伤收紧：同样过骨架——heredoc/引号体内字样是文件内容不参与判定。

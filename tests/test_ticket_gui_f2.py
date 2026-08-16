@@ -197,7 +197,9 @@ class TestF24DiffChain:
     def test_gui_edit_card_diff_default_open(self):
         """F2-4: 编辑类工具卡默认展开 —— F3-5 后工具卡内为摘要 + open 类，diff 本体独立区块。"""
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "resultEl.classList.add('open'); toggleEl.textContent = '▾';" in src
+        # SAFETY-1 守卫版：默认展开逻辑保留（open 类 + ▾ 箭头），仅加空值守卫
+        assert "resultEl.classList.add('open');" in src
+        assert "toggleEl.textContent = '▾';" in src
         # diff 本体搬出为独立区块（F3-5），红绿底色类仍在
         assert "diff-add" in src and "diff-del" in src and "diff-file" in src
 

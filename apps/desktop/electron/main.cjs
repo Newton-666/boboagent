@@ -15,6 +15,9 @@ let backendProcess = null
 let backendBuffer = ''
 let backendRestartCount = 0
 const MAX_BACKEND_RESTARTS = 3
+// 票 SAFETY-1：用户/系统主动停后端标志（退出应用 Cmd+Q / 改配置重启）。
+// true 时后端 exit 不触发自动重启——否则 Cmd+Q 幽灵复活、save-env 双重启动。
+let backendStopRequested = false
 let pendingMessages = []  // Buffer for messages received before window's IPC listener is ready
 let frontendLogFd = null   // TICKET-D1d ⑧: renderer log (O-7 黑匣子对齐)
 
@@ -79,6 +82,8 @@ function startBackend() {
   const python = resolvePython()
   const isPackaged = app.isPackaged
   let projectRoot
+  // 票 SAFETY-1：新一轮启动清除主动停止标志（下次 exit 按异常终止处理）
+  backendStopRequested = false
 
   // Install backend to ~/.bobo/ if packaged
   if (isPackaged) {
@@ -125,9 +130,11 @@ function startBackend() {
   })
 
   backendProcess.on('exit', (code) => {
-    console.log(`[bobo-desktop] Backend exited with code ${code}`)
+    console.log(`[bobo-desktop] Backend exited with code ${code} (stopRequested=${backendStopRequested})`)
     backendProcess = null
-    const exitMsg = { status: 'exited', code, message: code !== 0 ? `后端进程异常退出 (代码: ${code})` : '' }
+    // 票 SAFETY-1：退出码 0 也提示（可能是被外部 SIGTERM 后优雅退出——18:53
+    // 事故实证：bobo 误杀后端，退出码 0，旧逻辑不重启 → owner 桌面端永久断连）
+    const exitMsg = { status: 'exited', code, message: code !== 0 ? `后端进程异常退出 (代码: ${code})` : '后端进程已退出（自动重启中）' }
     if (mainWindow) {
       mainWindow.webContents.send('backend-status', exitMsg)
     }
@@ -135,14 +142,17 @@ function startBackend() {
     if (widgetWindow) {
       widgetWindow.webContents.send('backend-status', exitMsg)
     }
+    // 票 SAFETY-1：用户主动停止（Cmd+Q 退出应用 / 改配置重启）不自动重启——
+    // 否则幽灵复活；其余情况无论退出码 0 与否都走自动重启（保留 backoff 与上限）
+    if (backendStopRequested) return
     // Auto-restart with backoff (up to MAX_BACKEND_RESTARTS times)
-    if (code !== 0 && backendRestartCount < MAX_BACKEND_RESTARTS) {
+    if (backendRestartCount < MAX_BACKEND_RESTARTS) {
       backendRestartCount++
       const delay = backendRestartCount * 1000
       console.log(`[bobo-desktop] Restarting backend in ${delay}ms (attempt ${backendRestartCount}/${MAX_BACKEND_RESTARTS})`)
       setTimeout(() => startBackend(), delay)
-    } else if (code !== 0) {
-      console.error(`[bobo-desktop] Backend crashed ${MAX_BACKEND_RESTARTS} times, retrying in 60s`)
+    } else {
+      console.error(`[bobo-desktop] Backend exited ${MAX_BACKEND_RESTARTS} times, retrying in 60s`)
       setTimeout(() => {
         backendRestartCount = 0
         startBackend()
@@ -194,6 +204,8 @@ function sendToBackend(msg) {
 }
 
 function stopBackend() {
+  // 票 SAFETY-1：主动停止（退出应用 / 改配置重启）→ exit 不触发自动重启
+  backendStopRequested = true
   if (backendProcess) {
     backendProcess.stdin.end()
     setTimeout(() => {

@@ -794,7 +794,8 @@ var sendTimeoutId = null;
 var sessionLoadSeq = 0;
 
 function debug(msg) {
-  debugEl.textContent = '[' + msg + ']';
+  // 票 SAFETY-1：debugEl 空值守卫（getElementById 可能为 null）
+  if (debugEl) debugEl.textContent = '[' + msg + ']';
   // TICKET-DESK-V2A：调试信息同步收纳进覆盖层"详情"可展开区
   var boxes = document.querySelectorAll('.ovl-detail-box');
   for (var i = 0; i < boxes.length; i++) boxes[i].textContent = '[' + msg + ']';
@@ -1066,6 +1067,7 @@ function buildHandoffCard(text) {
 function toggleHandoff(headEl) {
   var body = headEl.parentNode.querySelector('.handoff-body');
   var arrow = headEl.querySelector('span');
+  if (!body || !arrow) return;  // 票 SAFETY-1：空值守卫（与 toggleWorktree 同款）
   var open = body.style.display !== 'none';
   body.style.display = open ? 'none' : 'block';
   arrow.textContent = open ? '▸' : '▾';
@@ -1310,7 +1312,7 @@ function addTool(name, context, toolId) {
     // Don't toggle when clicking result text — allows text selection
     if (e.target.closest('.tool-result')) return;
     var r = div.querySelector('.tool-result');
-    if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; }
+    if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); if (t) { t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; } }
   };
   // F4-1: 聚合卡持续吞并 —— 任何时刻屏幕只有两块：聚合卡（吞并所有中间步骤）+ 最新一步摊开
   // 第 1 步直接铺开；第 2 步起建聚合卡；之后每步把"最新一步"收进聚合卡、新一步摊开。
@@ -1340,9 +1342,11 @@ function addTool(name, context, toolId) {
       agg.onclick = function(e) {
         if (e.target.closest('.tool')) return; // 点工具卡本身不折叠（卡内自有展开逻辑）
         var body = this.querySelector('.tool-agg-body');
+        if (!body) return;  // 票 SAFETY-1：DOM 结构异常（元素缺失）时跳过，防 textContent 空引用
         var open = body.style.display !== 'none';
         body.style.display = open ? 'none' : 'block';
-        this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+        var arrowEl = this.querySelector('.tool-agg-arrow');
+        if (arrowEl) arrowEl.textContent = open ? '▸' : '▾';  // 票 SAFETY-1：空值守卫（1345 事故行）
       };
       var aggBody = agg.querySelector('.tool-agg-body');
       roundToolEls.forEach(function(d) {
@@ -1438,8 +1442,8 @@ function updateToolResult(toolId, data) {
     div.setAttribute('data-state', 'failed');
     var timeElF = div.querySelector('.tool-time');
     if (timeElF) { timeElF.textContent = '—'; timeElF.classList.add('in'); }
-    resultEl.className = 'tool-result error open';
-    resultEl.textContent = error.substring(0, 200);
+    // 票 SAFETY-1：resultEl 空值守卫（与 1345 同源：DOM 结构异常时防 textContent 空引用）
+    if (resultEl) { resultEl.className = 'tool-result error open'; resultEl.textContent = error.substring(0, 200); }
   } else {
     dot.className = 'dot done';
     div.setAttribute('data-state', 'done');
@@ -1452,15 +1456,21 @@ function updateToolResult(toolId, data) {
       div.setAttribute('data-result', resultText);
       if (inlineDiff) {
         // F3-5: 工具卡片只留一行摘要（"编辑文件 path +N/-M"），diff 区块独立于消息流
-        resultEl.classList.add('open'); toggleEl.textContent = '▾';
-        resultEl.innerHTML = '<div class="tool-summary">' + esc(toolSummary(args, inlineDiff)) + '</div>';
+        // 票 SAFETY-1：resultEl/toggleEl 空值守卫（与 1345 同源防 textContent 空引用）
+        if (resultEl) {
+          resultEl.classList.add('open');
+          resultEl.innerHTML = '<div class="tool-summary">' + esc(toolSummary(args, inlineDiff)) + '</div>';
+        }
+        if (toggleEl) toggleEl.textContent = '▾';
         appendDiffBlock(div, inlineDiff);
       } else {
-        resultEl.innerHTML = renderToolDetail(args, resultText, inlineDiff);
+        // 票 SAFETY-1：resultEl 空值守卫
+        if (resultEl) resultEl.innerHTML = renderToolDetail(args, resultText, inlineDiff);
       }
     }
-    toggleEl.style.display = 'inline';
-    if (!inlineDiff) toggleEl.textContent = '▸';
+    // 票 SAFETY-1：toggleEl 空值守卫
+    if (toggleEl) toggleEl.style.display = 'inline';
+    if (!inlineDiff && toggleEl) toggleEl.textContent = '▸';
     // Notify when a tool > 2s completes
     if (duration > 2 && Notification.permission !== 'denied') {
       if (Notification.permission === 'granted') {
@@ -2486,9 +2496,11 @@ function renderHistUnit(unit) {
     agg.onclick = function(e) {
       if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
       var body = this.querySelector('.tool-agg-body');
+      if (!body) return;  // 票 SAFETY-1：DOM 结构异常时跳过，防 textContent 空引用
       var open = body.style.display !== 'none';
       body.style.display = open ? 'none' : 'block';
-      this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+      var arrowEl = this.querySelector('.tool-agg-arrow');
+      if (arrowEl) arrowEl.textContent = open ? '▸' : '▾';  // 票 SAFETY-1：空值守卫
     };
     var aggBody = agg.querySelector('.tool-agg-body');
     if (unit.think) aggBody.appendChild(buildHistThinkBox(unit.think));
@@ -2680,9 +2692,11 @@ function renderHistAggCard(thinkText, toolMsgs) {
   agg.onclick = function(e) {
     if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
     var body = this.querySelector('.tool-agg-body');
+    if (!body) return;  // 票 SAFETY-1：DOM 结构异常时跳过，防 textContent 空引用
     var open = body.style.display !== 'none';
     body.style.display = open ? 'none' : 'block';
-    this.querySelector('.tool-agg-arrow').textContent = open ? '▸' : '▾';
+    var arrowEl = this.querySelector('.tool-agg-arrow');
+    if (arrowEl) arrowEl.textContent = open ? '▸' : '▾';  // 票 SAFETY-1：空值守卫
   };
   var aggBody = agg.querySelector('.tool-agg-body');
   // 思考框进考古卡（同 addHistThinking：默认收起、点击展开）
