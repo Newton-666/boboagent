@@ -106,4 +106,6 @@ D-1 桌面复活（审计/通电/Electron 43/共享后端/GUI 平齐）→ GUI-F
 
 08-14/15：PARK-1 工具外挂仓（schema 税 8352→4025）→ COST-1A 沙盒实验（B 档平衡点）→ D25 工具卡 SVG+流光 → GOV-1 纪律内化 → V4/V4B 小组件+忙碌按会话隔离 → CLI bobo desktop → D5 药丸修复 → D6 思考框中性化 → D7 药丸墨痕（思考蓝退役）→ F13 历史像素级复原+窗口化 → DESK-TEL Telescope 观测台（五区战报+活表格+diff 弹层+历史轮+delta 节流，终审打回一处修复后通过）
 
-当前 main: 7ef13f9 · 测试基线 2574 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+DESK-TEL 热修（幻影 render→mdReply，L14 立规）→ COST-1b Token 度量层（rounds.jsonl 双观测注入+重复劳动侦测+消耗页签+cost_report.py；gateway 白名单授权模式确立）
+
+当前 main: 531aafb · 测试基线 2588 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
