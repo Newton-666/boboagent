@@ -110,4 +110,6 @@ DESK-TEL 热修（幻影 render→mdReply，L14 立规）→ COST-1b Token 度�
 
 TEL-b 表格管道符转义 → GUI-F14 初始化链解耦（loadSession 15s 超时兜底 + readyFallback 同症状补修，Plugin 空白/药丸恒 0% 根治）
 
-当前 main: 80533fc · 测试基线 2596 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+COST-1c 度量层数据质量补强（缓存透传+逐次累计+target 抓取；真实数据验收通过：cache 1920/54445、usage_calls=35）→ GUI-F15 Plugin 图标 SVG 化
+
+当前 main: 含 GUI-F15 · 测试基线 2613 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
