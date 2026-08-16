@@ -490,9 +490,15 @@ def test_budget_chars_match_actual_per_section(library, no_skills, tmp_path, mon
         f"identity claimed={ev['sections']['identity']}, actual={len(identity_content)}"
     )
 
-    # note_pointers 段核对：找出含 📚 的消息
-    note_msgs = [m for m in msgs if "📚 关联笔记" in m.get("content", "")]
-    note_chars = sum(len(m["content"]) for m in note_msgs)
+    # note_pointers 段核对：笔记指针段现在附加在 user 消息内容内（方案 A），
+    # 从含 📚 的消息中提取段文本（📚 到动态块边界 \n\n）
+    note_chars = 0
+    for m in msgs:
+        c = m.get("content", "")
+        if "📚 关联笔记" in c:
+            seg = c[c.index("📚"):]
+            seg = seg.split("\n\n", 1)[0]
+            note_chars += len(seg)
     actual_note_chars = ev["sections"]["note_pointers"].get("chars", 0)
     assert actual_note_chars == note_chars, (
         f"note_pointers chars={actual_note_chars}, actual={note_chars}"

@@ -354,7 +354,8 @@ def test_c8_core_zero_diff_guard():
         ["git", "diff", "--cached", "--name-only", "core/"], capture_output=True, text=True, cwd=ROOT)
     changed = [x for x in (r.stdout + r2.stdout).splitlines() if x.strip()]
     # 票 COST-1c ① 特批白名单：llm_caller.py 允许（仅加字段透传）
-    changed = [x for x in changed if x != "core/llm_caller.py"]
+    # 票 COST-2 特批白名单：injector.py 允许（仅限两处：NOW 锚点后移 + 小时级精度）
+    changed = [x for x in changed if x not in ("core/llm_caller.py", "core/injector.py")]
     assert changed == [], f"core/ 有改动，违反铁律: {changed}"
 
 

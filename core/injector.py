@@ -106,22 +106,32 @@ def _extract_selfmap_l0() -> str | None:
     return m.group(1)
 
 
-def _build_now_anchor() -> str:
-    """票 TICKET-P1：生成 [NOW] 日期时间锚点（≤60 字符）。
+_WEEKDAYS_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
-    格式：`[NOW] 2026-08-12 18:23 Thursday (Asia/Shanghai)`。
+
+def _build_now_anchor() -> str:
+    """票 TICKET-P1 + 票 COST-2：生成 [NOW] 日期时间锚点（≤60 字符）。
+
+    格式：`[NOW] 2026-08-16 18时 周六 (Asia/Shanghai)`。
     每轮组装时调用（build_messages 内），取当前时间；优先 Asia/Shanghai 时区，
     系统无 tzdata 时回退本地时间（ZoneInfo 不可用不炸）。超长截断为无星期几格式。
     全模式（普通/auto/office）无差别注入——日期时间是无模式的基础信息。
+
+    票 COST-2（前缀缓存稳定化）：精度从分钟级降为小时级——分钟级锚点每分钟变一次，
+    锚点之后的全部 prompt tokens 缓存作废（实测命中率仅 3.4%）；小时级对
+    日期/星期/时段类问题零影响，确需精确到分钟的问题走 get_current_time 工具。
     """
     try:
         from zoneinfo import ZoneInfo
         now = _datetime.now(ZoneInfo("Asia/Shanghai"))
     except Exception:
         now = _datetime.now()
-    anchor = now.strftime("[NOW] %Y-%m-%d %H:%M %A (Asia/Shanghai)")
+    anchor = (
+        f"[NOW] {now:%Y-%m-%d} {now.hour}时 "
+        f"{_WEEKDAYS_CN[now.weekday()]} (Asia/Shanghai)"
+    )
     if len(anchor) > 60:
-        anchor = now.strftime("[NOW] %Y-%m-%d %H:%M (Asia/Shanghai)")
+        anchor = f"[NOW] {now:%Y-%m-%d} {now.hour}时 (Asia/Shanghai)"
     return anchor
 
 
@@ -357,6 +367,15 @@ class PromptInjector:
 
         messages = [{"role": "system", "content": system_prompt}] + engine.history
 
+        # ── 票 COST-2：动态段尾部收集器 ──
+        # 前缀稳定化：所有"每轮组装内容可能变化"的注入段统一收集到这里，
+        # 在 8.5 段插到最后一个 user 消息（本轮用户输入）之前；头部只留
+        # 逐字节静态内容（system_prompt + L0 + 自查协议 + GUIDANCE + 用户资料
+        # + 自定义 API），前缀随轮次稳定 → DeepSeek 前缀缓存生效。
+        # 期望注入顺序（前→后）：proactive 连接 → 记忆 → 笔记指针 → 改动日志
+        # → 已读文件 → 纪律 → SELF 章节 → NOW 锚点。
+        _tail_blocks = []  # list[(name, content)]
+
         # ── 票 TICKET-021：失忆自查协议（身份段追加，指令口吻，≤250字符）──
         _lib_index = _os.path.relpath(_os.path.join(_LIBRARY_DIR, "index.md"))
         messages.insert(1, {
@@ -393,29 +412,19 @@ class PromptInjector:
             })
             budget_stats["selfmap"] = {"chars": len(_l0)}
 
-        # ── 票 TICKET-P1：日期时间锚点（常驻，全模式一致，≤60字符）──
-        # 每轮组装时取当前时间，紧跟 L0 selfmap 之后注入；计入 prompt.budget。
-        # 锚点行 ≤60 字符；附引导行：日期/星期/时间问题直接引用锚点，禁调工具
-        # （E1 首跑实证：无引导时 get_current_time 工具描述诱导必调工具）。
-        _now_anchor = _build_now_anchor()
-        if _now_anchor:
-            _now_block = (
-                _now_anchor + "\n"
-                "回答日期/星期/时间类问题直接引用上方 [NOW] 锚点，禁止为此调用工具。"
-            )
-            messages.insert(2, {
-                "role": "system",
-                "content": _now_block,
-            })
-            budget_stats["now"] = {"chars": len(_now_block)}
+        # ── 票 TICKET-P1 + 票 COST-2：日期时间锚点 ──
+        # 原位置：紧跟 L0 之后 insert(2) 注入。COST-2 前缀稳定化后移——
+        # 分钟级锚点在头部每轮必变，锚点之后数万 tokens 缓存全作废（实测命中率 3.4%）；
+        # 现改为尾部"最新用户消息之前"注入（见下方第 9.5 段），前缀恢复稳定。
+        # 引导行：日期/星期/时段类问题直接引用锚点禁调工具；精确到分钟走工具。
 
         # ── 票 TICKET-E3b：GUIDANCE 预付层导航（紧跟自查协议之后，缺失静默）──
-        # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2，
-        # 票 TICKET-P1：NOW 锚点紧随 L0 之后（index 2），自查协议被挤到 index 3，
-        # GUIDANCE 用 insert(4) 紧跟自查协议之后（E3b "紧跟自查协议之后"语义不变）。
+        # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2。
+        # 票 COST-2：NOW 锚点已后移至尾部（不再占 index 2），GUIDANCE 用 insert(3)
+        # 紧跟自查协议之后（E3b "紧跟自查协议之后"语义不变）。
         _guidance = _load_guidance()
         if _guidance:
-            messages.insert(4, {
+            messages.insert(3, {
                 "role": "system",
                 "content": _guidance,
             })
@@ -432,10 +441,9 @@ class PromptInjector:
             _disc_text, _disc_truncated = _build_discipline_text(
                 _discipline_scene, _load_gui_lessons())
             if _disc_text:
-                messages.insert(5, {
-                    "role": "system",
-                    "content": _disc_text,
-                })
+                # 票 COST-2：纪律段从头部 insert(5) 后移至尾部动态区
+                # （场景触发、每轮内容可能变 → 头部会破坏前缀缓存）
+                _tail_blocks.append(("discipline", _disc_text))
                 _discipline_stats = {
                     "chars": len(_disc_text),
                     "scene": _discipline_scene,
@@ -456,10 +464,12 @@ class PromptInjector:
                 _chapter = _extract_self_chapter(_ccfg["title"])
                 if _chapter:
                     _selfmap_chapter_texts[_ckey] = _chapter
-                    messages.insert(5, {
-                        "role": "system",
-                        "content": f"[SELF {_ccfg['title']}]\n{_chapter}",
-                    })
+                    # 票 COST-2：SELF 章节从头部 insert(5) 后移至尾部动态区
+                    # （触发基于 history[-4:]/user_input，每轮内容可能变）
+                    _tail_blocks.append((
+                        f"selfmap_{_ckey}",
+                        f"[SELF {_ccfg['title']}]\n{_chapter}",
+                    ))
                     _selfmap_chapters.append(_ckey)
         if _selfmap_chapters:
             budget_stats["selfmap_chapters"] = {
@@ -493,22 +503,24 @@ class PromptInjector:
             })
             budget_stats["office"] = {"chars": len(_office_notice)}
 
-        # ── 1. pending diff ──
+        # ── 1. pending diff（票 COST-2：一次性段 → 后移尾部动态区）──
+        # 注入后清空（原语义：diff 只在首轮出现一次）；若留在头部 insert(1)，
+        # 首轮有 diff 段、次轮无 → 前缀在 index 1 分叉，缓存全废（实弹实证：
+        # 修复前 R1 命中 2.8% 仅 system_prompt 1152 tokens；R2→R3 前缀稳定后
+        # 命中 99.8%）。后移后头部逐字节稳定。
         if engine._pending_diff:
             diff_preview = engine._pending_diff[:4000]
-            messages.insert(1, {
-                "role": "system",
-                "content": (
-                    f"[代码变更 — 请审查以下 diff 是否有 bug、安全风险或性能问题:]\n"
-                    f"{diff_preview}\n\n"
-                    f"审查要点:\n"
-                    f"1. 逻辑错误（拼写错误、条件反转、off-by-one）\n"
-                    f"2. 安全风险（注入、硬编码密钥、权限问题）\n"
-                    f"3. 性能问题（不必要的循环、重复计算、N+1 查询）\n"
-                    f"4. 代码风格（与项目其他部分不一致的命名/格式）\n\n"
-                    f"发现问题后如实报告，使用 review_diff 工具可查看完整 diff。"
-                )
-            })
+            _tail_blocks.append((
+                "pending_diff",
+                f"[代码变更 — 请审查以下 diff 是否有 bug、安全风险或性能问题:]\n"
+                f"{diff_preview}\n\n"
+                f"审查要点:\n"
+                f"1. 逻辑错误（拼写错误、条件反转、off-by-one）\n"
+                f"2. 安全风险（注入、硬编码密钥、权限问题）\n"
+                f"3. 性能问题（不必要的循环、重复计算、N+1 查询）\n"
+                f"4. 代码风格（与项目其他部分不一致的命名/格式）\n\n"
+                f"发现问题后如实报告，使用 review_diff 工具可查看完整 diff。"
+            ))
             engine._pending_diff = ""
 
         # ── 3. 自定义 API ──
@@ -540,6 +552,8 @@ class PromptInjector:
                     "content": user_profile
                 })
             # 注入记忆（票 LN-5：按总池比例计算 memory floor/ceiling，低信号淘汰）
+            # 票 COST-2：记忆段从头部 insert(1) 后移至尾部动态区（signal 随
+            # decay/touch 变化 → 内容可能逐轮变，留头部会破坏前缀缓存）
             if not engine._compressing:
                 pool = get_prompt_pool()
                 mem_floor = pool.floor("memory")
@@ -547,10 +561,7 @@ class PromptInjector:
                 mem_text, mem_stats = format_memory_by_signal(
                     max_chars=mem_ceiling, min_chars=min(mem_floor, mem_ceiling))
                 if mem_text:
-                    messages.insert(1, {
-                        "role": "system",
-                        "content": mem_text
-                    })
+                    _tail_blocks.append(("memory", mem_text))
                     budget_stats["memory"] = {
                         "chars": len(mem_text),
                         "entries": mem_stats.get("entries", 0),
@@ -585,17 +596,16 @@ class PromptInjector:
 
             if combined_parts:
                 combined = "\n".join(combined_parts)
-                messages.insert(1, {
-                    "role": "system",
-                    "content": combined
-                })
+                # 票 COST-2：笔记指针从头部 insert(1) 后移至尾部动态区
+                # （路径 2 按 user_input 主题词命中 → 每轮可能变）
+                _tail_blocks.append(("note_pointers", combined))
                 merged_stats = {**pointer_stats}
                 merged_stats["session_notes"] = ledger_stats.get("session_notes", 0)
                 budget_stats["note_pointers"] = merged_stats
         except Exception as e:
             logger.debug("注入笔记指针失败: %s", e)
 
-        # ── 6. 改动日志 ──
+        # ── 6. 改动日志（票 COST-2：会话累计增长 → 后移至尾部动态区）──
         if engine.tracker._change_log:
             items = engine.tracker._change_log[-5:]
             lines = ["[本会话的改动记录]:", ""]
@@ -603,31 +613,106 @@ class PromptInjector:
                 lines.append(f"  {it['desc']}")
             if len(engine.tracker._change_log) > 5:
                 lines.append(f"  ...（共 {len(engine.tracker._change_log)} 次改动）")
-            messages.insert(1, {"role": "system", "content": "\n".join(lines)})
+            _tail_blocks.append(("change_log", "\n".join(lines)))
 
-        # ── 7. 已读文件 ──
+        # ── 7. 已读文件（票 COST-2：会话累计增长 → 后移至尾部动态区）──
         if engine.tracker._read_files:
             items = list(engine.tracker._read_files.items())[-3:]
             lines = ["[最近读过的文件]:", ""]
             for fpath, preview in items:
                 short = preview[:120].replace('\n', ' ').strip()
                 lines.append(f"  {fpath}: {short}...")
-            messages.insert(1, {"role": "system", "content": "\n".join(lines)})
+            _tail_blocks.append(("read_files", "\n".join(lines)))
 
         # ── 8. 主动连接 ──
         messages = engine.proactive.inject_context(messages)
 
-        # ── 9. 技能标准（票 TICKET-E3b：未命中清单已删，仅命中才注入）──
+        # ── 8.5 票 TICKET-P1 + COST-2：动态段统一尾部注入（紧跟最新用户消息之前）──
+        # COST-2 前缀稳定化：NOW 锚点（原头部 index 2，分钟级每轮必变）+ 全部动态段
+        # （proactive 知识连接、记忆、笔记指针、改动日志、已读文件、纪律、SELF 章节）
+        # 统一插到最后一个 user 消息（本轮用户输入）之前；头部只留逐字节静态内容
+        # → 前缀随轮次稳定 → DeepSeek 前缀缓存生效（受控实验：固定前缀命中 98%+）。
+        # 模型可见性不变（全部仍在 messages 内、用户消息前）。预算记账保留。
+        # 1) proactive 知识连接搬回尾部：full 模式 inject_context 把连接 insert(0)，
+        #    按轮次主题检索（_extract_topic 取最近 user 消息）→ 内容逐轮变，
+        #    位于前缀第一位最致命。先识别其标志性前缀并 pop 收集（必须先 pop
+        #    再算 _last_user_idx，否则 pop 后 index 前移导致锚点错位）。
+        #    （subtle 模式追加到 system prompt 内部，无法搬移；当前配置为 full。）
+        _PROACTIVE_MARK = "以下是你之前的知识记录，可能对当前对话有帮助："
+        if (messages and messages[0].get("role") == "system"
+                and str(messages[0].get("content", "")).startswith(_PROACTIVE_MARK)):
+            _pa = messages.pop(0)
+            _tail_blocks.append(("proactive", _pa["content"]))
+
+        # 2) NOW 锚点（期望顺序最末；随冻结段统一置前，跨小时自动重建）
+        _now_anchor = _build_now_anchor()
+        if _now_anchor:
+            _now_block = (
+                _now_anchor + "\n"
+                "回答日期/星期/时间类问题直接引用上方 [NOW] 锚点，禁止为此调用工具；"
+                "确需精确到分钟的时间问题可调用 get_current_time 工具。"
+            )
+            _tail_blocks.append(("now", _now_block))
+            budget_stats["now"] = {"chars": len(_now_block)}
+
+        # 3a) 技能标准收集（票 TICKET-E3b：未命中清单已删，仅命中才注入）
+        # 票 COST-2：必须在本段统一注入之前收集；原第 9 段（注入后）append
+        # 到 messages 末尾，位置逐轮漂移导致前缀错位（详见第 9 段注释）。
         skill_stds = engine.skill_loader.load_standards()
         if skill_stds:
-            combined = "\n\n---\n\n".join(skill_stds)
-            messages.append({
-                "role": "system",
-                "content": (
-                    "## 项目标准 — 以下规则优先级高于一切，违反即不合格\n\n"
-                    + combined
-                ),
-            })
+            _skill_combined = "\n\n---\n\n".join(skill_stds)
+            _tail_blocks.append((
+                "skill",
+                "## 项目标准 — 以下规则优先级高于一切，违反即不合格\n\n"
+                + _skill_combined,
+            ))
+            budget_stats["skills"] = {"chars": len(_skill_combined),
+                                      "truncated": False}
+
+        # 3) 统一注入 + 票 COST-2：动态块附加到当前轮 user 消息内容前部
+        #    （前缀稳定化终极方案）。实弹暴露：动态段若以 system 消息插在 user
+        #    消息之前，锚点逐轮漂移（R1 的 T 块在 R1u 前、R2 的 T 块在 R2u 前）
+        #    + 内容逐轮变（proactive 主题/记忆 touch/pending_diff 首轮有次轮无）
+        #    → R1 与 R2 公共前缀只有头部（实测命中率 5.3%）。
+        #    修复：所有动态块（proactive/记忆/笔记指针/纪律/SELF 章节/change_log/
+        #    read_files/pending_diff/NOW）按期望顺序拼接，附加到 messages 最后一
+        #    个 user 消息（本轮输入）的 content 前部 —— 位于消息序列末尾，历史
+        #    消息区逐字节稳定 → R2 前缀 == R1 全部（命中率 ~100%），且每轮内容
+        #    照常刷新（纪律场景/记忆 touch/NOW 小时级都实时，无冻结锁死）。
+        #    注：messages 内 user dict 与 engine.history 共享引用 → 附加同时写回
+        #    history，下一轮该 user 消息（含动态块）成为前缀的一部分。
+        _TAIL_ORDER = {"proactive": 0, "memory": 1, "note_pointers": 2,
+                       "change_log": 3, "read_files": 4, "pending_diff": 5,
+                       "discipline": 6,
+                       "selfmap_arch": 7, "selfmap_boundary": 8, "selfmap_rescue": 9,
+                       "skill": 10, "now": 11}
+        if _tail_blocks:
+            _ordered = sorted(
+                _tail_blocks, key=lambda b: _TAIL_ORDER.get(b[0], 99))
+            _dyn_text = "\n\n".join(c for _n, c in _ordered)
+            _DYN_MARK = "【COST-2 动态块】"
+            _last_user = None
+            for _m in reversed(messages):
+                if _m.get("role") == "user":
+                    _last_user = _m
+                    break
+            if _last_user is not None:
+                _orig = str(_last_user.get("content") or "")
+                if not _orig.startswith(_DYN_MARK):
+                    _last_user["content"] = (
+                        _DYN_MARK + "\n" + _dyn_text
+                        + ("\n\n" + _orig if _orig else "")
+                    )
+            else:
+                messages.append({"role": "user", "content": _DYN_MARK + "\n" + _dyn_text})
+
+        # ── 9. 技能标准（票 TICKET-E3b：未命中清单已删，仅命中才注入）──
+        # 票 COST-2：收集已前移至 8.5 段 3a（必须在统一注入之前）；此处仅
+        # 记录原语义——原实现 append 到 messages 末尾（user 之后），实弹暴露：
+        # R1=[H, 动态块, 技能] / R2=[H, 动态块, A1, 动态块2, 技能]——技能段
+        # 位置逐轮漂移（夹在历史区之间），R2 前缀与 R1 在技能段错位分叉，
+        # 命中率塌回头部（实测 5.3%）。修复：技能并入尾部动态块（随本轮
+        # user 消息附加、写回 history 后逐字节固定），跨轮稳定。
 
         # ── 10. 上下文预算监控（票 LN-4 + LN-5）────
         # 组装完成写 prompt.budget 事件（兼容 LN-4）
