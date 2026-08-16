@@ -127,6 +127,21 @@ def handle_project_set_root(params: dict, rid: str, ctx) -> dict:
 
 # ── 注册 ──
 
+def handle_metrics_read(params: dict, rid: str, ctx) -> dict:
+    """COST-1b：只读消耗度量（rounds.jsonl 最近 N 条，供 Telescope 消耗页签）。
+
+    只读不写；文件不存在/损坏行跳过，绝不抛错。
+    """
+    limit = int(params.get("limit", 50) or 50)
+    if limit > 500:
+        limit = 500
+    try:
+        from bobo_tui_gateway.metrics import metrics_sink
+        rows = metrics_sink.read_recent(limit=limit, session_id=params.get("session_id", ""))
+        return ok(rid, {"rounds": rows, "count": len(rows)})
+    except Exception as e:
+        return err(rid, -32000, f"读取消耗度量失败: {e}")
+
 def register(reg_method, ctx):
     reg_method("shell.exec")(handle_shell_exec)
     reg_method("image.attach")(handle_image_attach)
@@ -135,3 +150,4 @@ def register(reg_method, ctx):
     reg_method("input.detect_drop")(handle_input_detect_drop)
     reg_method("context.stats")(lambda params, rid: handle_context_stats(params, rid, ctx))
     reg_method("project.set_root")(lambda params, rid: handle_project_set_root(params, rid, ctx))
+    reg_method("metrics.read")(lambda params, rid: handle_metrics_read(params, rid, ctx))
