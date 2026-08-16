@@ -247,6 +247,60 @@ console.log('NODE_TEL3_OK');
     assert "NODE_TEL3_OK" in out, f"node 实跑失败: {out}"
 
 
+# ── TEL-3b：活表格管道符转义（TEL-b：a|b 单元格不破坏列结构）──────────
+
+def test_tel_3b_calls_pipe_escape():
+    """单元格含 | 必须转义（同台账 \\|）：三表各 1 行、内容完整保留、行结构合法。"""
+    js = _node_prelude() + r"""
+// 真实事件流初始化状态（与 TEL-3 同款），再注入含 | 的单元格数据
+_telOnStart({ session_id: 's1' });
+_telState.calls = {
+  Skills: [{ name: 'read|file', args: 'a|b', result: 'ok|yes' }],
+  Memory: [{ name: 'm|1', args: 'sig|nal', result: 'in|ject', error: true }],
+  Tools:  [{ name: 'edit|file', args: 'x|y', result: '写入 +1|−1', dur: '0.8|s', diff: true }],
+};
+const html = _telRenderCalls();
+// 三张活表格各渲染一张（同 category 行追加不新开表）
+const secs = (html.match(/<div class="tel-sec"><div class="tel-sec-title">(Skills|Memory|Tools)<\/div>/g) || []).length;
+if (secs !== 3) throw new Error('三张活表格应各一张，实际 ' + secs);
+// 单元格内容完整保留（管道已转义为 \|，防 marked 打乱列结构；error 态 span 内同样转义）
+for (const needle of ['read\\|file', 'a\\|b', 'ok\\|yes', 'm\\|1', 'sig\\|nal', 'in\\|ject',
+                      'edit\\|file', 'x\\|y', '写入 +1\\|−1', '0.8\\|s']) {
+  if (html.indexOf(needle) === -1) throw new Error('单元格内容未完整保留: ' + needle);
+}
+// diff 链接是 HTML 非单元格文本，必须原样保留（不被转义误伤）
+if (html.indexOf('<a href="#tel-diff-0" data-tel-src="_cur">查看 diff</a>') === -1)
+  throw new Error('查看 diff 链接必须 HTML 原样保留');
+// 行结构合法：数据行未转义管道数 = 列数 + 1（Tools 4 列 → 5，Skills/Memory 3 列 → 4）
+const rows = html.split('\n').filter(l => l.indexOf('\\|') !== -1);
+if (rows.length !== 3) throw new Error('应 3 条数据行（各表 1 行），实际 ' + rows.length);
+for (const row of rows) {
+  const pipes = (row.match(/(?<!\\)\|/g) || []).length;
+  const expect = row.indexOf('edit\\|file') !== -1 ? 5 : 4;
+  if (pipes !== expect) throw new Error('行未转义管道数不符：期望 ' + expect + '，实际 ' + pipes + ' → ' + row);
+}
+console.log('NODE_TEL3B_OK');
+"""
+    out = _run_node(js)
+    assert "NODE_TEL3B_OK" in out, f"node 实跑失败: {out}"
+
+
+# ── TEL-3c：守卫——三张活表格转义调用必须存在（TEL-b）────────────────
+
+def test_tel_3c_calls_pipe_escape_guard():
+    """静态守卫：_telRenderCalls 单元格管道转义必须存在（同台账 \\| 做法）。"""
+    src = _gui()
+    m = re.search(r"function _telRenderCalls.*?(?=\nfunction )", src, re.S)
+    assert m, "未找到 _telRenderCalls"
+    body = m.group(0)
+    assert "var escP = function(s) { return esc(s).replace(/\\|/g, '\\\\|'); };" in body, \
+        "_telRenderCalls 必须定义单元格管道转义 helper（escP，同台账 \\| 做法）"
+    for frag in ("escP(r.name)", "escP(r.args)", "escP(r.result)", "escP(r.dur)"):
+        assert frag in body, f"_telRenderCalls 单元格未走管道转义: {frag}"
+    # 查看 diff 链接是 HTML 非单元格文本，必须保持原样拼在结果列后（防误伤）
+    assert "res + link + ' | '" in body, "diff 链接必须保持 HTML 原样（不得被转义吞掉）"
+
+
 # ── TEL-4：轮次分隔（message.start 驱动 Round N）──────────────────────
 
 def test_tel_4_round_separator():
