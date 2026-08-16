@@ -217,7 +217,8 @@ def test_v4b_5_engine_gateway_zero_diff():
     # COST-1C（2026-08-16）特批：core/llm_caller.py 仅加 usage 事件透传，diff 必须含 COST-1c 标记
     COST1C_ALLOWED = {"core/llm_caller.py"}
     # COST-2（2026-08-16）特批：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度），
-    # diff 必须含 COST-2 标记
+    # diff 必须含 COST-2 标记；DIAG-1（2026-08-16）特批：injector.py 新增调试纪律
+    # 场景（scene=debug），diff 必须含 DIAG-1 标记
     COST2_ALLOWED = {"core/injector.py"}
     # SAFETY-1（2026-08-16）特批：core/command_safety.py 进程杀灭白名单（kill/pkill/
     # killall 误杀自身后端与桌面端渲染进程的根治疗），diff 必须含 SAFETY-1 标记
@@ -233,7 +234,8 @@ def test_v4b_5_engine_gateway_zero_diff():
         assert "COST-1c" in r4.stdout, f"{f} 的改动缺 COST-1c 特批标记，未授权改动被拦截"
     for f in sorted(COST2_ALLOWED & set(changed)):
         r5 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert "COST-2" in r5.stdout, f"{f} 的改动缺 COST-2 特批标记，未授权改动被拦截"
+        assert ("COST-2" in r5.stdout or "DIAG-1" in r5.stdout), \
+            f"{f} 的改动缺 COST-2/DIAG-1 特批标记，未授权改动被拦截"
     for f in sorted(SAFETY1_ALLOWED & set(changed)):
         r6 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
