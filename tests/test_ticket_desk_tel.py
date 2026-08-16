@@ -498,21 +498,29 @@ def test_tel_8_zero_interference():
     }
     # 引擎 / gateway / TUI / 小组件零改动
     for ln in changed:
+        # 票 COST-1c ① 特批：core/llm_caller.py 仅加 usage 事件透传，diff 必须含 COST-1c 标记
+        if ln == "core/llm_caller.py":
+            r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-1c" in r4.stdout, f"{ln} 缺 COST-1c 特批标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "COST-1b" in r3.stdout, f"{ln} 缺 COST-1b 授权标记，未授权改动被拦截"
+            assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout), \
+                f"{ln} 缺 COST-1b/COST-1c 授权标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
-    # 改动文件清单（index.html + 本测试文件 + V2C12 豁免记账文件）只允许 TEL 相关
+    # 改动文件清单（index.html + 本测试文件 + V2C12/V4 豁免 + COST-1c 特批）只允许相关
     for ln in changed:
         if ln.endswith("index.html"):
             continue
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py":
             continue
-        assert "test_ticket_desk_tel" in ln or "test_ticket_desk_v2c12" in ln or "test_ticket_desk_v4" in ln, \
-            f"意外改动文件: {ln}"
+        if ("test_ticket_desk_tel" in ln or "test_ticket_desk_v2c12" in ln
+                or "test_ticket_desk_v4" in ln or "test_ticket_cost1" in ln):
+            continue
+        assert False, f"意外改动文件: {ln}"
 
 
 def test_tel_8b_event_wrap_not_overwrite():

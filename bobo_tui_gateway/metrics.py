@@ -38,16 +38,38 @@ _MAX_TOOLS_PER_ROUND = 200
 
 
 def _tool_target(name: str, args: dict) -> str:
-    """提取 read 类工具的 target（文件路径或 path+pattern），取不到返回 ''。"""
+    """提取工具的 target（票 COST-1c ③ 全抓取），取不到返回 ''（不许编造）。
+
+    四类口径（票面）：
+      - 终端 execute_terminal → command（截 120 字符）
+      - 文件类 read_local_file / edit_file / file_operation / file_writer → filepath/file_path/path
+      - grep 类 grep_code → pattern@path
+      - obsidian 类 read/write/append_obsidian 等 → filename（笔记路径）
+    其余工具若有 filepath/file_path/path/filename 参数也通用兜底抓取。
+    """
     args = args or {}
+    if name == "execute_terminal":
+        cmd = str(args.get("command") or "")
+        return cmd[:120] if cmd else ""
     if name == "read_local_file":
         return str(args.get("file_path") or args.get("filepath") or "")
-    if name == "read_obsidian":
-        return str(args.get("filename") or "")
+    if name in ("edit_file", "file_writer"):
+        return str(args.get("file_path") or args.get("path") or "")
+    if name == "file_operation":
+        return str(args.get("path") or "")
     if name == "grep_code":
         p = str(args.get("path") or "")
         pat = str(args.get("pattern") or "")
-        return (p + "::" + pat) if (p or pat) else ""
+        return (pat + "@" + p) if (p or pat) else ""
+    if name in ("read_obsidian", "write_obsidian", "append_obsidian",
+                "delete_note", "classify_note", "batch_copy_notes",
+                "batch_move_notes", "batch_delete_notes"):
+        return str(args.get("filename") or "")
+    # 通用兜底：任一路径类参数存在即抓取
+    for k in ("filepath", "file_path", "path", "filename"):
+        v = str(args.get(k) or "")
+        if v:
+            return v
     return ""
 
 
@@ -147,6 +169,8 @@ class MetricsSink:
             completion_tokens = usage.get("completion_tokens")
             if completion_tokens is None:
                 completion_tokens = usage.get("output")
+            # ── 票 COST-1c ②：逐次 LLM 调用累计（事件流观测；快照字段保留不动）──
+            _llm = self._llm_calls_summary(sid, buf["t0"])
             user_chars = self._user_chars.pop(sid, None)
             tools = buf["tools"][:_MAX_TOOLS_PER_ROUND]
             repeat_reads = [
@@ -163,8 +187,14 @@ class MetricsSink:
                 "usage": {
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
-                    "cache_hit_tokens": usage.get("prompt_cache_hit_tokens"),
-                    "cache_miss_tokens": usage.get("prompt_cache_miss_tokens"),
+                    # 票 COST-1c ①：cache 字段优先取事件流 llm.usage 最近值（API 原样）；
+                    # 事件观测不到退回 message.complete usage（取不到落 null，不编造）
+                    "cache_hit_tokens": _llm["cache_hit_tokens"] if _llm["cache_hit_tokens"] is not None else usage.get("prompt_cache_hit_tokens"),
+                    "cache_miss_tokens": _llm["cache_miss_tokens"] if _llm["cache_miss_tokens"] is not None else usage.get("prompt_cache_miss_tokens"),
+                    # 票 COST-1c ②：逐次累计真值（usage_calls=本轮 LLM 调用次数）
+                    "usage_calls": _llm["usage_calls"],
+                    "prompt_tokens_sum": _llm["prompt_tokens_sum"],
+                    "completion_tokens_sum": _llm["completion_tokens_sum"],
                     "user_prompt_chars": user_chars,
                 },
                 "budget": self._budget(sid),
@@ -174,6 +204,62 @@ class MetricsSink:
             }
             self._buf.pop(sid, None)
             self._append(row)
+
+    def _llm_calls_summary(self, sid: str, since_ts: float) -> dict:
+        """从 events.jsonl 尾部倒找本 sid 的 LLM 调用事件（t0 之后），累计真实消耗。
+
+        口径：
+          - usage_calls / prompt_tokens_sum / completion_tokens_sum ← llm.call 事件
+            （engine 每次 LLM 调用写一条，带逐次 prompt/completion_tokens 真值）
+          - cache_hit/miss ← llm.usage 事件最近一条携带该字段的值（API 原样，
+            llm_caller 侧 ① 透传；事件观测不到则 null，诚实口径）
+        观测不到任何事件 → 0/null（不编造）。
+        """
+        try:
+            if not self._events_path.exists():
+                return {"usage_calls": 0, "prompt_tokens_sum": 0, "completion_tokens_sum": 0,
+                        "cache_hit_tokens": None, "cache_miss_tokens": None}
+            size = self._events_path.stat().st_size
+            read_size = min(size, 512 * 1024)
+            with open(self._events_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(max(0, size - read_size))
+                tail = f.read()
+            calls = 0
+            p_sum = 0
+            c_sum = 0
+            cache_hit = None
+            cache_miss = None
+            for raw in reversed(tail.splitlines()):
+                try:
+                    ev = json.loads(raw)
+                except Exception:
+                    continue
+                if ev.get("session_id") != sid:
+                    continue
+                if ev.get("ts", 0) < since_ts - 1:
+                    continue  # 只统计本轮 t0 之后（1s 容差防边界抖动）
+                t = ev.get("type")
+                if t == "llm.call":
+                    # engine 逐次调用落账（真实值）
+                    calls += 1
+                    p = ev.get("prompt_tokens")
+                    c = ev.get("completion_tokens")
+                    if isinstance(p, (int, float)):
+                        p_sum += int(p)
+                    if isinstance(c, (int, float)):
+                        c_sum += int(c)
+                elif t == "llm.usage":
+                    # llm_caller ① 透传通道：只取 cache 字段（API 原样）
+                    u = ev.get("usage") or {}
+                    if cache_hit is None and u.get("prompt_cache_hit_tokens") is not None:
+                        cache_hit = u.get("prompt_cache_hit_tokens")
+                    if cache_miss is None and u.get("prompt_cache_miss_tokens") is not None:
+                        cache_miss = u.get("prompt_cache_miss_tokens")
+            return {"usage_calls": calls, "prompt_tokens_sum": p_sum, "completion_tokens_sum": c_sum,
+                    "cache_hit_tokens": cache_hit, "cache_miss_tokens": cache_miss}
+        except Exception:
+            return {"usage_calls": 0, "prompt_tokens_sum": 0, "completion_tokens_sum": 0,
+                    "cache_hit_tokens": None, "cache_miss_tokens": None}
 
     # ── 元数据 ──
 

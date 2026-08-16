@@ -730,6 +730,15 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                     result = {"choices": [choice]}
                     if usage:
                         result["usage"] = usage
+                        # 票 COST-1c ①：usage 原样透传事件（含 prompt_cache_hit/miss_tokens）。
+                        # 度量层经事件流观测逐次调用；纯观测零逻辑改动，取不到由下游落 null。
+                        try:
+                            _event_bus.write("llm.usage", {
+                                "session_id": session_id or "",
+                                "usage": usage,
+                            })
+                        except Exception:
+                            pass
                     if _finish_reason:   # 票 PERF-1：finish_reason 透出（调用方/审计可用）
                         result["finish_reason"] = _finish_reason
                     # 票 P：reasoning 独立返回（不混入 content），并留事件
@@ -779,6 +788,15 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             "detail": response.text[:500],
                         }
                     continue  # 回到 for attempt 循环（attempt+1，消耗一次重试配额，_length_retried 防循环）
+                # 票 COST-1c ①：非流式 usage 同样原样透传事件（流式在 731 行处）
+                if isinstance(_body, dict) and _body.get("usage"):
+                    try:
+                        _event_bus.write("llm.usage", {
+                            "session_id": session_id or "",
+                            "usage": _body["usage"],
+                        })
+                    except Exception:
+                        pass
                 return _body
 
             except LLMInterrupted:
