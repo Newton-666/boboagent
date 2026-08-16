@@ -114,4 +114,6 @@ COST-1c 度量层数据质量补强（缓存透传+逐次累计+target 抓取；
 
 COST-2 前缀稳定化（小时级锚点+尾部动态块统一注入 user 消息；实测 R3 起缓存命中 99.8%，基线 3.4%——账单结构性打折落地）
 
-当前 main: 含 COST-2 · 测试基线 2621 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+SAFETY-1 进程杀灭分级（pkill/killall 黑名单 + kill PID 强制审批 + bobo 进程标识硬拦）+ 后端 code-0 自动重启 + 1345 空值守卫
+
+当前 main: 含 SAFETY-1 · 测试基线 2661 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
