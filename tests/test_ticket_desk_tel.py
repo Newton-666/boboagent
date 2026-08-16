@@ -508,6 +508,11 @@ def test_tel_8_zero_interference():
             r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "COST-2" in r4.stdout, f"{ln} 缺 COST-2 特批标记，未授权改动被拦截"
             continue
+        # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
+        if ln == "core/command_safety.py":
+            r5 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "SAFETY-1" in r5.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
@@ -520,9 +525,15 @@ def test_tel_8_zero_interference():
     for ln in changed:
         if ln.endswith("index.html"):
             continue
+        # 票 SAFETY-1 特批：apps/desktop/electron/main.cjs 后端自动重启（退出码 0
+        # 也重启），diff 必须含 SAFETY-1 标记
+        if ln.endswith("main.cjs"):
+            r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "SAFETY-1" in r7.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py":
             continue
         if ln.startswith("tests/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）

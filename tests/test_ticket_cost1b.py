@@ -355,7 +355,9 @@ def test_c8_core_zero_diff_guard():
     changed = [x for x in (r.stdout + r2.stdout).splitlines() if x.strip()]
     # 票 COST-1c ① 特批白名单：llm_caller.py 允许（仅加字段透传）
     # 票 COST-2 特批白名单：injector.py 允许（仅限两处：NOW 锚点后移 + 小时级精度）
-    changed = [x for x in changed if x not in ("core/llm_caller.py", "core/injector.py")]
+    # 票 SAFETY-1 特批白名单：command_safety.py 允许（进程杀灭分级，diff 须含 SAFETY-1 标记）
+    changed = [x for x in changed
+               if x not in ("core/llm_caller.py", "core/injector.py", "core/command_safety.py")]
     assert changed == [], f"core/ 有改动，违反铁律: {changed}"
 
 
