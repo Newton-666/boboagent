@@ -98,7 +98,10 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     }
     # COST-1C（2026-08-16）特批：core/llm_caller.py 仅加 usage 事件透传，diff 必须含 COST-1c 标记
     COST1C_ALLOWED = {"core/llm_caller.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED]
+    # COST-2（2026-08-16）特批：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度），
+    # diff 必须含 COST-2 标记
+    COST2_ALLOWED = {"core/injector.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
@@ -107,6 +110,9 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     for f in sorted(COST1C_ALLOWED & set(changed)):
         r4 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "COST-1c" in r4.stdout, f"{f} 的改动缺 COST-1c 特批标记，未授权改动被拦截"
+    for f in sorted(COST2_ALLOWED & set(changed)):
+        r5 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "COST-2" in r5.stdout, f"{f} 的改动缺 COST-2 特批标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")

@@ -66,12 +66,13 @@ def _build(engine, user_input):
 
 
 def _discipline_msg(msgs):
-    """返回纪律段消息内容；未注入返回 None。"""
+    """返回纪律段消息内容（取最后一处=当前轮，历史轮次可能残留旧纪律）；未注入返回 None。"""
+    found = None
     for m in msgs:
         c = m.get("content", "")
         if "【施工工作流纪律】" in c or "【收工自审纪律】" in c:
-            return c
-    return None
+            found = c
+    return found
 
 
 # ── 1. 施工类回合注入施工纪律 ──
@@ -132,6 +133,8 @@ def test_zero_context_clone_still_injects():
     eng = MockEngine()  # history 仅初始消息、tracker 全空 = 新 clone
     for ui, marker in (("施工：修 bug", "【施工工作流纪律】"),
                        ("收工汇报", "【收工自审纪律】")):
+        # 模拟真实引擎流程：每轮先 append 当前 user 消息再 build
+        eng.history.append({"role": "user", "content": ui})
         msgs = _build(eng, ui)
         disc = _discipline_msg(msgs)
         assert disc is not None and marker in disc, f"零上下文下 {ui!r} 应注入 {marker}"

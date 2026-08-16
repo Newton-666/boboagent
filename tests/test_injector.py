@@ -188,10 +188,12 @@ class TestNowAnchor:
         )
 
     def _find_anchor(self, msgs):
+        """提取 [NOW] 锚点块（锚点行 + 指令行，位于 user 消息内容内）。"""
         for m in msgs:
             c = m.get("content", "")
-            if isinstance(c, str) and c.startswith("[NOW] "):
-                return c
+            if isinstance(c, str) and "[NOW] " in c:
+                seg = c[c.index("[NOW] "):]
+                return seg.split("\n\n", 1)[0]
         return None
 
     def test_anchor_injected(self, injector):
@@ -201,7 +203,10 @@ class TestNowAnchor:
         assert anchor is not None, "messages 中未找到 [NOW] 锚点"
 
     def test_anchor_format(self, injector):
-        """格式正确：首行 `[NOW] YYYY-MM-DD HH:MM Weekday (Asia/Shanghai)` ≤60 字符。"""
+        """格式正确：首行 `[NOW] YYYY-MM-DD N时 周X (Asia/Shanghai)` ≤60 字符。
+
+        票 COST-2：精度分钟级→小时级（前缀缓存稳定化），星期为中文。
+        """
         msgs = self._build(injector)
         anchor = self._find_anchor(msgs)
         assert anchor is not None
@@ -209,8 +214,8 @@ class TestNowAnchor:
         assert len(first_line) <= 60, f"锚点行超长: {len(first_line)}"
         import re
         pat = (
-            r"^\[NOW\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} "
-            r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) "
+            r"^\[NOW\] \d{4}-\d{2}-\d{2} \d{1,2}时 "
+            r"(周一|周二|周三|周四|周五|周六|周日) "
             r"\(Asia/Shanghai\)$"
         )
         assert re.match(pat, first_line), f"格式不符: {first_line}"

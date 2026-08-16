@@ -183,9 +183,11 @@ class TestIronRules:
         r = subprocess.run(["git", "diff", "--stat", "core/"],
                            capture_output=True, text=True, cwd=str(ROOT))
         # 票 COST-1c ① 特批白名单：core/llm_caller.py 仅加 usage 事件透传（零逻辑改动）；
+        # 票 COST-2 特批白名单：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度）；
         # 过滤掉特批文件行与 --stat 汇总行（"1 file changed"）
         lines = [l for l in r.stdout.strip().splitlines()
-                 if l.strip() and "core/llm_caller.py" not in l and "file changed" not in l]
+                 if l.strip() and "core/llm_caller.py" not in l
+                 and "core/injector.py" not in l and "file changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 
     def test_results_in_gitignore(self):
