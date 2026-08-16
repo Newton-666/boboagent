@@ -3781,19 +3781,21 @@ function _telRenderCalls(st, srcKey) {
   srcKey = (srcKey == null) ? '_cur' : srcKey;
   var heads = { Skills: 'Skill | 加载内容 | 用途', Memory: '条目 | 信号 | 注入原因', Tools: '工具 | 参数摘要 | 结果 | 耗时' };
   var html = '';
+  // TEL-b：单元格管道转义（与台账同款）——| 不打乱 Markdown 列结构；diff 链接是 HTML 非单元格文本，不受影响
+  var escP = function(s) { return esc(s).replace(/\|/g, '\\|'); };
   ['Skills', 'Memory', 'Tools'].forEach(function(cat) {
     var rows = st.calls[cat];
     if (!rows.length) return;
     html += '<div class="tel-sec"><div class="tel-sec-title">' + cat + '</div>';
     var md = '| ' + heads[cat] + ' |\n|---|---|---|\n';
     rows.forEach(function(r, i) {
-      var res = r.error ? '<span class="tel-muted">' + esc(r.result) + '</span>' : esc(r.result);
+      var res = r.error ? '<span class="tel-muted">' + escP(r.result) + '</span>' : escP(r.result);
       var link = '';
       if (r.diff) link = ' <a href="#tel-diff-' + i + '" data-tel-src="' + srcKey + '">查看 diff</a>';
       if (cat === 'Tools') {
-        md += '| `' + esc(r.name) + '` | ' + esc(r.args) + ' | ' + res + link + ' | ' + esc(r.dur) + ' |\n';
+        md += '| `' + escP(r.name) + '` | ' + escP(r.args) + ' | ' + res + link + ' | ' + escP(r.dur) + ' |\n';
       } else {
-        md += '| `' + esc(r.name) + '` | ' + esc(r.args) + ' | ' + res + ' |\n';
+        md += '| `' + escP(r.name) + '` | ' + escP(r.args) + ' | ' + res + ' |\n';
       }
     });
     html += mdReply(md) + '</div>';
