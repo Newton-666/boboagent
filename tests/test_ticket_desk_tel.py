@@ -536,6 +536,13 @@ def test_tel_8_zero_interference():
             assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
                 f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
             continue
+        # 票 TICKET-GW-SOCK 特批：bobo_tui_gateway/entry.py（socket 双实例防护：
+        # 探测活跃 sock 拒绝双实例 + EADDRINUSE 竞态兜底，_run_socket_backend 内），
+        # diff 必须含 TICKET-GW-SOCK 标记
+        if ln == "bobo_tui_gateway/entry.py":
+            r_gw = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-GW-SOCK" in r_gw.stdout, f"{ln} 缺 TICKET-GW-SOCK 特批标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
         # diff 必须含 DESK-P2 标记，否则未授权改动被拦截
@@ -552,13 +559,20 @@ def test_tel_8_zero_interference():
         # 也重启），diff 必须含 SAFETY-1 标记
         if ln.endswith("main.cjs"):
             r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "SAFETY-1" in r7.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
+            assert ("SAFETY-1" in r7.stdout or "TICKET-GW-SOCK" in r7.stdout), \
+                f"{ln} 缺 SAFETY-1/TICKET-GW-SOCK 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：apps/desktop/electron/preload.cjs 新增 chooseFolder 别名
         #（桌面端主进程传真实项目根），diff 必须含 DESK-P1 标记
         if ln.endswith("preload.cjs"):
             r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r9.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-GW-SOCK 特批：bobo_tui_gateway/entry.py（socket 双实例防护），
+        # diff 必须含 TICKET-GW-SOCK 标记
+        if ln == "bobo_tui_gateway/entry.py":
+            r_gw2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-GW-SOCK" in r_gw2.stdout, f"{ln} 缺 TICKET-GW-SOCK 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）

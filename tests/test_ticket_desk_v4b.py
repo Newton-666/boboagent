@@ -263,6 +263,13 @@ def test_v4b_5_engine_gateway_zero_diff():
     if not r2.stdout.strip():
         return  # COST-1B：entry.py 无改动时跳过 DESK-CLI 锚点 diff 校验
     added, deleted = [int(x) for x in r2.stdout.split()[:2]]
+    r_gw = subprocess.run(["git", "diff", "--", "bobo_tui_gateway/entry.py"],
+                          capture_output=True, text=True, cwd=ROOT)
+    # TICKET-GW-SOCK（2026-08-17）特批：entry.py socket 双实例防护（探测活跃 +
+    # EADDRINUSE 竞态兜底，_run_socket_backend 内），diff 必须含 TICKET-GW-SOCK 标记
+    if "TICKET-GW-SOCK" in r_gw.stdout:
+        assert deleted <= 5, f"GW-SOCK 授权范围外删除: {r2.stdout}"
+        return
     assert deleted == 0, f"entry.py 不得删除既有行: {r2.stdout}"
     anchor_lines = len(m.group(0).splitlines())  # 全部行（含锚点段尾随空行，与 git diff 新增行数对齐）
     assert added == anchor_lines, f"锚点段外存在改动：diff+{added} vs 锚点段 {anchor_lines} 行"

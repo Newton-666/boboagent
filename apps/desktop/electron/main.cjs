@@ -8,11 +8,15 @@ const fs = require('fs')
 const os = require('os')
 // TICKET-DESK-V4: 小组件开关状态 + 窗口尺寸持久化（纯 Node 模块）
 const { readWidgetEnabled, writeWidgetEnabled, readWidgetSize, writeWidgetSize } = require('./widget-config.cjs')
+// TICKET-GW-SOCK: 桌面端 ⇄ gateway 的 unix socket 桥（固定名 bobo-gw-main.sock）
+const { resolveGwSockPath, probeSocket, cleanupStaleSocket, createGatewayClient, buildBackendEnv } = require('./gateway-socket.cjs')
+
+const GW_SOCK_PATH = resolveGwSockPath()
 
 let mainWindow = null
 let widgetWindow = null   // TICKET-DESK-V4: 只读投影小组件小窗（独立生命周期，不波及主窗/后端）
 let backendProcess = null
-let backendBuffer = ''
+let gwClient = null       // TICKET-GW-SOCK: unix socket 客户端（替代 stdio 管道桥接）
 let backendRestartCount = 0
 const MAX_BACKEND_RESTARTS = 3
 // 票 SAFETY-1：用户/系统主动停后端标志（退出应用 Cmd+Q / 改配置重启）。
@@ -78,7 +82,7 @@ function resolvePython() {
   return 'python3'
 }
 
-function startBackend() {
+async function startBackend() {
   const python = resolvePython()
   const isPackaged = app.isPackaged
   let projectRoot
@@ -94,32 +98,35 @@ function startBackend() {
     projectRoot = path.resolve(__dirname, '..', '..', '..')
   }
 
-  // TICKET-D1b E1: force stdio mode — strip TUI-specific env vars so the
-  // backend cannot fall into socket mode (BOBO_GW_SOCKET) or inherit the
-  // TUI's dedicated session path (BOBO_SESSION_DIR). Only BOBO_BACKEND stays.
-  const env = {
-    ...process.env,
-    BOBO_BACKEND: '1',
-    PYTHONPATH: projectRoot,
-    BOBO_CWD: process.cwd(),
-  }
-  // TICKET-D1c (E3): dev 模式不强制 BOBO_DATA_DIR —— 让 config.py 自动判定
-  // （仓库 data/ 存在 → 仓库 data/，与 TUI dev 一致）；packaged 模式才固定
-  // ~/.bobo（与 TUI 生产安装一致）。两端数据目录统一，会话/记忆/知识库共享。
-  if (isPackaged) {
-    env.BOBO_DATA_DIR = process.env.BOBO_DATA_DIR || path.join(require('os').homedir(), '.bobo')
-  }
-  for (const k of ['BOBO_GW_SOCKET', 'BOBO_SESSION_DIR']) {
-    delete env[k]
+  // TICKET-GW-SOCK：spawn 前先探测——若已有活跃后端（旧桌面端残留 / 用户手动
+  // 起过 gateway）直接复用其 socket，不重复 spawn，杜绝双 gateway 抢同一 sock
+  // （EADDRINUSE 根治法：复用而非再起）。
+  const reused = await probeSocket(GW_SOCK_PATH, 1000)
+  if (reused) {
+    console.log(`[bobo-desktop] 探测到活跃后端 ${GW_SOCK_PATH}，复用（不重新 spawn）`)
+    backendProcess = null
+    ensureGatewayClient()
+    gwClient.connect()
+    return
   }
 
-  console.log(`[bobo-desktop] Starting backend: ${python} -m bobo_tui_gateway.entry`)
+  // 无活跃后端：清理陈旧 sock 文件（残留文件会导致新后端 bind 报地址占用）后 spawn
+  cleanupStaleSocket(GW_SOCK_PATH)
+
+  // TICKET-GW-SOCK 版 D1b E1 防护：显式注入 BOBO_GW_SOCKET 固定路径 + 空闲超时 0
+  // （后端生命周期由桌面端管，窗口崩/关不杀后端，重开重连恢复会话）；
+  // BOBO_SESSION_DIR 仍删除，防继承 TUI 专用会话路径。
+  const env = buildBackendEnv({ projectRoot, isPackaged })
+
+  console.log(`[bobo-desktop] Starting backend: ${python} -m bobo_tui_gateway.entry (socket=${GW_SOCK_PATH})`)
   console.log(`[bobo-desktop] Project root: ${projectRoot}`)
 
   backendProcess = spawn(python, ['-m', 'bobo_tui_gateway.entry'], {
     cwd: projectRoot,
     env,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    // TICKET-GW-SOCK：socket 模式下 JSON-RPC 不再走 stdin/stdout——stdin 不用，
+    // stdout 仅转发日志（无 JSON-RPC 行解析）。
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
   backendProcess.on('error', (err) => {
@@ -168,46 +175,68 @@ function startBackend() {
     process.stderr.write(`[backend] ${text}`)
   })
 
-  // Parse JSON-RPC lines from stdout
+  // TICKET-GW-SOCK：socket 模式下 stdout 只有日志（JSON-RPC 走 unix socket），
+  // 转发到 renderer 的 backend-log（与 stderr 同款），不再做 JSON-RPC 行解析。
   backendProcess.stdout.on('data', (data) => {
-    backendBuffer += data.toString()
-    const lines = backendBuffer.split('\n')
-    backendBuffer = lines.pop() // keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (!line.trim()) continue
-      try {
-        const msg = JSON.parse(line)
-        if (mainWindow) {
-          mainWindow.webContents.send('backend-message', msg)
-        } else {
-          pendingMessages.push(msg)
-        }
-        // TICKET-DESK-V4: 只读投影 —— 同一条现成事件流镜像给小组件（只监听不响应）
-        if (widgetWindow) {
-          widgetWindow.webContents.send('backend-message', msg)
-        }
-      } catch {
-        process.stderr.write(`[bobo-desktop] Unparseable backend output: ${line.slice(0, 100)}\n`)
-      }
+    const text = data.toString()
+    if (mainWindow) {
+      mainWindow.webContents.send('backend-log', { stream: 'stdout', text })
     }
+    process.stdout.write(`[backend] ${text}`)
+  })
+
+  // TICKET-GW-SOCK：spawn 后连 socket（后端 bind 需要时间，client 自动重连兜底）
+  ensureGatewayClient()
+  gwClient.connect()
+}
+
+/** TICKET-GW-SOCK：建立/复用 gateway socket 客户端。renderer 的 IPC 接口
+ * （backend-send / backend-message / backend-status）完全不变——桥接层从
+ * stdio 管道换成 unix socket，对窗口与小组件透明。 */
+function ensureGatewayClient() {
+  if (gwClient) return
+  gwClient = createGatewayClient({
+    sockPath: GW_SOCK_PATH,
+    onMessage: (msg) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('backend-message', msg)
+      } else {
+        pendingMessages.push(msg)
+      }
+      // TICKET-DESK-V4: 只读投影 —— 同一条现成事件流镜像给小组件（只监听不响应）
+      if (widgetWindow) {
+        widgetWindow.webContents.send('backend-message', msg)
+      }
+    },
+    onStatus: (status) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('backend-status', { status: 'socket', detail: status })
+      }
+    },
+    onLog: (line) => console.log(`[bobo-desktop] ${line}`),
   })
 }
 
 function sendToBackend(msg) {
-  if (!backendProcess || !backendProcess.stdin) {
-    console.warn('[bobo-desktop] Backend not running, cannot send message')
+  if (!gwClient || !gwClient.send(msg)) {
+    console.warn('[bobo-desktop] Backend not connected, cannot send message')
     return false
   }
-  backendProcess.stdin.write(JSON.stringify(msg) + '\n')
   return true
 }
 
 function stopBackend() {
   // 票 SAFETY-1：主动停止（退出应用 / 改配置重启）→ exit 不触发自动重启
   backendStopRequested = true
+  // TICKET-GW-SOCK：先关 socket 客户端（停止重连），再杀后端进程。
+  // 复用外部后端时 backendProcess 为 null——天然杀不到外部进程（它归用户/旧桌面端管）。
+  if (gwClient) {
+    gwClient.close()
+    gwClient = null
+  }
   if (backendProcess) {
-    backendProcess.stdin.end()
+    // stdio 已切 socket 模式（stdin='ignore'），防御性判空
+    if (backendProcess.stdin) backendProcess.stdin.end()
     setTimeout(() => {
       if (backendProcess) {
         backendProcess.kill()
