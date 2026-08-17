@@ -529,10 +529,12 @@ def test_tel_8_zero_interference():
                 f"{ln} 缺 COST-3/DESK-P1 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
-        # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记
+        # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
+        # 票 VSC-2B：engine_adapter.py 复用（写审批闸门），diff 标记兼容
         if ln in ("core/engine_adapter.py", "core/tool_runner.py"):
             r8 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "DESK-P1" in r8.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
+            assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
+                f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
@@ -553,6 +555,12 @@ def test_tel_8_zero_interference():
         if ln == "bobo_tui_gateway/transport.py":
             r_gwm = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "TICKET-GW-MULTI" in r_gwm.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
+            continue
+        # 票 VSC-2B 特批：bobo_tui_gateway/handlers/sessions.py（session.set_write_approval
+        # RPC + 会话级写审批开关），diff 必须含 VSC-2B 标记
+        if ln == "bobo_tui_gateway/handlers/sessions.py":
+            r_v2b = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "VSC-2B" in r_v2b.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
@@ -593,6 +601,11 @@ def test_tel_8_zero_interference():
         if ln == "bobo_tui_gateway/transport.py":
             r_gwm2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "TICKET-GW-MULTI" in r_gwm2.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
+            continue
+        # 票 VSC-2B 特批：bobo_tui_gateway/handlers/sessions.py（会话级写审批）
+        if ln == "bobo_tui_gateway/handlers/sessions.py":
+            r_v2b2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "VSC-2B" in r_v2b2.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）

@@ -21,7 +21,11 @@ export class ChatPanel {
   private newChatCb: (() => void) | null = null;
   private switchSessionCb: ((sid: string) => void) | null = null;
   private requestSessionsCb: (() => void) | null = null;
-  private diffDecisionCb: ((filePath: string, accept: boolean) => void) | null = null;
+  // 票 VSC-2B：审批卡决策（choice: allow/deny）。diffDecisionCb 随审批闸门废弃
+  //（Reject 语义前移到执行前，diff 展示只读）。
+  private approvalDecisionCb: ((choice: string) => void) | null = null;
+  // 票 VSC-2B：停止按钮回调（webview 点停止/Esc → host 发 session.interrupt）
+  private stopCb: (() => void) | null = null;
 
   constructor(ctx: vscode.ExtensionContext, view: vscode.WebviewView) {
     this.ctx = ctx;
@@ -62,19 +66,24 @@ export class ChatPanel {
     this.post({ kind: 'tool', sessionId: sid, event: ev });
   }
 
-  /** TICKET-VSC-2C：推 diff 卡片（Accept/Reject）。 */
-  showDiffCard(filePath: string, title: string): void {
-    this.post({ kind: 'diffCard', filePath, title });
+  /** 票 VSC-2B：审批卡（tool_name + arguments 摘要；执行前无 diff，不显示 diff）。 */
+  showApprovalCard(sid: string, ev: Record<string, unknown>): void {
+    this.post({ kind: 'approvalCard', sessionId: sid, event: ev });
+  }
+
+  /** 票 VSC-2B：审批已响应（allow/deny），收起卡片。 */
+  approvalDone(): void {
+    this.post({ kind: 'approvalDone' });
+  }
+
+  /** 票 VSC-2B：120s 超时（引擎侧放弃），卡片置灰"已超时"。 */
+  approvalTimeout(sid: string): void {
+    this.post({ kind: 'approvalTimeout', sessionId: sid });
   }
 
   /** TICKET-VSC-2D：推台账条目到折叠区。 */
   setLedger(items: { id: string; title: string; status: string }[]): void {
     this.post({ kind: 'ledger', items });
-  }
-
-  /** TICKET-VSC-2C：diff 卡已处理完毕（收起面板卡片）。 */
-  hideDiffCard(filePath: string): void {
-    this.post({ kind: 'diffCardDone', filePath });
   }
 
   /** TICKET-VSC-2B：清空面板（New chat 后）。 */
@@ -104,6 +113,11 @@ export class ChatPanel {
     this.post({ kind: 'complete', sessionId: sid, finalText });
   }
 
+  /** 票 VSC-2B：状态栏文本（如中断后 Stopped）。 */
+  setStatus(text: string): void {
+    this.post({ kind: 'status', text });
+  }
+
   /** Ask the webview to show the pairing confirmation prompt. */
   askPairing(): void {
     this.post({ kind: 'pairing' });
@@ -122,8 +136,16 @@ export class ChatPanel {
   /** TICKET-VSC-2B：webview 请求会话列表。 */
   onRequestSessions(cb: () => void): void { this.requestSessionsCb = cb; }
 
-  /** TICKET-VSC-2C：webview 对 diff 卡做了 Accept/Reject 决定。 */
-  onDiffDecision(cb: (filePath: string, accept: boolean) => void): void { this.diffDecisionCb = cb; }
+  /** 票 VSC-2B：webview 对审批卡做了 Accept/Reject 决定（choice: allow/deny）。 */
+  onApprovalDecision(cb: (choice: string) => void): void { this.approvalDecisionCb = cb; }
+
+  /** 票 VSC-2B：回合进行中 Send⇄停止钮切换（message.start→true / complete→false）。 */
+  setRunning(running: boolean): void {
+    this.post({ kind: 'busy', running });
+  }
+
+  /** 票 VSC-2B：webview 请求停止（点停止钮/Esc）。 */
+  onStopRequested(cb: () => void): void { this.stopCb = cb; }
 
   private post(msg: unknown): void {
     // VSC-1B 实弹修复：webview 加载完成前 postMessage 会丢——排队，ready 后补发
@@ -138,7 +160,7 @@ export class ChatPanel {
   private webviewReady = false;
   private pending: unknown[] = [];
 
-  private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean; sessionId?: string; filePath?: string; accept?: boolean }): void {
+  private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean; sessionId?: string; filePath?: string; accept?: boolean; choice?: string }): void {
     if (!msg) return;
     if (msg.kind === 'ready') {
       this.webviewReady = true;
@@ -160,8 +182,10 @@ export class ChatPanel {
       this.switchSessionCb(msg.sessionId);
     } else if (msg.kind === 'requestSessions' && this.requestSessionsCb) {
       this.requestSessionsCb();
-    } else if (msg.kind === 'diffDecision' && typeof msg.filePath === 'string' && typeof msg.accept === 'boolean' && this.diffDecisionCb) {
-      this.diffDecisionCb(msg.filePath, msg.accept);
+    } else if (msg.kind === 'approvalDecision' && typeof msg.choice === 'string' && this.approvalDecisionCb) {
+      this.approvalDecisionCb(msg.choice);
+    } else if (msg.kind === 'stop' && this.stopCb) {
+      this.stopCb();
     }
   }
 
@@ -250,6 +274,10 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 #input { flex:1; border:1px solid var(--border); border-radius:6px; padding:6px 8px; background:var(--bg); font:inherit; }
 #send { border:1px solid var(--border); border-radius:6px; background:var(--bg); padding:6px 12px; cursor:pointer; }
 #send:hover { background:var(--bg3); }
+/* 票 VSC-2B：停止按钮（参照桌面端 #stop-btn：圆形、红系 rgba(244,135,113,*)、■） */
+#stop { border:1px solid rgba(244,135,113,0.4); border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; width:28px; height:28px; padding:0; cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; flex-shrink:0; }
+#stop:hover { background:rgba(244,135,113,0.22); }
+#stop.show { display:flex; }
 #pairing { display:none; margin:10px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
 #pairing.show { display:block; }
 #pairing p { margin:0 0 8px; font-size:13px; }
@@ -268,26 +296,44 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 .think-box.open .think-caret { transform:rotate(90deg); }
 .think-box .think-text { white-space:pre-wrap; word-break:break-word; line-height:1.5; margin-top:6px; display:none; color:var(--text); }
 .think-box.open .think-text { display:block; }
-/* === VSC-2B：工具行（图标+名称+摘要，可折叠；对齐桌面端 .tool 视觉）=== */
-.tool-row { margin:4px 0; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg2); font-size:12px; color:var(--text2); cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
-.tool-row .tool-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-.tool-row .tool-dot.run { background:#e8913a; }
-.tool-row .tool-dot.done { background:var(--green); }
-.tool-row .tool-dot.fail { background:var(--del); }
-.tool-row .tool-name { font-weight:600; color:var(--text); flex-shrink:0; }
-.tool-row .tool-ctx { color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
-.tool-row .tool-caret { font-size:10px; color:var(--text2); flex-shrink:0; }
-.tool-row.open .tool-caret { transform:rotate(90deg); }
+/* === 票 VSC-2B：工具聚合卡（对齐桌面端 .tool-agg/.tool 视觉）=== */
+.tool-agg { margin:6px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
+.tool-agg-head { display:block; padding:8px 12px; font-size:12px; color:var(--text2); cursor:pointer; user-select:none; }
+.tool-agg-head:hover { background:var(--bg3); }
+.tool-agg-arrow { display:inline-block; transition:transform 0.15s; margin-right:6px; }
+.tool-agg-body { border-top:1px solid var(--border); padding:4px 0; }
+.tool { font-size:13px; color:var(--text2); padding:6px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; border:1px solid transparent; transition:background 0.15s, border-color 0.15s; }
+.tool:hover { background:var(--bg3); border-color:var(--border); }
+.tool .tool-icon { font-size:13px; flex-shrink:0; }
+.tool .tool-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.tool .tool-dot.run { background:#e8913a; }
+.tool .tool-dot.done { background:var(--green); }
+.tool .tool-dot.fail { background:var(--del); }
+.tool .tool-name { font-weight:600; color:var(--text); flex-shrink:0; }
+.tool .tool-context { color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+.tool .tool-toggle { font-size:10px; color:var(--text2); flex-shrink:0; }
+.tool .tool-result { display:none; width:100%; margin-top:4px; font-size:12px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+.tool .tool-result.open { display:block; }
 .tool-body { display:none; margin:0 0 4px; padding:6px 10px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; font-size:12px; color:var(--text); }
 .tool-body.open { display:block; }
 .tool-body pre { margin:0; background:transparent; border:none; padding:0; }
-/* === VSC-2C：diff 卡片（Accept/Reject）=== */
-.diff-card { margin:6px 0; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
-.diff-card .diff-file { font-weight:600; color:var(--text); font-size:12px; word-break:break-all; }
-.diff-card .diff-actions { display:flex; gap:6px; margin-top:6px; }
-.diff-card button { border:1px solid var(--border); border-radius:6px; padding:3px 10px; cursor:pointer; background:var(--bg); font-size:12px; color:var(--text); }
-.diff-card .accept { background:var(--str); color:#fff; border-color:var(--str); }
-.diff-card .reject:hover { border-color:var(--del); color:var(--del); }
+/* 票 VSC-2B：diff 只读块（对齐桌面端 diffBlock：@@ 头 / +绿 / -红 / 上下文灰） */
+.diff-block { margin:4px 10px 6px; border:1px solid var(--border); border-radius:6px; overflow:hidden; font-family:var(--mono, monospace); font-size:12px; line-height:1.45; background:var(--bg3); }
+.diff-block .df { padding:2px 10px; color:var(--text2); background:var(--bg2); font-weight:600; }
+.diff-block .dl { padding:1px 10px; white-space:pre-wrap; word-break:break-all; color:var(--text); }
+.diff-block .dl.add { background:rgba(126,231,135,0.08); color:var(--green); }
+.diff-block .dl.del { background:rgba(244,135,113,0.08); color:var(--del); }
+.diff-block .dl.ctx { color:var(--text2); }
+/* === 票 VSC-2B：审批卡（approval.request 唯一卡；执行前无 diff，展示 tool_name+arguments）=== */
+.approval-card { margin:6px 0; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
+.approval-card .approval-title { font-weight:600; color:var(--text); font-size:12px; display:flex; align-items:center; gap:6px; }
+.approval-card .approval-args { margin:6px 0 2px; font-size:12px; color:var(--text2); word-break:break-all; line-height:1.6; }
+.approval-card .diff-actions { display:flex; gap:6px; margin-top:6px; }
+.approval-card button { border:1px solid var(--border); border-radius:6px; padding:3px 10px; cursor:pointer; background:var(--bg); font-size:12px; color:var(--text); }
+.approval-card .approve { background:var(--str); color:#fff; border-color:var(--str); }
+.approval-card .reject:hover { border-color:var(--del); color:var(--del); }
+.approval-card.timeout { opacity:0.6; }
+.approval-card .approval-timedout { font-size:12px; color:var(--text2); }
 /* === VSC-2B：会话栏（New chat 按钮 + 会话下拉）=== */
 #sessbar { position:relative; display:flex; align-items:center; gap:6px; padding:4px 10px; border-bottom:1px solid var(--border); background:var(--bg2); }
 #sessbar button { border:1px solid var(--border); border-radius:6px; padding:2px 8px; cursor:pointer; background:var(--bg); font-size:12px; color:var(--text); }
@@ -331,7 +377,7 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 <div id="pairing"><p>Allow this VS Code window to talk to the local bobo gateway? The socket is local-only (127.0.0.1 equivalent).</p><button id="pair-ok">Allow</button></div>
 <div id="welcome"><div id="welcome-title">Let's finish up something today.</div></div>
 <div id="chat"></div>
-<div id="inputbar"><input id="input" placeholder="Ask a follow-up…"><button id="send">Send</button></div>
+<div id="inputbar"><input id="input" placeholder="Ask a follow-up…"><button id="send">Send</button><button id="stop" title="Stop" hidden>■</button></div>
 <div id="ledger">
   <div id="ledger-head">Ledger<span id="ledger-count"></span></div>
   <div id="ledger-body"></div>

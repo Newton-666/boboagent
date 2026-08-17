@@ -52,6 +52,7 @@
 | COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。**速度与成本同一杠杆：前缀缓存命中率（标杆 Pi 99.93%、P99 -42%）+ PTC 减少模型往返 + prompt 瘦身**。产出：测量报告 → 优化票 |
 | COST-1a 外置变量实验沙盒（owner 立规：**核心引擎零改动，实验全外置**） | 独立目录搭模拟栈：可调 N 工具/N skill/N 段注入 prompt，实测缓存命中率与速度提升，找 efficiency×ability 平衡点；报告出来前核心一行不动 | 📋 COST-1 第一子票 |
 | COST-1b 三端功耗体检 | 桌面端 Electron 常驻内存/CPU + TUI + gateway 常驻开销测量 | 📋 随 COST-1 | 📋 GUI 梯队收官后启动 |
+| COST-4 结果标记/load_result 循环 + 压缩频率治理（2026-08-17 开票，接 COST-2/3 战线的实测新发现） | 根除"读文件=read+load_result 两步走"重复调用（read_local_file 分级标记，<2000 字符不标记直给全文）；压缩摘要调用可观测化（llm.usage 带 reason:summary）+ 预算比 0.7→0.85 拉长压缩间隔；工作锚点补"已读文件"防压缩后重读。背景实证：VSC-2B 施工时段命中率 13%（压缩黑洞 hit=7.7K miss=5.1万）、Repeated read ×8、上下文 60K→111K 暴涨 | 📋 排队（票 docs/tickets/TICKET-COST-4.md） |
 | TOOL-OPT 实验线 | 工具调用效率（COST-1 的子线）：读文件缓存/同回合去重/纯读结果复用；借鉴 DeepSeek Harness PTC 程序化工具调用 → EV-2 轨迹回放做 A/B | 📋 并入 COST-1 |
 | EVAL 体验题 | 同一真实任务 Hermes/bobo 桌面端对照跑，体验差距量化 | 📋 待开 |
 | vitest 存量 13 失败 | gatewayClient websocket 10 个等陈年老账立案清理 | 📋 排队 |

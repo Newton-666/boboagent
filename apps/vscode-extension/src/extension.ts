@@ -23,7 +23,7 @@ import { buildUserMessage, SelectionContext, extractDiagnostics } from './contex
 import { buildPrompt } from './explain';
 import { splitThinking } from './markdown';
 import { applySessionResult, resolveAskGate, buildSelectionPayload } from './sessionFlow';
-import { SnapshotStore, extractTargetPath, hasInlineDiff, restoreSnapshot, WRITE_TOOLS } from './diffFlow';
+import { SnapshotStore, extractTargetPath, hasInlineDiff, WRITE_TOOLS } from './diffFlow';
 import { DiffSnapshotProvider } from './diffProvider';
 
 const PAIRING_KEY = 'bobo.paired.v1';
@@ -34,7 +34,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
     client: SocketClient | null;
     panel: ChatPanel | null;
     sessionId: string | null;
-  } = { client: null, panel: null, sessionId: null };
+    // 票 VSC-2B：审批卡串行令牌——新卡到来递增，旧卡的 120s 超时计时器据此作废
+    approvalToken: number;
+  } = { client: null, panel: null, sessionId: null, approvalToken: 0 };
 
   // ── TICKET-VSC-2C：diff 快照（内存）+ 只读文档提供者 ──
   const snapshots = new SnapshotStore();
@@ -59,7 +61,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
         panel.onNewChat(() => { void newChat(state, ctx); });
         panel.onSwitchSession((sid) => { void switchSession(state, ctx, sid); });
         panel.onRequestSessions(() => { void refreshSessionList(state, ctx); });
-        panel.onDiffDecision((filePath, accept) => { handleDiffDecision(state, filePath, accept, snapshots, diffProvider); });
+        // 票 VSC-2B：审批卡 Accept/Reject → approval.respond（allow/deny）。
+        // 原 VSC-2 的 diffDecisionCb（事后 Reject 快照写回）随审批闸门废弃——
+        // Reject 语义已前移到审批闸门（执行前），diff 展示只读。
+        panel.onApprovalDecision((choice) => { void respondApproval(state, ctx, choice); });
+        // 票 VSC-2B：停止按钮（点停止钮/Esc）→ session.interrupt
+        panel.onStopRequested(() => { void stopCurrentRun(state, ctx); });
         if (state.client && state.client.connected) panel.setExplain(panel.explain);
         // VSC-1B 实弹修复：打开面板即连接——已配对直接连；未配对先问（否则
         // 状态永远卡 connecting、Send 因无 client 静默无效）
@@ -264,13 +271,22 @@ export function activate(ctx: vscode.ExtensionContext): void {
             sid,
             st.panel ? (s) => st.panel && st.panel.setSession(s) : null,
           );
+          // 票 VSC-2B：会话创建即开写审批闸门（配对确认后的第一时间，
+          // 避免首轮工具调用漏闸）。开关挂会话对象，随 session.resume 存活。
+          if (sid) {
+            void client.send('session.set_write_approval', { session_id: sid, on: true })
+              .catch((e: Error) => console.error('bobo: set_write_approval failed', e && e.message));
+          }
         }).catch((e: Error) => {
           // 不静默吞错：session.create 失败留 log（票风险自查点）
           console.error('bobo: session.create failed', e && e.message);
         });
       },
       onDisconnect: () => {
-        if (st.panel) st.panel.handleEvent({ type: 'gateway.error' } as any);
+        if (st.panel) {
+          st.panel.setRunning(false);
+          st.panel.handleEvent({ type: 'gateway.error' } as any);
+        }
       },
       onEvent: (ev) => {
         const p = (ev.params || {}) as Record<string, unknown>;
@@ -280,21 +296,43 @@ export function activate(ctx: vscode.ExtensionContext): void {
         const payload = (p.payload || {}) as Record<string, unknown>;
         const merged: Record<string, unknown> = { ...p, ...payload };
         const sid = String(merged.session_id || '');
-        if (t === 'message.delta' && typeof merged.text === 'string' && st.panel) {
+        if (t === 'message.start' && st.panel) {
+          // 票 VSC-2B：回合开始 → Send 切停止钮
+          st.panel.setRunning(true);
+        } else if (t === 'message.delta' && typeof merged.text === 'string' && st.panel) {
           st.panel.handleDelta(sid, merged.text);
         } else if (t === 'message.complete' && st.panel) {
+          // 票 VSC-2B：回合结束 → 停止钮切回 Send
+          st.panel.setRunning(false);
           const final = String(merged.final_text || '');
           const { body, thinking } = splitThinking(final);
           // VSC-2B：thinking 单独推折叠块，正文照旧流式定稿
           st.panel.handleThinking(sid, thinking);
           st.panel.handleComplete(sid, body || final);
+        } else if (t === 'approval.request') {
+          // 票 VSC-2B：写审批闸门（reason=write_approval）——唯一审批卡。
+          // 引擎天然串行（一次只跑一个工具，pending_confirm 按 sid 单槽）；
+          // 扩展侧再保险：新卡到来先关旧 diff/旧卡，一次只弹一个。
+          const reason = String(merged.reason || '');
+          if (reason === 'write_approval' && st.panel) {
+            st.approvalToken = (st.approvalToken || 0) + 1;
+            const token = st.approvalToken;
+            void closeBoboDiffs();
+            st.panel.showApprovalCard(sid, merged);
+            // 120s 超时置灰（引擎侧既有超时放弃语义，卡片同步提示"已超时"）
+            setTimeout(() => {
+              if (st.approvalToken === token && st.panel) st.panel.approvalTimeout(sid);
+            }, 120000);
+          }
         } else if (t === 'tool.start' && st.panel) {
           // VSC-2C：写文件工具 start → 目标文件快照（内存）
           captureSnapshot(st, snapshots, merged);
           st.panel.handleTool(sid, merged);
         } else if (t === 'tool.complete' && st.panel) {
           st.panel.handleTool(sid, merged);
-          // VSC-2C：写文件工具带 inline_diff → 开 vscode.diff + 面板 Accept/Reject 卡
+          // 票 VSC-2B：diff 只读展示——审批已在执行前过闸门（approval.request
+          // 分支），此处仅开 vscode.diff 快照对比，不再弹 Accept/Reject 审批卡
+          //（防双弹；原 VSC-2 直开审批路径已移除）。
           const name = String(merged.name || '');
           if (WRITE_TOOLS.has(name) && hasInlineDiff(merged)) {
             const args = (merged.arguments || {}) as Record<string, unknown>;
@@ -302,7 +340,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
             if (rel) {
               const abs = resolveAbsPath(rel);
               if (snapshots.has(abs)) {
-                st.panel.showDiffCard(abs, `${name} · ${path.basename(abs)}`);
                 void openDiff(diffProvider, abs);
               }
             }
@@ -469,29 +506,47 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
-  /** Accept/Reject：Accept 关 diff 即完；Reject 快照逐字节写回（fs 直写）。 */
-  function handleDiffDecision(
-    st: typeof state,
-    filePath: string,
-    accept: boolean,
-    store: SnapshotStore,
-    provider: DiffSnapshotProvider,
-  ): void {
-    const entry = store.get(filePath);
-    if (!entry) return;
-    if (!accept) {
-      try {
-        const fs = require('fs') as typeof import('fs');
-        const pathMod = require('path') as typeof import('path');
-        restoreSnapshot(entry, fs, pathMod);
-      } catch (e) {
-        vscode.window.showErrorMessage(`bobo: 快照还原失败 ${(e as Error).message}`);
-        return;
-      }
+  /** 票 VSC-2B：审批卡决策 → approval.respond（allow/deny）。
+   * 原 handleDiffDecision（事后 Reject 快照写回）废弃——Reject 语义已前移
+   * 到审批闸门（执行前）；diff 展示只读，无决策按钮。 */
+  async function respondApproval(st: typeof state, ctx2: vscode.ExtensionContext, choice: string): Promise<void> {
+    if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
+    if (!st.client || !st.sessionId) return;
+    try {
+      await st.client.send('approval.respond', { session_id: st.sessionId, choice });
+      if (st.panel) st.panel.approvalDone();
+    } catch (e) {
+      vscode.window.showErrorMessage(`bobo: approval.respond failed ${(e as Error).message}`);
     }
-    store.delete(filePath);
-    if (st.panel) st.panel.hideDiffCard(filePath);
-    void vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  }
+
+  /** 票 VSC-2B：停止当前回合 → session.interrupt；状态栏 Stopped，输入区恢复可发。 */
+  async function stopCurrentRun(st: typeof state, ctx2: vscode.ExtensionContext): Promise<void> {
+    if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
+    if (!st.client || !st.sessionId) return;
+    try {
+      await st.client.send('session.interrupt', { session_id: st.sessionId });
+      if (st.panel) {
+        st.panel.setRunning(false);
+        st.panel.setStatus('Stopped');
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`bobo: session.interrupt failed ${(e as Error).message}`);
+    }
+  }
+
+  /** 只关 bobo 自己的 diff tab（uri scheme=bobo-diff），不碰用户编辑器 tab。
+   * 风险自查点：workbench.action.closeActiveEditor 会误关用户 tab，禁用。 */
+  async function closeBoboDiffs(): Promise<void> {
+    try {
+      for (const ed of vscode.window.visibleTextEditors) {
+        if (ed.document.uri.scheme === 'bobo-diff') {
+          await vscode.commands.executeCommand('workbench.action.closeActiveEditor', ed.document.uri);
+        }
+      }
+    } catch (e) {
+      console.error('bobo: closeBoboDiffs failed', (e as Error).message);
+    }
   }
 
   /** 相对/绝对路径 → 绝对（相对路径锚定 workspace 根）。 */
