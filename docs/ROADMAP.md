@@ -147,4 +147,6 @@ VSC-1C VS Code 面板渲染复刻桌面端（marked+DOMPurify+highlight vendor �
 
 VSC-2 VS Code 完整聊天+diff 协作+对比度治理（New chat/会话切换/思考折叠/工具行 + tool.start 内存快照→vscode.diff→Accept/Reject 逐字节还原 + 对比度矩阵单测；自审修 existed 高危 bug；Kimi 终审 RPC 实探核实 session.resume/list/inline_diff 均真实存在；合并 da71c50d）
 
-当前 main: 含 VSC-2 · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 77/77 + socket 专项 7/7 · 回滚标签全部在远端
+VSC-2B 扩展写审批闭环（approval.request 监听 reason=write_approval 串行闸门单卡 + 移除原生确认框 + 审批卡 Accept/Reject 逐字节还原 + 工具聚合卡 + 停止按钮 session.interrupt；后端 sessions.py 会话级 set_write_approval RPC + engine_adapter 写审批闸门；tel/v4/v4b 守卫补 VSC-2B 特批白名单；Kimi 终审代码层+报告核验合格 md5 5/5 + 全量 2722 补跑背书；npm 84/84 + 守卫 44/44 + 分批 1069 passed；合并 92a6d08e；实弹验收 owner 在 VS Code 执行）
+
+当前 main: 含 VSC-2B · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 84/84 + socket 专项 7/7 · 回滚标签全部在远端（rollback/pre-vsc-2b）
