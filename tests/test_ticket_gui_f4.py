@@ -68,9 +68,9 @@ let out1 = renderToolDetail(argsEdit, '已替换: /tmp/a.py', diff);
 assert(out1.includes('diff-add'), '应有 diff-add span: ' + out1);
 assert(out1.includes('diff-del'), '应有 diff-del span');
 assert(out1.includes('diff-file'), '应有 diff-file span（@@ 行）');
-assert(out1.includes('路径'), '应有路径标签');
-assert(out1.includes('原文预览'), '应有原文预览标签');
-assert(out1.includes('新文预览'), '应有新文预览标签');
+assert(out1.includes('Path'), '应有路径标签');
+assert(out1.includes('Original'), '应有原文预览标签');
+assert(out1.includes('New'), '应有新文预览标签');
 // ── F4-3: 写入文件卡（content 巨大）→ 零原始 JSON 倾倒 ──
 let bigContent = 'x'.repeat(5000);
 let argsWrite = {{ action: 'write', path: '/tmp/big.txt', content: bigContent }};
@@ -79,9 +79,9 @@ assert(!out2.includes('"content"'), '不得倾倒原始 JSON 键 content: ' + ou
 assert(!out2.includes('\\"path\\"'), '不得倾倒原始 JSON 键 path');
 let xCount = (out2.match(/x/g) || []).length;
 assert(xCount < 5000, '内容必须截断预览，不得全量上屏（实际 x 数: ' + xCount + '）');
-assert(out2.includes('路径'), '应有路径');
-assert(out2.includes('内容预览'), '应有内容预览');
-assert(out2.includes('预览截断'), '长内容应有截断提示');
+assert(out2.includes('Path'), '应有路径');
+assert(out2.includes('Content'), '应有内容预览');
+assert(out2.includes('preview truncated'), '长内容应有截断提示');
 // ── F4-3: 读文件卡（无内容字段）→ 仍显示结果，无 JSON 倾倒 ──
 let out3 = renderToolDetail({{ filepath: '/tmp/r.py', max_chars: 200 }}, '文件内容: hello');
 assert(out3.includes('hello'), '应有结果');
@@ -112,7 +112,7 @@ class TestF41Aggregation:
 
     def test_aggregation_title_updates_realtime(self):
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "已执行 ' + roundTotalCount + ' 步操作" in src, "标题数字实时涨"
+        assert "Executed ' + roundTotalCount + ' steps " in src, "标题数字实时涨"
 
     def test_aggregation_reset_at_round_end(self):
         src = GUI_FILE.read_text(encoding="utf-8")
@@ -186,7 +186,7 @@ class TestF45PanelPreview:
     def test_project_file_preview_intercept(self):
         src = GUI_FILE.read_text(encoding="utf-8")
         assert "txt.length > 2000 && !full" in src, "showProjectFile 2000 字符拦截"
-        assert "显示全部" in src and "原始输出过长已收起" in src
+        assert "Show all (" in src and "output truncated" in src
 
     def test_note_preview_intercept(self):
         src = GUI_FILE.read_text(encoding="utf-8")
@@ -196,7 +196,7 @@ class TestF45PanelPreview:
     def test_terminal_output_intercept(self):
         src = GUI_FILE.read_text(encoding="utf-8")
         # F4-5 新增：终端面板长输出拦截
-        assert "输出过长已收起" in src
+        assert "output truncated" in src
         assert "toggleTerminalOutput" in src
         assert "outText.length > 2000" in src
 
@@ -322,7 +322,7 @@ class TestF1F2F3NoRegression:
     def test_f2_raw_output_collapsed_show_all(self):
         src = GUI_FILE.read_text(encoding="utf-8")
         assert "showProjectFile(filepath, full)" in src
-        assert "显示全部" in src
+        assert "Show all (" in src
 
     def test_f1_ime_guard(self):
         src = GUI_FILE.read_text(encoding="utf-8")

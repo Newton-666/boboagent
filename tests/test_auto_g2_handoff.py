@@ -205,7 +205,7 @@ class TestG2GuiCard:
         html = pathlib.Path("apps/desktop/dist/index.html").read_text(encoding="utf-8")
         assert "buildHandoffCard" in html
         assert "toggleHandoff" in html
-        assert "条操作被 AUTO 拦截" in html
+        assert "ops blocked by AUTO" in html
         assert "handoff-body" in html
         assert "%%HANDOFF_CARD%%" in html  # md 抽离/还原链路
 

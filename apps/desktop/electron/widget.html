@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" /><title>Bobo 执行实况</title>
+<meta charset="UTF-8" /><title>Bobo Live</title>
 <style>
+/* TICKET-DESK-P2：小组件界面文案全英文化（Pin · / Follow main / Idle / No tool calls 等）——
+   本文件在 DESK-P2 票据授权范围内改动，tel 零干涉闸按 DESK-P2 特批放行。 */
 /* TICKET-DESK-V4：小组件小窗 —— 只读投影。色值全部取自主窗现有色板/既有色值，零新增颜色。 */
 :root { --bg: #faf9f2; --bg2: #f2f1e8; --bg3: #eae8dc; --text: #2d2d2d; --text2: #777; --text-muted: #999; --border: #e0ded4; --hover: #e8e6da; --green: #4caf50; }
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -64,17 +66,17 @@ body.approval { border-color:#e8913a; animation:v4ApprovalFlash 1.2s ease-in-out
 <body>
   <div id="w-head">
     <span id="w-dot"></span>
-    <span id="w-title">Bobo 执行实况</span>
-    <span id="w-pin" title="点击轮换钉住的会话">跟随主窗</span>
-    <span id="w-badge">待审批</span>
+    <span id="w-title">Bobo Live</span>
+    <span id="w-pin" title="Click to cycle pinned session">Follow main</span>
+    <span id="w-badge">Approval</span>
   </div>
   <div id="w-body">
-    <div class="w-row" id="w-user"><b>指令</b> <span id="w-user-text">—</span></div>
-    <div class="w-row" id="w-task"><b>任务</b> <span id="w-task-text">空闲</span></div>
-    <div id="w-tools"><div class="w-empty">暂无工具调用</div></div>
+    <div class="w-row" id="w-user"><b>Command</b> <span id="w-user-text">—</span></div>
+    <div class="w-row" id="w-task"><b>Task</b> <span id="w-task-text">Idle</span></div>
+    <div id="w-tools"><div class="w-empty">No tool calls</div></div>
     <div id="w-diff" style="display:none"></div>
   </div>
-  <div id="w-approval" title="点击唤起主窗处理审批">⚠ 待审批操作，点击唤起主窗</div>
+  <div id="w-approval" title="Click to open main window for approval">⚠ Approval pending — click to open main window</div>
   <div id="w-foot">
     <span id="w-pill-text">ctx —</span>
     <span id="w-pill"><span id="w-pill-fill"></span></span>
@@ -157,7 +159,7 @@ function setPinned(sid) {
 // 切换钉住会话：清空旧会话的指令/任务/工具链/diff/审批残留（不留上一会话数据）
 function resetDisplay() {
   _tools = []; renderTools();
-  setUser('—'); setTask('空闲');
+  setUser('—'); setTask('Idle');
   renderDiff('');
   _approvalSid = null; hideApproval();
 }
@@ -168,13 +170,13 @@ function renderPinInd() {
   if (!el) return;
   if (_pinnedSid) {
     var t = _sessionTitles[_pinnedSid] || _pinnedSid;
-    el.textContent = '钉 · ' + t;
+    el.textContent = 'Pin · ' + t;
     el.className = 'pinned';
-    el.title = '已钉住：' + t + '（点击轮换到下一个活跃会话）';
+    el.title = 'Pinned: ' + t + ' (click to cycle to next active session)';
   } else {
-    el.textContent = '跟随主窗';
+    el.textContent = 'Follow main';
     el.className = '';
-    el.title = '跟随主窗当前会话（点击钉住下一个活跃会话）';
+    el.title = 'Following main window (click to pin next active session)';
   }
 }
 
@@ -204,14 +206,14 @@ function setConn(ok) {
   d.className = ok ? 'green' : 'red';
 }
 function setTask(t) {
-  document.getElementById('w-task-text').textContent = (t || '空闲').slice(0, 80);
+  document.getElementById('w-task-text').textContent = (t || 'Idle').slice(0, 80);
 }
 function setUser(t) {
   document.getElementById('w-user-text').textContent = (t || '—').slice(0, 60);
 }
 function renderTools() {
   var box = document.getElementById('w-tools');
-  if (!_tools.length) { box.innerHTML = '<div class="w-empty">暂无工具调用</div>'; return; }
+  if (!_tools.length) { box.innerHTML = '<div class="w-empty">No tool calls</div>'; return; }
   box.innerHTML = _tools.slice(-MAX_TOOLS).map(function(t) {
     return '<div class="w-tool ' + t.state + '">' +
       toolIcon(t.name) +
@@ -280,18 +282,18 @@ if (window.widgetAPI) {
     if (msg.method !== 'event' || !msg.params || !msg.params.type) return;
     var t = msg.params.type;
     var d = msg.params.payload || msg.params;
-    if (t === 'gateway.ready') { setConn(true); setTask('已连接'); return; }
-    if (t === 'gateway.error') { onActivity(); setTask('出错：' + String(d.message || '').slice(0, 60)); return; }
+    if (t === 'gateway.ready') { setConn(true); setTask('Connected'); return; }
+    if (t === 'gateway.error') { onActivity(); setTask('Error: ' + String(d.message || '').slice(0, 60)); return; }
     // TICKET-DESK-V4B：带 sid 的会话事件先过钉选过滤（A 的事件不泄漏到钉 B 的小窗）
     if (!shouldRender(d.session_id)) return;
-    if (t === 'message.start') { onActivity(); markActive(d.session_id); setTask('正在回复…'); return; }
-    if (t === 'message.delta') { onActivity(); markActive(d.session_id); setTask('正在回复：' + String(d.text || '').slice(0, 50)); return; }
-    if (t === 'message.complete') { onActivity(); setTask('回复完成'); return; }
+    if (t === 'message.start') { onActivity(); markActive(d.session_id); setTask('Replying…'); return; }
+    if (t === 'message.delta') { onActivity(); markActive(d.session_id); setTask('Replying: ' + String(d.text || '').slice(0, 50)); return; }
+    if (t === 'message.complete') { onActivity(); setTask('Reply done'); return; }
     if (t === 'status.update') { onActivity(); markActive(d.session_id); setTask(String(d.text || '').slice(0, 60)); return; }
     if (t === 'tool.start') { onActivity(); markActive(d.session_id); toolStart(d); return; }
     if (t === 'tool.complete') { onActivity(); toolComplete(d); return; }
     if (t === 'approval.request') { showApproval(d); return; }
-    if (t === 'session.cleared') { onActivity(); setTask('对话已清除'); return; }
+    if (t === 'session.cleared') { onActivity(); setTask('Chat cleared'); return; }
   });
   widgetAPI.onCtxStats(function(d, sid) {
     if (!shouldRender(sid)) return; // V4B：药丸按钉选过滤，不跨会话串台
@@ -302,7 +304,7 @@ if (window.widgetAPI) {
     setUser(text);
   });
   widgetAPI.onStatus(function(data) {
-    if (data && data.status === 'exited') { setConn(false); setTask('后端已退出'); }
+    if (data && data.status === 'exited') { setConn(false); setTask('Backend exited'); }
   });
   // ── TICKET-DESK-V4B：钉选三向同步 ──
   // 主窗行内按钮 → 钉选/回落

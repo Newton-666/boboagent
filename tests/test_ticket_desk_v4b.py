@@ -294,12 +294,12 @@ def test_v4b_6_entry_order_and_indicator():
     del_def = g.index("var del = document.createElement('button')")
     proj_def = g.index("var proj = document.createElement('button')")
     assert del_def < proj_def < order, "proj 按钮必须创建于 del 之后、appendChild 之前"
-    assert "proj.title = '投影到小组件';" in g
+    assert "proj.title = 'Project to widget';" in g
     assert "var PROJECT_SVG" in g, "缺投影眼睛图标"
     w = WIDGET.read_text(encoding="utf-8")
     assert 'id="w-pin"' in w, "缺会话指示元素"
     # 自定义名优先：_sessionTitles[_pinnedSid] || _pinnedSid
-    assert "el.textContent = '钉 · ' + t;" in w, "会话指示必须显示钉住会话名"
+    assert "el.textContent = 'Pin · ' + t;" in w, "会话指示必须显示钉住会话名"
     assert "var t = _sessionTitles[_pinnedSid] || _pinnedSid;" in w, "自定义名优先"
     assert "approvalFocus(_pinnedSid || _approvalSid)" in w, "审批点击必须跳钉住会话（不是主窗当前）"
     assert "document.getElementById('w-pin').addEventListener('click', function() { cyclePin(); });" in w, \

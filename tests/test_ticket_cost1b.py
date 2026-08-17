@@ -275,12 +275,12 @@ const FIXED_ROUNDS = [{
 }];
 const html = _telCostHtml(FIXED_ROUNDS);
 const out = [];
-out.push('has_battle_tab_static=' + (html.indexOf('本轮拆解') >= 0));
+out.push('has_battle_tab_static=' + (html.indexOf('Round breakdown') >= 0));
 out.push('has_user_seg=' + (html.indexOf('tel-bar-user') >= 0));
-out.push('has_user_label=' + (html.indexOf('不计入优化口径') >= 0));
-out.push('has_cache_warn=' + (html.indexOf('链路未透传') >= 0));
-out.push('has_repeat_warn=' + (html.indexOf('重复读取') >= 0 && html.indexOf('× 3') >= 0 && html.indexOf('core/engine.py') >= 0));
-out.push('has_sched_label=' + (html.indexOf('调度层') >= 0));
+out.push('has_user_label=' + (html.indexOf('not counted') >= 0));
+out.push('has_cache_warn=' + (html.indexOf('Cache fields not forwarded') >= 0));
+out.push('has_repeat_warn=' + (html.indexOf('Repeated read') >= 0 && html.indexOf('× 3') >= 0 && html.indexOf('core/engine.py') >= 0));
+out.push('has_sched_label=' + (html.indexOf('History & tool results (scheduling)') >= 0));
 out.push('no_raw_json=' + (html.indexOf('{') < 0 || html.indexOf('"session_id"') < 0));
 out.push('has_data_src=' + (html.indexOf('rounds.jsonl') >= 0));
 // 页签切换：_telOnClick 处理 BUTTON[data-tab]
@@ -315,8 +315,8 @@ const ROUNDS = [
 ];
 const html = _telCacheRate(ROUNDS);
 const out = [];
-out.push('cur_pct=' + (html.indexOf('本轮命中 75%') >= 0));
-out.push('avg_pct=' + (html.indexOf('近 2 轮均值 63%') >= 0));
+out.push('cur_pct=' + (html.indexOf('This round: 75%') >= 0));
+out.push('avg_pct=' + (html.indexOf('last 2-round avg 63%') >= 0));
 console.log(out.join('\n'));
 """
     out = _run_node(js)

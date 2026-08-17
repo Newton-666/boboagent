@@ -139,10 +139,10 @@ global.window = {{ boboAPI: null }};   // 无归档路径（focus 现存消息 +
     ],
   }});
   const textsA = msgs.map(m => m.text || '');
-  assert(textsA.includes('（工具调用回合）'), '空 assistant 应占位: ' + JSON.stringify(textsA));
+  assert(textsA.includes('(tool-call round)'), '空 assistant 应占位: ' + JSON.stringify(textsA));
   assert(textsA.includes('正常回复'), '非空 assistant 应原样: ' + JSON.stringify(textsA));
   assert(!textsA.includes(''), '不应再出现空泡泡: ' + JSON.stringify(textsA));
-  const statusA = statuses.filter(s => s.includes('摘要'));
+  const statusA = statuses.filter(s => s.includes('Summary'));
   assert(statusA.length === 0, '场景 A 无 summary 不应出摘要行: ' + JSON.stringify(statuses));
 
   // ── 场景 B：resume 带 summary → 历史顶部摘要分隔行 ──
@@ -151,7 +151,7 @@ global.window = {{ boboAPI: null }};   // 无归档路径（focus 现存消息 +
     summary: 'L2 极简摘要：完成了三件套修复',
     messages: [ {{ role: 'user', text: '压缩后第一条' }} ],
   }});
-  const summaryLine = statuses.find(s => s.includes('此前对话摘要'));
+  const summaryLine = statuses.find(s => s.includes('Earlier summary'));
   assert(summaryLine, '应渲染摘要分隔行: ' + JSON.stringify(statuses));
   assert(summaryLine.includes('L2 极简摘要'), '摘要行应带原文: ' + summaryLine);
   // 摘要行应出现在任何消息之前（历史顶部）

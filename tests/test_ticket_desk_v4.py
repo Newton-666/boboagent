@@ -204,7 +204,7 @@ setTimeout(() => {{
     assert d["toggleCalls"] >= 1, "syncWidgetBtn 未更新按钮态"
     assert d["apiCalls"] == ["widget-toggle"], "widgetToggle 必须走主进程 IPC（同源）"
     assert d["statusCalls"] >= 1, "开关反馈必须走既有 addStatus 通道"
-    assert d["btnText"] == "小组件 ✓", "按钮 on 态文本"
+    assert d["btnText"] == "Widget ✓", "按钮 on 态文本"
 
 
 def test_v4_2_no_widget_event_reactivity_in_main():

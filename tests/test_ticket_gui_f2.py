@@ -243,8 +243,8 @@ class TestF24Hierarchy:
     def test_raw_output_collapsed_with_show_all(self):
         src = GUI_FILE.read_text(encoding="utf-8")
         assert "showProjectFile(filepath, full)" in src
-        assert "显示全部" in src
-        assert "原始输出过长已收起" in src
+        assert "Show all (" in src
+        assert "output truncated" in src
 
     def test_thinking_still_collapsed_f1_2(self):
         """F1-2 思考折叠语义保持（默认收起只留摘要行）。"""

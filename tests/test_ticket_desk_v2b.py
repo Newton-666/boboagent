@@ -232,7 +232,7 @@ Promise.resolve().then(function() {
   if (els['ctx-pill-text'].textContent.indexOf('32%') === -1) throw new Error('药丸文字应含 32%: ' + els['ctx-pill-text'].textContent);
   if (els['ctx-pill-text'].textContent.indexOf('41K/128K') === -1) throw new Error('药丸文字应含 41K/128K: ' + els['ctx-pill-text'].textContent);
   if (els['ctx-pill-fill'].style.background !== 'rgba(45,45,45,0.12)') throw new Error('32% 应取文字墨痕: ' + els['ctx-pill-fill'].style.background);
-  if (els['ctx-stats-detail'].innerHTML.indexOf('上下文 token 估算') === -1) throw new Error('明细卡应含明细行');
+  if (els['ctx-stats-detail'].innerHTML.indexOf('Context tokens (est.)') === -1) throw new Error('明细卡应含明细行');
   // 再点 → 收起
   toggleCtxStats();
   if (els['ctx-stats-detail'].style.display !== 'none') throw new Error('再点应收起明细卡');
@@ -370,8 +370,17 @@ def test_v2b_css_zero_change_on_existing():
         r"/\* === DESK-P1 project pill ===.*?#project-menu \.prj-empty \{[^}]*\}\n", new_pre, re.S)
     assert pill_seg, "新版中应能找到 DESK-P1 project pill 锚点段"
     new_pre = new_pre.replace(pill_seg.group(0), "")
+    # DESK-P2 特批豁免（owner 票 TICKET-DESK-P2）：侧栏折叠图标 CSS 锚点段
+    # （/* === DESK-P2 === */ ... /* === end DESK-P2 === */）仅存在于新版，单向剔除。
+    p2_seg = re.search(r"/\* === DESK-P2 === \*/.*?/\* === end DESK-P2 === \*/\n", new_pre, re.S)
+    assert p2_seg, "新版中应能找到 DESK-P2 锚点段"
+    new_pre = new_pre.replace(p2_seg.group(0), "")
+    # DESK-P2：.welcome-sub 规则已随副标题元素删除（欢迎屏极简），基线单向剔除。
+    old_sub = re.search(r"\.welcome-sub \{[^}]*\}\n", old_style)
+    assert old_sub, "基线中应能找到 .welcome-sub 规则"
+    old_style = old_style.replace(old_sub.group(0), "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1 豁免段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1/DESK-P2 豁免段外零改动）"
 
 
 # ── 铁律 0 补充闸：V2B diff 不得删除任何 style 块内规则（V2A 段同样）───

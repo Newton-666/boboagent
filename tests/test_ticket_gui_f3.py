@@ -120,7 +120,7 @@ global.window = {{
   assert(toolMsg, '归档 tool 消息应渲染');
   assert(toolMsg.name === 'read_local_file', 'tool 名应保留: ' + JSON.stringify(toolMsg));
   // ── 压缩分隔线 ──
-  const sep = statuses.filter(s => s.includes('经上下文压缩'));
+  const sep = statuses.filter(s => s.includes('compacted'));
   assert(sep.length === 2, '两个压缩事件应有两条分隔线: ' + JSON.stringify(statuses));
   assert(sep[0].includes('175'), '分隔线应带压缩前消息数: ' + sep[0]);
   assert(sep[1].includes('80'), '第二条分隔线应带各自压缩前消息数: ' + sep[1]);
@@ -219,14 +219,14 @@ class TestF32ClickMustRespond:
         src = GUI_FILE.read_text(encoding="utf-8")
         # 点击立即给加载指示：该项 loading 类 + 状态条
         assert "setSessionLoading(sid, true);" in src, "点击必须立即给加载指示"
-        assert "addStatus('加载会话…');" in src, "点击必须立即给状态反馈"
+        assert "addStatus('Loading session…');" in src, "点击必须立即给状态反馈"
         assert "session-item.loading" in src, "CSS 必须有 loading 呼吸样式"
 
     def test_no_silent_return_on_failure(self):
         """失败必须显式报错，禁止静默停留旧会话（旧 `if (!result || result.error) return;` 移除）。"""
         src = GUI_FILE.read_text(encoding="utf-8")
         assert "if (!result || result.error) return;" not in src, "静默 return 必须移除"
-        assert "addStatus('⚠ 加载会话失败：'" in src, "失败必须显式报错"
+        assert "addStatus('⚠ Failed to load session: '" in src, "失败必须显式报错"
 
     def test_race_last_click_wins(self):
         """快速连点两会话 → 后一次为准（sessionLoadSeq 竞态序号，前者作废）。"""
@@ -258,7 +258,7 @@ class TestF33FullHistory:
 
     def test_compression_divider_line(self):
         src = GUI_FILE.read_text(encoding="utf-8")
-        assert "'— 此前 ' + n + ' 条消息经上下文压缩 —'" in src, "压缩边界给柔和分隔线"
+        assert "'— ' + n + ' earlier messages compacted —'" in src, "压缩边界给柔和分隔线"
 
     def test_archive_merge_renders_full(self):
         """node 实跑当前 HTML 真实 renderFullHistory：归档全文 + 现存拼接 + 分隔线齐全。"""
