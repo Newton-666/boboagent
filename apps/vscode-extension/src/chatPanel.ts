@@ -18,6 +18,10 @@ export class ChatPanel {
   private sessionId: string | null = null;
   private explainOn = false;
   private pairingCb: (() => void) | null = null;
+  private newChatCb: (() => void) | null = null;
+  private switchSessionCb: ((sid: string) => void) | null = null;
+  private requestSessionsCb: (() => void) | null = null;
+  private diffDecisionCb: ((filePath: string, accept: boolean) => void) | null = null;
 
   constructor(ctx: vscode.ExtensionContext, view: vscode.WebviewView) {
     this.ctx = ctx;
@@ -40,6 +44,47 @@ export class ChatPanel {
   /** TICKET-VSC-1B：推"当前选中"预览到 webview（null = 无选区/隐藏卡片）。 */
   setSelection(sel: { filePath: string; startLine: number; endLine: number; text: string } | null): void {
     this.post({ kind: 'selection', sel });
+  }
+
+  /** TICKET-VSC-2B：推会话列表到 webview。 */
+  setSessions(sessions: unknown[]): void {
+    this.post({ kind: 'sessionList', sessions });
+  }
+
+  /** TICKET-VSC-2B：推思考过程（折叠块）到 webview。 */
+  handleThinking(sid: string, text: string): void {
+    if (!text) return;
+    this.post({ kind: 'think', sessionId: sid, text });
+  }
+
+  /** TICKET-VSC-2B/C：推工具行事件到 webview（tool.start / tool.complete）。 */
+  handleTool(sid: string, ev: Record<string, unknown>): void {
+    this.post({ kind: 'tool', sessionId: sid, event: ev });
+  }
+
+  /** TICKET-VSC-2C：推 diff 卡片（Accept/Reject）。 */
+  showDiffCard(filePath: string, title: string): void {
+    this.post({ kind: 'diffCard', filePath, title });
+  }
+
+  /** TICKET-VSC-2D：推台账条目到折叠区。 */
+  setLedger(items: { id: string; title: string; status: string }[]): void {
+    this.post({ kind: 'ledger', items });
+  }
+
+  /** TICKET-VSC-2C：diff 卡已处理完毕（收起面板卡片）。 */
+  hideDiffCard(filePath: string): void {
+    this.post({ kind: 'diffCardDone', filePath });
+  }
+
+  /** TICKET-VSC-2B：清空面板（New chat 后）。 */
+  clearChat(): void {
+    this.post({ kind: 'clearChat' });
+  }
+
+  /** TICKET-VSC-2B：渲染会话历史（session.resume 的 transcript）。 */
+  setHistory(messages: unknown[]): void {
+    this.post({ kind: 'history', messages });
   }
 
   get explain(): boolean { return this.explainOn; }
@@ -68,6 +113,18 @@ export class ChatPanel {
     this.pairingCb = cb;
   }
 
+  /** TICKET-VSC-2B：webview 点了 New chat。 */
+  onNewChat(cb: () => void): void { this.newChatCb = cb; }
+
+  /** TICKET-VSC-2B：webview 点了某会话（切换）。 */
+  onSwitchSession(cb: (sid: string) => void): void { this.switchSessionCb = cb; }
+
+  /** TICKET-VSC-2B：webview 请求会话列表。 */
+  onRequestSessions(cb: () => void): void { this.requestSessionsCb = cb; }
+
+  /** TICKET-VSC-2C：webview 对 diff 卡做了 Accept/Reject 决定。 */
+  onDiffDecision(cb: (filePath: string, accept: boolean) => void): void { this.diffDecisionCb = cb; }
+
   private post(msg: unknown): void {
     // VSC-1B 实弹修复：webview 加载完成前 postMessage 会丢——排队，ready 后补发
     if (!this.webviewReady) { this.pending.push(msg); return; }
@@ -81,7 +138,7 @@ export class ChatPanel {
   private webviewReady = false;
   private pending: unknown[] = [];
 
-  private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean }): void {
+  private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean; sessionId?: string; filePath?: string; accept?: boolean }): void {
     if (!msg) return;
     if (msg.kind === 'ready') {
       this.webviewReady = true;
@@ -97,6 +154,14 @@ export class ChatPanel {
       vscode.commands.executeCommand('bobo.setExplain', msg.explain);
     } else if (msg.kind === 'pairingConfirm' && msg.confirm === true && this.pairingCb) {
       this.pairingCb();
+    } else if (msg.kind === 'newChat' && this.newChatCb) {
+      this.newChatCb();
+    } else if (msg.kind === 'switchSession' && typeof msg.sessionId === 'string' && this.switchSessionCb) {
+      this.switchSessionCb(msg.sessionId);
+    } else if (msg.kind === 'requestSessions' && this.requestSessionsCb) {
+      this.requestSessionsCb();
+    } else if (msg.kind === 'diffDecision' && typeof msg.filePath === 'string' && typeof msg.accept === 'boolean' && this.diffDecisionCb) {
+      this.diffDecisionCb(msg.filePath, msg.accept);
     }
   }
 
@@ -106,6 +171,7 @@ export class ChatPanel {
     // VSC-1C：vendor（marked/purify/highlight）+ md-render 管线脚本同走 nonce 本地引入
     const nonce = getNonce();
     const scriptUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'chat.js'));
+    const partsUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'parts.js'));
     const mdRenderUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'md-render.js'));
     const markedUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'vendor', 'marked.min.js'));
     const purifyUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'vendor', 'purify.min.js'));
@@ -118,16 +184,17 @@ export class ChatPanel {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${cspSource}; img-src ${cspSource} https:;">
 <style>
-/* TICKET-VSC-1C：复刻桌面端 design token（apps/desktop/dist/index.html :root） */
-:root { --bg:#faf9f2; --bg2:#f2f1e8; --bg3:#eae8dc; --text:#2d2d2d; --text2:#777; --text-muted:#999; --border:#e0ded4; --hover:#e8e6da; --green:#4caf50; --font-reply:'Charter','Songti SC','Noto Serif CJK SC',serif; }
+/* TICKET-VSC-1C：复刻桌面端 design token；VSC-2A：对比度治理（WCAG AA ≥4.5:1，
+   色值对照表见 src/contrast.ts，勿手动改色——测试矩阵会拦不达标的回退） */
+:root { --bg:#faf9f2; --bg2:#f2f1e8; --bg3:#eae8dc; --text:#2d2d2d; --text2:#5c5c5c; --text-muted:#6f6f6f; --border:#e0ded4; --hover:#e8e6da; --green:#4caf50; --accent:#a34e1a; --str:#2f6b2e; --num:#7a5f32; --del:#b3402a; --font-reply:'Charter','Songti SC','Noto Serif CJK SC',serif; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; height:100vh; display:flex; flex-direction:column; }
 #header { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); background:var(--bg2); }
-#status { font-size:12px; color:var(--text-muted); }
+#status { font-size:12px; color:var(--text2); }
 .dot { width:8px; height:8px; border-radius:50%; background:#c9c4b8; }
 .dot.on { background:var(--green); }
 .dot.busy { background:#e8913a; }
-#explain-wrap { margin-left:auto; display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text-muted); }
+#explain-wrap { margin-left:auto; display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text2); }
 #chat { flex:1; overflow-y:auto; padding:12px; }
 /* 空态欢迎（复刻桌面端 #welcome-title：font-reply 700 36px 居中） */
 #welcome { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
@@ -137,7 +204,7 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 .msg.user { background:var(--bg2); border:1px solid var(--border); margin-left:auto; white-space:pre-wrap; word-break:break-word; }
 .msg .who { font-size:12px; font-weight:600; color:var(--text2); margin-bottom:4px; }
 .msg .txt { white-space:pre-wrap; word-break:break-word; }
-.msg .txt strong, .msg .txt b { color:#e8913a; }
+.msg .txt strong, .msg .txt b { color:var(--accent); }
 .msg.bobo .txt { font-family:var(--font-reply); }
 .msg.bobo .txt h1 { font-size:20px; font-weight:700; margin:18px 0 6px; }
 .msg.bobo .txt h2 { font-size:18px; font-weight:700; margin:16px 0 5px; }
@@ -162,21 +229,21 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 .msg.bobo .txt del { color:var(--text2); }
 .msg.bobo .txt u { text-decoration:underline; }
 /* diff 增色（复刻桌面端：add #7ec87b / del #f48771） */
-.msg.bobo .txt .diff-add { color:#7ec87b; }
-.msg.bobo .txt .diff-del { color:#f48771; }
+.msg.bobo .txt .diff-add { color:var(--str); }
+.msg.bobo .txt .diff-del { color:var(--del); }
 .msg.bobo .txt .diff-file { color:var(--text2); font-weight:600; }
 /* highlight.js 主题（复刻桌面端：取色只用色板 + 既有语义色） */
 /* owner 实弹反馈（2026-08-17）：窄面板里 --text2 太淡，代码正文 token 一律压回 --text 深色 */
 .msg.bobo .txt .hljs { color:var(--text); background:transparent; }
-.msg.bobo .txt .hljs-comment, .msg.bobo .txt .hljs-quote { color:var(--text-muted); font-style:italic; }
-.msg.bobo .txt .hljs-keyword, .msg.bobo .txt .hljs-selector-tag, .msg.bobo .txt .hljs-built_in { color:#e8913a; }
-.msg.bobo .txt .hljs-string, .msg.bobo .txt .hljs-regexp, .msg.bobo .txt .hljs-addition { color:#50a14f; }
-.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:#8a6d3b; }
+.msg.bobo .txt .hljs-comment, .msg.bobo .txt .hljs-quote { color:var(--text2); font-style:italic; }
+.msg.bobo .txt .hljs-keyword, .msg.bobo .txt .hljs-selector-tag, .msg.bobo .txt .hljs-built_in { color:var(--accent); }
+.msg.bobo .txt .hljs-string, .msg.bobo .txt .hljs-regexp, .msg.bobo .txt .hljs-addition { color:var(--str); }
+.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:var(--num); }
 .msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:var(--text); }
 .msg.bobo .txt .hljs-variable, .msg.bobo .txt .hljs-template-variable { color:var(--text); }
 .msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:var(--text); }
-.msg.bobo .txt .hljs-deletion { color:#f48771; }
-.msg.bobo .txt .hljs-meta { color:var(--text-muted); }
+.msg.bobo .txt .hljs-deletion { color:var(--del); }
+.msg.bobo .txt .hljs-meta { color:var(--text2); }
 .msg.bobo .txt .hljs-emphasis { font-style:italic; }
 .msg.bobo .txt .hljs-strong { font-weight:700; }
 #inputbar { display:flex; gap:6px; padding:8px; border-top:1px solid var(--border); background:var(--bg2); }
@@ -190,13 +257,68 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 /* 选区卡片（VSC-1B 功能保留，样式对齐气泡同一套 token） */
 #selection { display:none; margin:8px 10px 0; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
 #selection.show { display:block; }
-#selection .sel-head { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted); margin-bottom:4px; }
+#selection .sel-head { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text2); margin-bottom:4px; }
 #selection .sel-file { font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #selection .sel-lines { flex-shrink:0; }
 #selection pre { margin:0; max-height:120px; overflow:auto; background:var(--bg3); }
+/* === VSC-2B：思考折叠块（对齐桌面端 think-box：默认收起只留摘要行，点击展开）=== */
+.think-box { padding:8px 12px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); background:var(--bg2); border:1px solid var(--border); cursor:pointer; user-select:none; }
+.think-box .think-label { font-size:11px; font-weight:600; color:var(--text2); display:flex; align-items:center; gap:6px; }
+.think-box .think-caret { font-size:10px; transition:transform 0.15s; }
+.think-box.open .think-caret { transform:rotate(90deg); }
+.think-box .think-text { white-space:pre-wrap; word-break:break-word; line-height:1.5; margin-top:6px; display:none; color:var(--text); }
+.think-box.open .think-text { display:block; }
+/* === VSC-2B：工具行（图标+名称+摘要，可折叠；对齐桌面端 .tool 视觉）=== */
+.tool-row { margin:4px 0; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg2); font-size:12px; color:var(--text2); cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
+.tool-row .tool-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.tool-row .tool-dot.run { background:#e8913a; }
+.tool-row .tool-dot.done { background:var(--green); }
+.tool-row .tool-dot.fail { background:var(--del); }
+.tool-row .tool-name { font-weight:600; color:var(--text); flex-shrink:0; }
+.tool-row .tool-ctx { color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+.tool-row .tool-caret { font-size:10px; color:var(--text2); flex-shrink:0; }
+.tool-row.open .tool-caret { transform:rotate(90deg); }
+.tool-body { display:none; margin:0 0 4px; padding:6px 10px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; font-size:12px; color:var(--text); }
+.tool-body.open { display:block; }
+.tool-body pre { margin:0; background:transparent; border:none; padding:0; }
+/* === VSC-2C：diff 卡片（Accept/Reject）=== */
+.diff-card { margin:6px 0; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
+.diff-card .diff-file { font-weight:600; color:var(--text); font-size:12px; word-break:break-all; }
+.diff-card .diff-actions { display:flex; gap:6px; margin-top:6px; }
+.diff-card button { border:1px solid var(--border); border-radius:6px; padding:3px 10px; cursor:pointer; background:var(--bg); font-size:12px; color:var(--text); }
+.diff-card .accept { background:var(--str); color:#fff; border-color:var(--str); }
+.diff-card .reject:hover { border-color:var(--del); color:var(--del); }
+/* === VSC-2B：会话栏（New chat 按钮 + 会话下拉）=== */
+#sessbar { position:relative; display:flex; align-items:center; gap:6px; padding:4px 10px; border-bottom:1px solid var(--border); background:var(--bg2); }
+#sessbar button { border:1px solid var(--border); border-radius:6px; padding:2px 8px; cursor:pointer; background:var(--bg); font-size:12px; color:var(--text); }
+#sessbar button:hover { background:var(--bg3); }
+#sessbar .sess-current { font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+#sess-dropdown { display:none; position:absolute; top:32px; left:10px; right:10px; z-index:50; background:var(--bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,0.12); max-height:240px; overflow-y:auto; }
+#sess-dropdown.show { display:block; }
+.sess-item { padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text); border-bottom:1px solid var(--border); }
+.sess-item:hover { background:var(--bg3); }
+.sess-item.active { background:var(--bg3); font-weight:600; }
+.sess-item .sess-meta { font-size:11px; color:var(--text2); }
+/* === VSC-2D：台账折叠区 === */
+#ledger { border-top:1px solid var(--border); background:var(--bg2); }
+#ledger-head { padding:6px 10px; font-size:11px; font-weight:600; color:var(--text2); cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; }
+#ledger-body { display:none; padding:2px 10px 8px; max-height:160px; overflow-y:auto; }
+#ledger.open #ledger-body { display:block; }
+#ledger-body .lg-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text); padding:2px 0; }
+#ledger-body .lg-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+#ledger-body .lg-dot.pending { background:var(--border); }
+#ledger-body .lg-dot.in_progress { background:#e8913a; }
+#ledger-body .lg-dot.done { background:var(--green); }
+#ledger-body .lg-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 </style>
 </head>
 <body>
+<div id="sessbar">
+  <button id="new-chat" title="New chat">+</button>
+  <span class="sess-current" id="sess-current">new session</span>
+  <button id="sess-toggle" title="Sessions">☰</button>
+  <div id="sess-dropdown"></div>
+</div>
 <div id="header">
   <span class="dot" id="dot"></span>
   <span id="status">bobo — connecting…</span>
@@ -210,10 +332,15 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 <div id="welcome"><div id="welcome-title">Let's finish up something today.</div></div>
 <div id="chat"></div>
 <div id="inputbar"><input id="input" placeholder="Ask a follow-up…"><button id="send">Send</button></div>
+<div id="ledger">
+  <div id="ledger-head">Ledger<span id="ledger-count"></span></div>
+  <div id="ledger-body"></div>
+</div>
 <script nonce="${nonce}" src="${markedUri}"></script>
 <script nonce="${nonce}" src="${purifyUri}"></script>
 <script nonce="${nonce}" src="${highlightUri}"></script>
 <script nonce="${nonce}" src="${mdRenderUri}"></script>
+<script nonce="${nonce}" src="${partsUri}"></script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

@@ -6,6 +6,9 @@ const {
   applySessionResult,
   resolveAskGate,
   buildSelectionPayload,
+  planSwitchSession,
+  needsSessionCreate,
+  sortSessions,
 } = require('../out/sessionFlow.js');
 
 test('applySessionResult: 无 panel 时 sessionId 仍被保存（Bug 2 修复核心）', () => {
@@ -59,4 +62,35 @@ test('buildSelectionPayload: text 截断到 500 字符', () => {
   const p = buildSelectionPayload('a.ts', 1, 1, long);
   assert.ok(p);
   assert.strictEqual(p.text.length, 500);
+});
+
+// ── TICKET-VSC-2B：会话切换状态机 ──
+
+test('planSwitchSession: 目标=当前 → same（不发请求）', () => {
+  assert.deepStrictEqual(planSwitchSession('s1', 's1', ['s1', 's2']), { kind: 'same' });
+  assert.deepStrictEqual(planSwitchSession(null, 's1', ['s1']), { kind: 'switch', sid: 's1' });
+});
+
+test('planSwitchSession: 目标在列表 → switch（需 resume+渲染历史）', () => {
+  assert.deepStrictEqual(planSwitchSession('s1', 's2', ['s1', 's2']), { kind: 'switch', sid: 's2' });
+});
+
+test('planSwitchSession: 列表外目标 → missing（防御，不发请求）', () => {
+  assert.deepStrictEqual(planSwitchSession('s1', 'ghost', ['s1']), { kind: 'missing' });
+});
+
+test('needsSessionCreate: 无 sessionId 时 New chat 必须先 create', () => {
+  assert.strictEqual(needsSessionCreate(null), true);
+  assert.strictEqual(needsSessionCreate(''), true);
+  assert.strictEqual(needsSessionCreate('s1'), false);
+});
+
+test('sortSessions: pinned 优先，同组按 started_at 倒序（新→旧）', () => {
+  const list = [
+    { id: 'old', started_at: 100 },
+    { id: 'pin', started_at: 50, pinned: true },
+    { id: 'new', started_at: 200 },
+  ];
+  const sorted = sortSessions(list);
+  assert.deepStrictEqual(sorted.map((s) => s.id), ['pin', 'new', 'old']);
 });
