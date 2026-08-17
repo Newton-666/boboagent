@@ -1,0 +1,53 @@
+{
+  "name": "bobo-vscode",
+  "displayName": "bobo - Ask your code",
+  "description": "Ask bobo about selected code — streamed answers with Explain mode",
+  "version": "0.1.0",
+  "publisher": "bobo-local",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:bobo.askSelection", "onCommand:bobo.toggleExplain"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "bobo.askSelection", "title": "Ask bobo", "category": "bobo" },
+      { "command": "bobo.toggleExplain", "title": "Toggle Explain mode", "category": "bobo" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "bobo.askSelection", "group": "bobo@1" }
+      ]
+    },
+    "keybindings": [
+      { "command": "bobo.askSelection", "key": "cmd+shift+b", "mac": "cmd+shift+b", "when": "editorTextFocus" }
+    ],
+    "configuration": {
+      "title": "bobo",
+      "properties": {
+        "bobo.socketPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override the bobo gateway unix socket path (auto-discovered when empty)"
+        },
+        "bobo.explainByDefault": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start chat with Explain mode on by default"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test test/*.test.js",
+    "vscode:prepublish": "npm run compile",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
