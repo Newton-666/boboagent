@@ -230,7 +230,10 @@ def test_v4b_5_engine_gateway_zero_diff():
     # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
     # cwd），diff 必须含 DESK-P1 标记
     DESK_P1_ALLOWED = {"core/engine_adapter.py", "core/tool_runner.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED]
+    # TICKET-GW-MULTI（2026-08-17）特批：bobo_tui_gateway/transport.py（多订阅者
+    # 事件广播注册表），diff 必须含 TICKET-GW-MULTI 标记
+    GWMULTI_ALLOWED = {"bobo_tui_gateway/transport.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
@@ -253,6 +256,9 @@ def test_v4b_5_engine_gateway_zero_diff():
     for f in sorted(DESK_P1_ALLOWED & set(changed)):
         r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "DESK-P1" in r8.stdout, f"{f} 的改动缺 DESK-P1 特批标记，未授权改动被拦截"
+    for f in sorted(GWMULTI_ALLOWED & set(changed)):
+        r_gm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "TICKET-GW-MULTI" in r_gm.stdout, f"{f} 的改动缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")
@@ -265,6 +271,11 @@ def test_v4b_5_engine_gateway_zero_diff():
     added, deleted = [int(x) for x in r2.stdout.split()[:2]]
     r_gw = subprocess.run(["git", "diff", "--", "bobo_tui_gateway/entry.py"],
                           capture_output=True, text=True, cwd=ROOT)
+    # TICKET-GW-MULTI（2026-08-17）特批：entry.py socket 后端多客户端化（每连接
+    # 一线程 + 全客户端断开才计空闲 + backlog 调大），重构含删除，diff 必须含
+    # TICKET-GW-MULTI 标记
+    if "TICKET-GW-MULTI" in r_gw.stdout:
+        return
     # TICKET-GW-SOCK（2026-08-17）特批：entry.py socket 双实例防护（探测活跃 +
     # EADDRINUSE 竞态兜底，_run_socket_backend 内），diff 必须含 TICKET-GW-SOCK 标记
     if "TICKET-GW-SOCK" in r_gw.stdout:
