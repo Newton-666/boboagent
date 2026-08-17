@@ -536,12 +536,19 @@ def test_tel_8_zero_interference():
             assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
                 f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
             continue
-        # 票 TICKET-GW-SOCK 特批：bobo_tui_gateway/entry.py（socket 双实例防护：
-        # 探测活跃 sock 拒绝双实例 + EADDRINUSE 竞态兜底，_run_socket_backend 内），
-        # diff 必须含 TICKET-GW-SOCK 标记
+        # 票 TICKET-GW-SOCK / TICKET-GW-MULTI 特批：bobo_tui_gateway/entry.py
+        # （GW-SOCK：socket 双实例防护；GW-MULTI：多客户端化，每连接一线程 +
+        # 全客户端断开才计空闲），diff 必须含对应票据标记
         if ln == "bobo_tui_gateway/entry.py":
             r_gw = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "TICKET-GW-SOCK" in r_gw.stdout, f"{ln} 缺 TICKET-GW-SOCK 特批标记，未授权改动被拦截"
+            assert ("TICKET-GW-SOCK" in r_gw.stdout or "TICKET-GW-MULTI" in r_gw.stdout), \
+                f"{ln} 缺 TICKET-GW-SOCK/TICKET-GW-MULTI 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-GW-MULTI 特批：bobo_tui_gateway/transport.py（多订阅者事件
+        # 广播注册表），diff 必须含 TICKET-GW-MULTI 标记
+        if ln == "bobo_tui_gateway/transport.py":
+            r_gwm = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-GW-MULTI" in r_gwm.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
@@ -568,11 +575,17 @@ def test_tel_8_zero_interference():
             r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r9.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
-        # 票 TICKET-GW-SOCK 特批：bobo_tui_gateway/entry.py（socket 双实例防护），
-        # diff 必须含 TICKET-GW-SOCK 标记
+        # 票 TICKET-GW-SOCK / TICKET-GW-MULTI 特批：bobo_tui_gateway/entry.py，
+        # diff 必须含对应票据标记
         if ln == "bobo_tui_gateway/entry.py":
             r_gw2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "TICKET-GW-SOCK" in r_gw2.stdout, f"{ln} 缺 TICKET-GW-SOCK 特批标记，未授权改动被拦截"
+            assert ("TICKET-GW-SOCK" in r_gw2.stdout or "TICKET-GW-MULTI" in r_gw2.stdout), \
+                f"{ln} 缺 TICKET-GW-SOCK/TICKET-GW-MULTI 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-GW-MULTI 特批：bobo_tui_gateway/transport.py（多订阅者广播）
+        if ln == "bobo_tui_gateway/transport.py":
+            r_gwm2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-GW-MULTI" in r_gwm2.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
@@ -584,7 +597,7 @@ def test_tel_8_zero_interference():
             r10 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r10.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
-        if ln.startswith("tests/"):
+        if ln.startswith("tests/") or ln.startswith("apps/desktop/electron/test/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
         # diff 必须含 DESK-P2 标记，否则未授权改动被拦截

@@ -325,14 +325,23 @@ def _scan_vault_tree(root):
     return tree
 
 
-def _serve_connection(lines_iter):
+def _serve_connection(lines_iter, transport=None):
     """服务一条连接（stdio 或 socket）：发 ready → 笔记树 → RPC 主循环。
 
     返回退出原因："eof" / "write_broken"。不保存会话、不退出进程——
     调用方决定连接结束后怎么办（stdio 模式退出；socket 模式等待重连）。
+
+    transport：socket 多客户端模式下每条连接的定向通道（TICKET-GW-MULTI）。
+    None = stdio 模式：ready/笔记树/响应走 write_json（单播到 active transport）。
+    RPC 响应始终定向回请求方（不广播）；emit 事件才走 write_json 广播。
     """
+    def _send(obj: dict) -> bool:
+        if transport is not None:
+            return transport.write(obj)
+        return write_json(obj)
+
     # 发送 ready 事件（包含皮肤配置）
-    if not write_json({
+    if not _send({
         "jsonrpc": "2.0",
         "method": "event",
         "params": {
@@ -365,7 +374,7 @@ def _serve_connection(lines_iter):
         vault = os.environ.get("OBSIDIAN_VAULT", "")
         if vault and os.path.isdir(vault):
             notebook_tree = _scan_vault_tree(vault)
-            write_json({
+            _send({
                 "jsonrpc": "2.0",
                 "method": "event",
                 "params": {"type": "notes.tree", "payload": {"tree": notebook_tree}}
@@ -382,7 +391,7 @@ def _serve_connection(lines_iter):
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
-            write_json({
+            _send({
                 "jsonrpc": "2.0",
                 "error": {"code": -32700, "message": "parse error"},
                 "id": None,
@@ -397,7 +406,7 @@ def _serve_connection(lines_iter):
         except Exception:
             pass
         if resp is not None:
-            if not write_json(resp):
+            if not _send(resp):
                 logger.warning("写入失败，前端已断开（rpc=%s）", req.get("method"))
                 return "write_broken"
 
@@ -417,7 +426,12 @@ def _run_socket_backend(sock_path: str):
     """
     import socket as _socket
 
-    from bobo_tui_gateway.transport import SocketTransport, set_transport
+    from bobo_tui_gateway.transport import (
+        SocketTransport,
+        register_transport,
+        unregister_transport,
+        active_client_count,
+    )
 
     _IDLE_TIMEOUT = 60
     try:
@@ -461,51 +475,74 @@ def _run_socket_backend(sock_path: str):
             return
         raise
     os.chmod(sock_path, 0o600)
-    srv.listen(1)
+    srv.listen(16)  # TICKET-GW-MULTI：backlog 调大，多客户端握手不再排队饿死
     if _IDLE_TIMEOUT > 0:
         srv.settimeout(1.0)  # 每 1 秒检查空闲超时
-    logger.critical("gateway socket 模式: 监听 %s（前端断开不再致命，等待重连）", sock_path)
+    logger.critical("gateway socket 模式: 监听 %s（多客户端，前端断开不再致命，等待重连）", sock_path)
 
     _idle_since: float = time.monotonic()  # TICKET-030：初始化为 listen 时刻，堵住"从未连接的孤儿永不退出"盲区
     while True:
         try:
             conn, _ = srv.accept()
         except _socket.timeout:
-            if _IDLE_TIMEOUT > 0 and _idle_since is not None:
-                if time.monotonic() - _idle_since > _IDLE_TIMEOUT:
-                    logger.critical("gateway socket: 空闲 %ds 无重连，自动退出", _IDLE_TIMEOUT)
-                    break
+            # TICKET-GW-MULTI：全部客户端断开才计空闲（任一客户端在线即重置）
+            if _IDLE_TIMEOUT > 0:
+                if active_client_count() == 0:
+                    if _idle_since is None:
+                        _idle_since = time.monotonic()
+                    elif time.monotonic() - _idle_since > _IDLE_TIMEOUT:
+                        logger.critical("gateway socket: 全部客户端断开 %ds 无重连，自动退出", _IDLE_TIMEOUT)
+                        break
+                else:
+                    _idle_since = None
             continue
         except OSError as e:
             logger.critical("gateway socket: accept 异常 %r，继续监听", e)
             continue
 
         _idle_since = None  # 有连接，重置空闲计时
-        logger.critical("gateway socket: 前端已连接")
-        set_transport(SocketTransport(conn))
-        try:
-            reader = conn.makefile("r", encoding="utf-8", newline="\n")
-            reason = _serve_connection(reader)
-            if _idle_since is None:
-                _idle_since = time.monotonic()
-            if _IDLE_TIMEOUT > 0:
-                logger.critical("gateway socket: 前端断开（原因=%s），%ds 内无重连将自动退出", reason, _IDLE_TIMEOUT)
-            else:
-                logger.critical("gateway socket: 前端断开（原因=%s），进程保持存活，等待重连", reason)
-        except OSError as e:
-            if _idle_since is None:
-                _idle_since = time.monotonic()
-            logger.critical("gateway socket: 连接异常 %r，%ds 内无重连将自动退出", e, _IDLE_TIMEOUT)
-        finally:
-            try:
-                conn.close()
-            except OSError:
-                pass
+        transport = SocketTransport(conn)
+        register_transport(transport)
+        logger.critical("gateway socket: 前端已连接（当前 %d 个客户端）", active_client_count())
+        threading.Thread(
+            target=_serve_socket_conn,
+            args=(conn, transport),
+            daemon=True,
+            name=f"gw-conn-{conn.fileno()}",
+        ).start()
 
     # 空闲超时退出：保存所有活跃会话
     from bobo_tui_gateway.server import shutdown_sessions
     shutdown_sessions()
     logger.critical("gateway socket: 进程正常退出")
+
+
+def _serve_socket_conn(conn, transport):
+    """服务一条 socket 连接（TICKET-GW-MULTI：每连接一个线程，互不阻塞）。
+
+    连接断开只注销自己的 transport：不影响其他客户端的服务与事件广播。
+    """
+    from bobo_tui_gateway.transport import (
+        unregister_transport,
+        active_client_count,
+    )
+    reason = "eof"
+    try:
+        reader = conn.makefile("r", encoding="utf-8", newline="\n")
+        reason = _serve_connection(reader, transport=transport)
+    except OSError as e:
+        logger.critical("gateway socket: 连接异常 %r", e)
+        reason = "error"
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+        unregister_transport(transport)
+        logger.critical(
+            "gateway socket: 客户端断开（原因=%s），剩余 %d 个客户端",
+            reason, active_client_count(),
+        )
 
 
 def _run_backend():
