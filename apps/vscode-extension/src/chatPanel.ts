@@ -37,6 +37,11 @@ export class ChatPanel {
     this.post({ kind: 'explain', on });
   }
 
+  /** TICKET-VSC-1B：推"当前选中"预览到 webview（null = 无选区/隐藏卡片）。 */
+  setSelection(sel: { filePath: string; startLine: number; endLine: number; text: string } | null): void {
+    this.post({ kind: 'selection', sel });
+  }
+
   get explain(): boolean { return this.explainOn; }
 
   /** Forward a gateway event to the webview. */
@@ -118,6 +123,12 @@ hr { border:none; border-top:1px solid var(--border); margin:10px 0; }
 #pairing.show { display:block; }
 #pairing p { margin:0 0 8px; font-size:13px; }
 #pairing button { border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; background:#fff; }
+#selection { display:none; margin:8px 10px 0; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); }
+#selection.show { display:block; }
+#selection .sel-head { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); margin-bottom:4px; }
+#selection .sel-file { font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#selection .sel-lines { flex-shrink:0; }
+#selection pre { margin:0; max-height:120px; overflow:auto; }
 </style>
 </head>
 <body>
@@ -125,6 +136,10 @@ hr { border:none; border-top:1px solid var(--border); margin:10px 0; }
   <span class="dot" id="dot"></span>
   <span id="status">bobo — connecting…</span>
   <label id="explain-wrap"><input type="checkbox" id="explain"> Explain</label>
+</div>
+<div id="selection">
+  <div class="sel-head"><span class="sel-file" id="sel-file"></span><span class="sel-lines" id="sel-lines"></span></div>
+  <pre id="sel-code"></pre>
 </div>
 <div id="pairing"><p>Allow this VS Code window to talk to the local bobo gateway? The socket is local-only (127.0.0.1 equivalent).</p><button id="pair-ok">Allow</button></div>
 <div id="chat"></div>
@@ -135,6 +150,10 @@ const chat = document.getElementById('chat');
 const dot = document.getElementById('dot');
 const status = document.getElementById('status');
 const explain = document.getElementById('explain');
+const selCard = document.getElementById('selection');
+const selFile = document.getElementById('sel-file');
+const selLines = document.getElementById('sel-lines');
+const selCode = document.getElementById('sel-code');
 let current = null;
 function setStatus(s, cls) { status.textContent = s; dot.className = 'dot' + (cls ? ' ' + cls : ''); }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -158,6 +177,14 @@ window.addEventListener('message', (ev) => {
   const m = ev.data; if (!m || !m.kind) return;
   if (m.kind === 'session') { /* session bound */ }
   else if (m.kind === 'explain') { explain.checked = m.on; }
+  else if (m.kind === 'selection') {
+    const s = m.sel;
+    if (!s || !s.filePath) { selCard.classList.remove('show'); return; }
+    selFile.textContent = s.filePath;
+    selLines.textContent = ':' + s.startLine + '-' + s.endLine;
+    selCode.textContent = s.text;
+    selCard.classList.add('show');
+  }
   else if (m.kind === 'pairing') { document.getElementById('pairing').classList.add('show'); }
   else if (m.kind === 'event') {
     const t = m.type;
