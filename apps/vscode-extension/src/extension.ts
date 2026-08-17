@@ -47,6 +47,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
           ensureConnected(state, ctx);
         });
         if (state.client && state.client.connected) panel.setExplain(panel.explain);
+        // VSC-1B 实弹修复：打开面板即连接——已配对直接连；未配对先问（否则
+        // 状态永远卡 connecting、Send 因无 client 静默无效）
+        if (ctx.workspaceState.get<boolean>(PAIRING_KEY, false)) {
+          ensureConnected(state, ctx);
+        } else {
+          panel.askPairing();
+        }
       },
     }),
   );
@@ -125,7 +132,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(
     vscode.commands.registerCommand('bobo.submitQuestion', async (arg: { text?: string }) => {
       const text = arg && arg.text ? arg.text : '';
-      if (!text || !state.client || !state.sessionId) return;
+      if (!text) return;
+      // VSC-1B 实弹修复：面板内发送也要走连接闸门——未连接先连 + 等待 +
+      // sessionId 未就绪自动补一次 session.create，绝不静默 return
+      if (!state.client) { ensureConnected(state, ctx); await waitConnected(state); }
+      const gate = resolveAskGate(!!(state.client && state.client.connected), state.sessionId);
+      if (gate.kind === 'not_connected') {
+        vscode.window.showErrorMessage('bobo: not connected to the bobo gateway.');
+        return;
+      }
+      if (gate.kind === 'connecting' && state.client) {
+        try {
+          const r: any = await state.client.send('session.create', {});
+          applySessionResult(state, r && r.session_id,
+            state.panel ? (s) => state.panel && state.panel.setSession(s) : null);
+        } catch (e) {
+          vscode.window.showErrorMessage(`bobo: ${(e as Error).message}`);
+          return;
+        }
+      }
+      if (!state.client || !state.sessionId) {
+        vscode.window.showErrorMessage('bobo: connecting, try again in a moment.');
+        return;
+      }
       try {
         const explain = state.panel ? state.panel.explain : false;
         await state.client.send('prompt.submit', {
