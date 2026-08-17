@@ -361,8 +361,21 @@ def test_v2a_css_zero_change_on_existing():
         assert m_old and m_new, f"V2D7 豁免规则应在基线/新版中同时存在: {pat}"
         old_style = old_style.replace(m_old.group(0), "")
         new_pre = new_pre.replace(m_new.group(0), "")
+    # DESK-P1 特批豁免（owner 票 TICKET-DESK-P1 钉死）：ASCII BOBO 大字（#welcome-logo）
+    # → 文案标题（#welcome-title）+ project pill 锚点段（均位于 V2A 标记之前）。
+    # 双向剔除该段后比对，其余既有 CSS 仍逐字节锁死。
+    old_welcome = re.search(r"#welcome-logo \{[^}]*\}\n", old_style)
+    assert old_welcome, "基线中应能找到 #welcome-logo 规则"
+    old_style = old_style.replace(old_welcome.group(0), "")
+    new_welcome = re.search(r"/\* 票 DESK-P1：.*?#welcome-title \{[^}]*\}\n", new_pre, re.S)
+    assert new_welcome, "新版中应能找到 #welcome-title 规则段（含前后注释）"
+    new_pre = new_pre.replace(new_welcome.group(0), "")
+    pill_seg = re.search(
+        r"/\* === DESK-P1 project pill ===.*?#project-menu \.prj-empty \{[^}]*\}\n", new_pre, re.S)
+    assert pill_seg, "新版中应能找到 DESK-P1 project pill 锚点段"
+    new_pre = new_pre.replace(pill_seg.group(0), "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7 豁免段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1 豁免段外零改动）"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────

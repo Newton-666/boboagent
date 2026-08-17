@@ -188,6 +188,8 @@ class TestIronRules:
         # killall 误杀自身后端与桌面端渲染进程的根治疗，diff 须含 SAFETY-1 标记）；
         # 票 COST-3 特批白名单：core/context.py + core/engine.py（工作锚点属性化 +
         # 工具集全量稳定，diff 须含 COST-3 标记）；
+        # 票 DESK-P1 特批白名单：core/engine_adapter.py + core/tool_runner.py（会话
+        # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal cwd）；
         # 过滤掉特批文件行与 --stat 汇总行（"1 file changed"）
         lines = [l for l in r.stdout.strip().splitlines()
                  if l.strip() and "core/llm_caller.py" not in l
@@ -195,6 +197,8 @@ class TestIronRules:
                  and "core/command_safety.py" not in l
                  and "core/context.py" not in l
                  and "core/engine.py" not in l
+                 and "core/engine_adapter.py" not in l
+                 and "core/tool_runner.py" not in l
                  and "file changed" not in l and "files changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 

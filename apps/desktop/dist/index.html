@@ -83,7 +83,9 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 /* Main */
 #main { flex:1; display:flex; flex-direction:column; max-width:800px; margin:0 auto; width:100%; }
 #welcome { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
-#welcome-logo { font-family:'SF Mono',Monaco,Menlo,monospace; font-size:13px; line-height:1.3; color:#e8913a; margin:0; text-align:center; letter-spacing:1px; }
+/* 票 DESK-P1：ASCII BOBO 大字 → 文案标题。Charter 700 30px（既有 vendored
+   Charter + var(--font-reply)，零新增字体资源）；中文回落 Songti/Noto Serif 自然生效 */
+#welcome-title { font-family:var(--font-reply); font-weight:700; font-size:30px; color:var(--text); margin:0; text-align:center; line-height:1.3; }
 .welcome-sub { color:var(--text-muted); font-size:13px; margin-top:4px; }
 #chat { flex:1; overflow-y:auto; padding:24px 16px; }
 @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
@@ -162,6 +164,25 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #auto-toggle { position:absolute; right:104px; bottom:37px; padding:3px 10px; border-radius:6px; font-size:10px; letter-spacing:0.5px; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; }
 #auto-toggle:hover { background:var(--hover); }
 #auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
+/* === DESK-P1 project pill ===
+ * TICKET-DESK-P1（样式票，独立回溯）：Work with a project pill + 下拉菜单。
+ * 本段为外科式摘除单元：删除本段即完整回滚 DESK-P1 的输入区样式。
+ * 取色只用既有色板 token（--bg3/--border/--text/--text2/--text-muted/--hover），零新增。
+ */
+#project-pill-wrap { position:relative; margin-top:8px; text-align:left; }
+#project-pill { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:5px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+#project-pill:hover { background:var(--hover); }
+#project-menu { position:absolute; bottom:calc(100% + 6px); left:0; min-width:320px; max-width:420px; background:var(--bg); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.10); padding:6px; z-index:40; }
+#project-menu button { display:block; width:100%; text-align:left; font-family:inherit; font-size:13px; color:var(--text); background:none; border:none; border-radius:6px; padding:8px 10px; cursor:pointer; }
+#project-menu button:hover { background:var(--bg3); }
+#project-menu .prj-name { font-weight:600; color:var(--text); }
+#project-menu .prj-path { font-size:11px; color:var(--text-muted); font-family:'SF Mono',Monaco,Menlo,monospace; word-break:break-all; }
+#project-menu .prj-star { float:right; color:var(--text-muted); font-size:12px; padding:0 4px; }
+#project-menu .prj-star.on { color:#e8913a; }
+#project-menu .project-sep { height:1px; background:var(--border); margin:5px 8px; }
+#project-menu #project-clear { color:var(--text-muted); }
+#project-menu #project-clear:hover { color:#f48771; background:var(--bg3); }
+#project-menu .prj-empty { padding:8px 10px; font-size:12px; color:var(--text-muted); }
 #debug { text-align:center; font-size:11px; color:#666; margin-top:8px; font-family:monospace; }
 ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-thumb { background:#444; border-radius:2px; }
 /* Settings modal */
@@ -530,12 +551,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
   </div>
   <div id="main">
     <div id="welcome">
-      <pre id="welcome-logo">██████╗  ██████╗ ██████╗  ██████╗ 
-██╔══██╗██╔═══██╗██╔══██╗██╔═══██╗
-██████╔╝██║   ██║██████╔╝██║   ██║
-██╔══██╗██║   ██║██╔══██╗██║   ██║
-██████╔╝╚██████╔╝██████╔╝╚██████╔╝
-╚═════╝  ╚═════╝ ╚═════╝  ╚═════╝ </pre>
+      <!-- 票 DESK-P1：ASCII BOBO 大字（pre#welcome-logo）整块摘除 → 文案标题 -->
+      <h1 id="welcome-title">Let's finish up something today.</h1>
       <p class="welcome-sub">你的个人 AI 助手</p>
     </div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
@@ -557,6 +574,16 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       <button id="auto-toggle" title="AUTO 模式开关（点击切换，回车=发送 / Shift+回车=换行）" disabled>AUTO</button>
       <button id="send" disabled>↑</button>
       <button id="stop-btn" title="中断 (Esc)" onclick="stopThinking()">■</button>
+      <!-- 票 DESK-P1：Work with a project pill（输入框下方左侧；下拉：最近项目/Choose a folder/Clear project） -->
+      <div id="project-pill-wrap">
+        <button id="project-pill" title="Work with a project（选择项目文件夹）">Work with a project ▾</button>
+        <div id="project-menu" style="display:none">
+          <div id="project-recents"></div>
+          <button id="project-choose">Choose a folder</button>
+          <div class="project-sep"></div>
+          <button id="project-clear">Clear project</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="resize-handle"></div>
@@ -775,8 +802,116 @@ function sendPrompt(text) {
     addStatus('⚠ 消息已发送但后端未响应，请检查连接状态');
     sendTimeoutId = null;
   }, 15000);
-  window.boboAPI.send({ jsonrpc:'2.0', id:'prompt-'+(++reqId), method:'prompt.submit', params:{ session_id:currentSessionId, text:text } });
+  // 票 DESK-P1：会话项目根随 prompt.submit 下发（有值才带；null=默认现状，绝对兼容）
+  var submitParams = { session_id:currentSessionId, text:text };
+  if (currentProjectRoot) submitParams.project_root = currentProjectRoot;
+  window.boboAPI.send({ jsonrpc:'2.0', id:'prompt-'+(++reqId), method:'prompt.submit', params:submitParams });
 }
+
+// ── 票 DESK-P1：Work with a project（项目文件夹模式）──────────────────
+// 会话项目根：null=默认现状。前端选项目后随 prompt.submit 下发 project_root。
+// 最近项目持久化 localStorage（上限 8 个，最近使用置顶）。
+var currentProjectRoot = null;
+var recentProjects = [];
+try { recentProjects = JSON.parse(localStorage.getItem('boboRecentProjects') || '[]'); } catch(e) { recentProjects = []; }
+
+function prjName(path) { return path.split('/').filter(Boolean).pop() || path; }
+
+// 自审（GOV-1）：innerHTML 拼接前转义——localStorage 路径可含 < > & 等字符
+function prjEsc(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function prjToggleMenu() {
+  var menu = document.getElementById('project-menu');
+  menu.style.display = (menu.style.display === 'none') ? 'block' : 'none';
+}
+
+function prjCloseMenu() {
+  document.getElementById('project-menu').style.display = 'none';
+}
+
+function prjSaveRecents() {
+  try { localStorage.setItem('boboRecentProjects', JSON.stringify(recentProjects)); } catch(e) {}
+}
+
+function prjAddRecent(path) {
+  var entry = { name:prjName(path), path:path, starred:false, ts:Date.now() };
+  recentProjects = recentProjects.filter(function(p){ return p.path !== path; });
+  recentProjects.unshift(entry);
+  if (recentProjects.length > 8) recentProjects = recentProjects.slice(0, 8);
+  prjSaveRecents();
+}
+
+function prjChooseFolder() {
+  if (!window.boboAPI || !window.boboAPI.selectFolder) { debug('chooseFolder 不可用'); return; }
+  window.boboAPI.selectFolder().then(function(path) {
+    if (!path) return;
+    currentProjectRoot = path;
+    prjAddRecent(path);
+    prjUpdatePill();
+  });
+}
+
+function prjSelect(path) {
+  currentProjectRoot = path;
+  prjAddRecent(path);
+  prjUpdatePill();
+}
+
+function prjClear() {
+  currentProjectRoot = null;
+  prjUpdatePill();
+}
+
+function prjUpdatePill() {
+  var pill = document.getElementById('project-pill');
+  pill.textContent = currentProjectRoot ? (prjName(currentProjectRoot) + ' ▾') : 'Work with a project ▾';
+  prjRenderMenu();
+}
+
+function prjRenderMenu() {
+  var box = document.getElementById('project-recents');
+  if (!recentProjects.length) {
+    box.innerHTML = '<div class="prj-empty">暂无最近项目</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < recentProjects.length; i++) {
+    var p = recentProjects[i];
+    var star = p.starred ? '<span class="prj-star on" data-path="' + prjEsc(p.path) + '">★</span>'
+                         : '<span class="prj-star" data-path="' + prjEsc(p.path) + '">☆</span>';
+    html += '<button class="prj-item" data-path="' + prjEsc(p.path) + '">' + star +
+            '<span class="prj-name">' + prjEsc(p.name) + '</span><br><span class="prj-path">' + prjEsc(p.path) + '</span></button>';
+  }
+  box.innerHTML = html;
+  var items = box.querySelectorAll('.prj-item');
+  for (var j = 0; j < items.length; j++) {
+    (function(item) {
+      item.addEventListener('click', function(ev) {
+        if (ev.target.classList && ev.target.classList.contains('prj-star')) {
+          var path = ev.target.getAttribute('data-path');
+          for (var k = 0; k < recentProjects.length; k++) {
+            if (recentProjects[k].path === path) { recentProjects[k].starred = !recentProjects[k].starred; break; }
+          }
+          prjSaveRecents(); prjRenderMenu(); return;
+        }
+        prjSelect(item.getAttribute('data-path')); prjCloseMenu();
+      });
+    })(items[j]);
+  }
+}
+
+document.getElementById('project-pill').addEventListener('click', prjToggleMenu);
+document.getElementById('project-choose').addEventListener('click', function(){ prjChooseFolder(); prjCloseMenu(); });
+document.getElementById('project-clear').addEventListener('click', function(){ prjClear(); prjCloseMenu(); });
+document.addEventListener('click', function(ev) {
+  var wrap = document.getElementById('project-pill-wrap');
+  if (!wrap.contains(ev.target)) prjCloseMenu();
+});
+prjUpdatePill();
 
 // ── UI refs ────────────────────────────────────────────────────────────
 var chatEl = document.getElementById('chat');

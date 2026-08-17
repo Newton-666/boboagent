@@ -701,6 +701,18 @@ class PromptInjector:
         except Exception:
             logger.debug("工作锚点注入失败（静默降级）", exc_info=True)
 
+        # ── 票 DESK-P1：会话项目根（project_root 尾部动态段，COST-3 之后顺延）──
+        # 有项目时注入"当前项目根"提示（文件操作/终端命令基准目录）；无项目时
+        # 零注入（一字节都不许多——缓存前缀稳定红线）。engine.project_root 由
+        # gateway 经 engine_adapter 注入（session["project_root"]），None=默认现状。
+        try:
+            _pr = getattr(engine, "project_root", None)
+            if _pr:
+                _tail_blocks.append(("project_root",
+                                     f"当前项目根：{_pr}——所有文件操作/终端命令基于该目录"))
+        except Exception:
+            logger.debug("project_root 注入失败（静默降级）", exc_info=True)
+
         # 3a) 技能标准收集（票 TICKET-E3b：未命中清单已删，仅命中才注入）
         # 票 COST-2：必须在本段统一注入之前收集；原第 9 段（注入后）append
         # 到 messages 末尾，位置逐轮漂移导致前缀错位（详见第 9 段注释）。
@@ -731,7 +743,8 @@ class PromptInjector:
                        "change_log": 3, "read_files": 4, "pending_diff": 5,
                        "discipline": 6,
                        "selfmap_arch": 7, "selfmap_boundary": 8, "selfmap_rescue": 9,
-                       "skill": 10, "now": 11, "work_anchor": 12}
+                       "skill": 10, "now": 11, "work_anchor": 12,
+                       "project_root": 13}  # 票 DESK-P1：COST-3 之后顺延
         if _tail_blocks:
             _ordered = sorted(
                 _tail_blocks, key=lambda b: _TAIL_ORDER.get(b[0], 99))

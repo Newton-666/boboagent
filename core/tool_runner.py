@@ -323,6 +323,10 @@ class ToolRunnerMixin:
                 # 注入中断事件，工具内部轮询到即中断（2s 内）
                 exec_args = dict(tool_args)
                 exec_args["_interrupt_event"] = getattr(self, '_interrupt_event', None)
+                # 票 DESK-P1：execute_terminal 默认 cwd=会话 project_root
+                # （LLM 不可见注入；None=默认现状）
+                if tool_name == "execute_terminal":
+                    exec_args["_project_root"] = getattr(self, 'project_root', None)
             future = executor.submit(_execute_tool, tool_name, exec_args)
             future_map[future] = (tc, tool_name, tool_args, _tool_t0)
         executor.shutdown(wait=False)

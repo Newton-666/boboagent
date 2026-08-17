@@ -145,6 +145,15 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     if not session:
         return err(rid, -32000, "会话不存在")
 
+    # ── 票 DESK-P1：前端随 prompt.submit 下发 project_root（会话级）──
+    # None/空串=默认现状（绝对兼容）；仅显式传入非空路径才落会话元数据。
+    # 路径规范化：去除尾部斜杠，避免 /a/b/ 与 /a/b 双形态。
+    _pr = params.get("project_root")
+    if _pr is not None:
+        _pr = str(_pr).strip().rstrip("/") or None
+        with ctx.sessions_lock:
+            session["project_root"] = _pr
+
     # 审计 #12：上一个请求的 engine 仍在跑时，先中断它，再接受新请求。
     if not _cancel_engine_and_wait(sid):
         return err(rid, -32000, "无法取消上一个请求，请稍后重试")

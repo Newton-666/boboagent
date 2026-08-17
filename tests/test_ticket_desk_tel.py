@@ -505,10 +505,11 @@ def test_tel_8_zero_interference():
             continue
         # 票 COST-2 特批：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度），diff 必须含 COST-2 标记
         # 票 DIAG-1 特批：injector.py 新增调试纪律场景（scene=debug），diff 必须含 DIAG-1 标记
+        # 票 DESK-P1 特批：injector.py 新增 project_root 尾部动态段（_TAIL_ORDER 13）
         if ln == "core/injector.py":
             r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-2" in r4.stdout or "DIAG-1" in r4.stdout), \
-                f"{ln} 缺 COST-2/DIAG-1 特批标记，未授权改动被拦截"
+            assert ("COST-2" in r4.stdout or "DIAG-1" in r4.stdout or "DESK-P1" in r4.stdout), \
+                f"{ln} 缺 COST-2/DIAG-1/DESK-P1 特批标记，未授权改动被拦截"
             continue
         # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
         if ln == "core/command_safety.py":
@@ -516,16 +517,24 @@ def test_tel_8_zero_interference():
             assert "SAFETY-1" in r5.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
             continue
         # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
-        # 会话内全量稳定），diff 必须含 COST-3 标记
+        # 会话内全量稳定），diff 必须含 COST-3 标记；DESK-P1 复用 engine.py 追加
+        # project_root 属性（engine_adapter 会话创建时落库）
         if ln in ("core/context.py", "core/engine.py"):
             r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "COST-3" in r7.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout), \
+                f"{ln} 缺 COST-3/DESK-P1 特批标记，未授权改动被拦截"
+            continue
+        # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
+        # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记
+        if ln in ("core/engine_adapter.py", "core/tool_runner.py"):
+            r8 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "DESK-P1" in r8.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout), \
-                f"{ln} 缺 COST-1b/COST-1c 授权标记，未授权改动被拦截"
+            assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
+                f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
@@ -539,9 +548,21 @@ def test_tel_8_zero_interference():
             r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "SAFETY-1" in r7.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
             continue
+        # 票 DESK-P1 特批：apps/desktop/electron/preload.cjs 新增 chooseFolder 别名
+        #（桌面端主进程传真实项目根），diff 必须含 DESK-P1 标记
+        if ln.endswith("preload.cjs"):
+            r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "DESK-P1" in r9.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
+            continue
+        # 票 DESK-P1 特批：tools/execute_terminal.py 会话 project_root 非空时
+        # 注入 cwd（终端命令落项目目录），diff 必须含 DESK-P1 标记
+        if ln == "tools/execute_terminal.py":
+            r10 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "DESK-P1" in r10.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("tests/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）
