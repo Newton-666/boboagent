@@ -166,14 +166,15 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 .msg.bobo .txt .diff-del { color:#f48771; }
 .msg.bobo .txt .diff-file { color:var(--text2); font-weight:600; }
 /* highlight.js 主题（复刻桌面端：取色只用色板 + 既有语义色） */
+/* owner 实弹反馈（2026-08-17）：窄面板里 --text2 太淡，代码正文 token 一律压回 --text 深色 */
 .msg.bobo .txt .hljs { color:var(--text); background:transparent; }
 .msg.bobo .txt .hljs-comment, .msg.bobo .txt .hljs-quote { color:var(--text-muted); font-style:italic; }
 .msg.bobo .txt .hljs-keyword, .msg.bobo .txt .hljs-selector-tag, .msg.bobo .txt .hljs-built_in { color:#e8913a; }
 .msg.bobo .txt .hljs-string, .msg.bobo .txt .hljs-regexp, .msg.bobo .txt .hljs-addition { color:#50a14f; }
-.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:var(--text2); }
-.msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:var(--text2); }
-.msg.bobo .txt .hljs-variable, .msg.bobo .txt .hljs-template-variable { color:var(--text2); }
-.msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:var(--text2); }
+.msg.bobo .txt .hljs-number, .msg.bobo .txt .hljs-literal { color:#8a6d3b; }
+.msg.bobo .txt .hljs-title, .msg.bobo .txt .hljs-section, .msg.bobo .txt .hljs-attr, .msg.bobo .txt .hljs-attribute { color:var(--text); }
+.msg.bobo .txt .hljs-variable, .msg.bobo .txt .hljs-template-variable { color:var(--text); }
+.msg.bobo .txt .hljs-type, .msg.bobo .txt .hljs-class .hljs-title { color:var(--text); }
 .msg.bobo .txt .hljs-deletion { color:#f48771; }
 .msg.bobo .txt .hljs-meta { color:var(--text-muted); }
 .msg.bobo .txt .hljs-emphasis { font-style:italic; }
