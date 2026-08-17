@@ -425,13 +425,41 @@ def _run_socket_backend(sock_path: str):
     except (ValueError, TypeError):
         pass
 
-    try:
-        os.unlink(sock_path)
-    except FileNotFoundError:
-        pass
+    def _probe_active(sock_path: str) -> bool:
+        """探测 sock 是否已被活跃 gateway 进程 listen（能连上 = 活跃）。"""
+        try:
+            _p = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            try:
+                _p.settimeout(0.5)
+                _p.connect(sock_path)
+            finally:
+                _p.close()
+            return True
+        except OSError:
+            return False
+
+    # TICKET-GW-SOCK：sock 文件存在且被活跃进程 listen → 拒绝双实例启动；
+    # 否则清理陈旧文件后 bind。顺序必须先探测再 unlink——若先 unlink，第二个
+    # 进程会 bind 成功并抢占 sock 文件，与第一个进程"叠罗汉"（双 gateway 并存）。
+    if os.path.exists(sock_path):
+        if _probe_active(sock_path):
+            logger.critical("gateway socket: %s 已被活跃 gateway 占用，拒绝双实例启动", sock_path)
+            return
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
 
     srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-    srv.bind(sock_path)
+    try:
+        srv.bind(sock_path)
+    except OSError as e:
+        # 竞态兜底：探测后瞬间被其他进程 bind 成功
+        if e.errno == getattr(_socket, "EADDRINUSE", 48):
+            logger.critical("gateway socket: %s bind 竞态占用，拒绝双实例启动", sock_path)
+            srv.close()
+            return
+        raise
     os.chmod(sock_path, 0o600)
     srv.listen(1)
     if _IDLE_TIMEOUT > 0:
