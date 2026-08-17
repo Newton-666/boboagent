@@ -7,9 +7,26 @@
   "license": "MIT",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
-  "activationEvents": ["onCommand:bobo.askSelection", "onCommand:bobo.toggleExplain"],
+  "activationEvents": ["onCommand:bobo.askSelection", "onCommand:bobo.toggleExplain", "onView:boboChat"],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "bobo",
+          "title": "bobo",
+          "icon": "media/bobo.svg"
+        }
+      ]
+    },
+    "views": {
+      "bobo": [
+        {
+          "id": "boboChat",
+          "name": "Chat"
+        }
+      ]
+    },
     "commands": [
       { "command": "bobo.askSelection", "title": "Ask bobo", "category": "bobo" },
       { "command": "bobo.toggleExplain", "title": "Toggle Explain mode", "category": "bobo" }

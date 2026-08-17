@@ -498,6 +498,10 @@ def test_tel_8_zero_interference():
     }
     # 引擎 / gateway / TUI / 小组件零改动
     for ln in changed:
+        # VSC-1B（2026-08-17）终审裁决：apps/vscode-extension/ 是独立 npm 子项目
+        # （自带 node:test 体系，pytest 世界外），桌面端守卫不管辖 VS Code 扩展
+        if ln.startswith("apps/vscode-extension/"):
+            continue
         # 票 COST-1c ① 特批：core/llm_caller.py 仅加 usage 事件透传，diff 必须含 COST-1c 标记
         if ln == "core/llm_caller.py":
             r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
@@ -560,6 +564,9 @@ def test_tel_8_zero_interference():
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
     # 改动文件清单（index.html + 本测试文件 + V2C12/V4 豁免 + COST-1c 特批）只允许相关
     for ln in changed:
+        # VSC-1B（2026-08-17）终审裁决：apps/vscode-extension/ 独立 npm 子项目，不管辖
+        if ln.startswith("apps/vscode-extension/"):
+            continue
         if ln.endswith("index.html"):
             continue
         # 票 SAFETY-1 特批：apps/desktop/electron/main.cjs 后端自动重启（退出码 0

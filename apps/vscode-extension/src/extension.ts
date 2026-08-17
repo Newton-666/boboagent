@@ -22,6 +22,7 @@ import { ChatPanel } from './chatPanel';
 import { buildUserMessage, SelectionContext, extractDiagnostics } from './contextPack';
 import { buildPrompt } from './explain';
 import { splitThinking } from './markdown';
+import { applySessionResult, resolveAskGate, buildSelectionPayload } from './sessionFlow';
 
 const PAIRING_KEY = 'bobo.paired.v1';
 const PAIRING_MSG = 'bobo: first-time pairing — allow this VS Code window to talk to the local bobo gateway?';
@@ -137,6 +138,35 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }),
   );
 
+  // ── TICKET-VSC-1B：选中代码实时预览（owner 需求最小版）──
+  // 非空选区才发；300ms 防抖（多次 selection 事件只发最后一次，防刷屏）；
+  // text 截断 500 字符；无 panel（面板未开）时丢弃——面板后开不补历史选区（最小版）。
+  let selectionTimer: NodeJS.Timeout | null = null;
+  ctx.subscriptions.push(
+    vscode.window.onDidChangeTextEditorSelection((ev) => {
+      if (selectionTimer) clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        const editor = ev.textEditor;
+        const panel = state.panel;
+        if (!panel) return;
+        const sel = editor.selection;
+        if (!sel || sel.isEmpty) {
+          panel.setSelection(null);
+          return;
+        }
+        const doc = editor.document;
+        const relPath = toRelativePath(doc.uri, vscode.workspace.getWorkspaceFolder(doc.uri)?.uri);
+        const payload = buildSelectionPayload(
+          relPath || doc.uri.fsPath,
+          sel.start.line + 1,
+          sel.end.line + 1,
+          doc.getText(sel),
+        );
+        panel.setSelection(payload);
+      }, 300);
+    }),
+  );
+
   // ── helpers ──
 
   function pickSocket(ctx2: vscode.ExtensionContext): string | null {
@@ -154,13 +184,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (!sock) return;
     const client = new SocketClient({
       onConnect: () => {
+        // TICKET-VSC-1B（Bug 2 修复）：sessionId 无条件落 state——
+        // 面板未打开时不再被静默丢弃；面板已开/后开都通过 setSession 绑定。
         void client.send('session.create', {}).then((r: any) => {
           const sid = r && r.session_id;
-          if (sid && st.panel) {
-            st.sessionId = sid;
-            st.panel.setSession(sid);
-          }
-        }).catch(() => {});
+          applySessionResult(
+            st,
+            sid,
+            st.panel ? (s) => st.panel && st.panel.setSession(s) : null,
+          );
+        }).catch((e: Error) => {
+          // 不静默吞错：session.create 失败留 log（票风险自查点）
+          console.error('bobo: session.create failed', e && e.message);
+        });
       },
       onDisconnect: () => {
         if (st.panel) st.panel.handleEvent({ type: 'gateway.error' } as any);
@@ -201,15 +237,37 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   async function askWithContext(st: typeof state, ctx2: vscode.ExtensionContext, selCtx: SelectionContext): Promise<void> {
     if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
-    if (!st.client || !st.sessionId) {
+    // TICKET-VSC-1B：报错分支拆分——socket 未连上 vs 已连但 sessionId 未就绪
+    const gate = resolveAskGate(!!(st.client && st.client.connected), st.sessionId);
+    if (gate.kind === 'not_connected') {
       vscode.window.showErrorMessage('bobo: not connected to the bobo gateway.');
       return;
+    }
+    if (gate.kind === 'connecting') {
+      // 已连接但 session.create 尚未完成：提示稍等并自动重试一次
+      vscode.window.showErrorMessage('bobo: connecting, try again in a moment.');
+      const client = st.client;
+      if (client) {
+        try {
+          const r: any = await client.send('session.create', {});
+          const sid = r && r.session_id;
+          applySessionResult(
+            st,
+            sid,
+            st.panel ? (s) => st.panel && st.panel.setSession(s) : null,
+          );
+        } catch (e) {
+          console.error('bobo: session.create retry failed', (e as Error).message);
+          return;
+        }
+      }
+      if (!st.sessionId) return; // 重试仍未就绪，放弃（错误已提示）
     }
     // ensure a fresh session per ask (clean context), but keep the follow-up sid
     const userMsg = buildUserMessage(selCtx);
     const explain = st.panel ? st.panel.explain : false;
     try {
-      await st.client.send('prompt.submit', {
+      await st.client!.send('prompt.submit', {
         session_id: st.sessionId,
         text: buildPrompt(userMsg, explain),
         project_root: selCtx.workspaceRoot || undefined,
