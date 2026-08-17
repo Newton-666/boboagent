@@ -142,4 +142,6 @@ GW-MULTI socket 后端多客户端并发（listen(16) + 每连接一线程 + 事
 
 VSC-1B VS Code 侧边栏落地 + 连接死锁双 bug 修复（Bug1 package.json 补 viewsContainers/views 注册 + bobo.svg 图标；Bug2 sessionId 不再被面板状态绑架——"not connected" 假报错根治；选中代码实时预览卡片 300ms 防抖；ask 报错拆分 not_connected/connecting 自动重试；Kimi 终审裁决 tel 守卫放行 apps/vscode-extension/ 独立 npm 子项目；npm 40/40 + 全量 2722 零失败；合并 c6adbe89）
 
-当前 main: 含 VSC-1B · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 40/40 + socket 专项 7/7 · 回滚标签全部在远端
+VSC-1C VS Code 面板渲染复刻桌面端（marked+DOMPurify+highlight vendor 本地化 + 消息气泡/代码块/表格/diff 增色全套 design token 照抄 + 空态欢迎标题；Kimi 终审 npm 46/46×2 稳定 + 守卫 20/20；合并 ba60dd58）
+
+当前 main: 含 VSC-1C · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 46/46 + socket 专项 7/7 · 回滚标签全部在远端
