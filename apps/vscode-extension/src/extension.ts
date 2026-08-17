@@ -23,6 +23,8 @@ import { buildUserMessage, SelectionContext, extractDiagnostics } from './contex
 import { buildPrompt } from './explain';
 import { splitThinking } from './markdown';
 import { applySessionResult, resolveAskGate, buildSelectionPayload } from './sessionFlow';
+import { SnapshotStore, extractTargetPath, hasInlineDiff, restoreSnapshot, WRITE_TOOLS } from './diffFlow';
+import { DiffSnapshotProvider } from './diffProvider';
 
 const PAIRING_KEY = 'bobo.paired.v1';
 const PAIRING_MSG = 'bobo: first-time pairing — allow this VS Code window to talk to the local bobo gateway?';
@@ -33,6 +35,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
     panel: ChatPanel | null;
     sessionId: string | null;
   } = { client: null, panel: null, sessionId: null };
+
+  // ── TICKET-VSC-2C：diff 快照（内存）+ 只读文档提供者 ──
+  const snapshots = new SnapshotStore();
+  const diffProvider = new DiffSnapshotProvider(snapshots);
+  ctx.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('bobo-diff', diffProvider),
+  );
 
   // ── webview provider (sidebar view container) ──
   ctx.subscriptions.push(
@@ -46,6 +55,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
           ctx.workspaceState.update(PAIRING_KEY, true);
           ensureConnected(state, ctx);
         });
+        // ── TICKET-VSC-2B/C：面板新协议回调 ──
+        panel.onNewChat(() => { void newChat(state, ctx); });
+        panel.onSwitchSession((sid) => { void switchSession(state, ctx, sid); });
+        panel.onRequestSessions(() => { void refreshSessionList(state, ctx); });
+        panel.onDiffDecision((filePath, accept) => { handleDiffDecision(state, filePath, accept, snapshots, diffProvider); });
         if (state.client && state.client.connected) panel.setExplain(panel.explain);
         // VSC-1B 实弹修复：打开面板即连接——已配对直接连；未配对先问（否则
         // 状态永远卡 connecting、Send 因无 client 静默无效）
@@ -265,12 +279,45 @@ export function activate(ctx: vscode.ExtensionContext): void {
         //   {"type":"message.delta","payload":{"text":"...","session_id":"..."},"session_id":"..."}
         const payload = (p.payload || {}) as Record<string, unknown>;
         const merged: Record<string, unknown> = { ...p, ...payload };
+        const sid = String(merged.session_id || '');
         if (t === 'message.delta' && typeof merged.text === 'string' && st.panel) {
-          st.panel.handleDelta(String(merged.session_id || ''), merged.text);
+          st.panel.handleDelta(sid, merged.text);
         } else if (t === 'message.complete' && st.panel) {
           const final = String(merged.final_text || '');
-          const { body } = splitThinking(final);
-          st.panel.handleComplete(String(merged.session_id || ''), body || final);
+          const { body, thinking } = splitThinking(final);
+          // VSC-2B：thinking 单独推折叠块，正文照旧流式定稿
+          st.panel.handleThinking(sid, thinking);
+          st.panel.handleComplete(sid, body || final);
+        } else if (t === 'tool.start' && st.panel) {
+          // VSC-2C：写文件工具 start → 目标文件快照（内存）
+          captureSnapshot(st, snapshots, merged);
+          st.panel.handleTool(sid, merged);
+        } else if (t === 'tool.complete' && st.panel) {
+          st.panel.handleTool(sid, merged);
+          // VSC-2C：写文件工具带 inline_diff → 开 vscode.diff + 面板 Accept/Reject 卡
+          const name = String(merged.name || '');
+          if (WRITE_TOOLS.has(name) && hasInlineDiff(merged)) {
+            const args = (merged.arguments || {}) as Record<string, unknown>;
+            const rel = extractTargetPath(name, args);
+            if (rel) {
+              const abs = resolveAbsPath(rel);
+              if (snapshots.has(abs)) {
+                st.panel.showDiffCard(abs, `${name} · ${path.basename(abs)}`);
+                void openDiff(diffProvider, abs);
+              }
+            }
+          }
+          // VSC-2D：task_ledger 完成 → 台账折叠区（arguments.items 为条目）
+          if (name === 'task_ledger') {
+            const args = (merged.arguments || {}) as Record<string, unknown>;
+            const items = Array.isArray(args.items)
+              ? (args.items as unknown[]).filter(
+                  (x): x is { id: string; title: string; status: string } =>
+                    !!x && typeof (x as any).id === 'string' && typeof (x as any).title === 'string' && typeof (x as any).status === 'string',
+                )
+              : [];
+            st.panel.setLedger(items);
+          }
         } else if (st.panel) {
           const { type: _t, ...rest } = merged;
           st.panel.handleEvent({ type: t, ...rest } as any);
@@ -336,6 +383,122 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   if (vscode.window.activeTextEditor) {
     // eager: nothing — we connect lazily on first Ask
+  }
+
+  // ── TICKET-VSC-2B/C helpers ──
+
+  /** New chat：session.create → 绑定面板 + 清空视图。 */
+  async function newChat(st: typeof state, ctx2: vscode.ExtensionContext): Promise<void> {
+    if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
+    if (!st.client) return;
+    try {
+      const r: any = await st.client.send('session.create', {});
+      applySessionResult(st, r && r.session_id, st.panel ? (s) => st.panel && st.panel.setSession(s) : null);
+      if (st.panel) {
+        st.panel.clearChat();
+        st.panel.setSession(st.sessionId as string);
+      }
+      void refreshSessionList(st, ctx2);
+    } catch (e) {
+      vscode.window.showErrorMessage(`bobo: ${(e as Error).message}`);
+    }
+  }
+
+  /** 切换会话：session.resume（实探确认既有 RPC；无 session.load）→ 渲染历史。 */
+  async function switchSession(st: typeof state, ctx2: vscode.ExtensionContext, sid: string): Promise<void> {
+    if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
+    if (!st.client) return;
+    try {
+      const r: any = await st.client.send('session.resume', { session_id: sid });
+      if (r && r.resumed) {
+        applySessionResult(st, r.session_id, st.panel ? (s) => st.panel && st.panel.setSession(s) : null);
+        if (st.panel) {
+          st.panel.clearChat();
+          st.panel.setSession(r.session_id);
+          st.panel.setHistory(r.messages || []);
+        }
+      } else if (r && r.error) {
+        vscode.window.showErrorMessage(`bobo: ${r.error.message || '切换会话失败'}`);
+      }
+    } catch (e) {
+      vscode.window.showErrorMessage(`bobo: ${(e as Error).message}`);
+    }
+  }
+
+  /** 拉取会话列表并推给面板。 */
+  async function refreshSessionList(st: typeof state, ctx2: vscode.ExtensionContext): Promise<void> {
+    if (!st.client) { ensureConnected(st, ctx2); await waitConnected(st); }
+    if (!st.client || !st.panel) return;
+    try {
+      const r: any = await st.client.send('session.list', {});
+      st.panel.setSessions(Array.isArray(r && r.sessions) ? r.sessions : []);
+    } catch {
+      /* 列表失败静默（面板已有当前会话可继续） */
+    }
+  }
+
+  /** tool.start：写文件工具 → 读目标文件快照入内存。 */
+  function captureSnapshot(st: typeof state, store: SnapshotStore, ev: Record<string, unknown>): void {
+    const name = String(ev.name || '');
+    if (!WRITE_TOOLS.has(name)) return;
+    const args = (ev.arguments || {}) as Record<string, unknown>;
+    const rel = extractTargetPath(name, args);
+    if (!rel) return;
+    const abs = resolveAbsPath(rel);
+    let content = '';
+    let existed = true;
+    try {
+      content = require('fs').readFileSync(abs, 'utf8');
+    } catch {
+      existed = false; // 新建场景：快照空串 + existed=false，Reject = 删除文件还原"不存在"
+    }
+    store.set({ absPath: abs, content, existed, takenAt: Date.now(), toolName: name });
+  }
+
+  /** 打开 VS Code 原生 diff（左侧只读快照 vs 右侧磁盘文件）。 */
+  async function openDiff(provider: DiffSnapshotProvider, abs: string): Promise<void> {
+    try {
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        provider.snapshotUri(abs),
+        vscode.Uri.file(abs),
+        'bobo 改动',
+      );
+    } catch (e) {
+      console.error('bobo: vscode.diff failed', (e as Error).message);
+    }
+  }
+
+  /** Accept/Reject：Accept 关 diff 即完；Reject 快照逐字节写回（fs 直写）。 */
+  function handleDiffDecision(
+    st: typeof state,
+    filePath: string,
+    accept: boolean,
+    store: SnapshotStore,
+    provider: DiffSnapshotProvider,
+  ): void {
+    const entry = store.get(filePath);
+    if (!entry) return;
+    if (!accept) {
+      try {
+        const fs = require('fs') as typeof import('fs');
+        const pathMod = require('path') as typeof import('path');
+        restoreSnapshot(entry, fs, pathMod);
+      } catch (e) {
+        vscode.window.showErrorMessage(`bobo: 快照还原失败 ${(e as Error).message}`);
+        return;
+      }
+    }
+    store.delete(filePath);
+    if (st.panel) st.panel.hideDiffCard(filePath);
+    void vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  }
+
+  /** 相对/绝对路径 → 绝对（相对路径锚定 workspace 根）。 */
+  function resolveAbsPath(p: string): string {
+    if (path.isAbsolute(p)) return p;
+    const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+    return ws ? path.join(ws.uri.fsPath, p) : path.resolve(p);
   }
 }
 

@@ -69,3 +69,36 @@ export function buildSelectionPayload(
     text: trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed,
   };
 }
+
+// ── TICKET-VSC-2B：会话切换状态机（纯判定）──
+
+export type SwitchPlan =
+  | { kind: 'same' }            // 目标就是当前会话，无动作
+  | { kind: 'switch'; sid: string } // 需 resume + 渲染历史 + 清空视图
+  | { kind: 'missing' };        // 列表里找不到目标（防御，不发请求）
+
+/** 会话切换决策：目标=当前 → same；目标在列表 → switch；否则 missing。 */
+export function planSwitchSession(
+  currentSid: string | null,
+  targetSid: string,
+  knownIds: string[],
+): SwitchPlan {
+  if (currentSid === targetSid) return { kind: 'same' };
+  if (!knownIds.includes(targetSid)) return { kind: 'missing' };
+  return { kind: 'switch', sid: targetSid };
+}
+
+/** New chat 决策：无 sessionId 时必须先 session.create。 */
+export function needsSessionCreate(sessionId: string | null): boolean {
+  return !sessionId;
+}
+
+/** 会话列表按 started_at 倒序（新→旧），置顶 pinned 优先。 */
+export function sortSessions(
+  sessions: { id: string; started_at?: number; pinned?: boolean }[],
+): { id: string; started_at?: number; pinned?: boolean }[] {
+  return [...sessions].sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return (b.started_at || 0) - (a.started_at || 0);
+  });
+}
