@@ -124,4 +124,8 @@ COST-3 长会话缓存杀手清除（工作锚点属性化移出 history + 工�
 
 DESK-P1 欢迎屏 Charter 文案（"Let's finish up something today." serif 700/30px）+ Work with a project 会话项目根（原生选夹 + 最近项目 + project_root 尾部注入，无项目零注入）
 
-当前 main: 含 DESK-P1 · 测试基线 2706 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+
+
+DESK-P2 界面全英文化（106 HTML + 278 JS 字符串，"仍在工作"心跳协议串豁免）+ 欢迎屏极简（副标题/常驻状态条删除，标题居中 36px）+ 侧栏 panel-left 折叠图标
+
+当前 main: 含 DESK-P2 · 测试基线 2722 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
