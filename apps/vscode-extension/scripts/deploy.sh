@@ -35,6 +35,7 @@ echo "[2/4] 拷贝 out/ + package.json + media/ 到安装目录"
 rm -rf "$EXT_DIR/out"
 cp -R out "$EXT_DIR/out"
 cp package.json "$EXT_DIR/package.json"
+rm -rf "$EXT_DIR/media"
 cp -R media "$EXT_DIR/media"
 
 echo "[3/4] 自校验"

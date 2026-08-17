@@ -84,6 +84,7 @@ export class ChatPanel {
   private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean }): void {
     if (!msg) return;
     if (msg.kind === 'ready') {
+      try { require('fs').appendFileSync('/tmp/bobo-ext-debug.log', new Date().toISOString() + ' webview ready received, pending=' + this.pending.length + '\n'); } catch { /* noop */ }
       this.webviewReady = true;
       for (const m of this.pending.splice(0)) {
         try { this.view.webview.postMessage(m); } catch { /* disposed */ }
@@ -101,12 +102,17 @@ export class ChatPanel {
   }
 
   private renderHtml(): string {
-    const media = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'chat.html'));
+    // VSC-1B 实弹修复：新版 VS Code webview 无 CSP 声明时拦内联脚本——
+    // 脚本外置 media/chat.js + nonce + 显式 CSP
+    const nonce = getNonce();
+    const scriptUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.ctx.extensionUri, 'media', 'chat.js'));
+    const cspSource = this.view.webview.cspSource;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${cspSource}; img-src ${cspSource} https:;">
 <style>
 :root { --bg:#faf9f2; --panel:#fffdf7; --text:#2d2d2d; --muted:#777; --accent:#b3562a; --border:#e0ded4; --code-bg:#f2f1e8; }
 * { box-sizing:border-box; }
@@ -156,76 +162,16 @@ hr { border:none; border-top:1px solid var(--border); margin:10px 0; }
 <div id="pairing"><p>Allow this VS Code window to talk to the local bobo gateway? The socket is local-only (127.0.0.1 equivalent).</p><button id="pair-ok">Allow</button></div>
 <div id="chat"></div>
 <div id="inputbar"><input id="input" placeholder="Ask a follow-up…"><button id="send">Send</button></div>
-<script>
-const vscode = acquireVsCodeApi();
-const chat = document.getElementById('chat');
-const dot = document.getElementById('dot');
-const status = document.getElementById('status');
-const explain = document.getElementById('explain');
-const selCard = document.getElementById('selection');
-const selFile = document.getElementById('sel-file');
-const selLines = document.getElementById('sel-lines');
-const selCode = document.getElementById('sel-code');
-let current = null;
-function setStatus(s, cls) { status.textContent = s; dot.className = 'dot' + (cls ? ' ' + cls : ''); }
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
-function addUser(text) { const d = el('div', 'msg user'); d.textContent = text; chat.appendChild(d); chat.scrollTop = chat.scrollHeight; }
-function ensureAnswer() {
-  if (current) return current;
-  const d = el('div', 'msg bobo'); d.appendChild(el('h4', null, 'bobo'));
-  current = d; chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
-  return d;
-}
-function renderInto(md) {
-  // inline mini-renderer (esc-first): same rules as extension markdown.ts
-  const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  let t = esc(md);
-  t = t.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/\n/g, '<br>');
-  return t;
-}
-window.addEventListener('message', (ev) => {
-  const m = ev.data; if (!m || !m.kind) return;
-  if (m.kind === 'session') { /* session bound */ }
-  else if (m.kind === 'explain') { explain.checked = m.on; }
-  else if (m.kind === 'selection') {
-    const s = m.sel;
-    if (!s || !s.filePath) { selCard.classList.remove('show'); return; }
-    selFile.textContent = s.filePath;
-    selLines.textContent = ':' + s.startLine + '-' + s.endLine;
-    selCode.textContent = s.text;
-    selCard.classList.add('show');
-  }
-  else if (m.kind === 'pairing') { document.getElementById('pairing').classList.add('show'); }
-  else if (m.kind === 'event') {
-    const t = m.type;
-    if (t === 'gateway.ready') setStatus('connected', 'on');
-    else if (t === 'gateway.error') setStatus('gateway error', 'busy');
-    else if (t === 'message.start') setStatus('bobo is thinking…', 'busy');
-    else if (t === 'status.update') setStatus(String(m.data.text || '').slice(0, 60), 'busy');
-  }
-  else if (m.kind === 'delta') { ensureAnswer().appendChild(el('span', null, m.text)); chat.scrollTop = chat.scrollHeight; }
-  else if (m.kind === 'complete') {
-    if (current) current.innerHTML = '';
-    ensureAnswer();
-    current.innerHTML = '<h4>bobo</h4>' + renderInto(m.finalText);
-    current = null;
-    setStatus('done', 'on');
-  }
-});
-document.getElementById('send').addEventListener('click', () => {
-  const inp = document.getElementById('input');
-  const t = inp.value.trim(); if (!t) return;
-  addUser(t); inp.value = '';
-  vscode.postMessage({ kind: 'send', text: t });
-});
-document.getElementById('input').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('send').click(); });
-explain.addEventListener('change', () => vscode.postMessage({ kind: 'toggleExplain', explain: explain.checked }));
-document.getElementById('pair-ok').addEventListener('click', () => { document.getElementById('pairing').classList.remove('show'); vscode.postMessage({ kind: 'pairingConfirm', confirm: true }); });
-vscode.postMessage({ kind: 'ready' });
-</script>
+<script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }
+}
+
+/** 生成 webview CSP nonce（VSC-1B）。 */
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
+  return text;
 }
