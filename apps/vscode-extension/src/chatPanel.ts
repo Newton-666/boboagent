@@ -84,7 +84,6 @@ export class ChatPanel {
   private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean }): void {
     if (!msg) return;
     if (msg.kind === 'ready') {
-      try { require('fs').appendFileSync('/tmp/bobo-ext-debug.log', new Date().toISOString() + ' webview ready received, pending=' + this.pending.length + '\n'); } catch { /* noop */ }
       this.webviewReady = true;
       for (const m of this.pending.splice(0)) {
         try { this.view.webview.postMessage(m); } catch { /* disposed */ }

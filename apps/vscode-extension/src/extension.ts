@@ -157,9 +157,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       try {
         const explain = state.panel ? state.panel.explain : false;
+        // VSC-1B 实弹修复：面板提问带上当前高亮选区——"解释一下这行代码"
+        // 必须让 bobo 看到选中的代码块，而不是只发一句裸文本
+        const selCtx = currentSelectionContext();
+        const outgoing = selCtx ? buildUserMessage(selCtx, text) : text;
         await state.client.send('prompt.submit', {
           session_id: state.sessionId,
-          text: buildPrompt(text, explain),
+          text: buildPrompt(outgoing, explain),
+          project_root: selCtx && selCtx.workspaceRoot ? selCtx.workspaceRoot : undefined,
         });
       } catch (e) {
         vscode.window.showErrorMessage(`bobo: ${(e as Error).message}`);
@@ -197,6 +202,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
   );
 
   // ── helpers ──
+
+  /** 当前编辑器的选区上下文（无编辑器/空选区 → null）。askSelection 与面板 Send 共用。 */
+  function currentSelectionContext(): SelectionContext | null {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty) return null;
+    const doc = editor.document;
+    const relPath = toRelativePath(doc.uri, vscode.workspace.getWorkspaceFolder(doc.uri)?.uri);
+    return {
+      filePath: relPath || doc.uri.fsPath,
+      languageId: doc.languageId,
+      selectedText: doc.getText(editor.selection),
+      startLine: editor.selection.start.line + 1,
+      endLine: editor.selection.end.line + 1,
+      diagnostics: extractDiagnostics(
+        vscode.languages.getDiagnostics(doc.uri).map((d) => ({
+          severity: d.severity as number,
+          message: d.message,
+          range: { start: { line: d.range.start.line } },
+        })),
+      ),
+      workspaceRoot: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath,
+    };
+  }
 
   function pickSocket(ctx2: vscode.ExtensionContext): string | null {
     const setting = vscode.workspace.getConfiguration('bobo').get<string>('socketPath', '');
