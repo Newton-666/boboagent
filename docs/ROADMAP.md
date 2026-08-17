@@ -121,3 +121,7 @@ DIAG-1 调试纪律场景注入（复现→取证→验证→定位→修后验�
 COST-3 长会话缓存杀手清除（工作锚点属性化移出 history + 工具集 31 schema 会话内逐字节稳定）——e2e 12 轮长会话三连 93.7/93.6/95.5%；a 口径修正：R2 ≥85% 稳定为引擎可控线，R3 掉落实证为 provider 缓存时序（hit 前沿逐字节相等），引擎无 cache_control 可控点；副产物：探针 profile 隔离/newChat/ fail-fast 三修正
 
 当前 main: 含 COST-3 · 测试基线 2693 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
+
+DESK-P1 欢迎屏 Charter 文案（"Let's finish up something today." serif 700/30px）+ Work with a project 会话项目根（原生选夹 + 最近项目 + project_root 尾部注入，无项目零注入）
+
+当前 main: 含 DESK-P1 · 测试基线 2706 passed / 2 skipped / 1 xpassed · 回滚标签全部在远端
