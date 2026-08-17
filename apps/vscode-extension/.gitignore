@@ -1,0 +1,4 @@
+# TICKET-VSC-1: VS Code extension sources are tracked; build artifacts are not.
+node_modules/
+out/
+*.vsix
