@@ -134,8 +134,10 @@ VSC-1 VS Code 扩展最小闭环（apps/vscode-extension/：Ask bobo 选中即�
 
 
 
-待发票仓（docs/tickets/）：GW-SOCK 桌面端后端 socket 常驻（VS Code 自动连接前提）→ VSC-2 完整聊天 + diff 协作闭环 → 后续 VSC-3 / 连接韧性 / DESK-V1 / V2C3 / CLEAN
+待发票仓（docs/tickets/）：VSC-2 完整聊天 + diff 协作闭环 → 后续 VSC-3 / 连接韧性 / DESK-V1 / V2C3 / CLEAN
 
 GW-SOCK 桌面端后端 socket 常驻（固定名 bobo-gw-main.sock + 防双实例拒绝 + 断连后端不死重连恢复；VS Code 扩展自动连接打通；Kimi 终审修专项 ROOT off-by-one 后 6/6）
 
-当前 main: 含 GW-SOCK · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 30/30 + socket 专项 6/6 · 回滚标签全部在远端
+GW-MULTI socket 后端多客户端并发（listen(16) + 每连接一线程 + 事件全广播/RPC 定向写 + 全部断开才计空闲；治 VS Code "not connected" 根因——桌面端占线时扩展握手成功但 5s 超时；Kimi 终审并发实弹 PASS：A 长连占线下 B 完整流式问答；合并 d77aad5a）
+
+当前 main: 含 GW-MULTI · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 30/30 + socket 专项 7/7 · 回滚标签全部在远端
