@@ -18,6 +18,12 @@ _running_lock = threading.Lock()
 _live_engines: dict[str, object] = {}
 _live_engines_lock = threading.Lock()
 
+# ── 票 VSC-2B：写审批闸门 —— WRITE_TOOLS 白名单（与扩展侧 diffFlow.ts 对齐）──
+# 会话开启写审批（session.set_write_approval on:true）后，这些工具在执行前
+# 进入 confirm_callback（approval.request）闸门：Accept=allow 继续执行；
+# Reject/120s 超时=deny，工具返回拒绝结果，模型自然换方法。
+_VSC2B_WRITE_TOOLS = frozenset({"edit_file", "file_operation"})
+
 
 def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool:
     """等待用户确认（票 B-3 可测化）。
@@ -231,11 +237,25 @@ def run_engine(
             with confirm_lock:
                 pending_confirm[sid] = event
 
-            emit("approval.request", sid, {
-                "command": tool_name,
-                "description": reason,
-                "session_id": sid,
-            })
+            # ── 票 VSC-2B：写审批闸门 —— 写审批模式的 approval.request 带
+            # tool_name/arguments/reason，供扩展侧（VS Code）按 reason=write_approval
+            # 过滤并渲染审批卡（diff 在工具执行前无内容，inline_diff 留空占位）。
+            if reason == "write_approval":
+                emit("approval.request", sid, {
+                    "command": tool_name,
+                    "description": f"写文件审批: {tool_name}",
+                    "tool_name": tool_name,
+                    "arguments": tool_args or {},
+                    "inline_diff": "",
+                    "reason": "write_approval",
+                    "session_id": sid,
+                })
+            else:
+                emit("approval.request", sid, {
+                    "command": tool_name,
+                    "description": reason,
+                    "session_id": sid,
+                })
 
             if not _wait_for_confirmation(event, timeout=120):
                 with confirm_lock:
@@ -245,6 +265,21 @@ def run_engine(
             with confirm_lock:
                 result = pending_confirm_result.pop(sid, False)
             return result
+
+        # ── 票 VSC-2B：写审批闸门（扩展侧激活用）──
+        # 写审批开启 + 工具命中 WRITE_TOOLS → 执行前先过 confirm_callback 闸门。
+        # _approval_lock 串行化同会话的写审批：并行工具调用时一次只弹一个审批卡，
+        # Accept 后下一个才出现（引擎 pending_confirm 按 sid 单槽，覆盖即丢失）。
+        # Reject/超时 → 返回拒绝文本，模型收到工具拒绝结果自然换方法（既有引擎语义）。
+        _approval_lock = threading.Lock()
+
+        def _guarded_execute(tool_name: str, tool_args: dict) -> str:
+            if session.get("write_approval") and tool_name in _VSC2B_WRITE_TOOLS:
+                with _approval_lock:
+                    allowed = confirm_callback(tool_name, tool_args, "write_approval")
+                if not allowed:
+                    return f"操作被用户拒绝（write_approval）: {tool_name}，请换一种方法或征得用户同意后再试。"
+            return execute_tool(tool_name, tool_args)
 
         emit("message.start", sid, {"session_id": sid})
 
@@ -277,7 +312,7 @@ def run_engine(
         except Exception:
             pass
 
-        engine = Engine(llm_caller, execute_tool, callback=on_event, confirm_callback=confirm_callback,
+        engine = Engine(llm_caller, _guarded_execute, callback=on_event, confirm_callback=confirm_callback,
                         auto_mode_getter=lambda: auto_mode.get(sid, False))
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底

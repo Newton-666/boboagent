@@ -456,7 +456,27 @@ def handle_session_activate(params: dict, rid: str, ctx) -> dict:
         "auto_state": bool(ctx.auto_mode.get(sid, False)),
         # TICKET-O2：切换会话时带回 office 状态（底栏 OFFICE 指示跟随该会话）
         "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
+        # 票 VSC-2B：切换会话时带回写审批开关状态（扩展侧审批卡渲染跟随该会话）
+        "write_approval": bool(session.get("write_approval", False)),
     })
+
+
+def handle_session_set_write_approval(params: dict, rid: str, ctx) -> dict:
+    """票 VSC-2B：会话级写审批开关（session.set_write_approval）。
+
+    开启后 engine_adapter._guarded_execute 对 WRITE_TOOLS（edit_file/file_operation）
+    执行前先过 approval.request（reason=write_approval）闸门：Accept 继续执行，
+    Reject/超时返回拒绝文本，模型自然换方法。开关存 session["write_approval"]，
+    engine 回合内读取（engine_adapter L277 session.get("write_approval")）。
+    """
+    sid = params.get("session_id", "")
+    on = bool(params.get("on", False))
+    with ctx.sessions_lock:
+        session = ctx.sessions.get(sid)
+        if not session:
+            return err(rid, -32000, "会话不存在")
+        session["write_approval"] = on
+    return ok(rid, {"session_id": sid, "write_approval": on})
 
 
 # ── 注册 ──
@@ -481,3 +501,5 @@ def register(reg_method, ctx):
     reg_method("session.steer")(lambda params, rid: handle_session_steer(params, rid, ctx))
     reg_method("session.active_list")(lambda params, rid: handle_session_active_list(params, rid, ctx))
     reg_method("session.activate")(lambda params, rid: handle_session_activate(params, rid, ctx))
+    # 票 VSC-2B：会话级写审批开关（扩展侧 diff 串行闸门激活用）
+    reg_method("session.set_write_approval")(lambda params, rid: handle_session_set_write_approval(params, rid, ctx))
