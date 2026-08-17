@@ -160,10 +160,10 @@ def test_f14_1_timeout_and_fallback():
     assert "LOAD_TIMEOUT_MS = 15000" in block, "F14: 必须 15s 超时常量"
     assert "Promise.race" in block, "F14: 必须 Promise.race 超时兜底"
     assert "try {" in block and "} catch (e) {" in block, "F14: loadSession 必须包 try/catch"
-    assert "showToast('fail', '会话加载失败：' + em" in block, "F14: 失败必须 toast 提示（绝不静默）"
-    assert "addStatus('⚠ 加载会话失败：' + em" in block, "F14: 失败必须状态栏提示"
+    assert "showToast('fail', 'Failed to load session: ' + em" in block, "F14: 失败必须 toast 提示（绝不静默）"
+    assert "addStatus('⚠ Failed to load session: ' + em" in block, "F14: 失败必须状态栏提示"
     assert "clearChat()" in block, "F14: 失败必须清聊天区显示空态（可发新消息）"
-    assert "withTimeout(newChat(), '新建会话')" in block, "F14: newChat 分支同样必须超时兜底（不阻塞后续）"
+    assert "withTimeout(newChat(), 'New chat')" in block, "F14: newChat 分支同样必须超时兜底（不阻塞后续）"
     assert "renderSessions()" in block, "F14: 失败路径也必须渲染侧栏会话列表"
     # 无论成功失败超时，收尾初始化必须执行到（debug/inputEl.focus 在 if/else 之后）
     i_debug = block.index("debug('Ready'); inputEl.focus();")
@@ -202,7 +202,7 @@ def test_f14_2_hang_timeout_recovers():
   // 超时视同失败：toast + 状态栏 + 空态 + 侧栏渲染，绝不静默
   var toasts = calls.filter(function(c) { return c.indexOf('toast:fail:') === 0; });
   if (!toasts.length) throw new Error('hang 场景必须出现失败 toast');
-  if (toasts[0].indexOf('超时') === -1) throw new Error('hang 场景 toast 必须含超时原因: ' + toasts[0]);
+  if (toasts[0].indexOf('timed out') === -1) throw new Error('hang 场景 toast 必须含超时原因: ' + toasts[0]);
   if (!calls.some(function(c) { return c.indexOf('status:') === 0; })) throw new Error('hang 场景必须状态栏提示');
   if (calls.indexOf('clearChat') === -1) throw new Error('hang 场景必须清聊天区（空态可发新消息）');
   if (calls.indexOf('renderSessions') === -1) throw new Error('hang 场景必须渲染侧栏');

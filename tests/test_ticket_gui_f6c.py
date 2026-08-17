@@ -106,7 +106,7 @@ def test_f6c_1_static_asserts():
     # ── F4-1 不破：聚合语义保留 ──
     assert "roundTotalCount >= 2" in src, "第 2 步起建聚合卡不破"
     assert "roundToolEls = []" in src, "吞并后清空不破"
-    assert "已执行 ' + roundTotalCount + ' 步操作" in src, "标题实时涨不破"
+    assert "Executed ' + roundTotalCount + ' steps " in src, "标题实时涨不破"
     assert "roundToolEls = []; roundAggregated = false; roundTotalCount = 0; roundAggregateHead = null;" in src, \
         "回合结束重置不破"
     # 视觉样式零新增：无新 class 引入
@@ -277,7 +277,7 @@ assert(JSON.stringify(gotKids) === JSON.stringify(expectKids),
 
 // ── 聚合卡标题计数 ──
 const head = kids[0].querySelector('.tool-agg-head');
-assert(head.textContent.includes('已执行 5 步操作'), '标题应计 5 步: ' + head.textContent);
+assert(head.textContent.includes('Executed 5 steps'), '标题应计 5 步: ' + head.textContent);
 
 // ── 聚合卡体内：思考→工具 成对顺序 ──
 const aggBody = kids[0].querySelector('.tool-agg-body');

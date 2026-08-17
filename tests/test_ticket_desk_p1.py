@@ -68,7 +68,8 @@ class TestWelcomeCopy:
         html = INDEX.read_text(encoding="utf-8")
         assert 'id="welcome-title"' in html
         assert "Let's finish up something today." in html
-        assert "你的个人 AI 助手" in html, "副标题小字保留"
+        # TICKET-DESK-P2：副标题（你的个人 AI 助手）已按票据删除
+        assert "你的个人 AI 助手" not in html, "副标题小字已由 DESK-P2 删除"
 
     def test_title_uses_charter(self):
         """金标准 3：#welcome-title 用 var(--font-reply)（vendored Charter）700。"""

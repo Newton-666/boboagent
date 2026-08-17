@@ -101,8 +101,8 @@ def test_v2a_1_overlay_static():
     # HTML：覆盖层根 + 三态（连接中/失败/断连）+ 详情区
     assert 'id="overlay-root"' in src
     assert 'id="ovl-connecting"' in src and 'ovl-spinner' in src, "连接中需动画指示，禁止纯文字"
-    assert 'id="ovl-failed"' in src and "连接失败" in src
-    assert 'id="ovl-disconnected"' in src and "后端已断开" in src
+    assert 'id="ovl-failed"' in src and "Connection failed" in src
+    assert 'id="ovl-disconnected"' in src and "Backend disconnected" in src
     assert src.count('ovl-detail-box') >= 3, "每态应有详情收纳区"
     # JS：状态机 + 重试 + 防抖
     assert "function showOverlay(" in src and "function hideOverlay(" in src
@@ -112,7 +112,7 @@ def test_v2a_1_overlay_static():
     # backend.exited：已连接过 → 断连态；首启未连过 → setup 屏
     assert "_everConnected" in src and "showOverlay('disconnected')" in src
     # gateway.ready：恢复后 toast
-    assert "showToast('success', '连接已恢复')" in src
+    assert "showToast('success', 'Connection restored')" in src
     # debugInfo 收纳：debug() 同步写 .ovl-detail-box
     assert "querySelectorAll('.ovl-detail-box')" in src
 
@@ -157,7 +157,7 @@ def test_v2a_2_sessions_static():
     assert "pin-mark" in rs, "应含 pin 图钉标记"
     assert "act pin" in rs, "应含 pin 行内按钮（.act 体系）"
     assert "v2a-empty" in rs, "搜索无结果应给空态"
-    assert "没有匹配的会话" in rs
+    assert "No matches" in rs, "空态应为英文（DESK-P2 英文化）"
     # togglePin：本地即时 + 后端持久化（session.pin）
     tp = _extract_func(src, "togglePin")
     assert "session.pin" in tp and "pinned: s.pinned" in tp
@@ -241,9 +241,9 @@ def test_v2a_4_toast_static():
     assert "setTimeout(remove, 3000)" in src, "3s 自动消失"
     assert "toast-close" in src, "手动关闭按钮"
     # 四个接入点：删除成功 / 重命名成功 / 连接恢复 / 后端错误
-    assert "showToast('success', '会话已删除')" in src
-    assert "showToast('success', '已重命名')" in src
-    assert "showToast('success', '连接已恢复')" in src
+    assert "showToast('success', 'Session deleted')" in src
+    assert "showToast('success', 'Renamed')" in src
+    assert "showToast('success', 'Connection restored')" in src
     assert "showToast('fail'," in src
 
 
@@ -374,8 +374,17 @@ def test_v2a_css_zero_change_on_existing():
         r"/\* === DESK-P1 project pill ===.*?#project-menu \.prj-empty \{[^}]*\}\n", new_pre, re.S)
     assert pill_seg, "新版中应能找到 DESK-P1 project pill 锚点段"
     new_pre = new_pre.replace(pill_seg.group(0), "")
+    # DESK-P2 特批豁免（owner 票 TICKET-DESK-P2）：侧栏折叠图标 CSS 锚点段
+    # （/* === DESK-P2 === */ ... /* === end DESK-P2 === */）仅存在于新版，单向剔除。
+    p2_seg = re.search(r"/\* === DESK-P2 === \*/.*?/\* === end DESK-P2 === \*/\n", new_pre, re.S)
+    assert p2_seg, "新版中应能找到 DESK-P2 锚点段"
+    new_pre = new_pre.replace(p2_seg.group(0), "")
+    # DESK-P2：.welcome-sub 规则已随副标题元素删除（欢迎屏极简），基线单向剔除。
+    old_sub = re.search(r"\.welcome-sub \{[^}]*\}\n", old_style)
+    assert old_sub, "基线中应能找到 .welcome-sub 规则"
+    old_style = old_style.replace(old_sub.group(0), "")
     assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1 豁免段外零改动）"
+        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1/DESK-P2 豁免段外零改动）"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────

@@ -89,7 +89,7 @@ var document = { getElementById };
   if (t.indexOf('9%') === -1) throw new Error('药丸未显示真实水位 9%: ' + t);
   if (_els['ctx-pill-fill'].style.width !== '9%') throw new Error('fill 宽度未更新: ' + _els['ctx-pill-fill'].style.width);
   const det = _els['ctx-stats-detail'].innerHTML;
-  if (det.indexOf('上下文 token 估算') === -1) throw new Error('明细卡未渲染');
+  if (det.indexOf('Context tokens (est.)') === -1) throw new Error('明细卡未渲染');
   console.log('NODE_V2D5_PILL_OK:' + t);
 })();
 """
@@ -134,12 +134,12 @@ var document = { getElementById };
   _injected = 102;
   await refreshCtxStats();
   const t = _els['ctx-pill-text'].innerHTML;
-  if (t.indexOf('记忆+2') === -1) throw new Error('本轮记忆注入缺失: ' + t);
-  if (t.indexOf('工具3') === -1) throw new Error('本轮工具计数缺失: ' + t);
+  if (t.indexOf('mem+2') === -1) throw new Error('本轮记忆注入缺失: ' + t);
+  if (t.indexOf('tools3') === -1) throw new Error('本轮工具计数缺失: ' + t);
   if (t.indexOf('9% · 87K/1000K') === -1) throw new Error('水位段缺失: ' + t);
   if (t.indexOf('v2d5-meta') === -1) throw new Error('meta 弱化类缺失: ' + t);
   const det = _els['ctx-stats-detail'].innerHTML;
-  if (det.indexOf('本轮记忆注入') === -1 || det.indexOf('本轮工具调用') === -1)
+  if (det.indexOf('Memory this round') === -1 || det.indexOf('Tools this round') === -1)
     throw new Error('明细卡未含本轮两项');
   console.log('NODE_V2D5_META_OK:' + t);
 })();
@@ -155,7 +155,7 @@ def test_v2d5_1_hooks_present():
         "sendPrompt 回合重置挂点缺失"
     assert "roundToolCount++;" in src, "tool.start 计数挂点缺失"
     assert "var roundMemBaseline = null;" in src, "全局变量缺失"
-    assert "本轮记忆注入" in src and "本轮工具调用" in src, "明细卡两行缺失"
+    assert "Memory this round" in src and "Tools this round" in src, "明细卡两行缺失"
 
 
 def test_v2d5_1_css_anchor_zero_new_colors():

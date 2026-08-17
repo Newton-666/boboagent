@@ -170,7 +170,7 @@ def test_tel_1_plugins_entry():
     assert m, "plugins 数组缺 telescope 项"
     entry = m.group(0)
     assert "name:'Telescope'" in entry, "telescope 项缺 name"
-    assert "desc:'引擎实况观测台'" in entry, "telescope 项缺 desc"
+    assert "desc:'Engine live view'" in entry, "telescope 项缺 desc"
     # 图标 = 细线 SVG（非 emoji）：1.25 描边 / currentColor / fill:none / viewBox
     assert "icon:'<svg" in entry, "图标必须是 SVG（非 emoji）"
     assert 'stroke-width="1.25"' in entry, "图标必须 1.25px 细线描边"
@@ -196,7 +196,7 @@ def test_tel_2_five_sections():
     # 用户原话/Markdown 表格/代码块全走管线
     p = _extract_func(src, "_telRenderPrompt")
     assert "mdReply(st.prompt)" in p, "用户原话必须经管线渲染"
-    assert "mdReply('**理解为**：" in p, "理解卡必须经管线渲染"
+    assert "mdReply('**Understood as**: '" in p, "理解卡必须经管线渲染"
     led = _extract_func(src, "_telRenderLedger")
     assert "mdReply(md)" in led, "Task Ledger 必须渲染成 Markdown 表格"
     terms = _extract_func(src, "_telRenderTerminal")
@@ -237,8 +237,8 @@ if (tables !== 1) throw new Error('Tools 区必须只有一张表，实际 ' + t
 const rows = (html.match(/\| `edit_file` \|/g) || []).length;
 if (rows !== 2) throw new Error('一张表应含两行 edit_file，实际 ' + rows);
 // 结果列人话渲染 + diff 链接
-if (html.indexOf('写入 +1 / −1 行') === -1) throw new Error('结果列必须人话渲染增删行');
-if ((html.match(/查看 diff/g) || []).length !== 2) throw new Error('两个写入应各带查看 diff 链接');
+if (html.indexOf('Wrote +1 / −1 lines') === -1) throw new Error('结果列必须人话渲染增删行');
+if ((html.match(/View diff/g) || []).length !== 2) throw new Error('两个写入应各带查看 diff 链接');
 // 耗时列
 if (html.indexOf('0.8s') === -1) throw new Error('耗时列应渲染');
 console.log('NODE_TEL3_OK');
@@ -269,7 +269,7 @@ for (const needle of ['read\\|file', 'a\\|b', 'ok\\|yes', 'm\\|1', 'sig\\|nal', 
   if (html.indexOf(needle) === -1) throw new Error('单元格内容未完整保留: ' + needle);
 }
 // diff 链接是 HTML 非单元格文本，必须原样保留（不被转义误伤）
-if (html.indexOf('<a href="#tel-diff-0" data-tel-src="_cur">查看 diff</a>') === -1)
+if (html.indexOf('<a href="#tel-diff-0" data-tel-src="_cur">View diff</a>') === -1)
   throw new Error('查看 diff 链接必须 HTML 原样保留');
 // 行结构合法：数据行未转义管道数 = 列数 + 1（Tools 4 列 → 5，Skills/Memory 3 列 → 4）
 const rows = html.split('\n').filter(l => l.indexOf('\\|') !== -1);
@@ -342,7 +342,7 @@ if (_telState.round !== 2) throw new Error('当前轮应=2');
 const html = _telEl.innerHTML;
 if (html.indexOf('Round 1') === -1 || html.indexOf('Round 2') === -1) throw new Error('两轮分隔线都应渲染');
 if (html.indexOf('edit_file') === -1) throw new Error('历史轮工具调用应保留');
-if (html.indexOf('写入 +1 / −1 行') === -1) throw new Error('历史轮活表格结果应保留');
+if (html.indexOf('Wrote +1 / −1 lines') === -1) throw new Error('历史轮活表格结果应保留');
 if (html.indexOf('第一轮完成') === -1) throw new Error('历史轮小结卡应保留');
 if (html.indexOf('用户原话') === -1) throw new Error('历史轮 Prompt 应保留');
 console.log('NODE_TEL4B_OK');
@@ -402,15 +402,15 @@ _telOnToolComplete({ name: 'execute_terminal', duration: 1.2, result_text: 'tota
 if (_telState.terminal.length !== 1) throw new Error('终端区应记录 1 条');
 const html = _telRenderTerminal();
 if (html.indexOf('$ ls -la') === -1) throw new Error('命令必须渲染成代码块，含 $ 前缀');
-if (html.indexOf('耗时 1.2s') === -1) throw new Error('弱色小字必须含耗时');
-if (html.indexOf('退出码') === -1) throw new Error('弱色小字必须含退出码');
+if (html.indexOf('Time 1.2s') === -1) throw new Error('弱色小字必须含耗时');
+if (html.indexOf('exit code') === -1) throw new Error('弱色小字必须含退出码');
 // 长输出默认折叠 + 展开按钮
 _telOnToolStart({ name: 'execute_terminal', arguments: { command: 'cat big.log' }, context: 'cat big.log', session_id: 's1' });
 const longOut = Array(60).fill('line-xxx-0123456789').join('\n');   // >400 字符
 _telOnToolComplete({ name: 'execute_terminal', duration: 2.0, result_text: longOut, session_id: 's1' });
 const html2 = _telRenderTerminal();
 if (html2.indexOf('collapsed') === -1) throw new Error('长输出必须默认折叠');
-if (html2.indexOf('展开全部') === -1) throw new Error('长输出必须带展开按钮');
+if (html2.indexOf('Expand all (') === -1) throw new Error('长输出必须带展开按钮');
 console.log('NODE_TEL6_OK');
 """
     out = _run_node(js)
@@ -425,7 +425,7 @@ _telOnStart({ session_id: 's1' });
 _telOnDelta({ text: '我来分析这个需求：把观测台面板做出来。', session_id: 's1' });
 if (_telState.understand.indexOf('我来分析这个需求') !== 0) throw new Error('理解卡应取 AI 开头回应');
 const html = _telRenderPrompt();
-if (html.indexOf('**理解为**：') === -1) throw new Error('理解卡缺文案前缀');
+if (html.indexOf('**Understood as**: ') === -1) throw new Error('理解卡缺文案前缀');
 if (html.indexOf('我来分析这个需求') === -1) throw new Error('理解卡缺开头回应内容');
 if (html.indexOf('用户原话：查一下项目结构') === -1) throw new Error('用户原话必须渲染在最顶部');
 if (html.indexOf('tel-understand') === -1) throw new Error('理解卡样式类缺 tel-understand');
@@ -447,7 +447,7 @@ _telOnToolComplete({ name: 'task_ledger', duration: 0.2, arguments: {
 }, session_id: 's1' });
 if (!_telState.ledger || _telState.ledger.rows.length !== 2) throw new Error('台账应解析 2 行');
 const html = _telRenderLedger();
-if (html.indexOf('| # | 事项 | 状态 |') === -1) throw new Error('台账必须渲染成 Markdown 表格');
+if (html.indexOf('| # | Item | Status |') === -1) throw new Error('台账必须渲染成 Markdown 表格');
 if (html.indexOf('任务甲') === -1 || html.indexOf('任务乙') === -1) throw new Error('台账缺事项行');
 if (html.indexOf('in_progress') === -1 || html.indexOf('pending') === -1) throw new Error('台账状态格缺状态');
 // 状态格弱色：td:last-child 弱色
@@ -474,10 +474,10 @@ if (_telState.files !== 1) throw new Error('改动文件数应=1');
 if (_telState.addLines !== 2 || _telState.delLines !== 1) throw new Error('增删行统计错误: ' + _telState.addLines + '/' + _telState.delLines);
 if (_telState.tests !== '12 passed') throw new Error('测试数字应提取 12 passed，实际 ' + _telState.tests);
 const html = _telRenderSummary();
-if (html.indexOf('本轮小结') === -1) throw new Error('小结卡缺标题');
-if (html.indexOf('改动文件 1 个 · 增 2 / 删 1 行') === -1) throw new Error('小结卡缺改动文件/增删行');
-if (html.indexOf('测试：12 passed') === -1) throw new Error('小结卡缺测试数字');
-if (html.indexOf('token 占用 42.3%') === -1) throw new Error('小结卡缺 token 预算审计');
+if (html.indexOf('**Round summary**') === -1) throw new Error('小结卡缺标题');
+if (html.indexOf('Files changed: 1 · +2 / −1 lines') === -1) throw new Error('小结卡缺改动文件/增删行');
+if (html.indexOf('Tests: 12 passed') === -1) throw new Error('小结卡缺测试数字');
+if (html.indexOf('token usage 42.3%') === -1) throw new Error('小结卡缺 token 预算审计');
 if (html.indexOf('第一句结论') === -1) throw new Error('小结卡缺一句人话结论');
 console.log('NODE_TEL7C_OK');
 """
@@ -537,6 +537,12 @@ def test_tel_8_zero_interference():
                 f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
+        # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
+        # diff 必须含 DESK-P2 标记，否则未授权改动被拦截
+        if ln.endswith("widget.html"):
+            r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "DESK-P2" in r9.stdout, f"{ln} 缺 DESK-P2 特批标记，未授权改动被拦截"
+            continue
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
     # 改动文件清单（index.html + 本测试文件 + V2C12/V4 豁免 + COST-1c 特批）只允许相关
     for ln in changed:
@@ -566,6 +572,12 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("tests/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）
+        # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
+        # diff 必须含 DESK-P2 标记，否则未授权改动被拦截
+        if ln.endswith("widget.html"):
+            r11 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "DESK-P2" in r11.stdout, f"{ln} 缺 DESK-P2 特批标记，未授权改动被拦截"
+            continue
         assert False, f"意外改动文件: {ln}"
 
 
@@ -634,7 +646,7 @@ if (_telState.understand !== 'a') throw new Error('理解卡应取开头第一�
 if (_telState.deltaBuf !== 'abc') throw new Error('deltaBuf 应累计，实际 ' + _telState.deltaBuf);
 // 手动触发 rAF：渲染累计状态
 _telRafQueue[_telRafQueue.length - 1]();
-if (_telEl.innerHTML.indexOf('**理解为**：a') === -1) throw new Error('rAF 触发后应渲染理解卡');
+if (_telEl.innerHTML.indexOf('**Understood as**: a') === -1) throw new Error('rAF 触发后应渲染理解卡');
 // 理解卡只取一次：后续 delta 不覆盖开头
 _telOnDelta({ text: 'XYZ', session_id: 's1' });
 if (_telState.understand.indexOf('XYZ') !== -1) throw new Error('理解卡应只取开头一次');

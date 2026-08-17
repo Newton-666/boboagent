@@ -9,6 +9,17 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #app { display:flex; height:100vh; }
 /* Sidebar */
 #sidebar { width:240px; min-width:240px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; transition:margin-left 0.2s; }
+/* === DESK-P2 === */
+#sidebar-header { display:flex; flex-direction:column; gap:8px; }
+#sidebar-header .sidebar-fold { align-self:flex-start; background:none; border:none; cursor:pointer; color:var(--text2); padding:2px; border-radius:4px; }
+#sidebar-header .sidebar-fold:hover { color:var(--text); background:var(--hover); }
+#sidebar-header .sidebar-fold:focus-visible { outline:1px solid #e8913a; outline-offset:1px; }
+#sidebar.closed #sidebar-header .sidebar-fold { display:none; }
+#sidebar-expand-btn { display:none; position:fixed; top:12px; left:12px; z-index:50; background:var(--bg2); border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--text2); padding:5px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+#sidebar-expand-btn:hover { color:var(--text); background:var(--hover); }
+#sidebar-expand-btn:focus-visible { outline:1px solid #e8913a; outline-offset:1px; }
+body.sidebar-collapsed #sidebar-expand-btn { display:block; }
+/* === end DESK-P2 === */
 #sidebar.closed { margin-left:-240px; }
 #sidebar-header { padding:12px; }
 #new-chat { width:100%; padding:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:14px; }
@@ -85,8 +96,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 #welcome { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
 /* 票 DESK-P1：ASCII BOBO 大字 → 文案标题。Charter 700 30px（既有 vendored
    Charter + var(--font-reply)，零新增字体资源）；中文回落 Songti/Noto Serif 自然生效 */
-#welcome-title { font-family:var(--font-reply); font-weight:700; font-size:30px; color:var(--text); margin:0; text-align:center; line-height:1.3; }
-.welcome-sub { color:var(--text-muted); font-size:13px; margin-top:4px; }
+#welcome-title { font-family:var(--font-reply); font-weight:700; font-size:36px; color:var(--text); margin:0; text-align:center; line-height:1.3; }
 #chat { flex:1; overflow-y:auto; padding:24px 16px; }
 @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 .msg, .tool, .think-box.show, .status { animation:fadeIn 0.25s ease-out; }
@@ -528,6 +538,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 </head>
 <body>
 <div id="app">
+  <button id="sidebar-expand-btn" title="Expand sidebar" onclick="toggleSidebar()"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><line x1="3.8" y1="5.5" x2="5" y2="5.5"/><line x1="3.8" y1="8" x2="5" y2="8"/></svg></button>
   <div id="sidebar">
     <!-- Session section -->
     <div class="section-hd" onclick="toggleSection('session')">
@@ -536,7 +547,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       <span class="section-count" id="session-count" style="font-size:11px;color:var(--text-muted);margin-left:auto;">0</span>
     </div>
     <div class="section-bd" id="body-session">
-      <div id="sidebar-header"><button id="new-chat">+ 新对话</button><input id="session-search" type="text" placeholder="搜索..." style="width:100%;margin-top:8px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;" /></div>
+      <div id="sidebar-header"><button id="sidebar-collapse" class="sidebar-fold" title="Collapse sidebar" onclick="toggleSidebar()"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><line x1="3.8" y1="5.5" x2="5" y2="5.5"/><line x1="3.8" y1="8" x2="5" y2="8"/></svg></button><button id="new-chat">New chat</button><input id="session-search" type="text" placeholder="Search..." style="width:100%;margin-top:8px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;" /></div>
       <div id="session-list"></div>
     </div>
     <!-- Plugin section -->
@@ -547,20 +558,19 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
     <div class="section-bd" id="body-plugin">
       <div id="plugin-list"></div>
     </div>
-    <div id="sidebar-footer"><span id="status-dot" class="dot red"></span><span id="status-text">Offline</span><span id="status-mode"></span><button id="widget-toggle" title="执行实况小组件（只读投影）">小组件</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
+    <div id="sidebar-footer"><span id="status-mode"></span><button id="widget-toggle" title="Live widget (read-only)">Widget</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
   </div>
   <div id="main">
     <div id="welcome">
       <!-- 票 DESK-P1：ASCII BOBO 大字（pre#welcome-logo）整块摘除 → 文案标题 -->
       <h1 id="welcome-title">Let's finish up something today.</h1>
-      <p class="welcome-sub">你的个人 AI 助手</p>
     </div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
     <div id="chat"></div>
     <!-- TICKET-DESK-V2B：上下文仪表盘细条（#input-box 正上方，22px；点击展开明细卡，Esc 收起）-->
     <div id="ctx-stats-wrap">
       <div id="ctx-stats-detail" class="ctx-detail" style="display:none"></div>
-      <div id="ctx-stats-bar" class="ctx-bar" title="上下文统计（点击展开 / Esc 收起）" onclick="toggleCtxStats()">
+      <div id="ctx-stats-bar" class="ctx-bar" title="Context stats (click to expand / Esc to collapse)" onclick="toggleCtxStats()">
         <div class="ctx-pill">
           <div class="ctx-pill-fill" id="ctx-pill-fill"></div>
           <span class="ctx-pill-text" id="ctx-pill-text">0% · 0/128K</span>
@@ -571,12 +581,12 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       <!-- TICKET-DESK-V2B3：斜杠命令面板（输入框正上方，左对齐；内容 JS 渲染） -->
       <div id="slash-panel" style="display:none"></div>
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
-      <button id="auto-toggle" title="AUTO 模式开关（点击切换，回车=发送 / Shift+回车=换行）" disabled>AUTO</button>
+      <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
       <button id="send" disabled>↑</button>
-      <button id="stop-btn" title="中断 (Esc)" onclick="stopThinking()">■</button>
+      <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
       <!-- 票 DESK-P1：Work with a project pill（输入框下方左侧；下拉：最近项目/Choose a folder/Clear project） -->
       <div id="project-pill-wrap">
-        <button id="project-pill" title="Work with a project（选择项目文件夹）">Work with a project ▾</button>
+        <button id="project-pill" title="Work with a project (choose a folder)">Work with a project ▾</button>
         <div id="project-menu" style="display:none">
           <div id="project-recents"></div>
           <button id="project-choose">Choose a folder</button>
@@ -596,7 +606,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <div id="preview-overlay"></div>
 <div id="preview-panel">
   <div id="preview-header">
-    <span>预览</span>
+    <span>Preview</span>
     <button id="preview-close">✕</button>
   </div>
   <iframe id="preview-iframe" sandbox="allow-scripts"></iframe>
@@ -604,12 +614,12 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <div id="settings-modal">
   <div id="settings-panel">
     <div id="settings-nav">
-      <div class="settings-tab active" data-tab="basic">基础设置</div>
+      <div class="settings-tab active" data-tab="basic">Basic</div>
       <div class="settings-tab" data-tab="api">API</div>
-      <div class="settings-tab" data-tab="advanced">高级设置</div>
+      <div class="settings-tab" data-tab="advanced">Advanced</div>
     </div>
     <div id="settings-content">
-      <h2>⚙ 设置</h2>
+      <h2>⚙ Settings</h2>
       <div class="settings-page" id="page-basic">
         <label>Provider</label>
         <select id="cfg-provider">
@@ -627,24 +637,24 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
       </div>
       <div class="settings-page" id="page-api" style="display:none">
         <label>API Key</label>
-        <input id="cfg-apikey" type="password" placeholder="输入 API Key" />
-        <label>Base URL <span style="font-weight:400;font-size:11px;">(选填)</span></label>
-        <input id="cfg-baseurl" type="text" placeholder="留空使用 Provider 默认地址" />
+        <input id="cfg-apikey" type="password" placeholder="Enter API Key" />
+        <label>Base URL <span style="font-weight:400;font-size:11px;">(optional)</span></label>
+        <input id="cfg-baseurl" type="text" placeholder="Leave empty for Provider default" />
         <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
-        <input id="cfg-obsidian" type="text" placeholder="留空自动检测" />
+        <input id="cfg-obsidian" type="text" placeholder="Leave empty to auto-detect" />
       </div>
       <div class="settings-page" id="page-advanced" style="display:none">
         <label>Max Tokens</label>
         <input id="cfg-maxtokens" type="number" value="8192" placeholder="8192" />
-        <label>请求超时 (秒)</label>
+        <label>Timeout (s)</label>
         <input id="cfg-timeout" type="number" value="120" placeholder="120" />
         <div style="margin-top:20px;">
-          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">删除所有会话</button>
+          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">Delete all</button>
         </div>
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
-        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">保存</button>
-        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">取消</button>
+        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">Save</button>
+        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">Cancel</button>
       </div>
     </div>
   </div>
@@ -652,23 +662,23 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <div id="setup-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;flex-direction:column;align-items:center;justify-content:center;">
   <div style="max-width:400px;text-align:center;padding:40px;">
     <div style="font-size:36px;margin-bottom:12px;">◆ <span style="color:#e8913a;">Bobo</span></div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">首次使用 — 配置 API Key</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">First run — configure API Key</p>
     <input id="setup-key" type="password" placeholder="API Key" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
-    <input id="setup-url" type="text" placeholder="API Base URL (可选)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
-    <input id="setup-model" type="text" placeholder="Model (默认: deepseek-chat)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:20px;">
-    <button id="setup-save" style="width:100%;padding:10px;border:none;border-radius:6px;background:#e8913a;color:#fff;cursor:pointer;font:inherit;font-size:13px;">保存并启动</button>
+    <input id="setup-url" type="text" placeholder="API Base URL (optional)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
+    <input id="setup-model" type="text" placeholder="Model (default: deepseek-chat)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:20px;">
+    <button id="setup-save" style="width:100%;padding:10px;border:none;border-radius:6px;background:#e8913a;color:#fff;cursor:pointer;font:inherit;font-size:13px;">Save &amp; Launch</button>
     <p id="setup-msg" style="font-size:11px;color:var(--text-muted);margin-top:10px;"></p>
   </div>
 </div>
 <!-- TICKET-D1d ③: 闸确认模态卡（替代原生 confirm，无超时自动拒绝）-->
 <div id="approval-overlay">
   <div id="approval-modal">
-    <div class="ap-title">⚠ 需要批准</div>
+    <div class="ap-title">⚠ Approval needed</div>
     <div class="ap-cmd" id="approval-cmd"></div>
     <div class="ap-desc" id="approval-desc"></div>
     <div class="ap-btns">
-      <button class="ap-btn ap-deny" id="approval-deny">拒绝</button>
-      <button class="ap-btn ap-allow" id="approval-allow">批准一次</button>
+      <button class="ap-btn ap-deny" id="approval-deny">Deny</button>
+      <button class="ap-btn ap-allow" id="approval-allow">Allow once</button>
     </div>
   </div>
 </div>
@@ -677,25 +687,25 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <div id="overlay-root">
   <div class="ovl" id="ovl-connecting">
     <div class="ovl-spinner"><span></span><span></span><span></span></div>
-    <div class="ovl-title">正在连接</div>
-    <div class="ovl-desc">正在连接后端服务…</div>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-title">Connecting…</div>
+    <div class="ovl-desc">Connecting to backend…</div>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
     <div class="ovl-detail-box" id="ovl-detail-connecting"></div>
   </div>
   <div class="ovl" id="ovl-failed">
     <div class="ovl-err-icon">⚠</div>
-    <div class="ovl-title">连接失败</div>
-    <div class="ovl-desc">无法连接到后端服务，请确认 Bobo 已启动。</div>
-    <button class="ovl-btn primary" onclick="retryConnect()">重试</button>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-title">Connection failed</div>
+    <div class="ovl-desc">Cannot reach the backend. Make sure Bobo is running.</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">Retry</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
     <div class="ovl-detail-box" id="ovl-detail-failed"></div>
   </div>
   <div class="ovl" id="ovl-disconnected">
     <div class="ovl-warn-icon">⚠</div>
-    <div class="ovl-title">后端已断开</div>
-    <div class="ovl-desc">后端进程已退出。请重启 Bobo 后重试，会话数据不会丢失。</div>
-    <button class="ovl-btn primary" onclick="retryConnect()">重新连接</button>
-    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">详情</button>
+    <div class="ovl-title">Backend disconnected</div>
+    <div class="ovl-desc">Backend exited. Restart Bobo and retry — your sessions are preserved.</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">Reconnect</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
     <div class="ovl-detail-box" id="ovl-detail-disconnected"></div>
   </div>
 </div>
@@ -704,11 +714,11 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system, Blink
 <!-- TICKET-DESK-V2A：删除二次确认模态（复用 approval 模态样式体系）-->
 <div id="confirm-overlay">
   <div id="confirm-modal">
-    <div class="cf-title" id="cf-title">⚠ 确认操作</div>
+    <div class="cf-title" id="cf-title">⚠ Confirm action</div>
     <div class="cf-desc" id="cf-desc"></div>
     <div class="cf-btns">
-      <button class="cf-btn cf-cancel" id="cf-cancel">取消</button>
-      <button class="cf-btn cf-ok" id="cf-ok">删除</button>
+      <button class="cf-btn cf-cancel" id="cf-cancel">Cancel</button>
+      <button class="cf-btn cf-ok" id="cf-ok">Delete</button>
     </div>
   </div>
 </div>
@@ -731,6 +741,12 @@ function widgetPinSession(sid) {
   _widgetPinnedSid = sid || null;
   renderSessions();
   if (window.boboAPI && window.boboAPI.widgetPinSession) window.boboAPI.widgetPinSession(sid || '');
+}
+function toggleSidebar() {
+  var sb = document.getElementById('sidebar');
+  if (!sb) return;
+  sb.classList.toggle('closed');
+  document.body.classList.toggle('sidebar-collapsed', sb.classList.contains('closed'));
 }
 function connect() {
   if (!window.boboAPI) { debug('Browser mode'); return; }
@@ -799,7 +815,7 @@ function sendPrompt(text) {
   // Timeout: if backend doesn't respond within 15s, notify user
   if (sendTimeoutId) clearTimeout(sendTimeoutId);
   sendTimeoutId = setTimeout(function() {
-    addStatus('⚠ 消息已发送但后端未响应，请检查连接状态');
+    addStatus('⚠ Message sent but backend not responding. Check connection.');
     sendTimeoutId = null;
   }, 15000);
   // 票 DESK-P1：会话项目根随 prompt.submit 下发（有值才带；null=默认现状，绝对兼容）
@@ -846,7 +862,7 @@ function prjAddRecent(path) {
 }
 
 function prjChooseFolder() {
-  if (!window.boboAPI || !window.boboAPI.selectFolder) { debug('chooseFolder 不可用'); return; }
+  if (!window.boboAPI || !window.boboAPI.selectFolder) { debug('chooseFolder unavailable'); return; }
   window.boboAPI.selectFolder().then(function(path) {
     if (!path) return;
     currentProjectRoot = path;
@@ -875,7 +891,7 @@ function prjUpdatePill() {
 function prjRenderMenu() {
   var box = document.getElementById('project-recents');
   if (!recentProjects.length) {
-    box.innerHTML = '<div class="prj-empty">暂无最近项目</div>';
+    box.innerHTML = '<div class="prj-empty">No recent projects</div>';
     return;
   }
   var html = '';
@@ -922,6 +938,7 @@ var debugEl = document.getElementById('debug');
 var sessionListEl = document.getElementById('session-list');
 var statusDot = document.getElementById('status-dot');
 var statusText = document.getElementById('status-text');
+// TICKET-DESK-P2: #sidebar-footer 连接指示（绿点+文字）已删除 —— statusDot/statusText 恒 null，引用处均走守卫
 var messaging = false;
 var sessions = [];
 var sendTimeoutId = null;
@@ -988,7 +1005,7 @@ function showToast(type, msg) {
   if (!root) return;
   var t = document.createElement('div');
   t.className = 'toast ' + (type === 'fail' ? 'fail' : 'success');
-  t.innerHTML = '<span>' + esc(msg) + '</span><button class="toast-close" title="关闭">✕</button>';
+  t.innerHTML = '<span>' + esc(msg) + '</span><button class="toast-close" title="Close">✕</button>';
   root.appendChild(t);
   var killed = false;
   function remove() {
@@ -1012,7 +1029,7 @@ document.addEventListener('keydown', _confirmKey);
 function askConfirm(title, desc, cb) {
   document.getElementById('cf-title').textContent = title;
   document.getElementById('cf-desc').textContent = desc;
-  document.getElementById('cf-ok').textContent = '删除';
+  document.getElementById('cf-ok').textContent = 'Delete';
   _confirmCb = cb;
   document.getElementById('confirm-overlay').classList.add('open');
   document.getElementById('cf-ok').focus();
@@ -1059,7 +1076,7 @@ function renderBusyUI() {
   messaging = busy;
   if (!connected) return;   // 未连接不刷状态条（applyConnected 管显示）
   sendEl.classList.toggle('loading', busy);
-  statusText.textContent = busy ? 'Running' : 'Ready';
+  if (statusText) statusText.textContent = busy ? 'Running' : 'Ready';
   showStop(busy);
 }
 /* ===BUSYGATE-END=== */
@@ -1072,9 +1089,9 @@ function setConnected(c) {
 function applyConnected(c) {
   connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
   var at = document.getElementById('auto-toggle'); if (at) at.disabled = !c;
-  inputEl.placeholder = c ? '输入消息 (↵ 发送，Shift+↵ 换行)' : 'Connecting...';
-  statusDot.className = 'dot ' + (c ? 'green' : 'red');
-  statusText.textContent = c ? 'Ready' : 'Offline';
+  inputEl.placeholder = c ? 'Type a message (↵ send, Shift+↵ newline)' : 'Connecting...';
+  if (statusDot) statusDot.className = 'dot ' + (c ? 'green' : 'red');
+  if (statusText) statusText.textContent = c ? 'Ready' : 'Offline';
   if (!c) showStop(false);
 }
 var _codeStore = {};
@@ -1085,8 +1102,8 @@ function copyCode(id) {
   if (!code) return;
   navigator.clipboard.writeText(code).then(function() {
     var btn = document.getElementById('copy-' + id);
-    if (btn) { btn.textContent = '✓ 已复制'; btn.classList.add('copied');
-      setTimeout(function() { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000); }
+    if (btn) { btn.textContent = '✓ Copied'; btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000); }
   });
 }
 function highlight(code, lang) {
@@ -1158,7 +1175,7 @@ function buildWorktreeCard(text) {
   return { head: head + (tail ? tail + '\n' : ''), card:
     '<div class="v2b4-wt-card">' +
     '<div class="v2b4-wt-head" onclick="toggleWorktree(this)">' +
-    '<span class="v2b4-wt-title">📋 工作区实况对账</span><span class="v2b4-wt-arrow">▸</span></div>' +
+    '<span class="v2b4-wt-title">📋 Workspace diff</span><span class="v2b4-wt-arrow">▸</span></div>' +
     '<pre class="v2b4-wt-body" style="display:none">' + esc(block) + '</pre>' +
     '</div>' };
 }
@@ -1195,7 +1212,7 @@ function buildHandoffCard(text) {
   }).join('');
   return { head: head, card:
     '<div style="border:1px solid #d33;border-left:3px solid #d33;border-radius:6px;margin:8px 0;overflow:hidden;">' +
-    '<div onclick="toggleHandoff(this)" style="padding:8px 12px;background:rgba(220,60,40,0.08);cursor:pointer;font-weight:600;color:#d33;">⚠ ' + total + ' 条操作被 AUTO 拦截，待人工处理 <span style="float:right;">▸</span></div>' +
+    '<div onclick="toggleHandoff(this)" style="padding:8px 12px;background:rgba(220,60,40,0.08);cursor:pointer;font-weight:600;color:#d33;">⚠ ' + total + ' ops blocked by AUTO — review needed <span style="float:right;">▸</span></div>' +
     '<div class="handoff-body" style="display:none;padding:8px 12px;border-top:1px solid rgba(220,60,40,0.2);">' + body + '</div>' +
     '</div>' };
 }
@@ -1224,8 +1241,8 @@ function md(s) {
       '<div class="code-block-wrapper">' +
       '<div class="code-header">' +
       '<span class="code-lang">' + esc(lang || '') + '</span>' +
-      (lang === 'html' ? '<button class="preview-btn" data-cid="' + cid + '" onclick="openPreview(\'' + cid + '\')">预览</button>' : '') +
-      '<button id="copy-' + cid + '" class="copy-btn" onclick="copyCode(\'' + cid + '\')">复制</button>' +
+      (lang === 'html' ? '<button class="preview-btn" data-cid="' + cid + '" onclick="openPreview(\'' + cid + '\')">Preview</button>' : '') +
+      '<button id="copy-' + cid + '" class="copy-btn" onclick="copyCode(\'' + cid + '\')">Copy</button>' +
       '</div>' +
       '<pre><code>' + highlight(rawCode, lang) + '</code></pre>' +
       '</div>'
@@ -1380,20 +1397,20 @@ var roundAggregateHead = null;// 聚合卡标题元素（实时更新步数）
 
 // TICKET-GUI-F8：工具友好名映射提升为模块级（历史工具 diff 渲染 renderHistToolDiff 复用）
 var TOOL_FRIENDLY = {
-  'file_operation': '写入文件', 'write_obsidian': '写入笔记', 'append_obsidian': '追加笔记',
-  'read_local_file': '读取文件', 'read_obsidian': '读取笔记',
-  'grep_code': '搜索代码', 'search_code': '搜索代码', 'search_obsidian': '搜索笔记',
-  'code_execution': '执行代码', 'execute_terminal': '终端命令',
-  'edit_file': '编辑文件', 'run_tests': '运行测试',
-  'web_search': '网络搜索', 'web_fetch': '抓取网页', 'web_extract': '提取内容',
-  'git_status': 'Git 状态', 'github_create_pr': '创建 PR', 'github_pr_diff': 'PR 差异',
-  'index_project': '项目索引', 'review_diff': '审查代码',
-  'cross_search': '跨平台搜索', 'cross_project_search': '跨项目搜索',
-  'code_to_obsidian': '保存知识', 'review_to_obsidian': '保存审查',
-  'save_memory': '保存记忆', 'search_memory': '搜索记忆',
-  'get_current_time': '获取时间', 'list_directory': '列出目录',
-  'notion_search': '搜索 Notion', 'notion_create_page': '创建 Notion 页面',
-  'search_emails': '搜索邮件', 'send_notification': '发送通知',
+  'file_operation': 'Write file', 'write_obsidian': 'Write note', 'append_obsidian': 'Append note',
+  'read_local_file': 'Read file', 'read_obsidian': 'Read note',
+  'grep_code': 'Search code', 'search_code': 'Search code', 'search_obsidian': 'Search note',
+  'code_execution': 'Run code', 'execute_terminal': 'Terminal',
+  'edit_file': 'Edit file', 'run_tests': 'Run tests',
+  'web_search': 'Web search', 'web_fetch': 'Fetch page', 'web_extract': 'Extract content',
+  'git_status': 'Git status', 'github_create_pr': 'Create PR', 'github_pr_diff': 'PR diff',
+  'index_project': 'Index project', 'review_diff': 'Review code',
+  'cross_search': 'Cross-search', 'cross_project_search': 'Cross-project search',
+  'code_to_obsidian': 'Save knowledge', 'review_to_obsidian': 'Save review',
+  'save_memory': 'Save memory', 'search_memory': 'Search memory',
+  'get_current_time': 'Get time', 'list_directory': 'List directory',
+  'notion_search': 'Search Notion', 'notion_create_page': 'Create Notion page',
+  'search_emails': 'Search email', 'send_notification': 'Send notification',
 };
 
 // TICKET-DESK-V2D25：细线 SVG 图标映射（D2.5-1）——14px / 1.25px 描边 / fill:none /
@@ -1473,7 +1490,7 @@ function addTool(name, context, toolId) {
     if (hasSwallowable) {
       roundAggregated = true;
       var agg = document.createElement('div'); agg.className = 'tool-agg';
-      agg.innerHTML = '<span class="tool-agg-head">已执行 ' + roundTotalCount + ' 步操作 <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
+      agg.innerHTML = '<span class="tool-agg-head">Executed ' + roundTotalCount + ' steps <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
       agg.onclick = function(e) {
         if (e.target.closest('.tool')) return; // 点工具卡本身不折叠（卡内自有展开逻辑）
         var body = this.querySelector('.tool-agg-body');
@@ -1496,7 +1513,7 @@ function addTool(name, context, toolId) {
     }
   }
   if (roundAggregated && roundAggregateHead) {
-    roundAggregateHead.textContent = '已执行 ' + roundTotalCount + ' 步操作 ' + (aggHeadArrowText());
+    roundAggregateHead.textContent = 'Executed ' + roundTotalCount + ' steps ' + (aggHeadArrowText());
   }
   roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
   chatEl.scrollTop = chatEl.scrollHeight;
@@ -1609,7 +1626,7 @@ function updateToolResult(toolId, data) {
     // Notify when a tool > 2s completes
     if (duration > 2 && Notification.permission !== 'denied') {
       if (Notification.permission === 'granted') {
-        new Notification('Bobo', { body: TOOL_FRIENDLY[toolId] || toolId + ' 完成 (' + duration.toFixed(1) + 's)' });
+        new Notification('Bobo', { body: TOOL_FRIENDLY[toolId] || toolId + ' done (' + duration.toFixed(1) + 's)' });
       } else if (Notification.permission === 'default') {
         Notification.requestPermission();
       }
@@ -1646,8 +1663,8 @@ function refreshCtxStats() {
       var kb = function(n) { return (n >= 1000) ? Math.round(n / 1000) + 'K' : String(n); };
       // TICKET-DESK-V2D5：认知状态条 —— 水位 + 本轮记忆注入 + 本轮工具调用（一条药丸，meta 弱化小字）
       var meta = '';
-      if (roundMemInjected > 0) meta += ' <span class="v2d5-meta">· 记忆+' + roundMemInjected + '</span>';
-      if (roundToolCount > 0) meta += ' <span class="v2d5-meta">· 工具' + roundToolCount + '</span>';
+      if (roundMemInjected > 0) meta += ' <span class="v2d5-meta">· mem+' + roundMemInjected + '</span>';
+      if (roundToolCount > 0) meta += ' <span class="v2d5-meta">· tools' + roundToolCount + '</span>';
       pillText.innerHTML = pct + '% · ' + kb(used) + '/' + kb(limit) + meta;
       // 三色阶墨痕化（色板派生零新色相）：<60% 文字墨痕 12% / ≥60% 品牌橙 15% / ≥85% 语义红 15%
       var color = pct >= 85 ? 'rgba(244,135,113,0.15)' : (pct >= 60 ? 'rgba(232,145,58,0.15)' : 'rgba(45,45,45,0.12)');
@@ -1655,14 +1672,14 @@ function refreshCtxStats() {
     }
     var det = document.getElementById('ctx-stats-detail');
     if (det) det.innerHTML =
-      '<div class="ctx-row"><span>上下文 token 估算</span><b>' + fmt(used) + '</b></div>' +
-      '<div class="ctx-row"><span>上下文上限</span><b>' + fmt(limit) + '</b></div>' +
-      '<div class="ctx-row"><span>压缩节省（字符）</span><b>' + fmt(d.saved_chars) + '</b></div>' +
-      '<div class="ctx-row"><span>结果标记条数</span><b>' + fmt(d.marked) + '</b></div>' +
-      '<div class="ctx-row"><span>记忆注入条数</span><b>' + fmt(d.memory_injected) + '</b></div>' +
-      '<div class="ctx-row"><span>本轮记忆注入</span><b>' + roundMemInjected + '</b></div>' +
-      '<div class="ctx-row"><span>本轮工具调用</span><b>' + roundToolCount + '</b></div>' +
-      '<div class="ctx-note">token 由当前会话消息估算；压缩节省与注入条数为工作区累计值，本轮两项为回合内增量。</div>';
+      '<div class="ctx-row"><span>Context tokens (est.)</span><b>' + fmt(used) + '</b></div>' +
+      '<div class="ctx-row"><span>Context limit</span><b>' + fmt(limit) + '</b></div>' +
+      '<div class="ctx-row"><span>Chars saved</span><b>' + fmt(d.saved_chars) + '</b></div>' +
+      '<div class="ctx-row"><span>Marked results</span><b>' + fmt(d.marked) + '</b></div>' +
+      '<div class="ctx-row"><span>Memory injected</span><b>' + fmt(d.memory_injected) + '</b></div>' +
+      '<div class="ctx-row"><span>Memory this round</span><b>' + roundMemInjected + '</b></div>' +
+      '<div class="ctx-row"><span>Tools this round</span><b>' + roundToolCount + '</b></div>' +
+      '<div class="ctx-note">Tokens estimated from current session messages; savings & injection are workspace cumulative; this-round values are per-turn increments.</div>';
   });
 }
 function toggleCtxStats() {
@@ -1744,15 +1761,15 @@ function renderToolDetail(args, resultText, inlineDiff) {
     if (typeof v === 'string' && v) { pv = { key: pathKeys[pi], val: v }; break; }
   }
   if (pv) {
-    html += '<span class="td-args">路径</span>\n' + esc(pv.val) + '\n';
+    html += '<span class="td-args">Path</span>\n' + esc(pv.val) + '\n';
   }
   // F4-3: 内容字段全部展示（edit_file 的原文/新文、write 的 content），每个独立截断预览
   for (var ci = 0; ci < contentKeys.length; ci++) {
     var cvv = args[contentKeys[ci]];
     if (typeof cvv !== 'string' || !cvv) continue;
-    var previewLabel = contentKeys[ci] === 'old_string' ? '原文预览' : contentKeys[ci] === 'new_string' ? '新文预览' : '内容预览';
+    var previewLabel = contentKeys[ci] === 'old_string' ? 'Original' : contentKeys[ci] === 'new_string' ? 'New' : 'Content';
     var previewText = cvv;
-    if (previewText.length > 300) previewText = previewText.substring(0, 300) + '\n...（预览截断，共 ' + cvv.length + ' 字符）';
+    if (previewText.length > 300) previewText = previewText.substring(0, 300) + '\n... (preview truncated, ' + cvv.length + ' chars)';
     html += '<span class="td-args">' + previewLabel + '</span>\n' + esc(previewText) + '\n';
   }
   // 其余小参数（action/recursive 等）若总量小仍显示，超限则省略（防倾泻）
@@ -1760,16 +1777,16 @@ function renderToolDetail(args, resultText, inlineDiff) {
   Object.keys(args).forEach(function(k) { if (!hideKeys[k]) extra[k] = args[k]; });
   var extraJson = JSON.stringify(extra, null, 2);
   if (Object.keys(extra).length > 0 && extraJson.length < 300) {
-    html += '<span class="td-args">参数</span>\n' + esc(extraJson) + '\n';
+    html += '<span class="td-args">Args</span>\n' + esc(extraJson) + '\n';
   }
   if (resultText) {
     if (html) html += '\n';
-    html += '<span class="td-args">结果</span>\n' + diffHighlight(resultText) + '\n';
+    html += '<span class="td-args">Result</span>\n' + diffHighlight(resultText) + '\n';
   }
   if (inlineDiff) {
     html += '<div class="inline-diff">' + diffHighlight(inlineDiff) + '</div>';
   }
-  return html || '(无输出)';
+  return html || '(no output)';
 }
 function addStatus(text) {
   var div = document.createElement('div'); div.className = 'status'; div.textContent = text;
@@ -1785,11 +1802,11 @@ function toggleSection(name) {
 }
 
 var plugins = [
-  { id:'notes', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 1.5 H9 L12.5 5 V14.5 H4.5 Z"/><path d="M9 1.5 V5 H12.5"/><path d="M6.5 8.5 H10 M6.5 11 H10 M6.5 13.5 H8.5"/></svg>', name:'笔记', desc:'浏览 Obsidian 笔记' },
-  { id:'project', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5 V12 A1.5 1.5 0 0 0 3 13.5 H13 A1.5 1.5 0 0 0 14.5 12 V6.5 A1.5 1.5 0 0 0 13 5 H6.9 L5.3 3 H3 A1.5 1.5 0 0 0 1.5 4.5 Z"/></svg>', name:'项目', desc:'项目文件浏览器' },
-  { id:'terminal', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4.5 6.5 L7 9 L4.5 11.5 M8 11.5 H11.5"/></svg>', name:'终端', desc:'命令执行记录' },
+  { id:'notes', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 1.5 H9 L12.5 5 V14.5 H4.5 Z"/><path d="M9 1.5 V5 H12.5"/><path d="M6.5 8.5 H10 M6.5 11 H10 M6.5 13.5 H8.5"/></svg>', name:'Notes', desc:'Browse Obsidian notes' },
+  { id:'project', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5 V12 A1.5 1.5 0 0 0 3 13.5 H13 A1.5 1.5 0 0 0 14.5 12 V6.5 A1.5 1.5 0 0 0 13 5 H6.9 L5.3 3 H3 A1.5 1.5 0 0 0 1.5 4.5 Z"/></svg>', name:'Project', desc:'Project file browser' },
+  { id:'terminal', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4.5 6.5 L7 9 L4.5 11.5 M8 11.5 H11.5"/></svg>', name:'Terminal', desc:'Command history' },
   // TICKET-DESK-TEL：Telescope 引擎实况观测台 —— 图标细线 SVG（V2D25 TOOL_ICONS 同款风格，非 emoji）
-  { id:'telescope', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.6" cy="3.8" r="1.7"/><path d="M5.9 5.1 L11 10.9"/><circle cx="12.4" cy="12.2" r="2.4"/><path d="M12.8 14.6 l1.9-1.9 M11.7 13.8 l-1.7 1.7"/></svg>', name:'Telescope', desc:'引擎实况观测台' },
+  { id:'telescope', icon:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.6" cy="3.8" r="1.7"/><path d="M5.9 5.1 L11 10.9"/><circle cx="12.4" cy="12.2" r="2.4"/><path d="M12.8 14.6 l1.9-1.9 M11.7 13.8 l-1.7 1.7"/></svg>', name:'Telescope', desc:'Engine live view' },
 ];
 
 function renderPluginList() {
@@ -1821,7 +1838,7 @@ function openPlugin(id) {
   else if (id === 'project') renderProjectPanel(content);
   else if (id === 'terminal') renderTerminalPanel(content);
   else if (id === 'telescope') renderTelescopePanel(content);
-  else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>即将上线</p>';
+  else content.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">' + p.desc + '<br><br>Coming soon</p>';
 }
 
 function closePanel() {
@@ -1861,7 +1878,7 @@ function closePanel() {
 
 function renderNotesPanel(el, tree) {
   if (!tree || tree.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">等待笔记数据...</p>';
+    el.innerHTML = '<p style="color:var(--text-muted);margin-top:20px;text-align:center;">Waiting for notes...</p>';
     return;
   }
   el.innerHTML = renderTree(tree, '');
@@ -1933,17 +1950,17 @@ var _projectTree = null;
 function renderProjectPanel(el) {
   if (_projectTree && _projectTree.length > 0) {
     el.innerHTML = '<div style="margin-bottom:8px;display:flex;align-items:center;gap:4px;">' +
-      '<span style="font-size:12px;color:var(--text2);flex:1;">📁 项目</span>' +
-      '<span onclick="importProject()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">更换</span>' +
+      '<span style="font-size:12px;color:var(--text2);flex:1;">📁 Project</span>' +
+      '<span onclick="importProject()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">Change</span>' +
       '<span onclick="clearProject()" style="cursor:pointer;font-size:13px;color:var(--text-muted);margin-left:4px;">✕</span></div>' +
       renderProjectTree(_projectTree);
     return;
   }
   el.innerHTML = '' +
     '<div style="text-align:center;margin-top:40px;">' +
-    '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">📁 导入项目文件夹</p>' +
-    '<p style="font-size:11px;color:var(--text-muted);margin-bottom:20px;">选择一个项目文件夹，Bobo 将自动浏览其中的文件</p>' +
-    '<button onclick="importProject()" style="padding:10px 24px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font:inherit;font-size:13px;">📂 从Mac导入</button>' +
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">📁 Import project folder</p>' +
+    '<p style="font-size:11px;color:var(--text-muted);margin-bottom:20px;">Choose a project folder; Bobo will browse its files</p>' +
+    '<button onclick="importProject()" style="padding:10px 24px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font:inherit;font-size:13px;">Import from Mac</button>' +
     '</div>';
 }
 
@@ -1961,22 +1978,22 @@ function renderTerminalPanel(el) {
   _terminalEl = el;
   if (_terminalLogs.length === 0) {
     el.innerHTML = '<div style="text-align:center;margin-top:40px;">' +
-      '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">⚡ 终端</p>' +
-      '<p style="font-size:11px;color:var(--text-muted);">Bobo 执行的命令会显示在这里</p></div>';
+      '<p style="font-size:13px;color:var(--text2);margin-bottom:8px;">⚡ Terminal</p>' +
+      '<p style="font-size:11px;color:var(--text-muted);">Commands Bobo runs will appear here</p></div>';
     return;
   }
   var html = '<div style="margin-bottom:8px;display:flex;align-items:center;gap:4px;">' +
-    '<span style="font-size:12px;color:var(--text2);flex:1;">⚡ 终端</span>' +
-    '<span onclick="clearTerminal()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">清除</span></div>';
+    '<span style="font-size:12px;color:var(--text2);flex:1;">⚡ Terminal</span>' +
+    '<span onclick="clearTerminal()" style="cursor:pointer;font-size:11px;color:var(--text-muted);">Clear</span></div>';
   _terminalLogs.forEach(function(log) {
     // F4-5: 终端面板长输出拦截 —— 超 2000 字符显示开头预览 + "显示全部/收起"按钮
     var outText = log.output || '';
     var isLong = outText.length > 2000;
-    var shown = isLong ? outText.substring(0, 2000) + '\n...（输出过长已收起，共 ' + outText.length + ' 字符）' : outText;
+    var shown = isLong ? outText.substring(0, 2000) + '\n... (output truncated, ' + outText.length + ' chars)' : outText;
     html += '<div style="margin-bottom:8px;">' +
       '<div style="font-family:monospace;font-size:11px;color:var(--text2);padding:2px 0;">$ ' + esc(log.command) + '</div>' +
       '<div style="font-family:monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;padding:4px 8px;background:var(--bg2);border-radius:4px;">' + esc(shown) + '</div>' +
-      (isLong ? '<button onclick="toggleTerminalOutput(this)" data-expanded="0" data-idx="' + _terminalLogs.indexOf(log) + '" style="margin-top:4px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-family:inherit;font-size:11px;">显示全部 (' + outText.length + ' 字符)</button>' : '') +
+      (isLong ? '<button onclick="toggleTerminalOutput(this)" data-expanded="0" data-idx="' + _terminalLogs.indexOf(log) + '" style="margin-top:4px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-family:inherit;font-size:11px;">Show all (' + outText.length + ' chars)</button>' : '') +
       '</div>';
   });
   el.innerHTML = html;
@@ -1990,9 +2007,9 @@ function toggleTerminalOutput(btn) {
   if (!log) return;
   var expanded = btn.getAttribute('data-expanded') === '1';
   var outText = log.output || '';
-  var shown = expanded ? outText.substring(0, 2000) + '\n...（输出过长已收起，共 ' + outText.length + ' 字符）' : outText;
+  var shown = expanded ? outText.substring(0, 2000) + '\n... (output truncated, ' + outText.length + ' chars)' : outText;
   btn.setAttribute('data-expanded', expanded ? '0' : '1');
-  btn.textContent = expanded ? '显示全部 (' + outText.length + ' 字符)' : '收起';
+  btn.textContent = expanded ? 'Show all (' + outText.length + ' chars)' : 'Collapse';
   var block = btn.previousElementSibling;
   if (block) block.textContent = shown;
 }
@@ -2047,45 +2064,45 @@ on('project.tree', function(payload) {
 
 function showProjectFile(filepath, full) {
   var content = document.getElementById('right-content');
-  var backBtn = '<span onclick="renderProjectPanel(document.getElementById(\'right-content\'))" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span>';
-  content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><p style="color:var(--text-muted);">正在加载...</p>';
+  var backBtn = '<span onclick="renderProjectPanel(document.getElementById(\'right-content\'))" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← Back</span>';
+  content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><p style="color:var(--text-muted);">Loading...</p>';
   call('file.read', { filepath: filepath }).then(function(r) {
     if (r && r.content) {
       var txt = r.content;
       // F2-4: 原始输出默认收起 —— 超 2000 字符只显示开头预览 + "显示全部"按钮
       // （owner 截图实证：原始代码倾泻占屏是层级倒置；"原始输出收起"为裁决原则）
       if (typeof txt === 'string' && txt.length > 2000 && !full) {
-        var preview = txt.substring(0, 2000) + '\n\n...（原始输出过长已收起）';
-        var showAll = '<div style="margin-top:10px;"><button onclick="showProjectFile(\'' + esc(filepath) + '\', true)" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:inherit;font-size:12px;">显示全部 (' + txt.length + ' 字符)</button></div>';
+        var preview = txt.substring(0, 2000) + '\n\n... (raw output too long, collapsed)';
+        var showAll = '<div style="margin-top:10px;"><button onclick="showProjectFile(\'' + esc(filepath) + '\', true)" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:inherit;font-size:12px;">Show all (' + txt.length + ' chars)</button></div>';
         content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div>' + md(preview) + showAll;
       } else {
-        if (typeof txt === 'string' && txt.length > 10000) txt = txt.substring(0, 10000) + '\n...（截断至 10000 字符）';
+        if (typeof txt === 'string' && txt.length > 10000) txt = txt.substring(0, 10000) + '\n... (truncated to 10000 chars)';
         content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div>' + md(txt);
       }
     } else {
-      content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '</div><p style="color:var(--text-muted);">无法加载文件</p>';
+      content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '</div><p style="color:var(--text-muted);">Failed to load file</p>';
     }
   });
 }
 
 function showNote(filepath, full) {
   var content = document.getElementById('right-content');
-  var backBtn = '<span onclick="renderNotesPanel(document.getElementById(\'right-content\'), _notesTree)" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← 返回</span>';
-  content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><div class="np"><p style="color:var(--text-muted);">正在加载...</p></div>';
+  var backBtn = '<span onclick="renderNotesPanel(document.getElementById(\'right-content\'), _notesTree)" style="cursor:pointer;color:var(--text-muted);font-size:13px;">← Back</span>';
+  content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><div class="np"><p style="color:var(--text-muted);">Loading...</p></div>';
   call('file.read', { filepath: filepath }).then(function(r) {
     if (r && r.content) {
       var txt = r.content;
       // F2-4: 原始输出默认收起（与 showProjectFile 同原则）
       if (typeof txt === 'string' && txt.length > 2000 && !full) {
-        var preview = txt.substring(0, 2000) + '\n\n...（原始输出过长已收起）';
-        var showAll = '<div style="margin-top:10px;"><button onclick="showNote(\'' + esc(filepath) + '\', true)" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:inherit;font-size:12px;">显示全部 (' + txt.length + ' 字符)</button></div>';
+        var preview = txt.substring(0, 2000) + '\n\n... (raw output too long, collapsed)';
+        var showAll = '<div style="margin-top:10px;"><button onclick="showNote(\'' + esc(filepath) + '\', true)" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:inherit;font-size:12px;">Show all (' + txt.length + ' chars)</button></div>';
         content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div><div class="np">' + md(preview) + '</div>' + showAll;
       } else {
-        if (typeof txt === 'string' && txt.length > 10000) txt = txt.substring(0, 10000) + '\n...（截断至 10000 字符）';
+        if (typeof txt === 'string' && txt.length > 10000) txt = txt.substring(0, 10000) + '\n... (truncated to 10000 chars)';
         content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '<span style="margin-left:8px;font-size:12px;color:var(--text2);">' + esc(filepath) + '</span></div>' + md(txt);
       }
     } else {
-      content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '</div><p style="color:var(--text-muted);">无法加载文件</p>';
+      content.innerHTML = '<div style="margin-bottom:10px;">' + backBtn + '</div><p style="color:var(--text-muted);">Failed to load file</p>';
     }
   });
 }
@@ -2118,7 +2135,7 @@ function startRename(s, span) {
       call('session.rename', { session_id: s.id, title: t });
       renderSessions();
       // TICKET-DESK-V2A：重命名成功 toast 接入点
-      showToast('success', '已重命名');
+      showToast('success', 'Renamed');
     } else {
       span.textContent = s.title || s.id;
     }
@@ -2140,7 +2157,7 @@ function renderSessions(filter) {
     // TICKET-DESK-V2A：无结果/无会话统一空态（EmptyState 组件，配色取现有色板）
     var empty = document.createElement('div');
     empty.className = 'v2a-empty';
-    empty.innerHTML = '<div class="v2a-empty-icon">' + (filter ? '🔍' : '🗂') + '</div><div>' + (filter ? '没有匹配的会话' : '暂无会话，点击「+ 新对话」开始') + '</div>';
+    empty.innerHTML = '<div class="v2a-empty-icon">' + (filter ? '🔍' : '🗂') + '</div><div>' + (filter ? 'No matches' : 'No sessions yet — start a new chat') + '</div>';
     sessionListEl.appendChild(empty);
     return;
   }
@@ -2153,7 +2170,7 @@ function renderSessions(filter) {
     // TICKET-GUI-F10（加分项）：后台活动中圆点指示（弱色取色板 --text-muted，标题前；
     // 样式走内联 style —— V2A/V2B CSS 零改动闸门约束，不新增全局 CSS 规则）
     if (bgActiveSids[s.id]) {
-      var bgDot = document.createElement('span'); bgDot.className = 'bg-active-dot'; bgDot.title = '后台运行中';
+      var bgDot = document.createElement('span'); bgDot.className = 'bg-active-dot'; bgDot.title = 'Running in background';
       bgDot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--text-muted);display:inline-block;margin-right:6px;flex-shrink:0;';
       span.insertBefore(bgDot, span.firstChild);
     }
@@ -2165,14 +2182,14 @@ function renderSessions(filter) {
       span.insertBefore(pinMark, span.firstChild);
     }
     // V2A 打磨：行内三键统一 .act（同尺寸同基线紧凑右置），顺序 pin→改名→删除
-    var pin = document.createElement('button'); pin.className = 'act pin' + (s.pinned ? ' on' : ''); pin.innerHTML = PIN_SVG; pin.title = s.pinned ? '取消置顶' : '置顶';
+    var pin = document.createElement('button'); pin.className = 'act pin' + (s.pinned ? ' on' : ''); pin.innerHTML = PIN_SVG; pin.title = s.pinned ? 'Unpin' : 'Pin';
     pin.onclick = function(e) { e.stopPropagation(); togglePin(s); };
-    var re = document.createElement('button'); re.className = 'act re'; re.textContent = '✎'; re.title = '重命名';
+    var re = document.createElement('button'); re.className = 'act re'; re.textContent = '✎'; re.title = 'Rename';
     re.onclick = function(e) { e.stopPropagation(); startRename(s, span); };
-    var del = document.createElement('button'); del.className = 'act del'; del.textContent = '✕'; del.title = '删除';
+    var del = document.createElement('button'); del.className = 'act del'; del.textContent = '✕'; del.title = 'Delete';
     del.onclick = function(e) { e.stopPropagation(); deleteSession(s.id); };
     // TICKET-DESK-V4B：行内四键统一 .act（顺序 pin→改名→删除→投影到小组件；on 态亮品牌橙）
-    var proj = document.createElement('button'); proj.className = 'act proj' + (_widgetPinnedSid === s.id ? ' on' : ''); proj.innerHTML = PROJECT_SVG; proj.title = '投影到小组件';
+    var proj = document.createElement('button'); proj.className = 'act proj' + (_widgetPinnedSid === s.id ? ' on' : ''); proj.innerHTML = PROJECT_SVG; proj.title = 'Project to widget';
     proj.onclick = function(e) { e.stopPropagation(); widgetPinSession(_widgetPinnedSid === s.id ? '' : s.id); };
     div.appendChild(span); div.appendChild(pin); div.appendChild(re); div.appendChild(del); div.appendChild(proj);
     sessionListEl.appendChild(div);
@@ -2193,12 +2210,12 @@ function togglePin(s) {
 
 // TICKET-DESK-V2A：行内删除 → 二次确认模态（复用 approval 样式体系）+ 成功 toast
 function deleteSession(sid) {
-  askConfirm('⚠ 删除会话', '删除此会话？TUI 中也会同步删除。', function() { doDeleteSession(sid); });
+  askConfirm('⚠ Delete session', 'Delete this session? It will also be removed in TUI.', function() { doDeleteSession(sid); });
 }
 async function doDeleteSession(sid) {
   await call('session.delete', { session_id: sid });
   sessions = sessions.filter(function(s) { return s.id !== sid; });
-  showToast('success', '会话已删除');
+  showToast('success', 'Session deleted');
   // TICKET-DESK-V4B：删的是小窗钉住的会话 → 自动回落跟随主窗（不留僵尸投影）
   if (_widgetPinnedSid === sid) widgetPinSession('');
   var wasCurrent = currentSessionId === sid;
@@ -2246,7 +2263,7 @@ async function loadSession(sid) {
   // F3-2 竞态：本次加载序号；期间再点其他会话，本次结果作废
   var mySeq = ++sessionLoadSeq;
   setSessionLoading(sid, true);
-  addStatus('加载会话…');
+  addStatus('Loading session…');
   var result = null;
   try {
     result = await call('session.resume', { session_id: sid });
@@ -2257,8 +2274,8 @@ async function loadSession(sid) {
   setSessionLoading(sid, false);
   if (!result || result.error || !result.session_id) {
     // F3-2: 失败必须显式报错，禁止静默停留旧会话
-    var em = (result && result.error && (result.error.message || result.error)) || '后端无响应（超时或连接断开）';
-    addStatus('⚠ 加载会话失败：' + em);
+    var em = (result && result.error && (result.error.message || result.error)) || 'Backend unresponsive (timeout or disconnected)';
+    addStatus('⚠ Failed to load session: ' + em);
     return;
   }
   clearChat();
@@ -2371,7 +2388,7 @@ async function renderFullHistory(sid, result) {
   // TICKET-GUI-F6（缺陷 2c）：resume 带回的压缩摘要 → 历史顶部柔和分隔摘要行
   // （复用 addStatus 样式，不动视觉样式；有摘要才渲染，无摘要零变化）
   if (result.summary) {
-    addStatus('📋 此前对话摘要：' + result.summary);
+    addStatus('📋 Earlier summary: ' + result.summary);
   }
   if (window.boboAPI && window.boboAPI.readArchive) {
     try {
@@ -2382,11 +2399,11 @@ async function renderFullHistory(sid, result) {
           var ams = rec.archived_messages || [];
           renderArchivedMessages(ams, 'hist-' + sid + '-a' + i + '-');
           var n = rec.pre_msg_count || ams.length;
-          addStatus('— 此前 ' + n + ' 条消息经上下文压缩 —');
+          addStatus('— ' + n + ' earlier messages compacted —');
         }
       }
     } catch (e) {
-      addStatus('⚠ 归档读取失败，仅展示当前消息：' + ((e && e.message) || e));
+      addStatus('⚠ Archive read failed; showing current messages: ' + ((e && e.message) || e));
     }
   }
   // TICKET-GUI-F12：预扫描"最新一轮"起点 —— 最后一条带 tool_calls 的 assistant
@@ -2443,7 +2460,7 @@ async function renderFullHistory(sid, result) {
       }
       // TICKET-GUI-F6（缺陷 2a）：现存消息里空 assistant（纯工具回合）给占位，
       // 与 renderArchivedMessages 一致，消灭一屏空泡泡
-      var aEl = addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), 'hist-' + sid + '-a' + idx);
+      var aEl = addMsg('bobo', m.text || (m.tool_calls && m.tool_calls.length ? '(tool-call round)' : ''), 'hist-' + sid + '-a' + idx);
       if (aEl) aEl.setAttribute('data-pose-id', 'a' + idx);
     }
     else if (m.role === 'tool') {
@@ -2523,7 +2540,7 @@ function histEstimateH(unit) {
 function buildHistUnits(sid, result) {
   var units = [];
   var msgs = result.messages || [];
-  if (result.summary) units.push({ kind: 'status', text: '📋 此前对话摘要：' + result.summary, idx: -1 });
+  if (result.summary) units.push({ kind: 'status', text: '📋 Earlier summary: ' + result.summary, idx: -1 });
   // 归档：整段并入（短段通常已被压缩，不必逐条窗口化；超长归档也走估算占位）
   var ar = result._archiveRecords || null;
   if (ar && ar.length) {
@@ -2533,12 +2550,12 @@ function buildHistUnits(sid, result) {
         var role = am.role || '';
         var content = (am.content != null && String(am.content)) || '';
         if (role === 'user') units.push({ kind: 'msg', role: 'user', text: content, idx: -1 });
-        else if (role === 'assistant') units.push({ kind: 'msg', role: 'bobo', text: content || (am.tool_calls && am.tool_calls.length ? '（工具调用回合）' : ''), idx: -1 });
-        else if (role === 'tool') units.push({ kind: 'tool', name: am.name || am.tool_name || '工具', text: content, idx: -1 });
+        else if (role === 'assistant') units.push({ kind: 'msg', role: 'bobo', text: content || (am.tool_calls && am.tool_calls.length ? '(tool-call round)' : ''), idx: -1 });
+        else if (role === 'tool') units.push({ kind: 'tool', name: am.name || am.tool_name || 'Tool', text: content, idx: -1 });
         else if (role === 'system' && content && content.length < 200) units.push({ kind: 'status', text: content, idx: -1 });
       });
       var n = ar[ai].pre_msg_count || ams.length;
-      units.push({ kind: 'status', text: '— 此前 ' + n + ' 条消息经上下文压缩 —', idx: -1 });
+      units.push({ kind: 'status', text: '— ' + n + ' earlier messages compacted —', idx: -1 });
     }
   }
   // 现存消息：与 renderFullHistory 同语义（考古开关 + 最新一轮预扫描 + 姿势锚点）
@@ -2579,7 +2596,7 @@ function buildHistUnits(sid, result) {
         }
       }
       units.push({ kind: 'msg', role: 'bobo',
-        text: m.text || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''),
+        text: m.text || (m.tool_calls && m.tool_calls.length ? '(tool-call round)' : ''),
         idx: idx, poseId: 'a' + idx });
     }
     else if (m.role === 'tool') {
@@ -2626,7 +2643,7 @@ function renderHistUnit(unit) {
   } else if (unit.kind === 'agg') {
     var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
     agg.setAttribute('data-pose-id', 'agg' + (histAggSeq++));
-    var headLabel = (unit.think ? '思考 + ' : '') + unit.tools.length + ' 个工具';
+    var headLabel = (unit.think ? 'Think + ' : '') + unit.tools.length + ' tools';
     agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
     agg.onclick = function(e) {
       if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
@@ -2750,8 +2767,8 @@ function renderArchivedMessages(ams, idPrefix) {
     var content = (m.content != null && String(m.content)) || '';
     var id = idPrefix + idx;
     if (role === 'user') addMsg('user', content, id);
-    else if (role === 'assistant') addMsg('bobo', content || (m.tool_calls && m.tool_calls.length ? '（工具调用回合）' : ''), id);
-    else if (role === 'tool') addTool(m.name || m.tool_name || '工具', content, id + '-t');
+    else if (role === 'assistant') addMsg('bobo', content || (m.tool_calls && m.tool_calls.length ? '(tool-call round)' : ''), id);
+    else if (role === 'tool') addTool(m.name || m.tool_name || 'Tool', content, id + '-t');
     else if (role === 'system' && content && content.length < 200) addStatus(content);
   });
 }
@@ -2822,7 +2839,7 @@ var histAggSeq = 0;
 function renderHistAggCard(thinkText, toolMsgs) {
   var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
   agg.setAttribute('data-pose-id', 'agg' + (histAggSeq++));
-  var headLabel = (thinkText ? '思考 + ' : '') + toolMsgs.length + ' 个工具';
+  var headLabel = (thinkText ? 'Think + ' : '') + toolMsgs.length + ' tools';
   agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
   agg.onclick = function(e) {
     if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
@@ -2872,13 +2889,13 @@ async function newChat() {
 connect();
 
 on('gateway.ready', async function() {
-  debug('已连接，恢复会话...');
+  debug('Connected, restoring sessions...');
   // TICKET-DESK-V2A：曾处于覆盖层态（连接中/失败/断连）时，恢复后 toast 告知
   var wasCovered = _ovlType !== null;
   _everConnected = true;
   setConnected(true);
   hideOverlay();
-  if (wasCovered) showToast('success', '连接已恢复');
+  if (wasCovered) showToast('success', 'Connection restored');
   await loadSessions();
   // ── TICKET-GUI-F14：解耦——无依赖初始化先行，loadSession 卡死/失败不再拖死整链 ──
   renderPluginList();
@@ -2890,26 +2907,26 @@ on('gateway.ready', async function() {
   var LOAD_TIMEOUT_MS = 15000;
   function withTimeout(p, label) {
     return Promise.race([p, new Promise(function(_, rej) {
-      setTimeout(function() { rej(new Error(label + '超时（15s）')); }, LOAD_TIMEOUT_MS);
+      setTimeout(function() { rej(new Error(label + ' timed out (15s)')); }, LOAD_TIMEOUT_MS);
     })]);
   }
   if (sessions.length > 0) {
     currentSessionId = sessions[0].id;
     try {
-      await withTimeout(loadSession(sessions[0].id), '加载会话');
+      await withTimeout(loadSession(sessions[0].id), 'Load session');
     } catch (e) {
-      var em = (e && e.message) || '未知错误';
-      showToast('fail', '会话加载失败：' + em + '，可发送新消息');
-      addStatus('⚠ 加载会话失败：' + em + '（已进入可发送新消息状态）');
+      var em = (e && e.message) || 'Unknown error';
+      showToast('fail', 'Failed to load session: ' + em + ' — you can still send a message');
+      addStatus('⚠ Failed to load session: ' + em + ' (ready for a new message)');
       clearChat();   // 欢迎空态：仍可发新消息
     }
     renderSessions();
   } else {
     // GUI-F14 同链路自查：newChat 分支同样不阻塞后续初始化（超时视同失败，绝不停链）
     try {
-      await withTimeout(newChat(), '新建会话');
+      await withTimeout(newChat(), 'New chat');
     } catch (e) {
-      showToast('fail', '新建会话失败：' + ((e && e.message) || '未知错误') + '，可发送新消息');
+      showToast('fail', 'Failed to create chat: ' + ((e && e.message) || 'Unknown error') + ' — you can still send a message');
     }
   }
   debug('Ready'); inputEl.focus();
@@ -2939,7 +2956,7 @@ function createThinkBox() {
   // 30s: auto-timeout — API likely hung
   tb._killTimer = setTimeout(function() {
     if (tb.parentNode) {
-      tb.querySelector('.think-text').textContent = 'API 无响应，请稍后重试或点击 ✕ 停止。';
+      tb.querySelector('.think-text').textContent = 'API unresponsive. Retry later or click ✕ to stop.';
       tb.querySelector('.think-label').innerHTML = '<span style="color:#f48771">⚠ Timeout</span>';
     }
   }, 30000);
@@ -3180,12 +3197,12 @@ document.getElementById('setup-save').onclick = function() {
   var url = document.getElementById('setup-url').value.trim();
   var model = document.getElementById('setup-model').value.trim();
   var msg = document.getElementById('setup-msg');
-  if (!key) { msg.textContent = '请输入 API Key'; return; }
-  msg.textContent = '正在保存...';
+  if (!key) { msg.textContent = 'Please enter API Key'; return; }
+  msg.textContent = 'Saving...';
   // TICKET-D1d ⑦-B: api_key 走 setup.submit（后端权威写盘 BOBO_DATA_DIR/.env + B3 热生效，零重启）
   call('setup.submit', { provider: 'deepseek', api_key: key }).then(function(res) {
     if (res && res.ok === false) {
-      msg.textContent = '保存失败: ' + (res.error || '未知错误');
+      msg.textContent = 'Save failed: ' + (res.error || 'Unknown error');
       return;
     }
     // model 走 config.set（权威 key: API_MODEL_NAME，热生效）
@@ -3195,10 +3212,10 @@ document.getElementById('setup-save').onclick = function() {
     // base_url 无 RPC 通道 → 走保留的 save-env（仅写该字段；TICKET-D1d ⑦-A 已令其跟随数据目录）
     if (url && window.boboAPI && window.boboAPI.saveEnv) {
       window.boboAPI.saveEnv({ DEEPSEEK_API_BASE_URL: url });
-      msg.textContent = '已保存，正在重启...';
+      msg.textContent = 'Saved, restarting...';
       setTimeout(function() { hideSetup(); }, 1500);
     } else {
-      msg.textContent = '已保存';
+      msg.textContent = 'Saved';
       setTimeout(function() { hideSetup(); }, 800);
     }
   });
@@ -3222,7 +3239,7 @@ function approvalRespond(choice) {
   if (window.boboAPI) {
     window.boboAPI.send({ jsonrpc:'2.0', id:'approval-resp-'+(++reqId), method:'approval.respond', params:{ session_id: _approvalSid, choice: choice } });
   }
-  if (choice === 'deny') addStatus('已拒绝操作');
+  if (choice === 'deny') addStatus('Operation denied');
 }
 document.getElementById('approval-allow').onclick = function() { approvalRespond('once'); };
 document.getElementById('approval-deny').onclick = function() { approvalRespond('deny'); };
@@ -3231,7 +3248,7 @@ on('gateway.error', function(data) {
   addStatus('❌ ' + (data.message || 'Unknown error').substring(0, 200));
   debug('Error: ' + (data.message || '').substring(0, 60));
   // TICKET-DESK-V2A：后端错误 toast 接入点
-  showToast('fail', (data.message || '后端错误').substring(0, 120));
+  showToast('fail', (data.message || 'Backend error').substring(0, 120));
 });
 
 // ── Fallback: if gateway.ready hasn't fired within 5s, poll backend ──
@@ -3265,7 +3282,7 @@ var readyFallbackTimer = setTimeout(async function() {
       inputEl.focus();
       // TICKET-DESK-V2A：fallback 恢复成功同样收覆盖层 + toast
       hideOverlay();
-      showToast('success', '连接已恢复');
+      showToast('success', 'Connection restored');
       return;
     }
     await new Promise(function(r2) { setTimeout(r2, 2000); });
@@ -3286,17 +3303,17 @@ var widgetBtn = document.getElementById('widget-toggle');
 function syncWidgetBtn(enabled) {
   if (!widgetBtn) return;
   widgetBtn.classList.toggle('on', !!enabled);
-  widgetBtn.textContent = enabled ? '小组件 ✓' : '小组件';
-  widgetBtn.title = enabled ? '关闭执行实况小组件' : '打开执行实况小组件（只读投影）';
+  widgetBtn.textContent = enabled ? 'Widget ✓' : 'Widget';
+  widgetBtn.title = enabled ? 'Close live widget' : 'Open live widget (read-only)';
 }
 function widgetToggle() {
   if (window.boboAPI && window.boboAPI.widgetToggle) {
     window.boboAPI.widgetToggle().then(function(r) {
       syncWidgetBtn(r && r.enabled);
-      addStatus(r && r.enabled ? '执行实况小组件已打开（只读投影）' : '执行实况小组件已关闭');
+      addStatus(r && r.enabled ? 'Live widget opened (read-only)' : 'Live widget closed');
     });
   } else {
-    addStatus('执行实况小组件仅桌面端可用（浏览器模式不支持）');
+    addStatus('Live widget is desktop-only (not available in browser mode)');
   }
 }
 if (widgetBtn) widgetBtn.addEventListener('click', widgetToggle);
@@ -3319,23 +3336,23 @@ if (window.boboAPI && window.boboAPI.onWidgetPinChanged) {
 }
 
 function handleSlash(cmd) {
-  if (cmd === 'help') { addMsg('bobo', '**可用命令:**\n- /help — 显示帮助\n- /clear — 清除当前对话\n- /undo — 回退上一步\n- /tools — 列出工具\n- /settings — 查看配置\n- /widget — 切换执行实况小组件\n\n或说 "切换到 OpenAI" 来换模型', 'help-'+Date.now()); return true; }
-  if (cmd === 'clear') { clearChat(); welcomeEl.style.display = 'flex'; addStatus('对话已清除'); return true; }
+  if (cmd === 'help') { addMsg('bobo', '**Available commands:**\n- /help — show help\n- /clear — clear current chat\n- /undo — undo last step\n- /tools — list tools\n- /settings — view config\n- /widget — toggle live widget\n\nOr say \"switch to OpenAI\" to change model', 'help-'+Date.now()); return true; }
+  if (cmd === 'clear') { clearChat(); welcomeEl.style.display = 'flex'; addStatus('Chat cleared'); return true; }
   if (cmd === 'tools') {
     call('tools.list', {}).then(function(r) {
       var tools = r.tools || [];
       var names = tools.map(function(t){return t.name;}).join(', ');
-      addMsg('bobo', '**可用工具 (' + tools.length + '):**\n' + names, 'tools-'+Date.now());
+      addMsg('bobo', '**Available tools (' + tools.length + '):**\n' + names, 'tools-'+Date.now());
     });
     return true;
   }
   if (cmd === 'settings') {
     call('config.full', {}).then(function(r) {
-      addMsg('bobo', '**当前配置:**\n```json\n' + JSON.stringify(r.config, null, 2) + '\n```', 'cfg-'+Date.now());
+      addMsg('bobo', '**Current config:**\n```json\n' + JSON.stringify(r.config, null, 2) + '\n```', 'cfg-'+Date.now());
     });
     return true;
   }
-  if (cmd === 'undo') { addStatus('请使用 Ctrl+Z 或在 TUI 中用 /undo'); return true; }
+  if (cmd === 'undo') { addStatus('Use Ctrl+Z or /undo in TUI'); return true; }
   // TICKET-DESK-V4: /widget 本地命令 —— 与侧栏开关同源（同一 widgetToggle 入口）
   if (cmd === 'widget') { widgetToggle(); return true; }
   return false;
@@ -3350,10 +3367,10 @@ var slashSel = -1;
 function execSlash(cmd) {
   // V2B3 斜杠路由：未本地处理的 "/" 输入一律走后端 slash.exec（携带 session_id），
   // 结果显示为系统消息（.status），不进 LLM
-  if (!connected || !currentSessionId) { addStatus('命令未执行：未连接或未选会话'); return; }
+  if (!connected || !currentSessionId) { addStatus('Command not run: not connected or no session'); return; }
   call('slash.exec', { command: cmd, session_id: currentSessionId }).then(function(r) {
     if (r && r.output) { addStatus(r.output); }
-    else if (r && r.error) { addStatus('命令执行失败: ' + r.error); }
+    else if (r && r.error) { addStatus('Command failed: ' + r.error); }
   });
 }
 
@@ -3528,7 +3545,7 @@ document.querySelectorAll('.settings-tab').forEach(function(tab) {
 document.getElementById('settings-icon').onclick = function() {
   call('setup.status', {}).then(function(r1) {
     document.getElementById('cfg-provider').value = (r1 && r1.provider) || 'deepseek';
-    document.getElementById('cfg-apikey').placeholder = (r1 && r1.provider_configured) ? '已配置' : '输入API Key';
+    document.getElementById('cfg-apikey').placeholder = (r1 && r1.provider_configured) ? 'Configured' : 'Enter API Key';
     // Trigger provider change to populate models
     document.getElementById('cfg-provider').dispatchEvent(new Event('change'));
   });
@@ -3562,19 +3579,19 @@ document.getElementById('settings-save').onclick = function() {
   if (key) {
     call('setup.submit', { provider: document.getElementById('cfg-provider').value, api_key: key }).then(function(res) {
       if (res && res.ok === false) {
-        addStatus('设置失败: ' + (res.error || '未知错误'));
+        addStatus('Settings failed: ' + (res.error || 'Unknown error'));
       } else {
         addStatus('Saved');
         if (model) call('config.set', { model: model });
       }
     });
   } else {
-    addStatus('请输入 API Key');
+    addStatus('Please enter API Key');
   }
   document.getElementById('settings-modal').classList.remove('open');
 };
 document.getElementById('settings-clear').onclick = function() {
-  if (!confirm('确定要删除所有会话吗？此操作不可撤销。')) return;
+  if (!confirm('Delete all sessions? This cannot be undone.')) return;
   sessions.forEach(function(s) {
     call('session.delete', { session_id: s.id });
   });
@@ -3583,7 +3600,7 @@ document.getElementById('settings-clear').onclick = function() {
   clearChat();
   renderSessions();
   renderBusyUI();   // V4B⓪：无当前会话 → 空闲态（清理全局忙碌残留）
-  addStatus('所有会话已删除');
+  addStatus('All sessions deleted');
   document.getElementById('settings-modal').classList.remove('open');
 };
 
@@ -3819,15 +3836,15 @@ function _telRowStart(cat, name, args, context) {
 
 function _telRowEnd(row, name, data) {
   row.dur = data.duration ? data.duration.toFixed(1) + 's' : '—';
-  if (data.error) { row.error = true; row.result = '失败'; return; }
+  if (data.error) { row.error = true; row.result = 'Failed'; return; }
   var diff = data.inline_diff || '';
   var rt = String(data.result_text || '');
   if (_telIsWriteTool(name) && diff) {
     var st = _telDiffStats(diff);
-    row.result = '写入 +' + st.add + ' / −' + st.del + ' 行';
+    row.result = 'Wrote +' + st.add + ' / −' + st.del + ' lines';
     row.diff = diff;
   } else if (_telIsWriteTool(name)) {
-    row.result = '写入完成';
+    row.result = 'Write complete';
   } else {
     // 人话结果：raw JSON/日志不上屏，只取人读摘要
     row.result = _telHuman(rt);
@@ -3863,7 +3880,7 @@ function _telTermComplete(data) {
   if (!t) return;
   t.output = String(data.result_text || '');
   t.duration = data.duration || 0;
-  if (data.error) t.exitCode = '失败';
+  if (data.error) t.exitCode = 'Failed';
   _telScheduleRender();
 }
 
@@ -3904,8 +3921,8 @@ function _telRender() {
   if (!_telEl) return;
   var active = (_telTab === 'cost') ? 'cost' : 'battle';
   var html = '<div class="tel-tabs">'
-    + '<button class="tel-tab' + (active === 'battle' ? ' active' : '') + '" data-tab="battle">战报</button>'
-    + '<button class="tel-tab' + (active === 'cost' ? ' active' : '') + '" data-tab="cost">消耗</button>'
+    + '<button class="tel-tab' + (active === 'battle' ? ' active' : '') + '" data-tab="battle">Report</button>'
+    + '<button class="tel-tab' + (active === 'cost' ? ' active' : '') + '" data-tab="cost">Cost</button>'
     + '</div>';
   // 战报 pane：轮次历史 + 当前轮
   html += '<div class="tel-pane" data-pane="battle"' + (active === 'battle' ? '' : ' style="display:none"') + '>';
@@ -3933,11 +3950,11 @@ function _telRenderState(st, srcKey) {
 
 function _telRenderPrompt(st) {
   st = st || _telState;
-  var html = '<div class="tel-sec"><div class="tel-sec-title">用户 Prompt</div>';
+  var html = '<div class="tel-sec"><div class="tel-sec-title">User prompt</div>';
   if (st.prompt) html += mdReply(st.prompt);
-  else html += '<div class="tel-muted">（本轮无用户原话快照）</div>';
+  else html += '<div class="tel-muted">(no user prompt snapshot this round)</div>';
   if (st.understand) {
-    html += '<div class="tel-understand">' + mdReply('**理解为**：' + st.understand) + '</div>';
+    html += '<div class="tel-understand">' + mdReply('**Understood as**: ' + st.understand) + '</div>';
   }
   return html + '</div>';
 }
@@ -3945,7 +3962,7 @@ function _telRenderPrompt(st) {
 function _telRenderLedger(st) {
   st = st || _telState;
   if (!st.ledger || !st.ledger.rows.length) return '';
-  var md = '| # | 事项 | 状态 |\n|---|---|---|\n';
+  var md = '| # | Item | Status |\n|---|---|---|\n';
   st.ledger.rows.forEach(function(r, i) {
     md += '| ' + (i + 1) + ' | ' + String(r.title).replace(/\|/g, '\\|') + ' | ' + String(r.status) + ' |\n';
   });
@@ -3955,7 +3972,7 @@ function _telRenderLedger(st) {
 function _telRenderCalls(st, srcKey) {
   st = st || _telState;
   srcKey = (srcKey == null) ? '_cur' : srcKey;
-  var heads = { Skills: 'Skill | 加载内容 | 用途', Memory: '条目 | 信号 | 注入原因', Tools: '工具 | 参数摘要 | 结果 | 耗时' };
+  var heads = { Skills: 'Skill | Loaded | Purpose', Memory: 'Item | Signal | Injection reason', Tools: 'Tool | Args | Result | Time' };
   var html = '';
   // TEL-b：单元格管道转义（与台账同款）——| 不打乱 Markdown 列结构；diff 链接是 HTML 非单元格文本，不受影响
   var escP = function(s) { return esc(s).replace(/\|/g, '\\|'); };
@@ -3967,7 +3984,7 @@ function _telRenderCalls(st, srcKey) {
     rows.forEach(function(r, i) {
       var res = r.error ? '<span class="tel-muted">' + escP(r.result) + '</span>' : escP(r.result);
       var link = '';
-      if (r.diff) link = ' <a href="#tel-diff-' + i + '" data-tel-src="' + srcKey + '">查看 diff</a>';
+      if (r.diff) link = ' <a href="#tel-diff-' + i + '" data-tel-src="' + srcKey + '">View diff</a>';
       if (cat === 'Tools') {
         md += '| `' + escP(r.name) + '` | ' + escP(r.args) + ' | ' + res + link + ' | ' + escP(r.dur) + ' |\n';
       } else {
@@ -3984,17 +4001,17 @@ function _telRenderTerminal(st, srcKey) {
   srcKey = (srcKey == null) ? '_cur' : srcKey;
   var terms = st.terminal;
   if (!terms.length) return '';
-  var html = '<div class="tel-sec"><div class="tel-sec-title">终端执行</div>';
+  var html = '<div class="tel-sec"><div class="tel-sec-title">Terminal run</div>';
   terms.forEach(function(t, i) {
     html += '<div class="tel-term" data-tel-src="' + srcKey + '">';
     html += '<div class="tel-term-cmd">' + mdReply('```\n$ ' + t.command + '\n```') + '</div>';
-    var code = t.exitCode === '失败' ? '失败' : '—';
-    html += '<div class="tel-term-meta">耗时 ' + (t.duration ? t.duration.toFixed(1) + 's' : '—') + ' · 退出码 ' + code + '</div>';
+    var code = t.exitCode === 'Failed' ? 'Failed' : '—';
+    html += '<div class="tel-term-meta">Time ' + (t.duration ? t.duration.toFixed(1) + 's' : '—') + ' · exit code ' + code + '</div>';
     if (t.output) {
       var long = t.output.length > 400;
-      var shown = long ? t.output.substring(0, 200) + '\n…（输出过长已折叠，共 ' + t.output.length + ' 字符）' : t.output;
+      var shown = long ? t.output.substring(0, 200) + '\n… (output folded, ' + t.output.length + ' chars)' : t.output;
       html += '<div class="tel-term-out' + (long ? ' collapsed' : '') + '" data-i="' + i + '">' + esc(shown) + '</div>';
-      if (long) html += '<button class="tel-term-toggle" data-i="' + i + '" onclick="telToggleTerm(this)">展开全部 (' + t.output.length + ' 字符)</button>';
+      if (long) html += '<button class="tel-term-toggle" data-i="' + i + '" onclick="telToggleTerm(this)">Expand all (' + t.output.length + ' chars)</button>';
     }
     html += '</div>';
   });
@@ -4016,28 +4033,28 @@ function telToggleTerm(btn) {
   var expanded = !out.classList.contains('collapsed');
   if (expanded) {
     out.classList.add('collapsed');
-    out.textContent = t.output.substring(0, 200) + '\n…（输出过长已折叠，共 ' + t.output.length + ' 字符）';
-    btn.textContent = '展开全部 (' + t.output.length + ' 字符)';
+    out.textContent = t.output.substring(0, 200) + '\n… (output folded, ' + t.output.length + ' chars)';
+    btn.textContent = 'Expand all (' + t.output.length + ' chars)';
   } else {
     out.classList.remove('collapsed');
     out.textContent = t.output;
-    btn.textContent = '收起';
+    btn.textContent = 'Collapse';
   }
 }
 
 function _telRenderSummary(st) {
   st = st || _telState;
   if (!st.summaryDone) return '';
-  var lines = ['**本轮小结**'];
-  if (st.files) lines.push('- 改动文件 ' + st.files + ' 个 · 增 ' + st.addLines + ' / 删 ' + st.delLines + ' 行');
-  if (st.tests) lines.push('- 测试：' + st.tests);
+  var lines = ['**Round summary**'];
+  if (st.files) lines.push('- Files changed: ' + st.files + ' · +' + st.addLines + ' / −' + st.delLines + ' lines');
+  if (st.tests) lines.push('- Tests: ' + st.tests);
   if (st.usage) {
     var pct = (st.usage.context_percent != null) ? st.usage.context_percent + '%'
             : ((st.usage.total != null) ? st.usage.total : '—');
-    lines.push('- token 占用 ' + pct);
+    lines.push('- token usage ' + pct);
   }
   if (st.concl) lines.push('> ' + st.concl);
-  return '<div class="tel-sec"><div class="tel-sec-title">收尾小结</div><div class="tel-summary">' + mdReply(lines.join('\n')) + '</div></div>';
+  return '<div class="tel-sec"><div class="tel-sec-title">Wrap-up</div><div class="tel-summary">' + mdReply(lines.join('\n')) + '</div></div>';
 }
 
 // ── diff 模态弹层（✕ / Esc / 点背景关闭；diff 块与主聊天区同源 diffBlock 逐字节一致）──
@@ -4046,7 +4063,7 @@ function telShowDiff(diffText) {
   var ov = document.createElement('div'); ov.className = 'tel-modal-ov';
   var box = document.createElement('div'); box.className = 'tel-modal';
   var head = document.createElement('div'); head.className = 'tel-modal-head';
-  head.innerHTML = '<span>Telescope · diff 详情</span><span class="tel-modal-x" onclick="telCloseDiff()">✕</span>';
+  head.innerHTML = '<span>Telescope · diff details</span><span class="tel-modal-x" onclick="telCloseDiff()">✕</span>';
   var body = document.createElement('div'); body.className = 'tel-modal-body';
   body.innerHTML = diffBlock(diffText);    // 同源 esc/diffBlock，与主聊天区 1:1
   box.appendChild(head); box.appendChild(body);
@@ -4072,12 +4089,12 @@ function _telHtmlEsc(s) {
 function _telRenderCost() {
   var pane = _telEl && _telEl.querySelector('[data-pane="cost"]');
   if (!pane) return;
-  pane.innerHTML = '<div class="tel-muted">读取消耗度量…</div>';
+  pane.innerHTML = '<div class="tel-muted">Loading metrics…</div>';
   call('metrics.read', { limit: 50 }).then(function(res) {
     if (!pane) return;
     var rounds = (res && res.rounds) || [];
     if (!rounds.length) {
-      pane.innerHTML = '<div class="tel-muted">暂无消耗数据（rounds.jsonl 为空，或本次运行尚无回合完成）</div>';
+      pane.innerHTML = '<div class="tel-muted">No cost data yet (rounds.jsonl empty, or no rounds completed in this run)</div>';
       return;
     }
     pane.innerHTML = _telCostHtml(rounds);
@@ -4085,12 +4102,12 @@ function _telRenderCost() {
 }
 function _telCostHtml(rounds) {
   var cur = rounds[0];   // metrics.read 返回新→旧，[0]=最近一轮
-  var h = '<div class="tel-sec"><div class="tel-sec-title">本轮拆解 · Round ' + cur.round + '</div>'
+  var h = '<div class="tel-sec"><div class="tel-sec-title">Round breakdown · ' + cur.round + '</div>'
     + _telCostBar(cur) + '</div>';
-  h += '<div class="tel-sec"><div class="tel-sec-title">缓存命中率</div>' + _telCacheRate(rounds) + '</div>';
+  h += '<div class="tel-sec"><div class="tel-sec-title">Cache hit rate</div>' + _telCacheRate(rounds) + '</div>';
   var warn = _telRepeatWarn(cur);
-  if (warn) h += '<div class="tel-sec"><div class="tel-sec-title">重复劳动警示</div>' + warn + '</div>';
-  h += '<div class="tel-cost-note">数据源 data/metrics/rounds.jsonl（每轮 message.complete 落一条）· 面板只读</div>';
+  if (warn) h += '<div class="tel-sec"><div class="tel-sec-title">Redundant work warning</div>' + warn + '</div>';
+  h += '<div class="tel-cost-note">Source: data/metrics/rounds.jsonl (one row per message.complete) · read-only</div>';
   return h;
 }
 function _telCostBar(r) {
@@ -4108,16 +4125,16 @@ function _telCostBar(r) {
   var schedPct = Math.max(0, 100 - userPct - injectPct);
   return '<div class="tel-bar-wrap">'
     + '<div class="tel-bar">'
-    + '<div class="tel-bar-seg tel-bar-user" style="width:' + userPct + '%" title="用户输入 ' + userChars + ' 字符"></div>'
-    + '<div class="tel-bar-seg tel-bar-inject" style="width:' + injectPct + '%" title="注入编排 ' + inject + ' 字符"></div>'
-    + '<div class="tel-bar-seg tel-bar-sched" style="width:' + schedPct + '%" title="历史与工具回传（调度层）"></div>'
+    + '<div class="tel-bar-seg tel-bar-user" style="width:' + userPct + '%" title="User input ' + userChars + ' chars"></div>'
+    + '<div class="tel-bar-seg tel-bar-inject" style="width:' + injectPct + '%" title="Injection ' + inject + ' chars"></div>'
+    + '<div class="tel-bar-seg tel-bar-sched" style="width:' + schedPct + '%" title="History & tool results (scheduling)"></div>'
     + '</div>'
     + '<div class="tel-bar-legend">'
-    + '<span><i style="background:#b8b4a8"></i>用户输入 ' + userChars + '（不计入优化口径）</span>'
-    + '<span><i style="background:#777"></i>注入编排 ' + inject + '</span>'
-    + '<span><i style="background:#e8913a"></i>历史与工具回传（调度层）</span>'
+    + '<span><i style="background:#b8b4a8"></i>User input ' + userChars + ' (not counted)</span>'
+    + '<span><i style="background:#777"></i>Injection ' + inject + '</span>'
+    + '<span><i style="background:#e8913a"></i>History & tool results (scheduling)</span>'
     + '</div>'
-    + '<div class="tel-muted">总 prompt tokens ' + prompt + ' · 注入=system+discipline+memory+pointers 字符合计（量级近似，字符≠token）</div>'
+    + '<div class="tel-muted">Total prompt tokens ' + prompt + ' · injection=system+discipline+memory+pointers chars (approx; chars≠tokens)</div>'
     + '</div>';
 }
 function _telCacheRate(rounds) {
@@ -4130,17 +4147,17 @@ function _telCacheRate(rounds) {
   });
   var curHit = cur.cache_hit_tokens, curMiss = cur.cache_miss_tokens;
   if (typeof curHit !== 'number' || typeof curMiss !== 'number') {
-    return '<div class="tel-warn"><p>链路未透传 DeepSeek usage 的 cache 字段（gateway 转发层未带 prompt_cache_hit_tokens / prompt_cache_miss_tokens），命中率暂不可用 —— 字段位已预留，取到即显示。</p></div>';
+    return '<div class="tel-warn"><p>Cache fields not forwarded from DeepSeek usage (gateway relay lacks prompt_cache_hit_tokens / prompt_cache_miss_tokens); hit rate unavailable — slots reserved.</p></div>';
   }
   var pct = (hit + miss) > 0 ? Math.round(hit / (hit + miss) * 100) : 0;
   var curPct = (curHit + curMiss) > 0 ? Math.round(curHit / (curHit + curMiss) * 100) : 0;
-  return '<div class="tel-muted">本轮命中 ' + curPct + '%（' + curHit + '/' + (curHit + curMiss) + '） · 近 ' + (n || 1) + ' 轮均值 ' + pct + '%</div>';
+  return '<div class="tel-muted">This round: ' + curPct + '% (' + curHit + '/' + (curHit + curMiss) + ') · last ' + (n || 1) + '-round avg ' + pct + '%</div>';
 }
 function _telRepeatWarn(r) {
   var rr = r.repeat_reads || [];
   if (!rr.length) return '';
   var items = rr.map(function(x) {
-    return '<p>⚠ 重复读取 <code>' + _telHtmlEsc(x.target) + '</code> × ' + x.count + '</p>';
+    return '<p>⚠ Repeated read <code>' + _telHtmlEsc(x.target) + '</code> × ' + x.count + '</p>';
   }).join('');
   return '<div class="tel-warn">' + items + '</div>';
 }
