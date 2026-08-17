@@ -22,6 +22,7 @@
     "views": {
       "bobo": [
         {
+          "type": "webview",
           "id": "boboChat",
           "name": "Chat"
         }
