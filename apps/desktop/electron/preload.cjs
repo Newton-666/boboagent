@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('boboAPI', {
   // Open native macOS folder picker
   selectFolder: () => ipcRenderer.invoke('select-folder'),
 
+  // 票 DESK-P1：Choose a folder（别名，复用 select-folder IPC——main.cjs 已
+  // 实现 dialog.showOpenDialog properties:['openDirectory']）
+  chooseFolder: () => ipcRenderer.invoke('select-folder'),
+
   // Save .env config (bypasses backend, writes directly)
   saveEnv: (data) => ipcRenderer.invoke('save-env', data),
 

@@ -289,6 +289,9 @@ def run_engine(
         engine.proactive.load_config()
         # ── 票 AUTO-G2：注入会话级"已交接水位线"（None=首回合列全部）──
         engine.handoff_watermark = session.get("handoff_watermark")
+        # ── 票 DESK-P1：会话项目根（None=默认现状；前端选项目后经
+        # prompt.submit 落 session["project_root"]）──
+        engine.project_root = session.get("project_root")
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))

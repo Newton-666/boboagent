@@ -108,25 +108,33 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     # COST-3（2026-08-16）特批：core/context.py + core/engine.py（工作锚点属性化 +
     # 工具集会话内全量稳定），diff 必须含 COST-3 标记
     COST3_ALLOWED = {"core/context.py", "core/engine.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED]
+    # DESK-P1（2026-08-17）特批：core/engine_adapter.py + core/tool_runner.py（会话
+    # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
+    # cwd），diff 必须含 DESK-P1 标记
+    DESK_P1_ALLOWED = {"core/engine_adapter.py", "core/tool_runner.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout), \
-            f"{f} 的改动缺 COST-1b/COST-1c 授权标记，未授权改动被拦截"
+        assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
+            f"{f} 的改动缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
     for f in sorted(COST1C_ALLOWED & set(changed)):
         r4 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "COST-1c" in r4.stdout, f"{f} 的改动缺 COST-1c 特批标记，未授权改动被拦截"
     for f in sorted(COST2_ALLOWED & set(changed)):
         r5 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert ("COST-2" in r5.stdout or "DIAG-1" in r5.stdout), \
-            f"{f} 的改动缺 COST-2/DIAG-1 特批标记，未授权改动被拦截"
+        assert ("COST-2" in r5.stdout or "DIAG-1" in r5.stdout or "DESK-P1" in r5.stdout), \
+            f"{f} 的改动缺 COST-2/DIAG-1/DESK-P1 特批标记，未授权改动被拦截"
     for f in sorted(SAFETY1_ALLOWED & set(changed)):
         r6 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
     for f in sorted(COST3_ALLOWED & set(changed)):
         r7 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert "COST-3" in r7.stdout, f"{f} 的改动缺 COST-3 特批标记，未授权改动被拦截"
+        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout), \
+            f"{f} 的改动缺 COST-3/DESK-P1 特批标记，未授权改动被拦截"
+    for f in sorted(DESK_P1_ALLOWED & set(changed)):
+        r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "DESK-P1" in r8.stdout, f"{f} 的改动缺 DESK-P1 特批标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")

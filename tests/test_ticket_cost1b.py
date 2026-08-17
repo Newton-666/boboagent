@@ -357,9 +357,11 @@ def test_c8_core_zero_diff_guard():
     # 票 COST-2 特批白名单：injector.py 允许（仅限两处：NOW 锚点后移 + 小时级精度）
     # 票 SAFETY-1 特批白名单：command_safety.py 允许（进程杀灭分级，diff 须含 SAFETY-1 标记）
     # 票 COST-3 特批白名单：context.py + engine.py 允许（工作锚点属性化 + 工具集全量稳定，diff 须含 COST-3 标记）
+    # 票 DESK-P1 特批白名单：engine_adapter.py + tool_runner.py 允许（会话项目根注入链路，diff 须含 DESK-P1 标记）
     changed = [x for x in changed
                if x not in ("core/llm_caller.py", "core/injector.py", "core/command_safety.py",
-                            "core/context.py", "core/engine.py")]
+                            "core/context.py", "core/engine.py",
+                            "core/engine_adapter.py", "core/tool_runner.py")]
     assert changed == [], f"core/ 有改动，违反铁律: {changed}"
 
 

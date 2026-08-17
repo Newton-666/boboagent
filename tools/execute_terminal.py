@@ -86,13 +86,18 @@ def _kill_process_group(proc):
         proc.wait()
 
 
-def execute(command: str, timeout: int = 30, _interrupt_event=None) -> str:
+def execute(command: str, timeout: int = 30, _interrupt_event=None, _project_root: str | None = None) -> str:
     """执行终端命令并返回输出。
 
     票 AUTO-E2：运行期间每 _POLL_INTERVAL 检查一次 _interrupt_event，
     一旦 set 立即杀进程组（ESC 硬中断 ≤2s），返回结果带 ⛔ 中断标注，
     已产生的部分 stdout/stderr 一并返回（现场证据不丢）。
     _interrupt_event 由 tool_runner 注入（engine._interrupt_event），
+    schema 不暴露，LLM 无法伪造。
+
+    票 DESK-P1：_project_root 由 tool_runner 注入（engine.project_root，
+    会话级，来自 gateway 落库）。有值且为目录时 Popen cwd=该项目根——
+    文件操作/终端命令默认落在项目目录；None 保持默认现状（进程 cwd）。
     schema 不暴露，LLM 无法伪造。
     """
     try:
@@ -113,6 +118,11 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None) -> str:
         # 使用 shell 执行（支持管道、重定向），环境变量已脱敏
         # 安全防护由上游 Engine 的 _is_high_risk_tool + 用户确认机制保障
         clean_env = sanitize_env()
+        # 票 DESK-P1：会话项目根作为默认 cwd（_project_root 由 tool_runner
+        # 注入，LLM 不可见；None/不存在目录 → 保持进程 cwd 现状）
+        _cwd = None
+        if _project_root and os.path.isdir(_project_root):
+            _cwd = _project_root
         proc = subprocess.Popen(
             command,
             shell=True,
@@ -121,6 +131,7 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None) -> str:
             text=True,
             executable='/bin/bash',
             env=clean_env,
+            cwd=_cwd,
             start_new_session=True,  # E2-1：独立进程组，可整组 killpg
         )
 

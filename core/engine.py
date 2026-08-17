@@ -86,6 +86,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.test_mode = test_mode or ('pytest' in sys.modules)
         self._auto_mode_getter = auto_mode_getter  # 票 A：会话级 AUTO MODE 开关读取器（放 ctx，engine 只读）
         self.history = []
+        # ── 票 DESK-P1（特批标记）：会话项目根。null=默认现状（工作目录即
+        # BOBO_Project_Backup），绝对兼容；gateway 经 engine_adapter 注入
+        # （session["project_root"]）。injector 据此注入尾部动态段，
+        # tool_runner 据此给 execute_terminal 注入默认 cwd。 ──
+        self.project_root: str | None = None
         # 会话标识：gateway 在 open_session 中设 self.sid；无会话时走时间戳兜底
         _now = time.time()
         self.sid = f"boot-{int(_now)}-{os.urandom(2).hex()}"

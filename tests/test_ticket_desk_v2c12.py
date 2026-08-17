@@ -44,6 +44,15 @@ PALETTE_HEX = {
     "#f44336",  # 危险红（既有）
 }
 
+# DESK-P1 特批豁免（owner 票 TICKET-DESK-P1 钉死）：#welcome-title 规则段为票授权新增
+# （含 var(--font-reply)/Charter 字样）。V2C1 段外泄漏检查前先剔除该段（含前后注释）。
+DESK_P1_WELCOME_RE = re.compile(r"/\* 票 DESK-P1：.*?#welcome-title \{[^}]*\}\n", re.S)
+
+
+def _strip_welcome_title(src: str) -> str:
+    """剔除 DESK-P1 #welcome-title 规则段（/* 票 DESK-P1 注释开头 → #welcome-title 规则行尾）。"""
+    return DESK_P1_WELCOME_RE.sub("", src)
+
 
 def _run_node_cwd(js: str, cwd=DESKTOP) -> str:
     """在 node 中执行 JS（cwd=apps/desktop，可 require jsdom），返回 stdout。"""
@@ -240,10 +249,12 @@ def test_v2c12_7_font_face_and_var():
         "--font-reply 变量必须按票定义（Charter → Songti SC → Noto Serif CJK）"
     assert ".msg.bobo .txt { font-family:var(--font-reply); }" in css, \
         "--font-reply 必须只应用到助手正文一处"
-    # 全文件仅此一处 font-family:var(--font-reply)
-    assert src.count("font-family:var(--font-reply)") == 1, "--font-reply 不得扩散"
+    # 全文件 font-family:var(--font-reply) 共两处：V2C1 助手正文 + DESK-P1 #welcome-title
+    # （owner 票 TICKET-DESK-P1 钉死：欢迎标题与正文同取 --font-reply，零新增字体资源）
+    assert src.count("font-family:var(--font-reply)") == 2, "--font-reply 不得扩散"
     # 锚点段外不得出现 Charter / --font-reply（外科式摘除完整性）
-    outside = src[:css_start] + src[css_end:]
+    # DESK-P1 豁免：#welcome-title 规则段（含注释）为票授权新增，先剔除再做段外检查
+    outside = _strip_welcome_title(src[:css_start] + src[css_end:])
     assert "Charter" not in outside and "--font-reply" not in outside, "V2C1 声明泄漏到锚点段外"
     # 字体加载失败静默回退：font-display:swap 声明
     assert "font-display:swap" in css, "字体加载失败须静默回退（font-display:swap）"
@@ -263,7 +274,8 @@ def test_v2c12_8_css_anchor_and_palette():
     hex_colors = set(re.findall(r"#[0-9a-fA-F]{3,8}\b", css))
     assert hex_colors <= PALETTE_HEX, f"V2C1 样式块含色板外色值: {hex_colors - PALETTE_HEX}"
     # 段外零新增：Charter/--font-reply/mdReply 样式选择器不得出现在锚点段外
-    outside = src[:css_start] + src[css_end:]
+    # DESK-P1 豁免：#welcome-title 规则段（票授权新增，含 --font-reply/Charter 字样）先剔除
+    outside = _strip_welcome_title(src[:css_start] + src[css_end:])
     for token in [".msg.bobo .txt", "--font-reply", "Charter", "hljs-", "language-python"]:
         assert token not in outside, f"V2C1 样式泄漏到锚点段外: {token}"
     # vendor script 必须在主 <script> 之前（L1：新 DOM/引用先于主脚本）
