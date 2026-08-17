@@ -69,6 +69,8 @@ export class ChatPanel {
   }
 
   private post(msg: unknown): void {
+    // VSC-1B 实弹修复：webview 加载完成前 postMessage 会丢——排队，ready 后补发
+    if (!this.webviewReady) { this.pending.push(msg); return; }
     try {
       this.view.webview.postMessage(msg);
     } catch {
@@ -76,9 +78,19 @@ export class ChatPanel {
     }
   }
 
+  private webviewReady = false;
+  private pending: unknown[] = [];
+
   private onMessage(msg: { kind?: string; text?: string; explain?: boolean; confirm?: boolean }): void {
     if (!msg) return;
-    if (msg.kind === 'send' && typeof msg.text === 'string' && this.sessionId) {
+    if (msg.kind === 'ready') {
+      this.webviewReady = true;
+      for (const m of this.pending.splice(0)) {
+        try { this.view.webview.postMessage(m); } catch { /* disposed */ }
+      }
+      return;
+    }
+    if (msg.kind === 'send' && typeof msg.text === 'string') {
       vscode.commands.executeCommand('bobo.submitQuestion', { text: msg.text });
     } else if (msg.kind === 'toggleExplain' && typeof msg.explain === 'boolean') {
       this.explainOn = msg.explain;
@@ -211,6 +223,7 @@ document.getElementById('send').addEventListener('click', () => {
 document.getElementById('input').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('send').click(); });
 explain.addEventListener('change', () => vscode.postMessage({ kind: 'toggleExplain', explain: explain.checked }));
 document.getElementById('pair-ok').addEventListener('click', () => { document.getElementById('pairing').classList.remove('show'); vscode.postMessage({ kind: 'pairingConfirm', confirm: true }); });
+vscode.postMessage({ kind: 'ready' });
 </script>
 </body>
 </html>`;
