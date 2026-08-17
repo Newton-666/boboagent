@@ -48,6 +48,8 @@
 
 | 票 | 干什么 | 状态 |
 |---|---|---|
+| **VSC-2C 工作目录感知 + 工具图标 SVG + 对比度核验（2026-08-17 owner 实弹热修，功能错误优先）** | ①bobo 感知不到 VS Code 打开的文件夹（send 入口 project_root 错误依赖选区，无选区→undefined→建文件落到后端 cwd）；②工具图标 emoji→桌面端同款细线 SVG（L4）；③目录树/代码条对比度核验（先复现再修）。根因已定位 extension.ts:182-189 + currentSelectionContext 无选区返 null | 📋 排队（票 docs/tickets/TICKET-VSC-2C.md，建议先于 COST-4 施工） |
+| **VSC-2D 裸 HTML 元素化修复（2026-08-18 开票，VSC-2C 实弹后续发现）** | bobo 回复里未包代码块的裸 HTML（`<div class="card">` 等）被 marked+DOMPurify 当真渲染成 DOM 元素→标签文本消失/布局错乱/文字变灰被盖住。根因实证：md-render.js 用 marked 默认允许 inline HTML；桌面端 md() 是先 esc 再处理，VSC 未对齐。修复：marked 自定义 html renderer 转义为文本（方案已 node 实测） | 📋 排队（票 docs/tickets/TICKET-VSC-2D.md，VSC-2C 收编后施工） |
 | EV-2 | 评估跑道升级：轨迹回放 + mock 驱动；复活 BLOCKED 的 A5/A7 题；A1 新规则（≤2 次工具）复测；B2 的 test_archive_file_exists 定位 | 📋 排队 |
 | COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。**速度与成本同一杠杆：前缀缓存命中率（标杆 Pi 99.93%、P99 -42%）+ PTC 减少模型往返 + prompt 瘦身**。产出：测量报告 → 优化票 |
 | COST-1a 外置变量实验沙盒（owner 立规：**核心引擎零改动，实验全外置**） | 独立目录搭模拟栈：可调 N 工具/N skill/N 段注入 prompt，实测缓存命中率与速度提升，找 efficiency×ability 平衡点；报告出来前核心一行不动 | 📋 COST-1 第一子票 |

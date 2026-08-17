@@ -56,3 +56,23 @@ test('旧值回归防护：票基准上的不达标旧值被拒（防回退）',
     assert.throws(() => assertContrast(old, PALETTE.bg3, 4.5), `旧值 ${old} 不得达标`);
   }
 });
+
+// ── 票 VSC-2C：代码块/目录树场景回归闸（owner 实弹：目录树/代码条对比度太低）──
+test('VSC-2C 代码块场景：无语言 pre code 文字色（--text）vs --bg3 ≥4.5:1', () => {
+  // chatPanel.ts `.msg.bobo .txt pre code` 无显式 color，继承 body --text；
+  // 任何给 pre code 显式赋低对比色、或把代码块前景改成 muted 的改动都会被此测试拦住。
+  assertContrast(PALETTE.text, PALETTE.bg3, 4.5);
+});
+
+test('VSC-2C 目录树/次级列表场景：--text2 在代码块背景 --bg3 ≥4.5:1', () => {
+  // 回复目录树/代码条若以 --text2 作前景，必须满足 WCAG AA（实测 ≥5:1）
+  assertContrast(PALETTE.text2, PALETTE.bg3, 4.5);
+});
+
+test('VSC-2C 内容文字禁 --text-muted：muted 在代码块背景必须 <4.5:1（证明不可作代码块内容前景）', () => {
+  // --text-muted 只允许占位符/装饰，退出内容文字（派单：内容文字禁 --text-muted）。
+  // 若某次改动把 muted 提到 ≥4.5（比如加深），就会破坏"muted 不是内容色"的语义，
+  // 代码块/目录树内容可能被误用 muted——此闸阻止该方向。
+  const r = contrastRatio(PALETTE.textMuted, PALETTE.bg3);
+  assert.ok(r < 4.5, `muted vs --bg3 必须 <4.5:1（实际 ${r.toFixed(2)}），否则会被误用于代码块内容`);
+});

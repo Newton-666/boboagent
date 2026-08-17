@@ -25,6 +25,7 @@ import { splitThinking } from './markdown';
 import { applySessionResult, resolveAskGate, buildSelectionPayload } from './sessionFlow';
 import { SnapshotStore, extractTargetPath, hasInlineDiff, WRITE_TOOLS } from './diffFlow';
 import { DiffSnapshotProvider } from './diffProvider';
+import { resolveProjectRoot } from './projectRoot';
 
 const PAIRING_KEY = 'bobo.paired.v1';
 const PAIRING_MSG = 'bobo: first-time pairing — allow this VS Code window to talk to the local bobo gateway?';
@@ -182,10 +183,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
         // 必须让 bobo 看到选中的代码块，而不是只发一句裸文本
         const selCtx = currentSelectionContext();
         const outgoing = selCtx ? buildUserMessage(selCtx, text) : text;
+        // VSC-2C：project_root 与选区解耦——无条件取 workspace 根（有 workspace 就带，
+        // 单文件/无 workspace 才 undefined）。此前依赖 selCtx.workspaceRoot，无选区时
+        // currentSelectionContext() 返 null → project_root undefined → bobo 感知不到
+        // VS Code 打开的文件夹，建文件落到后端 cwd。
+        const wsRoot = resolveProjectRoot(vscode.workspace.workspaceFolders);
         await state.client.send('prompt.submit', {
           session_id: state.sessionId,
           text: buildPrompt(outgoing, explain),
-          project_root: selCtx && selCtx.workspaceRoot ? selCtx.workspaceRoot : undefined,
+          project_root: wsRoot,
         });
       } catch (e) {
         vscode.window.showErrorMessage(`bobo: ${(e as Error).message}`);
