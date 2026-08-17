@@ -3,6 +3,14 @@
 三组测试对应票文验收项 2/3/4。代码不动，只补测试。
 """
 
+def _get_anchor(eng):
+    """票 COST-3：工作锚点属性化——从 eng._work_anchor 读取（history 不再持有锚点）。"""
+    wa = getattr(eng, "_work_anchor", None)
+    if wa and wa.get("content"):
+        return [wa]
+    return [m for m in eng.history
+            if m.get("role") == "system"
+            and m.get("content", "").startswith("[工作锚点]")]
 import json
 import pytest
 
@@ -77,9 +85,7 @@ class TestCompressSkip:
         assert ev["ratio"] < 0.15, f"ratio {ev['ratio']} should be < 0.15"
 
         # 工作锚点应被重建（compress_skipped 分支）
-        anchors = [m for m in engine.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(engine)
         assert len(anchors) == 1, f"Expected 1 anchor, got {len(anchors)}"
 
     def test_normal_compress_when_archivable_above_threshold(self, monkeypatch, tmp_path):
@@ -352,9 +358,7 @@ class TestToolHeavyCompression:
 
         # 检查锚点数量
         _ANCHOR_PREFIX = "[工作锚点"
-        anchors = [m for m in engine.history
-                   if m.get("role") == "system" and
-                   m.get("content", "").startswith(_ANCHOR_PREFIX)]
+        anchors = _get_anchor(engine)
         assert len(anchors) == 1, (
             f"Expected exactly 1 anchor, got {len(anchors)}: "
             f"{[m.get('content','')[:80] for m in anchors]}"

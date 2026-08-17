@@ -352,25 +352,32 @@ class ContextMixin:
                 })
             except Exception:
                 logger.warning("context.compress_skipped 事件写入失败（静默降级）", exc_info=True)
-            anchor_msg = self._build_work_anchor()
+            # 票 COST-3：工作锚点不再 insert 进 history（任何位置都不许）——
+            # 改为随 COST-2 尾部动态段由 injector 每轮请求组装时注入。
+            # 压缩豁免语义保留：锚点内容（当前任务/已写文件/台账）全部来自
+            # 会话级属性，不随压缩丢失；此处仅清理 history 中残留旧锚点
+            # （兼容旧存盘/旧测试），并刷新 self._work_anchor 供尾部注入。
             _ANCHOR_PREFIX = "[工作锚点"
             self.history = [m for m in self.history
                             if not (m.get("role") == "system" and
                                     m.get("content", "").startswith(_ANCHOR_PREFIX))]
-            self.history.insert(0, anchor_msg)
+            self._work_anchor = self._build_work_anchor()
             return
 
         # ── 预统计 ──
         pre_msg_count = total_msg_count
         pre_tokens = total_tokens
 
-        # ── 构建 + 插入工作锚点（TICKET-020） ──
-        anchor_msg = self._build_work_anchor()
+        # ── 构建 + 刷新工作锚点（TICKET-020 → 票 COST-3 移位） ──
+        # COST-3：锚点不再 insert 进 history（头部 insert 破坏前缀缓存），
+        # 改为存 self._work_anchor，由 injector 每轮组装时注入尾部动态段
+        # （最后一个 user 消息之前）。压缩豁免语义不变：锚点内容全部来自
+        # 会话级属性，压缩不丢。history 中残留旧锚点照常清理（兼容旧数据）。
         _ANCHOR_PREFIX = "[工作锚点"
         self.history = [m for m in self.history
                         if not (m.get("role") == "system" and
                                 m.get("content", "").startswith(_ANCHOR_PREFIX))]
-        self.history.insert(0, anchor_msg)
+        self._work_anchor = self._build_work_anchor()
 
         # ── 三层分割 ──
         # 层0：从尾部往前取，直到累计 token 超 _LAYER_0_TOKEN_LIMIT
@@ -695,18 +702,16 @@ class ContextMixin:
             )
             layer_0 = [m for m in layer_0 if m not in anchors_in_l0]
 
-        # 保留已有锚点（在 history[0]）
-        anchor = self.history[0] if (self.history and
-                                     self.history[0].get("role") == "system" and
-                                     self.history[0].get("content", "").startswith(_ANCHOR_PREFIX)) else None
+        # 票 COST-3：锚点不再 append 进 history（原 TICKET-020 放摘要后/层0前，
+        # 位于头部导致其后 tokens 缓存作废——长会话杀手）。压缩豁免语义由
+        # self._work_anchor 属性承载：压缩主路径/跳过路径已在上游刷新属性，
+        # 此处仅兜底确保属性非空，绝不触碰 history。
+        if not getattr(self, "_work_anchor", None):
+            self._work_anchor = self._build_work_anchor()
         # 组装
         new_history = []
         new_history.extend(l2_summaries)
         new_history.extend(l1_summaries)
-        if anchor:
-            new_history.append(anchor)
-        else:
-            new_history.append(self._build_work_anchor())
         new_history.extend(layer_0)
         self.history = new_history
 

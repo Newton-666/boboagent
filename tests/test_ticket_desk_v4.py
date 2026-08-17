@@ -105,7 +105,10 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     # SAFETY-1（2026-08-16）特批：core/command_safety.py 进程杀灭白名单（kill/pkill/
     # killall 误杀自身后端与桌面端渲染进程的根治疗），diff 必须含 SAFETY-1 标记
     SAFETY1_ALLOWED = {"core/command_safety.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED]
+    # COST-3（2026-08-16）特批：core/context.py + core/engine.py（工作锚点属性化 +
+    # 工具集会话内全量稳定），diff 必须含 COST-3 标记
+    COST3_ALLOWED = {"core/context.py", "core/engine.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
@@ -121,6 +124,9 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     for f in sorted(SAFETY1_ALLOWED & set(changed)):
         r6 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
+    for f in sorted(COST3_ALLOWED & set(changed)):
+        r7 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "COST-3" in r7.stdout, f"{f} 的改动缺 COST-3 特批标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")

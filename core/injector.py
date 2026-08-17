@@ -686,6 +686,21 @@ class PromptInjector:
             _tail_blocks.append(("now", _now_block))
             budget_stats["now"] = {"chars": len(_now_block)}
 
+        # 票 COST-3：工作锚点（原 TICKET-020 压缩时 insert(0) 进 history 头部 →
+        # 长会话前缀杀手，位于 system 之后第一条，含 current_user_input 每轮必变
+        # → 其后的历史 tokens 缓存全废）改为每轮随 COST-2 动态块注入（附加到
+        # 本轮 user content 前部，历史区逐字节稳定）。压缩豁免语义保留：锚点
+        # 内容（当前任务/已写文件/台账）全部来自会话级属性，压缩不丢，每轮
+        # 重建即最新；压缩路径仅刷新 self._work_anchor，不再触碰 history。
+        try:
+            _build_wa = getattr(engine, "_build_work_anchor", None)
+            if callable(_build_wa):
+                _wa = _build_wa()
+                if _wa and _wa.get("content"):
+                    _tail_blocks.append(("work_anchor", _wa["content"]))
+        except Exception:
+            logger.debug("工作锚点注入失败（静默降级）", exc_info=True)
+
         # 3a) 技能标准收集（票 TICKET-E3b：未命中清单已删，仅命中才注入）
         # 票 COST-2：必须在本段统一注入之前收集；原第 9 段（注入后）append
         # 到 messages 末尾，位置逐轮漂移导致前缀错位（详见第 9 段注释）。
@@ -716,7 +731,7 @@ class PromptInjector:
                        "change_log": 3, "read_files": 4, "pending_diff": 5,
                        "discipline": 6,
                        "selfmap_arch": 7, "selfmap_boundary": 8, "selfmap_rescue": 9,
-                       "skill": 10, "now": 11}
+                       "skill": 10, "now": 11, "work_anchor": 12}
         if _tail_blocks:
             _ordered = sorted(
                 _tail_blocks, key=lambda b: _TAIL_ORDER.get(b[0], 99))

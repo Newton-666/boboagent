@@ -155,6 +155,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._phase_pending_cleanup: bool = False
         self._phase_summary: str = ""
         self._worker_reminded: bool = False
+        self._work_anchor: dict | None = None  # 票 COST-3：工作锚点属性化（不入 history），压缩时刷新、injector 尾部注入
         self._ledger_reminded: bool = False  # 票Z 缝1：无账提醒标记
         self._ledger_backfill_suspect: bool = False  # 票 O8-2：事后补账嫌疑（工具轮批量创建即全 done）
         self._reply_quality_reinject_count: int = 0  # 票 R2b：答复质量闸打回计数（每回合至多 1 次，防死循环）
@@ -1376,6 +1377,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._phase_pending_cleanup = False
 
         # 首次工具调用后提醒 LLM 考虑用 spawn_worker 拆分子任务
+        # 票 COST-3：insert(0) 改为 append——头部插入会断裂 DeepSeek 前缀缓存
+        # （首个工具轮触发后，后续所有轮 prompt 头部多出该条，与首轮公共前缀
+        # 只剩系统提示，实测命中率 97%→52.8%）。append 到 history 末尾：工具
+        # 结果之后、下一轮 user 之前，位置固定后跨轮逐字节稳定，前缀不破坏。
         if not self._worker_reminded and self._step_count >= 1:
             has_worker = any(
                 "spawn_worker" in str(m.get("content", ""))
@@ -1386,7 +1391,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 for m in self.history
             )
             if not has_worker:
-                self.history.insert(0, {
+                self.history.append({
                     "role": "system",
                     "content": "注意：这个任务涉及多个步骤或文件。\n"
                     "选项 A：用 spawn_worker 拆分成独立子任务（推荐，可并行，各模块上下文隔离、质量更好）\n"
@@ -1472,7 +1477,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
             })
 
 
-        filtered_tools = self._get_filtered_tools(extra_categories=self._used_categories)
+        # 票 COST-3：工具集会话内逐字节稳定——不再按查询分类过滤。
+        # 原 _get_filtered_tools 每轮按分类发 15~31 个不同子集 → tools 段逐轮变
+        # → 请求前缀在 tools 处断裂 + 能力随分类抖动（rounds.jsonl 实测：tools
+        # 变化的轮命中跌至 2.9%）。全量 31 个 schema 固定发送（TOOLS_SCHEMA 为
+        # 静态列表，顺序稳定）。成本账（真实数据，见票据报告）：全量 ≈8020
+        # tokens/轮、命中 1/10 价 ≈802 当量；过滤子集 ≈5691 tokens/轮但未命中
+        # 全价 + 前缀断裂拖累 messages 命中 → 全量稳定更优，且工具可用性 100%
+        # 不缩水（owner 红线）。describe_tool 取件的 _extra_tools 走执行器注册，
+        # 不依赖 prompt schema，不受影响。
+        filtered_tools = TOOLS_SCHEMA
         if filtered_tools is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered_tools]
             self._notify("thinking", {"phase": "tool_filter", "message": f"加载 {len(filtered_tools)} 个工具 ({', '.join(names)})"})
