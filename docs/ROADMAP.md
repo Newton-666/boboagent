@@ -132,6 +132,10 @@ DESK-P2 界面全英文化（106 HTML + 278 JS 字符串，"仍在工作"心跳�
 
 VSC-1 VS Code 扩展最小闭环（apps/vscode-extension/：Ask bobo 选中即问 cmd+shift+B + Explain 教学模式 + unix socket JSON-RPC 客户端含退避重连；协议级实弹 Explain OFF/ON 双模式通过；UI 级实跑待补）
 
-当前 main: 含 VSC-1 · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展单测 30/30 · 回滚标签全部在远端
+
 
 待发票仓（docs/tickets/）：GW-SOCK 桌面端后端 socket 常驻（VS Code 自动连接前提）→ VSC-2 完整聊天 + diff 协作闭环 → 后续 VSC-3 / 连接韧性 / DESK-V1 / V2C3 / CLEAN
+
+GW-SOCK 桌面端后端 socket 常驻（固定名 bobo-gw-main.sock + 防双实例拒绝 + 断连后端不死重连恢复；VS Code 扩展自动连接打通；Kimi 终审修专项 ROOT off-by-one 后 6/6）
+
+当前 main: 含 GW-SOCK · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 30/30 + socket 专项 6/6 · 回滚标签全部在远端
