@@ -134,7 +134,7 @@ VSC-1 VS Code 扩展最小闭环（apps/vscode-extension/：Ask bobo 选中即�
 
 
 
-待发票仓（docs/tickets/）：VSC-2 完整聊天 + diff 协作闭环 → 后续 VSC-3 / 连接韧性 / DESK-V1 / V2C3 / CLEAN
+待发票仓（docs/tickets/）：VSC-3（桌面端体验完整搬进 VS Code + vsix 私有分发）/ 连接韧性 / DESK-V1 / V2C3 / CLEAN / 桌面端低对比色回同步（VSC-2A 治理后）
 
 GW-SOCK 桌面端后端 socket 常驻（固定名 bobo-gw-main.sock + 防双实例拒绝 + 断连后端不死重连恢复；VS Code 扩展自动连接打通；Kimi 终审修专项 ROOT off-by-one 后 6/6）
 
@@ -144,4 +144,6 @@ VSC-1B VS Code 侧边栏落地 + 连接死锁双 bug 修复（Bug1 package.json 
 
 VSC-1C VS Code 面板渲染复刻桌面端（marked+DOMPurify+highlight vendor 本地化 + 消息气泡/代码块/表格/diff 增色全套 design token 照抄 + 空态欢迎标题；Kimi 终审 npm 46/46×2 稳定 + 守卫 20/20；合并 ba60dd58）
 
-当前 main: 含 VSC-1C · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 46/46 + socket 专项 7/7 · 回滚标签全部在远端
+VSC-2 VS Code 完整聊天+diff 协作+对比度治理（New chat/会话切换/思考折叠/工具行 + tool.start 内存快照→vscode.diff→Accept/Reject 逐字节还原 + 对比度矩阵单测；自审修 existed 高危 bug；Kimi 终审 RPC 实探核实 session.resume/list/inline_diff 均真实存在；合并 da71c50d）
+
+当前 main: 含 VSC-2 · 测试基线 2722 passed / 2 skipped / 1 xpassed + 扩展 77/77 + socket 专项 7/7 · 回滚标签全部在远端
