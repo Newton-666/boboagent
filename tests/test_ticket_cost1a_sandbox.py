@@ -186,11 +186,16 @@ class TestIronRules:
         # 票 COST-2 特批白名单：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度）；
         # 票 SAFETY-1 特批白名单：core/command_safety.py 进程杀灭分级（kill/pkill/
         # killall 误杀自身后端与桌面端渲染进程的根治疗，diff 须含 SAFETY-1 标记）；
+        # 票 COST-3 特批白名单：core/context.py + core/engine.py（工作锚点属性化 +
+        # 工具集全量稳定，diff 须含 COST-3 标记）；
         # 过滤掉特批文件行与 --stat 汇总行（"1 file changed"）
         lines = [l for l in r.stdout.strip().splitlines()
                  if l.strip() and "core/llm_caller.py" not in l
                  and "core/injector.py" not in l
-                 and "core/command_safety.py" not in l and "file changed" not in l]
+                 and "core/command_safety.py" not in l
+                 and "core/context.py" not in l
+                 and "core/engine.py" not in l
+                 and "file changed" not in l and "files changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 
     def test_results_in_gitignore(self):

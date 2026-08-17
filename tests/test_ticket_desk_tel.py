@@ -515,6 +515,12 @@ def test_tel_8_zero_interference():
             r5 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "SAFETY-1" in r5.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
             continue
+        # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
+        # 会话内全量稳定），diff 必须含 COST-3 标记
+        if ln in ("core/context.py", "core/engine.py"):
+            r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r7.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
@@ -535,7 +541,7 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py":
             continue
         if ln.startswith("tests/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）

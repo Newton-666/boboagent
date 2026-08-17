@@ -8,6 +8,14 @@
 5. 降级路径：无 change_log/无台账/无任务时锚点正常生成
 """
 
+def _get_anchor(eng):
+    """票 COST-3：工作锚点属性化——从 eng._work_anchor 读取（history 不再持有锚点）。"""
+    wa = getattr(eng, "_work_anchor", None)
+    if wa and wa.get("content"):
+        return [wa]
+    return [m for m in eng.history
+            if m.get("role") == "system"
+            and m.get("content", "").startswith("[工作锚点]")]
 import os
 import sys
 import pytest
@@ -91,9 +99,7 @@ class TestWorkAnchorGolden:
 
         engine_with_files._compress_history()
 
-        anchors = [m for m in engine_with_files.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(engine_with_files)
         assert len(anchors) >= 1, "压缩后应有工作锚点"
 
         content = anchors[0]["content"]
@@ -115,9 +121,7 @@ class TestWorkAnchorGolden:
         _fill_history(engine_with_files, n_pairs=20, prefix="后续")
         engine_with_files._compress_history()
 
-        anchors = [m for m in engine_with_files.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(engine_with_files)
         assert len(anchors) == 1, f"锚点应只有一份，实际 {len(anchors)}"
 
     def test_anchor_updates_on_recompress(self, engine_with_files, monkeypatch):
@@ -137,9 +141,7 @@ class TestWorkAnchorGolden:
         _fill_history(engine_with_files, n_pairs=20, prefix="后续")
         engine_with_files._compress_history()
 
-        anchors = [m for m in engine_with_files.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(engine_with_files)
         content = anchors[0]["content"]
         assert "w.py" in content, "新文件 w.py 应出现在锚点中"
         assert "给 w.py 加日志" in content, "新的当前任务应出现在锚点中"
@@ -158,9 +160,7 @@ class TestWorkAnchorGolden:
         engine_with_files._compress_history()
 
         # 压缩后应同时存在锚点和 LLM 摘要（TICKET-024: L2/L1/兜底 格式）
-        anchors = [m for m in engine_with_files.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(engine_with_files)
         summaries = [m for m in engine_with_files.history
                      if m.get("role") == "system"
                      and (m.get("content", "").startswith("[L2 极简摘要]")
@@ -186,9 +186,7 @@ class TestWorkAnchorDegradation:
 
         eng._compress_history()
 
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         assert len(anchors) == 1
         content = anchors[0]["content"]
         assert "你好" in content
@@ -208,9 +206,7 @@ class TestWorkAnchorDegradation:
 
         eng._compress_history()
 
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         content = anchors[0]["content"]
         assert "a.py" in content
         assert "写一个脚本" in content
@@ -228,9 +224,7 @@ class TestWorkAnchorDegradation:
 
         eng._compress_history()
 
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         content = anchors[0]["content"]
         assert "b.md" in content
         assert "任务" in content
@@ -248,9 +242,7 @@ class TestWorkAnchorDegradation:
 
         eng._compress_history()
 
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         assert len(anchors) == 1
         # 即使完全空，至少标题行存在
         content = anchors[0]["content"]
@@ -290,9 +282,7 @@ class TestWorkAnchorDegradation:
 
         eng._compress_history()
 
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         assert len(anchors) == 1, "纯工具记录段压缩后也应有锚点"
         content = anchors[0]["content"]
         assert "x.py" in content
@@ -319,9 +309,7 @@ class TestAnchorRobust:
         eng.sid = "test-colon-001"
 
         eng._compress_history()
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         assert len(anchors) == 1
         content = anchors[0]["content"]
         # 完整路径不被截断
@@ -352,9 +340,7 @@ class TestAnchorRobust:
         assert len(eng.tracker._change_log) <= 11
 
         eng._compress_history()
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         content = anchors[0]["content"]
         # 早期文件仍在（来自 _session_written_files，不受塌缩影响）
         assert "early_a.py" in content
@@ -377,9 +363,7 @@ class TestAnchorRobust:
         eng.sid = "test-path-003"
 
         eng._compress_history()
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         content = anchors[0]["content"]
         assert "a:b:c" in content
         assert "x.py" in content
@@ -415,9 +399,7 @@ class TestAnchorRobust:
         # 后续压缩 → 锚点仍含阶段一文件
         eng.sid = "test-phase-004"
         eng._compress_history()
-        anchors = [m for m in eng.history
-                   if m.get("role") == "system"
-                   and m.get("content", "").startswith("[工作锚点")]
+        anchors = _get_anchor(eng)
         content = anchors[0]["content"]
         assert "phase1_report.md" in content
         assert "phase1_data.csv" in content
