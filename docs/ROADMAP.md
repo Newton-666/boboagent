@@ -22,7 +22,15 @@
 | 4.5 | GUI-F13 历史像素级复原 + 丝滑窗口化（owner 19:46/19:48 拍板） | 统一渲染管线 + 视觉姿势持久化 + 窗口化（>200 条分流/提前 2 屏/占位高度/rAF）；考古聚合降级为开关；零上下文影响 | ✅ 已合并 5d3beb1（全量 2557 passed；**遗留：长会话滚动帧率 Playwright 实测挂 F13b 补票，owner 实弹验收重点**；回滚标签 rollback/pre-gui-f13） |
 | 5 | DESK-V2D 美学微票串余下三张（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | ✅ D5 药丸修复+认知条（c6a8d5e）→ ✅ D6 思考框中性化（419e450，去 emoji/去蓝/同族不同阶）→ ✅ D7 药丸墨痕重设计（6d5e550，方案 A 墨痕填充；思考蓝全面退役，色彩收口=纸+墨+橙印；信息蓝 12 处迁墨灰为票面④授权内的范围扩张，owner 实弹裁决中）→ ~~D2 橙色印章语义~~（owner 20:25 实弹否决：bobo 做过什么工具卡已一目了然，橙印是重复表达，价值不足，**封存**）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise） | 📋 D3 待开 |
 | ⏸ | COST-1a 工具画像+外置实验 | ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存 |
-| **GUI-F16 桌面端 markdown 数学公式渲染（2026-08-18 开票，owner 实弹反馈）** | 桌面端助手正文缺 KaTeX——marked 不解析 LaTeX，`$x^2$` 显示为裸源码（实测原样输出）。修：KaTeX vendor 本地化（dist/vendor/ 对齐 marked/hljs 先例）+ mdReply 管线接公式渲染（先保护代码块再提取 $...$/$$...$$，占位符还原，渲染失败原样容错） | 📋 排队（票 docs/tickets/TICKET-GUI-F16.md） |
+| **GUI-F16 桌面端 markdown 数学公式渲染（2026-08-18 开票，owner 实弹反馈）** | 桌面端助手正文缺 KaTeX——marked 不解析 LaTeX，`$x^2$` 显示为裸源码（实测原样输出）。修：KaTeX vendor 本地化（dist/vendor/ 对齐 marked/hljs 先例）+ mdReply 管线接公式渲染（先保护代码块再提取 $...$/$$...$$，占位符还原，渲染失败原样容错） | ✅ 已合并 b5f37354 |
+| **GUI-F17 停止假中断（Hermes 评审 Bug 1，严重）** | stopThinking 的 session.interrupt 只在 thinkBoxEl 非空时发；tool.start 收束思考框置 null → 工具执行期间停止失效。修：interrupt 无条件发 | ✅ 终审通过，待 owner 实弹 + 收编 |
+| **GUI-F18 Esc 路由优先级 + 清空会话模态化（Hermes 评审 Bug 2+4）** | Esc 双监听冲突 → 浮层优先级链 + stopPropagation；清空会话原生 confirm 改 askConfirm（L6） | 📋 排队（票 docs/tickets/TICKET-GUI-F18.md） |
+| **GUI-F19 滚动锚定（Hermes 评审 Bug 3）** | 8 处无条件 scrollTop → isNearBottom 判定 + 统一 scrollToBottomIfNear | 📋 排队（票 docs/tickets/TICKET-GUI-F19.md） |
+| **GUI-F20 设置空 key 保存弹窗不关（Hermes 评审 Bug 5）** | settings-save 空 key 时弹窗照样关。修：空 key return 不关弹窗 + 内联错误 | 📋 排队（票 docs/tickets/TICKET-GUI-F20.md） |
+| **GUI-F21 桌面端历史渲染对齐实时** | 实时=聚合卡+最新摊开+思考吞并；历史默认平铺 → 不一致。修：历史默认聚合形态 + 编辑流摊开 + 窗口化同步 | ✅ 终审通过，待 owner 实弹 + 收编 |
+| **GUI-F22 侧栏折叠按钮置顶** | 折叠按钮（SVG）移到 Session 头之上（owner 实弹；首次未 commit 被覆盖，重建提交） | ✅ 已合并 aee40d6f |
+| **GUI-F23 草稿会话模式（2026-08-18 owner 定案 Hermes 同款）** | 启动/New chat 进草稿态（初始页、左侧栏不新增）；首条消息才 session.create → 会话浮现（动画）；根治"启动进会话却显示初始页" | ✅ 终审通过，待 owner 实弹 + 收编（分支已并入 F22） |
+| **GUI-F24 Request 面板——会话级 Roles/Rules 设定与注入（2026-08-18 owner 设计定案）** | Work with a project 旁加 Request ▾：自由输入 Roles/Rules + 保存（会话级持久化）；injector 尾部动态块注入（复用 project_root 先例）；Office 无关纯引导 | 📋 排队（票 docs/tickets/TICKET-GUI-F24.md） |
 
 **✅ 已完成（近期，新→旧）**
 
