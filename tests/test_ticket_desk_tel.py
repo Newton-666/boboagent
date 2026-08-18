@@ -537,6 +537,10 @@ def test_tel_8_zero_interference():
                 f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
+        # 票 GUI-F16 特批：apps/desktop/dist/vendor/katex/（KaTeX 本地化资源，
+        # 官方压缩产物，与 vendor/marked 等先例同性质，不承载项目逻辑）
+        if ln.startswith("apps/desktop/dist/vendor/katex/"):
+            continue
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
@@ -576,6 +580,9 @@ def test_tel_8_zero_interference():
         if ln.startswith("apps/vscode-extension/"):
             continue
         if ln.endswith("index.html"):
+            continue
+        # 票 GUI-F16 特批：KaTeX vendor 资源（官方压缩产物，不承载项目逻辑）
+        if ln.startswith("apps/desktop/dist/vendor/katex/"):
             continue
         # 票 SAFETY-1 特批：apps/desktop/electron/main.cjs 后端自动重启（退出码 0
         # 也重启），diff 必须含 SAFETY-1 标记
