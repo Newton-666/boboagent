@@ -799,6 +799,8 @@ function connect() {
   debug('Connecting...');
   window.boboAPI.onMessage(function(msg) {
     if (!msg || typeof msg !== 'object') return;
+    // TICKET-GUI-F27：任何事件到达 = 后端有活动 → 活动超时滚动（thinking 长回合不误报）
+    _anyEventSinceSend = true;
     if (msg.method === 'event' && msg.params && msg.params.type) {
       var h = handlers.get(msg.params.type);
       if (h) {
@@ -856,12 +858,21 @@ function sendPrompt(text) {
   debug('Sent ✓');
   // TICKET-DESK-V2D5：新回合开始 —— 重置本轮认知计数（记忆增量基线 + 工具调用数）
   roundMemBaseline = null; roundMemInjected = 0; roundToolCount = 0;
-  // Timeout: if backend doesn't respond within 15s, notify user
+  // TICKET-GUI-F27：活动超时（替代 15s 固定超时）——推理模型 thinking 可长达
+  // 30-90s，15s 固定超时必然误报 "not responding"。收到任何事件（_anyEventSinceSend）
+  // 即重置计时器继续等待；只有 15s 完全无活动（真挂起/断连）才提示。
   if (sendTimeoutId) clearTimeout(sendTimeoutId);
-  sendTimeoutId = setTimeout(function() {
-    addStatus('⚠ Message sent but backend not responding. Check connection.');
-    sendTimeoutId = null;
-  }, 15000);
+  _anyEventSinceSend = false;
+  function _sendTimeoutCheck() {
+    if (_anyEventSinceSend) {
+      _anyEventSinceSend = false;   // 有活动 → 继续等（滚动超时）
+      sendTimeoutId = setTimeout(_sendTimeoutCheck, 15000);
+    } else {
+      addStatus('⚠ 后端长时间无响应（15s 无活动），可能已断连');
+      sendTimeoutId = null;
+    }
+  }
+  sendTimeoutId = setTimeout(_sendTimeoutCheck, 15000);
   // 票 DESK-P1：会话项目根随 prompt.submit 下发（有值才带；null=默认现状，绝对兼容）
   var submitParams = { session_id:currentSessionId, text:text };
   if (currentProjectRoot) submitParams.project_root = currentProjectRoot;
@@ -1061,6 +1072,7 @@ var statusText = document.getElementById('status-text');
 var messaging = false;
 var sessions = [];
 var sendTimeoutId = null;
+var _anyEventSinceSend = false;   // TICKET-GUI-F27：回合内是否收到任何事件（活动超时滚动判定）
 // TICKET-GUI-F3 (F3-2): 会话加载竞态序号 —— 快速连点两会话，以后一次为准（前者作废）
 var sessionLoadSeq = 0;
 
