@@ -725,8 +725,11 @@ class PromptInjector:
                     _req_parts.append("角色：" + str(_req.get("roles")))
                 if _req.get("rules"):
                     _req_parts.append("规则：" + str(_req.get("rules")))
-                _tail_blocks.append(("request",
-                                     "【会话请求】\n" + "\n".join(_req_parts)))
+                _req_text = "【会话请求】\n" + "\n".join(_req_parts)
+                _tail_blocks.append(("request", _req_text))
+                # TICKET-GUI-F28：request 预算记账（prompt.budget 事件可观测注入，
+                # 验证 request 是否真正进入上下文——F24 漏记）
+                budget_stats["request"] = {"chars": len(_req_text)}
         except Exception:
             logger.debug("request 注入失败（静默降级）", exc_info=True)
 
