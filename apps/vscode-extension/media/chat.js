@@ -47,8 +47,19 @@ function setStatus(s, cls) { status.textContent = s; dot.className = 'dot' + (cl
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function hideWelcome() { if (welcome) welcome.style.display = 'none'; }
 function showWelcome() { if (welcome) welcome.style.display = ''; }
+// TICKET-COST-5：动态块渲染剥离（方案 D）——历史显示【COST-2 动态块】治理。
+// 与桌面端 index.html stripDynBlock 同逻辑（injector.py:750-765 格式：
+// 标记\n + 块间\n\n连接 + \n\n + 原文；原文分隔 = 最后一个 \n\n）。
+function stripDynBlock(text) {
+  if (!text || typeof text !== 'string') return text;
+  if (text.indexOf('【COST-2 动态块】') !== 0) return text;
+  const i = text.lastIndexOf('\n\n');
+  if (i < 0) return '';
+  return text.slice(i + 2);
+}
 function addUser(text) {
   hideWelcome();
+  text = stripDynBlock(text);   // TICKET-COST-5：历史（renderHistory）与实时统一剥离，无标记原样
   const d = el('div', 'msg user');
   d.textContent = text;
   chat.appendChild(d);
