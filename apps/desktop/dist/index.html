@@ -192,6 +192,28 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 #project-menu .project-sep { height:1px; background:var(--border); margin:5px 8px; }
 #project-menu #project-clear { color:var(--text-muted); }
 #project-menu #project-clear:hover { color:#f48771; background:var(--bg3); }
+/*
+ * TICKET-GUI-F24（票内样式，独立回溯）：Request 面板——复用 project-pill 视觉体系。
+ * 取色只用既有色板 token（--bg/--bg2/--bg3/--border/--text/--text-muted/--hover）
+ * + 既有强调色 #e8913a（settings-save 同款）/#f48771（project-clear hover 同款），零新增。
+ * 外科式摘除单元：删除本段 + #input-actions 包裹层即完整回滚 F24 输入区样式。
+ */
+#input-actions { display:flex; align-items:flex-start; gap:8px; }
+#input-actions #project-pill-wrap { margin-top:0; } /* 覆盖 DESK-P1 的 margin-top:8px（flex 容器统一顶部间距，避免双重） */
+#request-pill-wrap { position:relative; }
+#request-pill { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:5px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin-top:8px; }
+#request-pill:hover { background:var(--hover); }
+#request-panel { position:absolute; bottom:calc(100% + 6px); left:0; min-width:340px; max-width:440px; background:var(--bg); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.10); padding:10px; z-index:40; }
+#request-panel .req-label { font-size:11px; color:var(--text-muted); margin:6px 0 4px; }
+#request-panel input, #request-panel textarea { width:100%; font-family:inherit; font-size:13px; color:var(--text); background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:6px 8px; box-sizing:border-box; }
+#request-panel textarea { resize:vertical; min-height:44px; }
+#request-panel .req-btns { display:flex; gap:8px; margin-top:10px; }
+#request-panel .req-btns button { font-family:inherit; font-size:12px; font-weight:500; padding:5px 12px; border-radius:6px; border:none; cursor:pointer; }
+#req-save { background:#e8913a; color:#fff; }
+#req-save:hover { filter:brightness(1.08); }
+#req-clear { background:var(--bg3); color:var(--text-muted); }
+#req-clear:hover { color:#f48771; background:var(--bg3); }
+#req-summary { margin-top:8px; font-size:11px; color:var(--text-muted); word-break:break-all; }
 #project-menu .prj-empty { padding:8px 10px; font-size:12px; color:var(--text-muted); }
 #debug { text-align:center; font-size:11px; color:#666; margin-top:8px; font-family:monospace; }
 ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-thumb { background:#444; border-radius:2px; }
@@ -589,13 +611,30 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <button id="send" disabled>↑</button>
       <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
       <!-- 票 DESK-P1：Work with a project pill（输入框下方左侧；下拉：最近项目/Choose a folder/Clear project） -->
-      <div id="project-pill-wrap">
-        <button id="project-pill" title="Work with a project (choose a folder)">Work with a project ▾</button>
-        <div id="project-menu" style="display:none">
-          <div id="project-recents"></div>
-          <button id="project-choose">Choose a folder</button>
-          <div class="project-sep"></div>
-          <button id="project-clear">Clear project</button>
+      <!-- 票 GUI-F24：request-pill 为兄弟按钮（flex 容器 #input-actions 同行；复用 project-pill 视觉体系） -->
+      <div id="input-actions">
+        <div id="project-pill-wrap">
+          <button id="project-pill" title="Work with a project (choose a folder)">Work with a project ▾</button>
+          <div id="project-menu" style="display:none">
+            <div id="project-recents"></div>
+            <button id="project-choose">Choose a folder</button>
+            <div class="project-sep"></div>
+            <button id="project-clear">Clear project</button>
+          </div>
+        </div>
+        <div id="request-pill-wrap">
+          <button id="request-pill" title="Request: set roles &amp; rules for this session">Request ▾</button>
+          <div id="request-panel" style="display:none">
+            <div class="req-label">Roles</div>
+            <input id="req-roles" type="text" placeholder="e.g. code reviewer, line-by-line">
+            <div class="req-label">Rules</div>
+            <textarea id="req-rules" rows="2" placeholder="e.g. always reply in Chinese"></textarea>
+            <div class="req-btns">
+              <button id="req-save">Save</button>
+              <button id="req-clear">Clear</button>
+            </div>
+            <div id="req-summary"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -934,6 +973,68 @@ document.addEventListener('click', function(ev) {
   if (!wrap.contains(ev.target)) prjCloseMenu();
 });
 prjUpdatePill();
+
+// ── 票 GUI-F24：会话级 Request（Roles/Rules 面板，Work with a project 兄弟按钮）──
+// 仅当前会话生效；保存 → session.set_request；清除 → request:null；面板打开从
+// session.resume/activate 带回的 request 字段回显（切会话显示对应会话的已保存值）。
+var currentRequest = null;
+
+function reqTogglePanel() {
+  var p = document.getElementById('request-panel');
+  p.style.display = (p.style.display === 'none') ? 'block' : 'none';
+}
+function reqClosePanel() {
+  document.getElementById('request-panel').style.display = 'none';
+}
+function reqSyncFromSession(req) {
+  currentRequest = req || null;
+  var rolesEl = document.getElementById('req-roles');
+  var rulesEl = document.getElementById('req-rules');
+  var sumEl = document.getElementById('req-summary');
+  if (rolesEl) rolesEl.value = (currentRequest && currentRequest.roles) || '';
+  if (rulesEl) rulesEl.value = (currentRequest && currentRequest.rules) || '';
+  if (sumEl) {
+    if (currentRequest && (currentRequest.roles || currentRequest.rules)) {
+      sumEl.textContent = 'Roles/rules: ' + ((currentRequest.roles || '') + ' / ' + (currentRequest.rules || ''));
+    } else { sumEl.textContent = ''; }
+  }
+}
+function reqSave() {
+  if (!currentSessionId) { showToast('fail', 'Start a session first'); return; }
+  var roles = document.getElementById('req-roles').value.trim();
+  var rules = document.getElementById('req-rules').value.trim();
+  call('session.set_request', { session_id: currentSessionId, request: { roles: roles, rules: rules } }).then(function(res) {
+    // 校验 res.session_id：call 超时兜底 resolve({}) 时不得误报成功（GUI-LESSONS 不静默/不谎报）
+    if (res && !res.error && res.session_id) {
+      currentRequest = { roles: roles, rules: rules };
+      reqSyncFromSession(currentRequest);
+      showToast('success', 'Request saved (this session)');
+      reqClosePanel();
+    } else {
+      showToast('fail', 'Save failed: ' + ((res.error && res.error.message) || 'unknown'));
+    }
+  });
+}
+function reqClear() {
+  if (!currentSessionId) return;
+  call('session.set_request', { session_id: currentSessionId, request: null }).then(function(res) {
+    if (res && !res.error && res.session_id) {
+      currentRequest = null;
+      reqSyncFromSession(null);
+      showToast('success', 'Request cleared');
+      reqClosePanel();
+    } else {
+      showToast('fail', 'Clear failed: ' + ((res.error && res.error.message) || 'unknown'));
+    }
+  });
+}
+document.getElementById('request-pill').addEventListener('click', reqTogglePanel);
+document.getElementById('req-save').addEventListener('click', reqSave);
+document.getElementById('req-clear').addEventListener('click', reqClear);
+document.addEventListener('click', function(ev) {
+  var wrap = document.getElementById('request-pill-wrap');
+  if (wrap && !wrap.contains(ev.target)) reqClosePanel();
+});
 
 // ── UI refs ────────────────────────────────────────────────────────────
 var chatEl = document.getElementById('chat');
@@ -2358,6 +2459,8 @@ async function loadSession(sid) {
     return;
   }
   clearChat();
+  // TICKET-GUI-F24：切会话回显该会话已保存的 request（无则空面板——不串）
+  reqSyncFromSession(result.request);
   // TICKET-GUI-F13：长会话（现存消息 > HIST_WINDOW_THRESHOLD）走窗口化惰性渲染
   //（DOM 节点硬上限 + 占位高度精确）；短会话走 renderFullHistory 全量（零变化）
   var msgsLen = (result.messages || []).length;
@@ -3700,7 +3803,12 @@ document.addEventListener('keydown', function(e) {
     // TICKET-DESK-V2B：明细卡开着时 Esc 优先收起（不触发中断）
     var ctxDet = document.getElementById('ctx-stats-detail');
     if (ctxDet && ctxDet.style.display !== 'none') { ctxDet.style.display = 'none'; }
-    else { stopThinking(); }
+    else {
+      // TICKET-GUI-F24：Request 面板开着时 Esc 收起（优先级：命令面板→明细卡→Request→中断）
+      var reqP = document.getElementById('request-panel');
+      if (reqP && reqP.style.display !== 'none') { reqP.style.display = 'none'; }
+      else { stopThinking(); }
+    }
   }
 });
 

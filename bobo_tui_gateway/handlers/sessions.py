@@ -74,6 +74,11 @@ def _save_session_to_disk(sid, ctx):
             # 票 AUTO-G2：持久化已交接水位线（保留磁盘旧值，防内存未设置时覆盖）
             if session.get("handoff_watermark") is not None:
                 data["handoff_watermark"] = session["handoff_watermark"]
+            # 票 GUI-F24：持久化会话级 request（roles/rules；清除=删字段，防残留旧值）
+            if session.get("request") is not None:
+                data["request"] = session["request"]
+            else:
+                data.pop("request", None)
         else:
             data = {
                 "id": sid,
@@ -84,6 +89,8 @@ def _save_session_to_disk(sid, ctx):
                 "user_named": False,
                 "pinned": False,
                 "handoff_watermark": session.get("handoff_watermark"),
+                # 票 GUI-F24：新建会话磁盘骨架也带 request（None=无角色/规则）
+                "request": session.get("request"),
             }
     except Exception:
         data = {
@@ -95,6 +102,7 @@ def _save_session_to_disk(sid, ctx):
             "user_named": False,
             "pinned": False,
             "handoff_watermark": session.get("handoff_watermark"),
+            "request": session.get("request"),
         }
     mgr._write_atomic(session_path, data)
 
@@ -324,6 +332,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
                 "messages": messages,
                 # TICKET-GUI-F7：内存版也带手动命名标记（引擎忙分支 resume 读内存版）
                 "user_named": bool(session_data.get("user_named", False)),
+                # 票 GUI-F24：内存版也带会话级 request（activate 读取/后续 save 落盘）
+                "request": session_data.get("request"),
             }
     # 引擎忙时禁止磁盘覆盖内存（丢回合风险）；但当前会话指向仍要切到该 sid
     with ctx.sessions_lock:
@@ -347,6 +357,8 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         "engine_busy": engine_busy,
         # TICKET-GUI-F7：手动命名标记（GUI 据此跳过自动命名）
         "user_named": user_named,
+        # 票 GUI-F24：带回会话级 request（roles/rules；无则 None——前端面板回显）
+        "request": (mem_session or session_data).get("request"),
     })
 
 
@@ -458,6 +470,8 @@ def handle_session_activate(params: dict, rid: str, ctx) -> dict:
         "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
         # 票 VSC-2B：切换会话时带回写审批开关状态（扩展侧审批卡渲染跟随该会话）
         "write_approval": bool(session.get("write_approval", False)),
+        # 票 GUI-F24：切换会话时带回会话级 request（roles/rules；无则 None）
+        "request": session.get("request"),
     })
 
 
@@ -477,6 +491,33 @@ def handle_session_set_write_approval(params: dict, rid: str, ctx) -> dict:
             return err(rid, -32000, "会话不存在")
         session["write_approval"] = on
     return ok(rid, {"session_id": sid, "write_approval": on})
+
+
+def handle_session_set_request(params: dict, rid: str, ctx) -> dict:
+    """票 GUI-F24：会话级 Roles/Rules 设定（session.set_request）。
+
+    仅当前会话生效（不触发 office/ticket 执法，纯引导注入）。存
+    session["request"]（随会话存盘，切回/重启保留）；request 为 null 时删除
+    字段（清除，下轮起 bobo 不再按角色行事）。只收 roles/rules 两键，其余
+    忽略（防脏数据）。对齐 session.set_write_approval 先例（锁内写，不显式
+    save——由后续 _save_session_to_disk 全量落盘）。
+    """
+    sid = params.get("session_id", "")
+    request = params.get("request")
+    if request is not None and not isinstance(request, dict):
+        return err(rid, -32000, "request 必须是对象或 null")
+    with ctx.sessions_lock:
+        session = ctx.sessions.get(sid)
+        if not session:
+            return err(rid, -32000, "会话不存在")
+        if request is None:
+            session.pop("request", None)
+        else:
+            session["request"] = {
+                "roles": str(request.get("roles", "") or ""),
+                "rules": str(request.get("rules", "") or ""),
+            }
+    return ok(rid, {"session_id": sid, "request": session.get("request")})
 
 
 # ── 注册 ──
@@ -503,3 +544,5 @@ def register(reg_method, ctx):
     reg_method("session.activate")(lambda params, rid: handle_session_activate(params, rid, ctx))
     # 票 VSC-2B：会话级写审批开关（扩展侧 diff 串行闸门激活用）
     reg_method("session.set_write_approval")(lambda params, rid: handle_session_set_write_approval(params, rid, ctx))
+    # 票 GUI-F24：会话级 Roles/Rules 设定（本票唯一授权的新 RPC）
+    reg_method("session.set_request")(lambda params, rid: handle_session_set_request(params, rid, ctx))
