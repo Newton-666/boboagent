@@ -150,3 +150,29 @@ test('escapeHtml 全字符集', () => {
   assert.strictEqual(escapeHtml(null), '');
   assert.strictEqual(escapeHtml(undefined), '');
 });
+
+// ── 票 VSC-2C：工具图标 emoji→SVG（GUI-LESSONS L4，验收标准 2 抽样 3 个）──
+// emoji 码点判定：杂项符号/装饰符号/杂项符号与象形文字（含铅笔/符号等旧 emoji 图标）
+function hasEmoji(s) {
+  return [...s].some((ch) => {
+    const cp = ch.codePointAt(0);
+    return (cp >= 0x1f000 && cp <= 0x1faff) || (cp >= 0x2700 && cp <= 0x27bf) || cp === 0x2315 || cp === 0x270e;
+  });
+}
+test('VSC-2C 工具图标：edit_file/execute_terminal/web_search 为细线 SVG 非 emoji', () => {
+  const { TOOL_ICONS, toolIcon } = require('../media/parts.js');
+  // 抽样 3 个键（验收标准 2）：写文件、终端、搜索
+  for (const name of ['edit_file', 'execute_terminal', 'web_search']) {
+    const icon = TOOL_ICONS[name];
+    assert.ok(icon && icon.includes('<svg'), `${name} 必须是 SVG`);
+    assert.ok(icon.includes('class="tool-ic"'), `${name} 保留 class="tool-ic"`);
+    assert.ok(icon.includes('stroke="currentColor"'), `${name} 用 currentColor（随主题）`);
+    assert.ok(!hasEmoji(icon), `${name} 不得是 emoji 字符`);
+  }
+  // _default 回退同样为 SVG
+  assert.ok(toolIcon('__no_such_tool__').includes('<svg'), '_default 回退必须是 SVG');
+  // 工具卡 HTML 里直接拼 SVG（不经 escapeHtml 转义成文本）
+  const html = buildToolItem({ type: 'tool.start', name: 'edit_file', arguments: { file_path: 'a.ts' } });
+  assert.ok(html.includes('<svg class="tool-ic"'), 'buildToolItem 输出含原始 SVG（未被转义）');
+  assert.ok(!html.includes('&lt;svg'), 'SVG 不得被 escapeHtml 转义');
+});

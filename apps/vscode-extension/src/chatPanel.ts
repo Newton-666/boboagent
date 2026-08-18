@@ -305,6 +305,7 @@ body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 -apple-s
 .tool { font-size:13px; color:var(--text2); padding:6px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:8px; border:1px solid transparent; transition:background 0.15s, border-color 0.15s; }
 .tool:hover { background:var(--bg3); border-color:var(--border); }
 .tool .tool-icon { font-size:13px; flex-shrink:0; }
+.tool .tool-ic { flex-shrink:0; color:var(--text-muted); display:inline-block; vertical-align:-2px; }
 .tool .tool-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
 .tool .tool-dot.run { background:#e8913a; }
 .tool .tool-dot.done { background:var(--green); }

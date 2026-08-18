@@ -15,15 +15,31 @@ function escapeHtml(s) {
 }
 
 // ── VSC-2B：工具图标（对齐桌面端 toolIcon 语义：映射 + _default 回退，不许空白）──
+// VSC-2C：emoji → 桌面端同款细线 SVG（apps/desktop/dist/index.html:1419+ 逐条复制，
+// class="tool-ic" 保留；桌面端无对应键的同族复用，未知回退 _default）——GUI-LESSONS L4
 var TOOL_ICONS = {
-  edit_file: '\u270E', file_operation: '\u270E', file_writer: '\u270E', refactor: '\u270E',
-  grep_code: '\u2315', search_obsidian: '\u2315', cross_search: '\u2315',
-  read_local_file: '\u{1F4D6}', read_obsidian: '\u{1F4D6}', list_directory: '\u{1F4C1}',
-  execute_terminal: '\u{1F5A5}', code_execution: '\u{1F5A5}', run_tests: '\u2705',
-  web_search: '\u{1F310}', web_fetch: '\u{1F310}',
-  write_obsidian: '\u{1F4D4}', append_obsidian: '\u{1F4D4}',
-  task_ledger: '\u{1F4CB}', save_memory: '\u{1F9E0}', search_memory: '\u{1F9E0}',
-  _default: '\u{1F527}',
+  'edit_file': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'file_operation': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'file_writer': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'refactor': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'grep_code': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.4"/><path d="M8.6 8.6 L11.5 11.5"/></svg>',
+  'search_obsidian': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.4"/><path d="M8.6 8.6 L11.5 11.5"/></svg>',
+  'cross_search': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.4"/><path d="M8.6 8.6 L11.5 11.5"/></svg>',
+  'read_local_file': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75 h3.5 l3.25 3.25 V12.25 H4 Z"/><path d="M7.25 1.75 v3.5 h3.5"/></svg>',
+  'read_obsidian': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75 h3.5 l3.25 3.25 V12.25 H4 Z"/><path d="M7.25 1.75 v3.5 h3.5"/></svg>',
+  'list_directory': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75 h3.5 l3.25 3.25 V12.25 H4 Z"/><path d="M7.25 1.75 v3.5 h3.5"/></svg>',
+  'execute_terminal': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.75" width="10.5" height="8.5" rx="1.5"/><path d="M4.25 5.25 L6 7 L4.25 8.75"/><path d="M7.5 8.75 h2.25"/></svg>',
+  'code_execution': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.75" width="10.5" height="8.5" rx="1.5"/><path d="M4.25 5.25 L6 7 L4.25 8.75"/><path d="M7.5 8.75 h2.25"/></svg>',
+  'run_tests': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.5 L5.5 10.25 L11.25 3.75"/></svg>',
+  'web_search': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M2.75 7 h8.5 M7 2.75 c-1.2 1.35 -1.2 6.15 0 8.5 M7 2.75 c1.2 1.35 1.2 6.15 0 8.5"/></svg>',
+  'web_fetch': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M2.75 7 h8.5 M7 2.75 c-1.2 1.35 -1.2 6.15 0 8.5 M7 2.75 c1.2 1.35 1.2 6.15 0 8.5"/></svg>',
+  'write_obsidian': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'append_obsidian': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.1 11.4 L3.65 8.9 8.9 3.65 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L5.1 10.35 l-2.5.65 z"/><path d="M2.3 12.2 h9.4"/></svg>',
+  'task_ledger': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.25 h8 M3 7 h8 M3 9.75 h8"/></svg>',
+  'save_memory': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'search_memory': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  'load_result': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9" rx="1.75"/><path d="M7 4.9 L9.1 7 L7 9.1 L4.9 7 Z"/></svg>',
+  '_default': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.25"/></svg>'
 };
 function toolIcon(name) { return TOOL_ICONS[name] || TOOL_ICONS['_default']; }
 
@@ -188,7 +204,7 @@ function runningView(running) {
 
 // 双环境（与 md-render.js 同模式）：浏览器挂 window.parts；Node require 导出。
 if (typeof module === 'object' && module.exports) {
-  module.exports = { escapeHtml, buildThinkBlock, buildToolAggCard, buildToolItem, buildApprovalCard, buildDiffBlock, toolSummary, buildLedgerItem, buildSessionItem, APPROVAL_CHOICES, createApprovalGate, runningView };
+  module.exports = { escapeHtml, buildThinkBlock, buildToolAggCard, buildToolItem, buildApprovalCard, buildDiffBlock, toolSummary, buildLedgerItem, buildSessionItem, APPROVAL_CHOICES, createApprovalGate, runningView, TOOL_ICONS, toolIcon };
 } else {
-  window.parts = { escapeHtml, buildThinkBlock, buildToolAggCard, buildToolItem, buildApprovalCard, buildDiffBlock, toolSummary, buildLedgerItem, buildSessionItem, APPROVAL_CHOICES, createApprovalGate, runningView };
+  window.parts = { escapeHtml, buildThinkBlock, buildToolAggCard, buildToolItem, buildApprovalCard, buildDiffBlock, toolSummary, buildLedgerItem, buildSessionItem, APPROVAL_CHOICES, createApprovalGate, runningView, TOOL_ICONS, toolIcon };
 }
