@@ -161,17 +161,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .msg .txt th { background:var(--bg3); color:var(--text2); font-weight:600; }
 .msg .txt tr:nth-child(even) { background:rgba(255,255,255,0.03); }
 #input-box { padding:12px 16px 24px; position:relative; }
-#input { width:100%; padding:14px 48px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
+#input { width:100%; padding:14px 64px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
 #input:focus { border-color:#e8913a; box-shadow:0 0 0 2px rgba(232,145,58,0.12); }
 #input::placeholder { color:var(--text2); }
-#send { position:absolute; right:24px; bottom:32px; width:32px; height:32px; border-radius:8px; background:var(--text); color:var(--bg); border:none; cursor:pointer; font-size:16px; font-weight:600; }
+#send { position:absolute; right:24px; bottom:34px; width:32px; height:32px; border-radius:10px; background:var(--text); color:var(--bg); border:none; cursor:pointer; font-size:16px; font-weight:600; }
 #send:disabled { opacity:0.3; }
 #send.loading { animation: sendPulse 1.2s ease-in-out infinite; }
 @keyframes sendPulse { 0%,100% { opacity:0.3; } 50% { opacity:0.7; } }
 /* TICKET-GUI-F2 (F2-2) + F4-4: 输入框旁 AUTO 模式开关 —— 与 #stop-btn（right:64px）水平错开，
    原 right:64px bottom:37px 与 stop-btn（right:64px bottom:36px）1px 撞车（截图实锤），
    左移至 right:104px 与停止钮同排，右→左：AUTO开关 / 停止钮 / 发送钮 互不重叠 */
-#auto-toggle { position:absolute; right:104px; bottom:37px; padding:3px 10px; border-radius:6px; font-size:10px; letter-spacing:0.5px; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; }
+#auto-toggle { position:absolute; right:104px; bottom:37px; padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
 #auto-toggle:hover { background:var(--hover); }
 #auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 /* === DESK-P1 project pill ===
