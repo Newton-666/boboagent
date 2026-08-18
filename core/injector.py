@@ -713,6 +713,23 @@ class PromptInjector:
         except Exception:
             logger.debug("project_root 注入失败（静默降级）", exc_info=True)
 
+        # ── 票 GUI-F24：会话级 Roles/Rules（request 尾部动态段，project_root 之后）──
+        # 有 request 时注入"会话请求"引导（角色/规则分行）；无 request 时零注入
+        # （一字节都不许多——缓存前缀稳定红线）。engine.request 由 gateway 经
+        # engine_adapter 注入（session["request"]），None=默认现状。
+        try:
+            _req = getattr(engine, "request", None)
+            if _req and (_req.get("roles") or _req.get("rules")):
+                _req_parts = []
+                if _req.get("roles"):
+                    _req_parts.append("角色：" + str(_req.get("roles")))
+                if _req.get("rules"):
+                    _req_parts.append("规则：" + str(_req.get("rules")))
+                _tail_blocks.append(("request",
+                                     "【会话请求】\n" + "\n".join(_req_parts)))
+        except Exception:
+            logger.debug("request 注入失败（静默降级）", exc_info=True)
+
         # 3a) 技能标准收集（票 TICKET-E3b：未命中清单已删，仅命中才注入）
         # 票 COST-2：必须在本段统一注入之前收集；原第 9 段（注入后）append
         # 到 messages 末尾，位置逐轮漂移导致前缀错位（详见第 9 段注释）。
@@ -744,7 +761,8 @@ class PromptInjector:
                        "discipline": 6,
                        "selfmap_arch": 7, "selfmap_boundary": 8, "selfmap_rescue": 9,
                        "skill": 10, "now": 11, "work_anchor": 12,
-                       "project_root": 13}  # 票 DESK-P1：COST-3 之后顺延
+                       "project_root": 13,  # 票 DESK-P1：COST-3 之后顺延
+                       "request": 14}  # 票 GUI-F24：project_root 之后顺延
         if _tail_blocks:
             _ordered = sorted(
                 _tail_blocks, key=lambda b: _TAIL_ORDER.get(b[0], 99))

@@ -327,6 +327,9 @@ def run_engine(
         # ── 票 DESK-P1：会话项目根（None=默认现状；前端选项目后经
         # prompt.submit 落 session["project_root"]）──
         engine.project_root = session.get("project_root")
+        # ── 票 GUI-F24：会话级 Roles/Rules 请求（None=默认现状；前端保存后经
+        # session.set_request 落 session["request"]）──
+        engine.request = session.get("request")
         # 冲突 #2：不要直接引用 session["messages"]——engine 会原地 append，
         # main 线程同时遍历保存（_save_session_to_disk）会导致丢消息。
         engine.history = list(session.get("messages", []))
