@@ -999,6 +999,19 @@ function reqSyncFromSession(req) {
     } else { sumEl.textContent = ''; }
   }
 }
+// TICKET-GUI-F25：错误消息统一提取（Bug A 修复）。后端 err 经 connect()
+// 以 {code,message} 本体 resolve（r(msg.result || msg.error || {}) 取整段
+// msg.error），旧代码查 res.error.message 恒 undefined → 真实错误被吞成
+// 'unknown'。兼容三形态：{code,message} 本体 / {error:{code,message}} 完整
+// 响应 / 字符串；都拿不到才回退 'unknown'（含超时 resolve({}) 情形）。
+function errMsg(res) {
+  if (!res) return 'unknown';
+  if (typeof res === 'string' && res) return res;
+  if (res.error && res.error.message) return res.error.message;
+  if (res.message) return res.message;
+  if (res.error) return res.error;
+  return 'unknown';
+}
 function reqSave() {
   if (!currentSessionId) { showToast('fail', 'Start a session first'); return; }
   var roles = document.getElementById('req-roles').value.trim();
@@ -1011,7 +1024,7 @@ function reqSave() {
       showToast('success', 'Request saved (this session)');
       reqClosePanel();
     } else {
-      showToast('fail', 'Save failed: ' + ((res.error && res.error.message) || 'unknown'));
+      showToast('fail', 'Save failed: ' + errMsg(res));
     }
   });
 }
@@ -1024,7 +1037,7 @@ function reqClear() {
       showToast('success', 'Request cleared');
       reqClosePanel();
     } else {
-      showToast('fail', 'Clear failed: ' + ((res.error && res.error.message) || 'unknown'));
+      showToast('fail', 'Clear failed: ' + errMsg(res));
     }
   });
 }
@@ -2454,7 +2467,10 @@ async function loadSession(sid) {
   setSessionLoading(sid, false);
   if (!result || result.error || !result.session_id) {
     // F3-2: 失败必须显式报错，禁止静默停留旧会话
-    var em = (result && result.error && (result.error.message || result.error)) || 'Backend unresponsive (timeout or disconnected)';
+    // TICKET-GUI-F25：真实后端 err 显示真实消息（errMsg 提取）；超时/断连
+    // （resolve({}) → errMsg 'unknown'）保持原语义提示 unresponsive
+    var em = errMsg(result);
+    if (em === 'unknown') em = 'Backend unresponsive (timeout or disconnected)';
     addStatus('⚠ Failed to load session: ' + em);
     return;
   }
