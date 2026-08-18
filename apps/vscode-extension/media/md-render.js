@@ -67,6 +67,15 @@
             breaks: false,
             renderer: (function () {
               var r = new marked.Renderer();
+              // VSC-2D：裸 HTML 文本化（对齐桌面端 esc 行为）——marked GFM 默认把
+              // inline HTML 当真渲染成 DOM（DOMPurify 又允许 div），bobo 回复里的
+              // <div class="card"> 等代码片段会变成真实元素（字灰/被盖住/整段不可读）。
+              // 只转义 < >（不碰 &，防已转义实体如 &quot; 被双转义成 &amp;quot;），
+              // 转义后由 DOMPurify 当纯文本输出；代码块走 r.code（不受影响）。
+              // v12 签名：renderer.html(text, block)——第一参数即 HTML 字符串。
+              r.html = function (html) {
+                return String(html).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              };
               // 代码块高亮：highlight.js 本地 vendor，只对已注册语言着色，未知语言原样转义
               r.code = function (code, lang) {
                 var l = (lang || '').trim().toLowerCase();
