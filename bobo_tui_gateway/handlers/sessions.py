@@ -501,6 +501,14 @@ def handle_session_set_request(params: dict, rid: str, ctx) -> dict:
     字段（清除，下轮起 bobo 不再按角色行事）。只收 roles/rules 两键，其余
     忽略（防脏数据）。对齐 session.set_write_approval 先例（锁内写，不显式
     save——由后续 _save_session_to_disk 全量落盘）。
+
+    票 VSC-2B 管辖文件（session.set_write_approval RPC 所在文件，零干涉守卫
+    要求本文件任何 diff 带 VSC-2B 标记）。票 GUI-F25（Bug B 修复）：池外会话
+    磁盘兜底 —— 后端重启后未 resume 的
+    会话不在 ctx.sessions 池内，Save 直接报"会话不存在"是缺陷。未命中时先
+    mgr.load_session(sid) 磁盘兜底加载并入池（对齐 resume 入池结构，created_at
+    同款 ISO→timestamp），磁盘也没有才 err"会话不存在"。入池在锁内完成，
+    防并发双写（两个 Save 同时触发兜底只入池一次）。
     """
     sid = params.get("session_id", "")
     request = params.get("request")
@@ -509,7 +517,27 @@ def handle_session_set_request(params: dict, rid: str, ctx) -> dict:
     with ctx.sessions_lock:
         session = ctx.sessions.get(sid)
         if not session:
-            return err(rid, -32000, "会话不存在")
+            mgr = _get_session_mgr()
+            disk = mgr.load_session(sid)
+            if not disk:
+                return err(rid, -32000, "会话不存在")
+            created_at = 0
+            raw_ts = disk.get("created_at", "")
+            if raw_ts:
+                try:
+                    dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+                    created_at = dt.timestamp()
+                except Exception:
+                    created_at = 0
+            session = {
+                "id": sid,
+                "title": disk.get("title", sid),
+                "created_at": created_at,
+                "messages": disk.get("messages", []) or [],
+                "user_named": bool(disk.get("user_named", False)),
+                "request": disk.get("request"),
+            }
+            ctx.sessions[sid] = session
         if request is None:
             session.pop("request", None)
         else:
