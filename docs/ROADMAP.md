@@ -22,6 +22,7 @@
 | 4.5 | GUI-F13 历史像素级复原 + 丝滑窗口化（owner 19:46/19:48 拍板） | 统一渲染管线 + 视觉姿势持久化 + 窗口化（>200 条分流/提前 2 屏/占位高度/rAF）；考古聚合降级为开关；零上下文影响 | ✅ 已合并 5d3beb1（全量 2557 passed；**遗留：长会话滚动帧率 Playwright 实测挂 F13b 补票，owner 实弹验收重点**；回滚标签 rollback/pre-gui-f13） |
 | 5 | DESK-V2D 美学微票串余下三张（owner 12:19/12:24 定调：**incremental——一票只改一处精调，大 CSS 骨架一概不动**；每票独立 rollback 标签，改完一处 owner 实弹看过再开下一票） | ✅ D5 药丸修复+认知条（c6a8d5e）→ ✅ D6 思考框中性化（419e450，去 emoji/去蓝/同族不同阶）→ ✅ D7 药丸墨痕重设计（6d5e550，方案 A 墨痕填充；思考蓝全面退役，色彩收口=纸+墨+橙印；信息蓝 12 处迁墨灰为票面④授权内的范围扩张，owner 实弹裁决中）→ ~~D2 橙色印章语义~~（owner 20:25 实弹否决：bobo 做过什么工具卡已一目了然，橙印是重复表达，价值不足，**封存**）→ D3 排版细节（中西文混排间距/中标点悬挂/引用块 serif：中楷体西 Charter）→ D4 纸感浮起（更浅卡片底+暖调半透明阴影，不碰 noise） | 📋 D3 待开 |
 | ⏸ | COST-1a 工具画像+外置实验 | ✅ 沙盒完成（**结论封存：B 合并 14 档=平衡点，100% 成功率且省 37%**；PARK-2 合并落地 + /tools 指令**暂缓，owner 思考中**） | ⏸ 封存 |
+| **GUI-F16 桌面端 markdown 数学公式渲染（2026-08-18 开票，owner 实弹反馈）** | 桌面端助手正文缺 KaTeX——marked 不解析 LaTeX，`$x^2$` 显示为裸源码（实测原样输出）。修：KaTeX vendor 本地化（dist/vendor/ 对齐 marked/hljs 先例）+ mdReply 管线接公式渲染（先保护代码块再提取 $...$/$$...$$，占位符还原，渲染失败原样容错） | 📋 排队（票 docs/tickets/TICKET-GUI-F16.md） |
 
 **✅ 已完成（近期，新→旧）**
 
@@ -48,6 +49,11 @@
 
 | 票 | 干什么 | 状态 |
 |---|---|---|
+| **VSC-2C 工作目录感知 + 工具图标 SVG + 对比度核验（2026-08-17 owner 实弹热修）** | ①bobo 感知不到 VS Code 打开的文件夹（send 入口 project_root 错误依赖选区）；②工具图标 emoji→桌面端同款细线 SVG（L4）；③对比度核验。终审已过（npm 91/91、pytest 2722/2/1、md5 3/3），owner 实弹通过（部署新代码后 3 问题解决） | ✅ 终审通过，待收编（feat/ticket-vsc-2c 工作区 6M+2新，未 commit） |
+| **VSC-2D 裸 HTML 元素化修复（2026-08-18 开票）** | bobo 回复里未包代码块的裸 HTML 被 marked+DOMPurify 当真渲染成 DOM→标签文本消失/被盖住/字变灰。根因实证 + 修复方案已 node 实测。修：marked 自定义 html renderer 转义为文本 | 📋 排队（票 docs/tickets/TICKET-VSC-2D.md） |
+| **VSC-2E VS Code AUTO 模式支持（2026-08-18 开票，owner 实弹）** | ①写审批闸门 _guarded_execute 不感知 AUTO→AUTO 开了照样弹审批（根因实证 engine.py:204 决策树 vs engine_adapter 闸门）；②VS Code 面板补 AUTO 开关（对齐桌面端 #auto-toggle，走既有 /auto 命令零后端新 RPC） | 📋 排队（票 docs/tickets/TICKET-VSC-2E.md） |
+| **VSC-2F 审批双端弹窗 + 联通开关（2026-08-18 开票，owner 实弹）** | GW-MULTI 事件全广播→approval.request 双端都弹。加设置 bobo.syncWithDesktop（默认 true）：关闭时 VS Code 不弹审批卡（审批由桌面端处理），事件流维持 sid 过滤。语义取舍待 owner 点头（isolated 下桌面端不在线则 120s 超时） | 📋 排队（票 docs/tickets/TICKET-VSC-2F.md，语义待 owner 确认） |
+| **VSC-2G diff 删除栏不显示（2026-08-18 开票，owner 实弹严重问题）** | vscode.diff 左栏（删除侧）显示不好/有时完全不显示，新增侧正常。候选根因 C1 新建无旧内容/C3 diff 编辑器折叠未修改区/C4 快照 uri 编码——L14：先复现取证再修，不许只修一个收工 | 📋 排队（票 docs/tickets/TICKET-VSC-2G.md，需 owner 提供修改场景实弹证据） |
 | EV-2 | 评估跑道升级：轨迹回放 + mock 驱动；复活 BLOCKED 的 A5/A7 题；A1 新规则（≤2 次工具）复测；B2 的 test_archive_file_exists 定位 | 📋 排队 |
 | COST-1 成本与功耗总线（owner 2026-08-14 拍板：**GUI 票收官后全队注意力转向此处**） | 三端成本体检：① API token 成本（TOOL-OPT 已有实证：26.7% 纯重复调用/2.8 亿 tokens/3 天）② 桌面端 Electron 内存/CPU 常驻功耗 ③ TUI 与后端 gateway 常驻开销 ④ 对照标杆：DeepSeek Harness 单任务约 2 毛钱。**速度与成本同一杠杆：前缀缓存命中率（标杆 Pi 99.93%、P99 -42%）+ PTC 减少模型往返 + prompt 瘦身**。产出：测量报告 → 优化票 |
 | COST-1a 外置变量实验沙盒（owner 立规：**核心引擎零改动，实验全外置**） | 独立目录搭模拟栈：可调 N 工具/N skill/N 段注入 prompt，实测缓存命中率与速度提升，找 efficiency×ability 平衡点；报告出来前核心一行不动 | 📋 COST-1 第一子票 |
@@ -136,6 +142,7 @@ VSC-1 VS Code 扩展最小闭环（apps/vscode-extension/：Ask bobo 选中即�
 
 
 待发票仓（docs/tickets/）：VSC-3（桌面端体验完整搬进 VS Code + vsix 私有分发）/ 连接韧性 / DESK-V1 / V2C3 / CLEAN / 桌面端低对比色回同步（VSC-2A 治理后）
+待讨论（2026-08-18 owner，不急）：**diff 显示增强**——VSC-2G 只修"删除栏不显示"，diff 两栏展示的信息密度/美观度提升（如改动统计、上下文行数控制、行内词级高亮）另行讨论后再开票
 
 GW-SOCK 桌面端后端 socket 常驻（固定名 bobo-gw-main.sock + 防双实例拒绝 + 断连后端不死重连恢复；VS Code 扩展自动连接打通；Kimi 终审修专项 ROOT off-by-one 后 6/6）
 
