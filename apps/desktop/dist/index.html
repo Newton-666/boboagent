@@ -1424,6 +1424,22 @@ function mdReply(s) {
 // ── Messages ───────────────────────────────────────────────────────────
 function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
 
+// TICKET-COST-5：动态块渲染剥离（方案 D）——历史/归档显示【COST-2 动态块】治理。
+// 根因：core/injector.py:750-765 动态块附加到本轮 user 消息 content 前部并写回
+// history（前缀稳定化、缓存命中 ~100% 的机制），副作用是历史 user 消息含内部
+// 上下文。方案 D：存储/请求零改动（不破坏前缀稳定），渲染层剥离。格式：
+//   【COST-2 动态块】\n<块1>\n\n<块2>...\n\n<原文>
+// 原文分隔 = 最后一个 \n\n（dyn_text 内部块间也是 \n\n，故用 lastIndexOf
+// 而非第一个分隔——锚点初版写"第一个"有误，L14 读源码修正）。
+// 只剥以标记开头的消息；原文内出现标记字样不误剥（indexOf !== 0 短路）。
+function stripDynBlock(text) {
+  if (!text || typeof text !== 'string') return text;
+  if (text.indexOf('【COST-2 动态块】') !== 0) return text;
+  var i = text.lastIndexOf('\n\n');
+  if (i < 0) return '';
+  return text.slice(i + 2);
+}
+
 function addMsg(role, text, id, append) {
   // TICKET-DESK-V4: 用户指令只读广播给小窗（投影数据源；不改任何渲染行为/状态）
   // V4B: 带会话 sid（小窗按钉选过滤，A 的指令不泄漏到钉 B 的小窗）
@@ -1431,6 +1447,10 @@ function addMsg(role, text, id, append) {
     window.boboAPI.widgetUserMsg(text, currentSessionId);
   }
   welcomeEl.style.display = 'none';
+  // TICKET-COST-5：user 消息渲染层剥离动态块（历史重放 renderFullHistory /
+  // renderArchivedMessages / 窗口化路径 / 实时防御性，一处覆盖；无标记原样返回
+  // 零影响；widgetUserMsg 广播已用原始 text，投影语义不变）
+  if (role === 'user' && text) text = stripDynBlock(text);
   // TICKET-DESK-V2C12 (C1)：仅助手正文气泡（bobo）走完整 markdown 管线；用户消息保持既有简渲染
   var render = (role === 'bobo') ? mdReply : md;
   var existing = document.getElementById(id);

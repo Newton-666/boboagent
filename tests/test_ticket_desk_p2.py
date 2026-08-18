@@ -33,6 +33,7 @@ EXEMPT_PATTERNS = [
     "已用 N/M 步",        # backend 状态文本匹配
     "正在压缩历史上下文",  # backend 状态文本匹配
     "搜索 'x' 跨平台",    # backend 状态文本匹配
+    "【COST-2 动态块】",   # backend COST-2 动态块注入标记（票 COST-5 渲染剥离匹配串）
     "思考过程",           # backend 思考段分隔标记正则
     "思考结束",           # backend 思考段分隔标记正则
     r"加载 \d+ 个工具",  # backend 状态正则
