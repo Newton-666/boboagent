@@ -334,7 +334,7 @@ function extract(fname) {
   }
   throw new Error('unclosed: ' + fname);
 }
-for (const fn of ['esc', 'md', 'buildHandoffCard', 'buildWorktreeCard', 'mdReply']) {
+for (const fn of ['esc', 'md', 'buildHandoffCard', 'buildWorktreeCard', 'extractMath', 'restoreMath', 'mdReply']) {
   win.eval(extract(fn));
 }
 win.eval('var _codeId = 0; var _codeStore = {}; var _mdReplyInit = false;');
