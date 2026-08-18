@@ -198,10 +198,10 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
  * + 既有强调色 #e8913a（settings-save 同款）/#f48771（project-clear hover 同款），零新增。
  * 外科式摘除单元：删除本段 + #input-actions 包裹层即完整回滚 F24 输入区样式。
  */
-#input-actions { display:flex; align-items:flex-start; gap:8px; }
+#input-actions { display:flex; align-items:center; gap:8px; }
 #input-actions #project-pill-wrap { margin-top:0; } /* 覆盖 DESK-P1 的 margin-top:8px（flex 容器统一顶部间距，避免双重） */
 #request-pill-wrap { position:relative; }
-#request-pill { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:5px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin-top:8px; }
+#request-pill { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:5px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
 #request-pill:hover { background:var(--hover); }
 #request-panel { position:absolute; bottom:calc(100% + 6px); left:0; min-width:340px; max-width:440px; background:var(--bg); border:1px solid var(--border); border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.10); padding:10px; z-index:40; }
 #request-panel .req-label { font-size:11px; color:var(--text-muted); margin:6px 0 4px; }
