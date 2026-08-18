@@ -161,17 +161,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .msg .txt th { background:var(--bg3); color:var(--text2); font-weight:600; }
 .msg .txt tr:nth-child(even) { background:rgba(255,255,255,0.03); }
 #input-box { padding:12px 16px 24px; position:relative; }
-#input { width:100%; padding:14px 64px 14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
+#input { width:100%; padding:14px 18px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font:inherit; resize:none; outline:none; }
 #input:focus { border-color:#e8913a; box-shadow:0 0 0 2px rgba(232,145,58,0.12); }
 #input::placeholder { color:var(--text2); }
-#send { position:absolute; right:24px; bottom:34px; width:32px; height:32px; border-radius:10px; background:var(--text); color:var(--bg); border:none; cursor:pointer; font-size:16px; font-weight:600; }
+#send { width:32px; height:32px; border-radius:10px; background:var(--text); color:var(--bg); border:none; cursor:pointer; font-size:16px; font-weight:600; margin-left:auto; flex-shrink:0; }
 #send:disabled { opacity:0.3; }
 #send.loading { animation: sendPulse 1.2s ease-in-out infinite; }
 @keyframes sendPulse { 0%,100% { opacity:0.3; } 50% { opacity:0.7; } }
 /* TICKET-GUI-F2 (F2-2) + F4-4: 输入框旁 AUTO 模式开关 —— 与 #stop-btn（right:64px）水平错开，
    原 right:64px bottom:37px 与 stop-btn（right:64px bottom:36px）1px 撞车（截图实锤），
    左移至 right:104px 与停止钮同排，右→左：AUTO开关 / 停止钮 / 发送钮 互不重叠 */
-#auto-toggle { position:absolute; right:104px; bottom:37px; padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+#auto-toggle { padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
 #auto-toggle:hover { background:var(--hover); }
 #auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 /* === DESK-P1 project pill ===
@@ -198,7 +198,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
  * + 既有强调色 #e8913a（settings-save 同款）/#f48771（project-clear hover 同款），零新增。
  * 外科式摘除单元：删除本段 + #input-actions 包裹层即完整回滚 F24 输入区样式。
  */
-#input-actions { display:flex; align-items:center; gap:8px; }
+#input-actions { display:flex; align-items:center; gap:8px; margin-top:8px; }
 #input-actions #project-pill-wrap { margin-top:0; } /* 覆盖 DESK-P1 的 margin-top:8px（flex 容器统一顶部间距，避免双重） */
 #request-pill-wrap { position:relative; }
 #request-pill { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:5px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
@@ -284,7 +284,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 #status-mode.auto { background:rgba(232,145,58,0.15); color:#e8913a; border:1px solid rgba(232,145,58,0.4); }
 #status-mode.office { background:rgba(232,145,58,0.15); color:#e8913a; border:1px solid rgba(232,145,58,0.4); }
 /* ⑤ 中断按钮 */
-#stop-btn { position:absolute; right:64px; bottom:36px; width:28px; height:28px; border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; border:1px solid rgba(244,135,113,0.4); cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; }
+#stop-btn { width:28px; height:28px; border-radius:50%; background:rgba(244,135,113,0.12); color:#f48771; border:1px solid rgba(244,135,113,0.4); cursor:pointer; font-size:12px; line-height:1; display:none; align-items:center; justify-content:center; flex-shrink:0; }
 #stop-btn:hover { background:rgba(244,135,113,0.22); }
 #stop-btn.show { display:flex; }
 
@@ -607,11 +607,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <!-- TICKET-DESK-V2B3：斜杠命令面板（输入框正上方，左对齐；内容 JS 渲染） -->
       <div id="slash-panel" style="display:none"></div>
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
-      <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
-      <button id="send" disabled>↑</button>
-      <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
-      <!-- 票 DESK-P1：Work with a project pill（输入框下方左侧；下拉：最近项目/Choose a folder/Clear project） -->
-      <!-- 票 GUI-F24：request-pill 为兄弟按钮（flex 容器 #input-actions 同行；复用 project-pill 视觉体系） -->
+      <!-- TICKET-GUI-F26：auto-toggle/send/stop-btn 移入 input-actions 与 project/request 同行（去 absolute，不再重叠输入框） -->
       <div id="input-actions">
         <div id="project-pill-wrap">
           <button id="project-pill" title="Work with a project (choose a folder)">Work with a project ▾</button>
@@ -636,6 +632,9 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
             <div id="req-summary"></div>
           </div>
         </div>
+        <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
+        <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
+        <button id="send" disabled>↑</button>
       </div>
     </div>
   </div>
