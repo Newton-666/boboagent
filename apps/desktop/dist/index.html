@@ -1666,6 +1666,12 @@ function liveDetach(u) {
 // 回收：DOM 移除 + 记实测高度（数据保留，滚回重建）
 function liveRecycle(u) {
   if (!u.el || u.el.parentNode !== chatEl) return;
+  // TICKET-GUI-F29 返工③：回收 think-box 时若正是当前流式思考框，先收束再清引用
+  //（thinkText 已同步进 unit.text；防幽灵节点——后续 message.delta 写进已脱离
+  //  DOM 的节点导致折叠失效/内容丢失，清引用后 delta 走"无打开框"分支重建）
+  if (u.kind === 'think' && u.el === thinkBoxEl) thinkBoxEl = null;
+  // TICKET-GUI-F29 返工④：diff 不参与回收（F6D 语义：写类工具 diff 常驻摊开）
+  if (u.kind === 'diff') return;
   var h = u.el.offsetHeight;
   if (h > 0) u.h = h;
   u.el.parentNode.removeChild(u.el);
@@ -1920,6 +1926,15 @@ var TOOL_FRIENDLY = {
   'cross_search': 'Cross-search', 'cross_project_search': 'Cross-project search',
   'code_to_obsidian': 'Save knowledge', 'review_to_obsidian': 'Save review',
   'save_memory': 'Save memory', 'search_memory': 'Search memory',
+  // TICKET-GUI-F29 返工②：TOOL_FRIENDLY 补全缺的工具（脚本比对一次补全——
+  // task_ledger/load_result/describe_tool/refactor/bobo_schedule/api_call/
+  // spawn_worker/read_worker_result/office_manager/bobo_config/list_folder）
+  'task_ledger': 'Ledger', 'load_result': 'Load result',
+  'describe_tool': 'Describe tool', 'refactor': 'Refactor',
+  'bobo_schedule': 'Schedule', 'api_call': 'API call',
+  'spawn_worker': 'Spawn worker', 'read_worker_result': 'Worker result',
+  'office_manager': 'Office manager', 'bobo_config': 'Config',
+  'list_folder': 'List folder',
   'get_current_time': 'Get time', 'list_directory': 'List directory',
   'notion_search': 'Search Notion', 'notion_create_page': 'Create Notion page',
   'search_emails': 'Search email', 'send_notification': 'Send notification',
@@ -2098,6 +2113,26 @@ function updateToolResult(toolId, data) {
   var div = null;
   for (var i = 0; i < allEntries.length; i++) {
     if (allEntries[i].getAttribute('data-state') === 'running') { div = allEntries[i]; break; }
+  }
+  // TICKET-GUI-F29 返工②：多工具并行 + 窗口化回收后 running 卡可能已被 liveRecycle
+  // 回收（DOM 移除、数据保留）→ 按 liveUnits 数据模型回退：找同名 tool unit 重建 DOM，
+  // 锚点精确到工具卡，diff 挂载不再丢/错位。
+  if (!div) {
+    for (var ui = liveUnits.length - 1; ui >= 0; ui--) {
+      var u = liveUnits[ui];
+      if (u.kind === 'tool' && u.name === toolId && !u.el) {
+        div = liveRebuild(u);
+        if (div) {
+          // liveRebuild 只建不插：按数组顺序插回消息流（与 liveTick 窗口重建同逻辑）
+          var beforeEl = null;
+          for (var j = ui + 1; j < liveUnits.length; j++) {
+            if (liveUnits[j].el && liveUnits[j].el.parentNode === chatEl) { beforeEl = liveUnits[j].el; break; }
+          }
+          chatEl.insertBefore(div, beforeEl || null);
+        }
+        break;
+      }
+    }
   }
   if (!div) return;
   var dot = div.querySelector('.dot');
