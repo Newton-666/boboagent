@@ -1,9 +1,11 @@
 # memory.py — 票 P0-1：Memory 模块 RPC（六类分组 / 删除 / 改 type）
 # 前端 Memory 面板数据源。删除与改 type 均写审计日志（负面通道，P0-5 衔接）。
+# 票 P0-5：删除/改 type 成功后向前端广播 memory.changed（实时刷新面板）。
 
 import logging
+from datetime import datetime
 
-from bobo_tui_gateway.server_utils import err, ok
+from bobo_tui_gateway.server_utils import err, ok, emit
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,12 @@ def handle_memory_delete(params: dict, rid: str, ctx) -> dict:
         r = delete_memory(int(entry_id), reason=params.get("reason", "user_request"))
         if "error" in r:
             return err(rid, -32000, r["error"])
+        # 票 P0-5：前端实时刷新（面板打开时收到 → 重载 → diff 红删）
+        sid = params.get("session_id", "")
+        emit("memory.changed", sid, {
+            "action": "delete", "entry_id": int(entry_id),
+            "changed_at": datetime.now().isoformat(timespec="seconds"),
+        })
         return ok(rid, r)
     except Exception as e:
         logger.warning("memory.delete 失败: %s", e, exc_info=True)
@@ -52,6 +60,12 @@ def handle_memory_update(params: dict, rid: str, ctx) -> dict:
         r = update_memory_type(int(entry_id), str(new_type))
         if "error" in r:
             return err(rid, -32000, r["error"])
+        # 票 P0-5：前端实时刷新（改 type 重新分组 → 面板重载）
+        sid = params.get("session_id", "")
+        emit("memory.changed", sid, {
+            "action": "retype", "entry_id": int(entry_id),
+            "changed_at": datetime.now().isoformat(timespec="seconds"),
+        })
         return ok(rid, r)
     except Exception as e:
         logger.warning("memory.update 失败: %s", e, exc_info=True)
