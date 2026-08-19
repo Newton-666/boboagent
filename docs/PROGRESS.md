@@ -77,3 +77,12 @@
   项目 library/agent开发/——VSC-2B、GUI-F23、GUI-F24 三次同款。已每次手动修正；
   **需治本**：bobo 的 note-taking/收工流程强化"完成报告固定落 library/agent开发/"
   （或收工汇报工具链检查路径）。待开票或纪律注入。
+
+## 六、自进化系统施工前全量备份（2026-08-19）
+
+- **git 快照标签**：`snapshot/pre-self-evolving-20260818`（指向 main 45c3bc85，annotated，
+  已推远端）——覆盖 TUI/桌面端/后端全部代码（单仓库），随时可 checkout 回溯；
+- **tar 物理备份**：`/Users/niuqingwei/Desktop/boboagent_pre-self-evolving_20260818.tar.gz`
+  （257MB，40116 文件，排除 node_modules/.venv/.git/data 大件）——物理保险；
+- 用途：自净化系统是大型系统性变动（P0 记忆重构起），一旦走错，回到此基线；
+- 施工开始后每完成一个阶段（P0 完成/P1 完成）建议再打一个阶段快照。
