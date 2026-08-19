@@ -136,33 +136,36 @@ def _call(messages, label: str, scene: str, variant: str) -> dict:
     }
 
 
-def build_messages(tail: str | None = None, mid: str | None = None) -> list:
-    """构造 messages。tail=尾部动态块（默认注入），mid=中段注入（S4 对照）。"""
+def build_messages(tail: str | None = None, mid: str | None = None,
+                   long: bool = False) -> list:
+    """构造 messages。tail=尾部动态块（默认注入），mid=中段注入（S4 对照），
+    long=True 时历史 x3（模拟长会话，验证前缀占比效应）。"""
     msgs = [{"role": "system", "content": SYSTEM}]
     if mid:
         msgs.append({"role": "system", "content": mid})
-    msgs.extend(HISTORY)
+    history = HISTORY * 3 if long else HISTORY
+    msgs.extend(history)
     if tail:
         msgs.append({"role": "user", "content": tail})
     return msgs
 
 
 def run_scenario(scene: str, variants: list[str], rounds: int,
-                 mode: str = "tail") -> list[dict]:
+                 mode: str = "tail", long: bool = False) -> list[dict]:
     """跑一个场景：每个变体跑 1 轮，共 rounds 个变体（或同变体重复 rounds 轮）。"""
     results = []
     if scene == "S0":
         # 基线：完全相同的请求连发 rounds 轮
-        msgs = build_messages(tail=TAIL_BASE)
+        msgs = build_messages(tail=TAIL_BASE, long=long)
         for i in range(rounds):
             results.append(_call(msgs, f"S0-基线-{i+1}", scene, "tail_base"))
     else:
         for i in range(rounds):
             variant = variants[i % len(variants)]
             if mode == "tail":
-                msgs = build_messages(tail=variant)
+                msgs = build_messages(tail=variant, long=long)
             else:
-                msgs = build_messages(mid=variant)
+                msgs = build_messages(mid=variant, long=long)
             results.append(_call(msgs, f"{scene}-{i+1}", scene, variant[:40]))
     return results
 
@@ -176,6 +179,8 @@ def main():
     ap = argparse.ArgumentParser(description="P0-3 缓存实测（尾部动态块 vs 前缀缓存）")
     ap.add_argument("--rounds", type=int, default=3, help="每场景取样次数（默认 3）")
     ap.add_argument("--skip-s4", action="store_true", help="跳过 S4 中段对照（省 1 次前缀破坏）")
+    ap.add_argument("--long", action="store_true",
+                    help="长前缀模式：历史 x3（~3k tokens），只跑 S0L 基线 + S2L 尾部替换")
     ap.add_argument("--dry", action="store_true", help="只打印请求构造，不发 API（离线自测）")
     args = ap.parse_args()
 
@@ -184,19 +189,28 @@ def main():
         sys.exit(1)
 
     all_results = []
-    scenarios = [
-        ("S0", "基线（不变）", [TAIL_BASE], "tail"),
-        ("S1", "尾部同主题微调", TAIL_S1_VARIANTS, "tail"),
-        ("S2", "尾部完全替换", TAIL_S2_VARIANTS, "tail"),
-        ("S3", "尾部长度变化", TAIL_S3_VARIANTS, "tail"),
-    ]
-    if not args.skip_s4:
-        scenarios.append(("S4", "中段对照（同 S2 变化）", TAIL_S4_VARIANTS, "mid"))
+    if args.long:
+        scenarios = [
+            ("S0L", "长前缀基线（不变）", [TAIL_BASE], "tail"),
+            ("S2L", "长前缀尾部替换", TAIL_S2_VARIANTS, "tail"),
+        ]
+        long = True
+    else:
+        scenarios = [
+            ("S0", "基线（不变）", [TAIL_BASE], "tail"),
+            ("S1", "尾部同主题微调", TAIL_S1_VARIANTS, "tail"),
+            ("S2", "尾部完全替换", TAIL_S2_VARIANTS, "tail"),
+            ("S3", "尾部长度变化", TAIL_S3_VARIANTS, "tail"),
+        ]
+        if not args.skip_s4:
+            scenarios.append(("S4", "中段对照（同 S2 变化）", TAIL_S4_VARIANTS, "mid"))
+        long = False
 
     if args.dry:
         for scene, name, variants, mode in scenarios:
             for i, v in enumerate(variants[:args.rounds]):
-                msgs = build_messages(tail=v) if mode == "tail" else build_messages(mid=v)
+                msgs = build_messages(tail=v, long=long) if mode == "tail" \
+                    else build_messages(mid=v, long=long)
                 print(f"[{scene}] {name} v{i+1}: {len(json.dumps(msgs, ensure_ascii=False))} chars, "
                       f"{len(msgs)} msgs, tail_len={len(v)}")
         print("dry-run OK（未发 API）")
@@ -205,7 +219,7 @@ def main():
     for scene, name, variants, mode in scenarios:
         print(f"── {scene} {name}（{args.rounds} 轮）──", flush=True)
         try:
-            rows = run_scenario(scene, variants, args.rounds, mode)
+            rows = run_scenario(scene, variants, args.rounds, mode, long=long)
         except Exception as e:
             print(f"  {scene} 失败: {e}", file=sys.stderr)
             continue
@@ -216,30 +230,43 @@ def main():
                   f"ratio={r['hit_ratio']*100:6.1f}%  ({r['duration_s']}s)")
         print(f"  → {scene} 中位命中率: {_median(rows, 'hit_ratio')*100:.1f}%", flush=True)
 
-    # 落盘原始值 + 汇总
+    # 落盘：long 模式合并追加（不覆盖主实验数据），按 scene+ts 去重
+    os.makedirs(os.path.dirname(_OUT), exist_ok=True)
+    existing_raw = []
+    if os.path.exists(_OUT):
+        try:
+            with open(_OUT, "r", encoding="utf-8") as f:
+                existing_raw = json.load(f).get("raw", [])
+        except (OSError, json.JSONDecodeError):
+            existing_raw = []
+    seen = {(r.get("scene"), r.get("ts")) for r in all_results}
+    merged = existing_raw + [r for r in all_results
+                             if (r.get("scene"), r.get("ts")) not in
+                             {(e.get("scene"), e.get("ts")) for e in existing_raw}]
+    # 按 scene 重建汇总（含历史数据）
+    scene_order = [s[0] for s in scenarios]
+    summary_scenes = {}
+    for s in sorted({r["scene"] for r in merged}, key=lambda x: scene_order.index(x)
+                    if x in scene_order else 99):
+        rows = [r for r in merged if r["scene"] == s]
+        summary_scenes[s] = {
+            "name": next((n for sc, n, _, _ in scenarios if sc == s), s),
+            "n": len(rows),
+            "median_hit_ratio": _median(rows, "hit_ratio"),
+            "min_hit_ratio": round(min(r["hit_ratio"] for r in rows), 4),
+            "max_hit_ratio": round(max(r["hit_ratio"] for r in rows), 4),
+        }
     summary = {
         "probe": "P0-3 cache probe",
         "model": MODEL,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "rounds_per_scene": args.rounds,
-        "scenarios": {},
+        "scenarios": summary_scenes,
     }
-    for scene, name, variants, mode in scenarios:
-        rows = [r for r in all_results if r["scene"] == scene]
-        if rows:
-            summary["scenarios"][scene] = {
-                "name": name,
-                "mode": mode,
-                "n": len(rows),
-                "median_hit_ratio": _median(rows, "hit_ratio"),
-                "min_hit_ratio": round(min(r["hit_ratio"] for r in rows), 4),
-                "max_hit_ratio": round(max(r["hit_ratio"] for r in rows), 4),
-            }
-    os.makedirs(os.path.dirname(_OUT), exist_ok=True)
     with open(_OUT, "w", encoding="utf-8") as f:
-        json.dump({"summary": summary, "raw": all_results}, f,
+        json.dump({"summary": summary, "raw": merged}, f,
                   ensure_ascii=False, indent=2)
-    print(f"\n已落盘: {_OUT}（{len(all_results)} 条原始值）")
+    print(f"\n已落盘: {_OUT}（本轮 {len(all_results)} 条，累计 {len(merged)} 条原始值）")
 
     print("\n=== 命中率中位数汇总 ===")
     for scene, name, variants, mode in scenarios:
