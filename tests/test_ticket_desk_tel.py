@@ -527,10 +527,13 @@ def test_tel_8_zero_interference():
         # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
         # 会话内全量稳定），diff 必须含 COST-3 标记；DESK-P1 复用 engine.py 追加
         # project_root 属性（engine_adapter 会话创建时落库）
+        # 票 P0-2 特批：engine.py _run_sedimentation 追加信号判定 hook
+        # （通道 A，只记录不动作，写 data/logs/signal_log.jsonl），diff 必须含 P0-2 标记
         if ln in ("core/context.py", "core/engine.py"):
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout), \
-                f"{ln} 缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
+            assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout
+                    or "P0-2" in r7.stdout), \
+                f"{ln} 缺 COST-3/DESK-P1/P0-1/P0-2 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
@@ -659,6 +662,13 @@ def test_tel_8_zero_interference():
         if ln == "scripts/probe_reasoning_echo.py":
             r_re = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "REASONING-ECHO" in r_re.stdout, f"{ln} 缺 REASONING-ECHO 特批标记，未授权改动被拦截"
+            continue
+        # 票 P0-2 特批：tools/signal_logger.py + tools/signal_library_stats.py
+        # （信号日志化双通道，只记录不动作；通道 A LLM 判定写 signal_log.jsonl，
+        # 通道 B 确定性统计 library 主题频率），diff 必须含 P0-2 标记
+        if ln in ("tools/signal_logger.py", "tools/signal_library_stats.py"):
+            r_p02 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "P0-2" in r_p02.stdout, f"{ln} 缺 P0-2 特批标记，未授权改动被拦截"
             continue
         assert False, f"意外改动文件: {ln}"
 
