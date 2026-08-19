@@ -1356,6 +1356,63 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         "error": str(_ln_err),
                         "stage": "ln_hook",
                     })
+                # ── 票 P0-2 通道 A：对话信号判定（只记录不动作）──
+                # guidance 四条（工作流/负强化/隐含偏好/强信号）LLM 判定，
+                # 命中写 data/logs/signal_log.jsonl。零动作铁律：绝不写
+                # knowledge_base / memory / 不注入；失败静默降级不阻塞回合。
+                try:
+                    from tools.signal_logger import judge_and_log_signal
+                    _sig_user_msgs = [
+                        m.get("content", "") for m in _hist_snap[-20:]
+                        if m.get("role") == "user" and m.get("content")
+                    ]
+                    _sig_last = (_sig_user_msgs[-1] if _sig_user_msgs else "")
+                    if _sig_last:
+                        def _sig_llm(prompt, **kw):
+                            # 票 INT-1：判定 LLM 调用同样接受中断
+                            if (self._interrupt_event is not None
+                                    and self._interrupt_event.is_set()):
+                                raise LLMInterrupted(
+                                    "interrupt during signal judge")
+                            kw.setdefault("_interrupt_event",
+                                          self._interrupt_event)
+                            return self.llm_caller(prompt, **kw)
+                        _sig_t0 = time.time()
+                        _sig_result = judge_and_log_signal(
+                            _sig_last, _sid, _sig_llm,
+                            history=_sig_user_msgs,
+                        )
+                        # 复用 ENG-1 先例：判定 LLM 调用补 llm.call 事件
+                        if _sig_result.get("llm_called"):
+                            event_bus.write("llm.call", {
+                                "session_id": _sid,
+                                "msg_count": 2,
+                                "has_tool_calls": False,
+                                "duration_ms": _sig_result.get(
+                                    "duration_ms",
+                                    int((time.time() - _sig_t0) * 1000)),
+                                "stage": "signal_judge",
+                                "prompt_tokens": 0,
+                                "completion_tokens": 0,
+                                "total_tokens": 0,
+                            })
+                        if _sig_result.get("logged"):
+                            logger.info(
+                                "signal logged (sid=%s type=%s reason=%s)",
+                                _sid,
+                                _sig_result["record"].get("signal_type"),
+                                _sig_result.get("reason"))
+                except LLMInterrupted:
+                    # 票 INT-1：中断时放弃判定——用户主动 stop
+                    logger.info("signal judge interrupted (sid=%s)", _sid)
+                except Exception as _sig_err:
+                    logger.warning("signal judge hook failed (sid=%s): %s",
+                                   _sid, _sig_err)
+                    event_bus.write("notes.error", {
+                        "session_id": _sid,
+                        "error": str(_sig_err),
+                        "stage": "signal_judge",
+                    })
         except Exception:
             logger.exception("sedimentation failed (sid=%s)", _sid)
 
