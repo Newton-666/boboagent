@@ -504,27 +504,31 @@ def test_tel_8_zero_interference():
             continue
         # 票 COST-1c ① 特批：core/llm_caller.py 仅加 usage 事件透传，diff 必须含 COST-1c 标记
         if ln == "core/llm_caller.py":
-            r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r4 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "COST-1c" in r4.stdout, f"{ln} 缺 COST-1c 特批标记，未授权改动被拦截"
             continue
         # 票 COST-2 特批：core/injector.py 仅限两处（NOW 锚点后移 + 小时级精度），diff 必须含 COST-2 标记
         # 票 DIAG-1 特批：injector.py 新增调试纪律场景（scene=debug），diff 必须含 DIAG-1 标记
         # 票 DESK-P1 特批：injector.py 新增 project_root 尾部动态段（_TAIL_ORDER 13）
+        # 票 REASONING-ECHO 特批：injector.py build_messages 返回前补
+        #   reasoning_content 回传（只改发送副本，浅拷贝零污染 history），
+        #   diff 必须含 REASONING-ECHO 标记
         if ln == "core/injector.py":
-            r4 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-2" in r4.stdout or "DIAG-1" in r4.stdout or "DESK-P1" in r4.stdout), \
-                f"{ln} 缺 COST-2/DIAG-1/DESK-P1 特批标记，未授权改动被拦截"
+            r4 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert ("COST-2" in r4.stdout or "DIAG-1" in r4.stdout or "DESK-P1" in r4.stdout
+                    or "REASONING-ECHO" in r4.stdout), \
+                f"{ln} 缺 COST-2/DIAG-1/DESK-P1/REASONING-ECHO 特批标记，未授权改动被拦截"
             continue
         # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
         if ln == "core/command_safety.py":
-            r5 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r5 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "SAFETY-1" in r5.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
             continue
         # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
         # 会话内全量稳定），diff 必须含 COST-3 标记；DESK-P1 复用 engine.py 追加
         # project_root 属性（engine_adapter 会话创建时落库）
         if ln in ("core/context.py", "core/engine.py"):
-            r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout), \
                 f"{ln} 缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
             continue
@@ -532,7 +536,7 @@ def test_tel_8_zero_interference():
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
         # 票 VSC-2B：engine_adapter.py 复用（写审批闸门），diff 标记兼容
         if ln in ("core/engine_adapter.py", "core/tool_runner.py"):
-            r8 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r8 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
                 f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
             continue
@@ -542,7 +546,7 @@ def test_tel_8_zero_interference():
         if ln.startswith("apps/desktop/dist/vendor/katex/"):
             continue
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
-            r3 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r3 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
                 f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
             continue
@@ -550,33 +554,33 @@ def test_tel_8_zero_interference():
         # （GW-SOCK：socket 双实例防护；GW-MULTI：多客户端化，每连接一线程 +
         # 全客户端断开才计空闲），diff 必须含对应票据标记
         if ln == "bobo_tui_gateway/entry.py":
-            r_gw = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_gw = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("TICKET-GW-SOCK" in r_gw.stdout or "TICKET-GW-MULTI" in r_gw.stdout), \
                 f"{ln} 缺 TICKET-GW-SOCK/TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-GW-MULTI 特批：bobo_tui_gateway/transport.py（多订阅者事件
         # 广播注册表），diff 必须含 TICKET-GW-MULTI 标记
         if ln == "bobo_tui_gateway/transport.py":
-            r_gwm = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_gwm = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "TICKET-GW-MULTI" in r_gwm.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         # 票 VSC-2B 特批：bobo_tui_gateway/handlers/sessions.py（session.set_write_approval
         # RPC + 会话级写审批开关），diff 必须含 VSC-2B 标记
         if ln == "bobo_tui_gateway/handlers/sessions.py":
-            r_v2b = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_v2b = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "VSC-2B" in r_v2b.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory 面板
         # RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
         if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
-            r_p01 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_p01 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
         # diff 必须含 DESK-P2 标记，否则未授权改动被拦截
         if ln.endswith("widget.html"):
-            r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r9 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P2" in r9.stdout, f"{ln} 缺 DESK-P2 特批标记，未授权改动被拦截"
             continue
         assert "widget.html" not in ln, f"零干涉铁律违反：小组件被改动 {ln}"
@@ -593,36 +597,36 @@ def test_tel_8_zero_interference():
         # 票 SAFETY-1 特批：apps/desktop/electron/main.cjs 后端自动重启（退出码 0
         # 也重启），diff 必须含 SAFETY-1 标记
         if ln.endswith("main.cjs"):
-            r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("SAFETY-1" in r7.stdout or "TICKET-GW-SOCK" in r7.stdout), \
                 f"{ln} 缺 SAFETY-1/TICKET-GW-SOCK 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：apps/desktop/electron/preload.cjs 新增 chooseFolder 别名
         #（桌面端主进程传真实项目根），diff 必须含 DESK-P1 标记
         if ln.endswith("preload.cjs"):
-            r9 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r9 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r9.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-GW-SOCK / TICKET-GW-MULTI 特批：bobo_tui_gateway/entry.py，
         # diff 必须含对应票据标记
         if ln == "bobo_tui_gateway/entry.py":
-            r_gw2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_gw2 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("TICKET-GW-SOCK" in r_gw2.stdout or "TICKET-GW-MULTI" in r_gw2.stdout), \
                 f"{ln} 缺 TICKET-GW-SOCK/TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-GW-MULTI 特批：bobo_tui_gateway/transport.py（多订阅者广播）
         if ln == "bobo_tui_gateway/transport.py":
-            r_gwm2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_gwm2 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "TICKET-GW-MULTI" in r_gwm2.stdout, f"{ln} 缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"
             continue
         # 票 VSC-2B 特批：bobo_tui_gateway/handlers/sessions.py（会话级写审批）
         if ln == "bobo_tui_gateway/handlers/sessions.py":
-            r_v2b2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_v2b2 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "VSC-2B" in r_v2b2.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory RPC）
         if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
-            r_p01b = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_p01b = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01b.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("docs/"):
@@ -632,13 +636,13 @@ def test_tel_8_zero_interference():
         # 票 DESK-P1 特批：tools/execute_terminal.py 会话 project_root 非空时
         # 注入 cwd（终端命令落项目目录），diff 必须含 DESK-P1 标记
         if ln == "tools/execute_terminal.py":
-            r10 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r10 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r10.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
             continue
         # 票 P0-1 特批：tools/v5_memory.py + tools/memory_migrate.py（记忆六类
         # 枚举 + 656 条迁移脚本），diff 必须含 P0-1 标记
         if ln in ("tools/v5_memory.py", "tools/memory_migrate.py"):
-            r_p01t = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r_p01t = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01t.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("tests/") or ln.startswith("apps/desktop/electron/test/"):
@@ -646,8 +650,15 @@ def test_tel_8_zero_interference():
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
         # diff 必须含 DESK-P2 标记，否则未授权改动被拦截
         if ln.endswith("widget.html"):
-            r11 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            r11 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P2" in r11.stdout, f"{ln} 缺 DESK-P2 特批标记，未授权改动被拦截"
+            continue
+        # 票 REASONING-ECHO 特批：scripts/probe_reasoning_echo.py（实弹取证脚本，
+        # 验证 DeepSeek 接受 reasoning_content 空串回传，压缩路径定案依据；
+        # 长期保留供压缩行为变更时复跑），diff 必须含 REASONING-ECHO 标记
+        if ln == "scripts/probe_reasoning_echo.py":
+            r_re = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "REASONING-ECHO" in r_re.stdout, f"{ln} 缺 REASONING-ECHO 特批标记，未授权改动被拦截"
             continue
         assert False, f"意外改动文件: {ln}"
 
