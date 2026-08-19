@@ -294,23 +294,33 @@ def test_v2a_5_three_state_static():
     assert "v2a-empty" in _extract_func(src, "renderSessions")
 
 
-# ── 铁律 0 闸：既有 CSS 零改动（V2A 之前的 style 段与 HEAD 逐字节一致）──
+# ── 铁律 0 闸：既有 CSS 零改动（V2A 之前的 style 段与基线逐字节一致）──
 def test_v2a_css_zero_change_on_existing():
     """铁律 0 闸（动态基线，P0-1 起）：style 块中当前票标记之前的所有规则，
-    必须与票起点 HEAD 逐字节一致。只允许在票段内新增，禁止改动任何既有属性值。
-    基线=HEAD（票起点 commit），不再用 rollback/pre-desk-v2a——后续票
-    （P2/V2B/C/D/F26/F27/TEL）已在 style 中间插段/改既有值，旧基线必然误报
-    （main 上已失败，P0-1 修复时收敛为动态基线）。"""
-    head = subprocess.run(["git", "show", "HEAD:apps/desktop/dist/index.html"],
+    必须与票起点基线逐字节一致。只允许在票段内新增，禁止改动任何既有属性值。
+
+    基线选择（Kimi 终审收编修正 2026-08-19）：
+    - 施工分支上：HEAD 尚不含本票段，基线=HEAD 成立；
+    - 合并到 main 后：HEAD 已含本票段，基线=HEAD 会自咬（new_pre 截在
+      本票段前 vs HEAD 全文含本票段）→ 基线改为 rollback/pre-p0-1
+      （票起点 ae278068，P0-1 合并前），它对"本票段之前的既有 CSS"的
+      约束与施工分支完全等价。"""
+    base_ref = "HEAD"
+    head = subprocess.run(["git", "show", f"{base_ref}:apps/desktop/dist/index.html"],
                           capture_output=True, text=True, cwd=str(ROOT))
-    assert head.returncode == 0, "git show HEAD 失败"
+    if head.returncode != 0 or "票 P0-1：Memory 面板" in head.stdout:
+        # HEAD 已含 P0-1 段（已收编到 main）→ 基线回退到票起点标签
+        base_ref = "rollback/pre-p0-1"
+        head = subprocess.run(["git", "show", f"{base_ref}:apps/desktop/dist/index.html"],
+                              capture_output=True, text=True, cwd=str(ROOT))
+        assert head.returncode == 0, f"git show {base_ref} 失败"
     old_style = re.search(r"<style[^>]*>(.*?)</style>", head.stdout, re.S).group(1)
     new_style = re.search(r"<style[^>]*>(.*?)</style>", _gui(), re.S).group(1)
-    # 新 style 中 P0-1 段起点前 = 票起点 HEAD 全文（P0-1 只允许追加在 style 末尾）
+    # 新 style 中 P0-1 段起点前 = 基线全文（P0-1 只允许追加在 style 末尾/段内）
     p01_pos = new_style.find("/* 票 P0-1：Memory 面板")
     assert p01_pos > 0, "P0-1 注释块应在 style 块内"
     new_pre = new_style[:p01_pos]
-    assert new_pre == old_style, "P0-1 之前的所有既有 CSS 必须与票起点 HEAD 逐字节一致"
+    assert new_pre == old_style, f"P0-1 之前的所有既有 CSS 必须与基线（{base_ref}）逐字节一致"
 
 
 # ── md5 闸门：真实库三文件零变动 ───────────────────────────────────────
