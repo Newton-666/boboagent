@@ -1604,7 +1604,253 @@ function mdReply(s) {
 }
 
 // ── Messages ───────────────────────────────────────────────────────────
-function clearChat() { chatEl.innerHTML = ''; welcomeEl.style.display = 'flex'; }
+function clearChat() {
+  chatEl.innerHTML = '';
+  // TICKET-GUI-F29：清空窗口化数据模型与占位状态（切会话/新建会话必须同步重置，
+  // 否则残留 units 会在新会话滚动时幽灵重建）
+  liveUnits = []; liveUidSeq = 0;
+  liveTopPh = liveBotPh = null;
+  liveWindowTop = -1; liveWindowBot = -1;
+  welcomeEl.style.display = 'flex';
+}
+
+// ══ TICKET-GUI-F29：实时消息窗口化（增量虚拟滚动）══
+// 目标：长会话 DOM 无限累积 → renderer 内存 ~3.5GB → SIGKILL(137)。
+// 机制：liveUnits 数据模型（完整消息流，不丢历史）+ 窗口化渲染（可视区±2屏
+// 真实 DOM，窗口外回收为占位 div，滚回按数据重建）。与 F13 历史窗口化
+// （renderHistWindow 整容器重建）互补：本机制对实时流做增量管理（不整重建，
+// 保住流式增量更新/工具聚合/思考折叠/心跳原地更新等交互）。
+// 约束（Owner 定调）：不出错 > 极致性能；向上滚动见全部历史；滚动条不跳变。
+var liveUnits = [];          // 实时消息数据模型（chatEl 直接子节点流映射）
+var liveUidSeq = 0;
+var LIVE_PRELOAD = 2;        // 可视区上下各 2 屏提前渲染（对齐 HIST_PRELOAD_SCREENS）
+var LIVE_MAX_NODES = 500;    // chatEl 直接子节点硬上限（含占位，Owner 定调兜底）
+var liveTopPh = null;        // 顶部占位（窗口上方回收区总高，滚动条比例维持）
+var liveBotPh = null;        // 底部占位（窗口下方回收区总高）
+var liveWindowTop = -1;      // 上次窗口上界（脏检查：滚动无跨边界不操作，丝滑）
+var liveWindowBot = -1;
+var liveTickRAF = null;
+
+// 估算高度（未渲染/无缓存占位用；实测后以实测为准，滚动条不跳）——与 F13 同款口径
+function liveEstimateH(u) {
+  var k = u.kind;
+  if (k === 'msg') return 26 + Math.ceil((u.text || '').length / 60) * 22;
+  if (k === 'think') return 30 + (u.text ? Math.min(120, Math.ceil(u.text.length / 40) * 16) : 0);
+  if (k === 'tool') return 34 + (u.inlineDiff ? Math.min(200, Math.ceil((u.inlineDiff || '').length / 50) * 16) : 0);
+  if (k === 'diff') return 30 + Math.ceil((u.text || '').length / 50) * 16;
+  if (k === 'status') return 24;
+  if (k === 'agg') return 40;
+  return 30;
+}
+function liveH(u) {
+  if (u.el && u.el.parentNode === chatEl && u.el.offsetHeight > 0) return u.el.offsetHeight;
+  return u.h || liveEstimateH(u);
+}
+// 挂载：unit 数据 + el 节点 → 数据模型 + DOM 插入（默认 botPh 前=尾部；beforeEl 指定 DOM
+// 插入点；afterUnit 指定数组插入位置（diff 块等需按 DOM 顺序插数组的场景））
+function liveMount(u, el, beforeEl, afterUnit) {
+  u.uid = ++liveUidSeq;
+  u.el = el;
+  if (el) el._liveUnit = u;
+  var idx = afterUnit ? liveUnits.indexOf(afterUnit) : -1;
+  if (idx >= 0) liveUnits.splice(idx + 1, 0, u); else liveUnits.push(u);
+  if (liveBotPh && !beforeEl) beforeEl = liveBotPh;
+  chatEl.insertBefore(el, beforeEl || null);
+  liveScheduleTick();
+}
+// 从数据模型移除（工具聚合被吞等：内容并入聚合卡数据，不再直接管理）
+function liveDetach(u) {
+  var i = liveUnits.indexOf(u);
+  if (i >= 0) liveUnits.splice(i, 1);
+}
+// 回收：DOM 移除 + 记实测高度（数据保留，滚回重建）
+function liveRecycle(u) {
+  if (!u.el || u.el.parentNode !== chatEl) return;
+  var h = u.el.offsetHeight;
+  if (h > 0) u.h = h;
+  u.el.parentNode.removeChild(u.el);
+  u.el = null;
+}
+// 从数据重建 DOM（复用既有渲染链；被回收的都是"已完成且滚出窗口"的旧消息，
+// 历史构造形态与 F13 平铺一致，零新增视觉）
+function liveRebuild(u) {
+  if (u.el) return u.el;
+  var el = null;
+  if (u.kind === 'msg') {
+    el = document.createElement('div');
+    el.id = u.mid || ('live-' + u.uid);
+    el.className = 'msg ' + u.role;
+    el.innerHTML = '<div class="who">' + (u.role === 'user' ? 'You' : 'Bobo') + '</div><div class="txt">' +
+      ((u.role === 'bobo') ? mdReply(u.text || '') : md(u.text || '')) + '</div>';
+  } else if (u.kind === 'think') {
+    el = buildHistThinkBox(u.text || '');
+  } else if (u.kind === 'tool') {
+    el = buildHistToolCard(u.name || 'Tool', u.summary || String(u.text || '').substring(0, 120));
+  } else if (u.kind === 'diff') {
+    var blk = document.createElement('div');
+    blk.innerHTML = diffBlock(u.text || '');
+    el = blk.firstChild;
+  } else if (u.kind === 'status') {
+    el = document.createElement('div');
+    el.className = 'status';
+    el.textContent = u.text || '';
+  } else if (u.kind === 'agg') {
+    // 聚合卡重建：复用 F13 renderHistAggCard 同款构造（不改其 append，内联返回 el）
+    var agg = document.createElement('div'); agg.className = 'tool-agg hist-agg';
+    var headLabel = ((u.thinks || []).length ? 'Think + ' : '') + (u.tools || []).length + ' tools';
+    agg.innerHTML = '<span class="tool-agg-head">' + headLabel + ' <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
+    agg.onclick = function(e) {
+      if (e.target.closest('.tool') || e.target.closest('.think-box') || e.target.closest('.diff-block')) return;
+      var body = this.querySelector('.tool-agg-body');
+      if (!body) return;
+      var open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      var arrowEl = this.querySelector('.tool-agg-arrow');
+      if (arrowEl) arrowEl.textContent = open ? '▸' : '▾';
+    };
+    var aggBody = agg.querySelector('.tool-agg-body');
+    // F29：被吞思考框全部保留（thinks 数组逐个渲染，与实时 DOM 多个折叠框一致，不丢）
+    (u.thinks || []).forEach(function(txt) {
+      if (txt) aggBody.appendChild(buildHistThinkBox(txt));
+    });
+    (u.tools || []).forEach(function(tm) {
+      var inlineDiff = tm.inlineDiff || '';
+      aggBody.appendChild(buildHistToolCard(tm.name || 'tool', inlineDiff ? toolSummary({}, inlineDiff) : String(tm.content || '').substring(0, 120)));
+      if (inlineDiff) {
+        var b2 = document.createElement('div');
+        b2.innerHTML = diffBlock(inlineDiff);
+        aggBody.appendChild(b2.firstChild);
+      }
+    });
+    el = agg;
+  }
+  if (el) el._liveUnit = u;
+  u.el = el;
+  return el;
+}
+// 按消息 id 找 unit（增量更新/删除路径）
+function liveFindByMid(id) {
+  if (!id) return null;
+  for (var i = 0; i < liveUnits.length; i++) {
+    if (liveUnits[i].mid === id) return liveUnits[i];
+  }
+  return null;
+}
+// TICKET-GUI-F29：工具聚合吞并的数据同步 —— 工具卡 unit 并入聚合卡 tools（引用保留，
+// updateToolResult 后续更新同步）；unit 从 liveUnits 移除（内容已入聚合卡，不再直接管理）。
+function liveAggSwallow(aggUnit, d) {
+  if (!aggUnit || !d || !d._liveUnit) return;
+  aggUnit.tools.push(d._liveUnit);
+  liveDetach(d._liveUnit);
+}
+// 被吞思考框数据并入聚合卡 thinks（重建聚合卡时全部渲染，不丢）
+function liveAggSwallowThink(aggUnit, tb) {
+  if (!aggUnit || !tb || !tb._liveUnit) return;
+  aggUnit.thinks.push(tb._liveUnit.text || '');
+  liveDetach(tb._liveUnit);
+}
+// 窗口化 tick：回收窗口外 / 重建窗口内 / 占位高度维护。脏检查：窗口区间无变化不操作。
+function liveWindowTick() {
+  if (!liveUnits.length) { liveTopPh = liveBotPh = null; return; }
+  var viewH = chatEl.clientHeight || 600;
+  var top = chatEl.scrollTop;
+  var preload = LIVE_PRELOAD * viewH;
+  var winTop = Math.max(0, top - preload);
+  var winBottom = top + viewH + preload;
+  // 累积高度（实测优先，缓存次之，估算兜底）
+  var ys = [0];
+  for (var i = 0; i < liveUnits.length; i++) ys.push(ys[i] + liveH(liveUnits[i]));
+  var total = ys[ys.length - 1];
+  function lowerBound(arr, val) {
+    var lo = 0, hi = arr.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (arr[mid] < val) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+  var startIdx = lowerBound(ys, winTop) - 1; if (startIdx < 0) startIdx = 0;
+  var endIdx = lowerBound(ys, winBottom); if (endIdx >= liveUnits.length) endIdx = liveUnits.length - 1;
+  if (endIdx < startIdx) { endIdx = startIdx; }
+  if (startIdx === liveWindowTop && endIdx === liveWindowBot) return;  // 滚动无跨边界 → 零操作
+  liveWindowTop = startIdx; liveWindowBot = endIdx;
+  // 回收窗口外（上下两侧；窗口内恒不回收，保住流式/聚合交互）
+  for (var i = 0; i < startIdx; i++) liveRecycle(liveUnits[i]);
+  for (var i = endIdx + 1; i < liveUnits.length; i++) liveRecycle(liveUnits[i]);
+  // 重建窗口内缺失（逆序插入，位置正确）
+  for (var i = endIdx; i >= startIdx; i--) {
+    var u = liveUnits[i];
+    if (!u.el || u.el.parentNode !== chatEl) {
+      var el = liveRebuild(u);
+      var beforeEl = null;
+      for (var j = i + 1; j <= endIdx; j++) {
+        if (liveUnits[j].el && liveUnits[j].el.parentNode === chatEl) { beforeEl = liveUnits[j].el; break; }
+      }
+      if (!beforeEl && liveBotPh && liveBotPh.parentNode === chatEl) beforeEl = liveBotPh;
+      chatEl.insertBefore(el, beforeEl || null);
+    }
+  }
+  // 顶部/底部占位（滚动条比例 = 占位 + 真实节点，不跳变）
+  var topH = ys[startIdx];
+  var botH = total - ys[endIdx + 1];
+  if (topH > 0) {
+    if (!liveTopPh || liveTopPh.parentNode !== chatEl) {
+      liveTopPh = document.createElement('div'); liveTopPh.className = 'hist-ph';
+      chatEl.insertBefore(liveTopPh, chatEl.firstChild);
+    }
+    liveTopPh.style.height = topH + 'px';
+  } else if (liveTopPh && liveTopPh.parentNode === chatEl) {
+    liveTopPh.parentNode.removeChild(liveTopPh); liveTopPh = null;
+  }
+  if (botH > 0) {
+    if (!liveBotPh || liveBotPh.parentNode !== chatEl) {
+      liveBotPh = document.createElement('div'); liveBotPh.className = 'hist-ph';
+      chatEl.appendChild(liveBotPh);
+    }
+    liveBotPh.style.height = botH + 'px';
+  } else if (liveBotPh && liveBotPh.parentNode === chatEl) {
+    liveBotPh.parentNode.removeChild(liveBotPh); liveBotPh = null;
+  }
+  // DOM 硬上限兜底：即使窗口计算异常，强制回收最旧窗口外节点到 ≤ LIVE_MAX_NODES
+  var guard = 0;
+  while (chatEl.childNodes.length > LIVE_MAX_NODES && guard < 200) {
+    guard++;
+    var recycled = false;
+    for (var gi = 0; gi < liveUnits.length; gi++) {
+      var gu = liveUnits[gi];
+      if (gu.el && gu.el.parentNode === chatEl && (gi < startIdx || gi > endIdx)) {
+        liveRecycle(gu); recycled = true; break;
+      }
+    }
+    if (!recycled) break;
+  }
+}
+function liveScheduleTick() {
+  if (liveTickRAF) return;
+  liveTickRAF = requestAnimationFrame(function() {
+    liveTickRAF = null;
+    liveWindowTick();
+  });
+}
+// 删除 DOM 节点 + 同步数据模型（message.complete 清理 think-box / streaming 占位）
+function liveRemoveEl(el) {
+  if (!el) return;
+  if (el._liveUnit) liveDetach(el._liveUnit);
+  if (el.parentNode) el.parentNode.removeChild(el);
+}
+// TICKET-GUI-F29：滚动到底跟随 —— 只在"贴近底部"时自动滚底。
+// 判定双保险：①数据模型：窗口已覆盖消息流末尾（用户在底部，精确，不受占位
+// 高度估算误差影响）；②scrollTop 贴近底（初始窗口未建立/窗口未覆盖末尾时兜底，
+// ±80px 阈值）。用户上滚看历史时收到流式新消息不被拉下去（Owner 风险自查：
+// 不打断用户滚动；默认未滚动场景 near=true，行为与既有无条件滚底零回归）
+function liveScrollBottom() {
+  var nearModel = liveWindowBot >= liveUnits.length - 3;
+  var near = nearModel || (chatEl.scrollTop + chatEl.clientHeight >= chatEl.scrollHeight - 80);
+  if (near) chatEl.scrollTop = chatEl.scrollHeight;
+}
+// TICKET-GUI-F29：实时窗口化滚动监听（rAF 节流；滚动本身零 DOM 操作，
+// 跨窗口边界才调整节点——滚动丝滑，不触发全量重排）
+chatEl.addEventListener('scroll', function() { liveScheduleTick(); });
 
 // TICKET-COST-5：动态块渲染剥离（方案 D）——历史/归档显示【COST-2 动态块】治理。
 // 根因：core/injector.py:750-765 动态块附加到本轮 user 消息 content 前部并写回
@@ -1639,11 +1885,18 @@ function addMsg(role, text, id, append) {
   if (existing) {
     var t = existing.querySelector('.txt');
     t.innerHTML = append ? t.innerHTML + render(text) : render(text);
+    // TICKET-GUI-F29：增量更新同步数据模型（被窗口化回收后滚回重建显示最新全文）
+    var u = liveFindByMid(id);
+    if (u) u.text = append ? (u.text || '') + text : text;
+    liveScheduleTick();  // 高度可能变化（占位/滚动条跟随修正）
     return;
   }
   var div = document.createElement('div'); div.id = id; div.className = 'msg ' + role;
   div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + render(text) + '</div>';
-  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+  // TICKET-GUI-F29：实时消息统一走 liveMount（数据模型 + 窗口化挂载；botPh 存在时
+  // 插到其前，无占位时行为 = 原 appendChild，零回归）
+  liveMount({ kind: 'msg', role: role, text: text, mid: id }, div);
+  liveScrollBottom();
   return div;
 }
 var toolResults = {};
@@ -1732,16 +1985,22 @@ function addTool(name, context, toolId) {
   if (roundAggregated && roundAggregateHead && roundToolEls.length > 0) {
     // 已有聚合卡：把当前最新一步收进聚合卡（吞并）
     var aggBody2 = roundAggregateHead.parentNode.querySelector('.tool-agg-body');
+    // TICKET-GUI-F29：聚合卡数据模型（被吞 unit 数据并入，重建聚合卡用）
+    var aggUnit2 = roundAggregateHead.parentNode._liveUnit || null;
     roundToolEls.forEach(function(d) {
       // TICKET-GUI-F6D：写/改类工具（编辑流）不入聚合卡 —— 思考与编辑卡+diff 全程摊开
       if (isWriteToolEl(d)) return;
       var tb2 = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
-      if (tb2) aggBody2.appendChild(tb2);
+      if (tb2) { aggBody2.appendChild(tb2); liveAggSwallowThink(aggUnit2, tb2); }
       aggBody2.appendChild(d);
+      liveAggSwallow(aggUnit2, d);
     });
     roundToolEls = [];
   }
-  chatEl.appendChild(div);
+  // TICKET-GUI-F29：工具卡挂 liveUnit 并走 liveMount（窗口化；botPh 前插入=原 appendChild）
+  var toolUnit = { kind: 'tool', name: name, text: context || '', summary: '' };
+  div._liveUnit = toolUnit;
+  liveMount(toolUnit, div);
   if (!roundAggregated && roundTotalCount >= 2) {
     // 第 2 步起建聚合卡：把前一步收进去，最新一步保持摊开。
     // F6D：若全部前步都是写类工具（编辑流），无可吞元素则不建空聚合卡——编辑流全程摊开
@@ -1749,6 +2008,9 @@ function addTool(name, context, toolId) {
     if (hasSwallowable) {
       roundAggregated = true;
       var agg = document.createElement('div'); agg.className = 'tool-agg';
+      // TICKET-GUI-F29：聚合卡数据模型（thinks/tools 保留全部被吞内容，重建不丢）
+      var aggUnit = { kind: 'agg', thinks: [], tools: [] };
+      agg._liveUnit = aggUnit;
       agg.innerHTML = '<span class="tool-agg-head">Executed ' + roundTotalCount + ' steps <span class="tool-agg-arrow">▸</span></span><div class="tool-agg-body" style="display:none"></div>';
       agg.onclick = function(e) {
         if (e.target.closest('.tool')) return; // 点工具卡本身不折叠（卡内自有展开逻辑）
@@ -1763,19 +2025,21 @@ function addTool(name, context, toolId) {
       roundToolEls.forEach(function(d) {
         if (isWriteToolEl(d)) return;  // F6D：写类工具卡与配对思考都留在消息流
         var tb = swallowThinkBox(d);  // F6C：配对思考框一并移入（思考在前，保持成对）
-        if (tb) aggBody.appendChild(tb);
+        if (tb) { aggBody.appendChild(tb); liveAggSwallowThink(aggUnit, tb); }
         aggBody.appendChild(d);
+        liveAggSwallow(aggUnit, d);
       });
       roundToolEls = [];
       roundAggregateHead = agg.querySelector('.tool-agg-head');
-      chatEl.insertBefore(agg, div);
+      // TICKET-GUI-F29：聚合卡走 liveMount（插到最新工具卡 div 前，与原 insertBefore 等价）
+      liveMount(aggUnit, agg, div);
     }
   }
   if (roundAggregated && roundAggregateHead) {
     roundAggregateHead.textContent = 'Executed ' + roundTotalCount + ' steps ' + (aggHeadArrowText());
   }
   roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
-  chatEl.scrollTop = chatEl.scrollHeight;
+  liveScrollBottom();
 }
 
 // TICKET-GUI-F6D：写/改类工具名单 —— 配对思考不吞并（编辑流思考→编辑卡+diff 全程摊开）
@@ -1882,6 +2146,12 @@ function updateToolResult(toolId, data) {
     // 票 SAFETY-1：toggleEl 空值守卫
     if (toggleEl) toggleEl.style.display = 'inline';
     if (!inlineDiff && toggleEl) toggleEl.textContent = '▸';
+    // TICKET-GUI-F29：工具卡数据同步（聚合吞并/窗口化回收后，重建时显示最新结果与 diff）
+    if (div._liveUnit) {
+      div._liveUnit.summary = inlineDiff ? toolSummary(args, inlineDiff) : String(resultText || '').substring(0, 120);
+      div._liveUnit.inlineDiff = inlineDiff || '';
+    }
+    liveScheduleTick();  // 工具卡高度可能变化（结果展开），窗口化占位跟随修正
     // Notify when a tool > 2s completes
     if (duration > 2 && Notification.permission !== 'denied') {
       if (Notification.permission === 'granted') {
@@ -2002,8 +2272,16 @@ function appendDiffBlock(toolDiv, inlineDiff) {
   var child = block.firstChild;
   var aggBody = toolDiv.closest ? toolDiv.closest('.tool-agg-body') : null;
   var anchor = aggBody ? aggBody.parentNode : toolDiv;
-  if (anchor.nextSibling) chatEl.insertBefore(child, anchor.nextSibling);
-  else chatEl.appendChild(child);
+  // TICKET-GUI-F29：diff 块走 liveMount（afterUnit=anchor 的 unit，数组按 DOM 顺序插入；
+  // beforeEl=anchor.nextSibling 与原 insertBefore 等价；锚点无 unit（历史路径）则直插）
+  var anchorUnit = (anchor && anchor._liveUnit) ? anchor._liveUnit : null;
+  if (anchorUnit) {
+    liveMount({ kind: 'diff', text: inlineDiff }, child, anchor.nextSibling, anchorUnit);
+  } else if (anchor.nextSibling) {
+    chatEl.insertBefore(child, anchor.nextSibling);
+  } else {
+    chatEl.appendChild(child);
+  }
 }
 // TICKET-D1d ① + F4-3: 工具卡片展开内容 = 路径 + 内容预览/diff + 结果（原始 JSON 永不直接上屏）
 function renderToolDetail(args, resultText, inlineDiff) {
@@ -2049,7 +2327,9 @@ function renderToolDetail(args, resultText, inlineDiff) {
 }
 function addStatus(text) {
   var div = document.createElement('div'); div.className = 'status'; div.textContent = text;
-  chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
+  // TICKET-GUI-F29：统一走 liveMount（botPh 前插入；无占位 = 原 appendChild 零回归）
+  liveMount({ kind: 'status', text: text }, div);
+  liveScrollBottom();
 }
 
 // ── Sidebar Sections & Plugin System ──
@@ -3154,6 +3434,16 @@ function renderHistWindow() {
   // 姿势还原（窗口内元素）
   applyPose(histWindowSid);
   // 节点数硬上限：占位 2 + 窗口内单元节点（每个 unit 摊 2-4 节点）恒 ≤ HIST_MAX_NODES
+  // TICKET-GUI-F29：整重建后恢复实时 live 节点（长会话切回后用户实时发送的场景，
+  // 历史窗口滚动不能清掉实时消息——liveUnits 按序重新挂回，随后窗口化接管）
+  if (liveUnits.length) {
+    for (var li = 0; li < liveUnits.length; li++) {
+      var lu = liveUnits[li];
+      if (lu.el && lu.el.parentNode !== chatEl) chatEl.appendChild(lu.el);
+    }
+    liveWindowTop = -1; liveWindowBot = -1;
+    liveScheduleTick();
+  }
 }
 
 // 窗口化滚动监听（rAF 节流，滚动丝滑不卡顿）
@@ -3373,8 +3663,12 @@ function createThinkBox() {
   var tb = document.createElement('div');
   tb.className = 'think-box show';
   tb.innerHTML = '<div class="think-label"><span>Thinking</span><span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span><span class="think-stop" title="Stop" onclick="stopThinking()">✕</span></div><div class="think-text"></div>';
-  chatEl.appendChild(tb);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  // TICKET-GUI-F29：实时思考框挂 liveUnit（流式 text 同步数据；窗口化回收后
+  // 滚回重建为折叠摘要框，内容不丢）
+  var unit = { kind: 'think', text: '' };
+  tb._liveUnit = unit;
+  liveMount(unit, tb);
+  liveScrollBottom();
   // 10s: show warning
   tb._warnTimer = setTimeout(function() {
     if (tb.parentNode) {
@@ -3415,6 +3709,8 @@ function collapseThinkBox(tb, thinkingText) {
   if (label) label.innerHTML = '<span>thinking</span><span class="tool-toggle">▸</span>';
   var txt = tb.querySelector('.think-text');
   if (txt) txt.textContent = thinkingText || '';
+  // TICKET-GUI-F29：折叠收束同步数据（窗口化回收后重建显示同款折叠摘要框）
+  if (tb._liveUnit) tb._liveUnit.text = thinkingText || '';
   tb.classList.remove('show');
   tb.classList.add('collapsed');
   tb.onclick = function(e) {
@@ -3438,7 +3734,7 @@ function stopThinking() {
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
     if (currentSessionId) call('session.interrupt', { session_id: currentSessionId });
-    thinkBoxEl.remove(); thinkBoxEl = null;
+    liveRemoveEl(thinkBoxEl); thinkBoxEl = null;
   }
   addStatus('Stopped');
 }
@@ -3469,7 +3765,8 @@ on('message.delta', function(data) {
       var lastEl = chatEl.lastElementChild;
       // TICKET-GUI-F6D：相邻判定跳过状态行（status 类非结构节点）——状态行插在
       // 思考框之间不再打断合并判定（owner 实证：状态行致思考框连排成墙）
-      while (lastEl && lastEl.classList && lastEl.classList.contains('status')) {
+      // TICKET-GUI-F29：同时跳过窗口化占位（hist-ph）——回收占位非结构节点
+      while (lastEl && lastEl.classList && (lastEl.classList.contains('status') || lastEl.classList.contains('hist-ph'))) {
         lastEl = lastEl.previousElementSibling;
       }
       if (lastEl && lastEl.classList && lastEl.classList.contains('think-box') &&
@@ -3498,7 +3795,9 @@ on('message.delta', function(data) {
       }
     }
     var txt = thinkBoxEl.querySelector('.think-text');
-    if (txt) { txt.textContent = thinkText; chatEl.scrollTop = chatEl.scrollHeight; }
+    if (txt) { txt.textContent = thinkText; liveScrollBottom(); }
+    // TICKET-GUI-F29：流式 thinking 同步数据模型（窗口化回收后滚回重建内容不丢）
+    if (thinkBoxEl._liveUnit) thinkBoxEl._liveUnit.text = thinkText;
   }
 });
 on('message.complete', function(data) {
@@ -3507,7 +3806,7 @@ on('message.complete', function(data) {
   renderBusyUI(); debug('Connected ✓');             // V4B⓪：UI 按当前显示会话刷新
   var toolsWereCalled = toolIdCounter > 0;
   thinkText = '';
-  if (streamingId) { var old = document.getElementById(streamingId); if (old) old.remove(); streamingId = null; }
+  if (streamingId) { var old = document.getElementById(streamingId); if (old) liveRemoveEl(old); streamingId = null; }
   toolIdCounter = 0;
   // F2-3: 回合结束重置聚合状态（下回合重新计数）
   roundToolEls = []; roundAggregated = false; roundTotalCount = 0; roundAggregateHead = null;
@@ -3523,7 +3822,7 @@ on('message.complete', function(data) {
       if (!thinkBoxEl) thinkBoxEl = createThinkBox();
       collapseThinkBox(thinkBoxEl, thinking);
     } else if (thinkBoxEl) {
-      thinkBoxEl.remove(); thinkBoxEl = null;
+      liveRemoveEl(thinkBoxEl); thinkBoxEl = null;
     }
     addMsg('bobo', body, 'msg-' + Date.now());
   } else if (thinking) {
@@ -3534,7 +3833,7 @@ on('message.complete', function(data) {
     // All tool calls done with no final text — clean up think box
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
-    thinkBoxEl.remove(); thinkBoxEl = null;
+    liveRemoveEl(thinkBoxEl); thinkBoxEl = null;
   } else if (thinkBoxEl) {
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
@@ -3611,7 +3910,7 @@ on('status.update', function(data) {
     for (var hi = sts.length - 1; hi >= 0; hi--) {
       if (sts[hi].textContent.indexOf('仍在工作') === 0) { hbEl = sts[hi]; break; }
     }
-    if (hbEl) { if (hbEl.textContent !== t) { hbEl.textContent = t; chatEl.scrollTop = chatEl.scrollHeight; } return; }
+    if (hbEl) { if (hbEl.textContent !== t) { hbEl.textContent = t; liveScrollBottom(); } return; }
   }
   addStatus(t);
 });

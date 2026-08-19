@@ -592,17 +592,26 @@ def test_tel_8_zero_interference():
         # VSC-1B（2026-08-17）终审裁决：apps/vscode-extension/ 独立 npm 子项目，不管辖
         if ln.startswith("apps/vscode-extension/"):
             continue
+        # 票 TICKET-GUI-F29 特批：apps/desktop/dist/index.html（实时窗口化数据模型
+        # liveMount/liveAggSwallow*/liveRebuild + 流式 thinking 数据同步 + clearChat
+        # 窗口态重置），diff 必须含 TICKET-GUI-F29 标记，否则未授权改动被拦截
         if ln.endswith("index.html"):
+            r_idx = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-GUI-F29" in r_idx.stdout, \
+                f"{ln} 缺 TICKET-GUI-F29 特批标记，未授权改动被拦截"
             continue
         # 票 GUI-F16 特批：KaTeX vendor 资源（官方压缩产物，不承载项目逻辑）
         if ln.startswith("apps/desktop/dist/vendor/katex/"):
             continue
         # 票 SAFETY-1 特批：apps/desktop/electron/main.cjs 后端自动重启（退出码 0
         # 也重启），diff 必须含 SAFETY-1 标记
+        # 票 TICKET-GUI-F29 特批：main.cjs 窗口重建期缓冲上限 200 条（pendingMessages
+        # 超限丢最旧，防主进程 OOM），diff 必须含 TICKET-GUI-F29 标记
         if ln.endswith("main.cjs"):
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("SAFETY-1" in r7.stdout or "TICKET-GW-SOCK" in r7.stdout), \
-                f"{ln} 缺 SAFETY-1/TICKET-GW-SOCK 特批标记，未授权改动被拦截"
+            assert ("SAFETY-1" in r7.stdout or "TICKET-GW-SOCK" in r7.stdout
+                    or "TICKET-GUI-F29" in r7.stdout), \
+                f"{ln} 缺 SAFETY-1/TICKET-GW-SOCK/TICKET-GUI-F29 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：apps/desktop/electron/preload.cjs 新增 chooseFolder 别名
         #（桌面端主进程传真实项目根），diff 必须含 DESK-P1 标记

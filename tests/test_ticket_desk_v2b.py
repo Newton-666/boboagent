@@ -112,6 +112,10 @@ def test_v2b_1_tool_timeline_node():
     src = _gui()
     ur = _extract_func(src, "updateToolResult")
     js = r"""
+// TICKET-GUI-F29 适配桩：updateToolResult 尾部调 liveScheduleTick（结果展开高度修正），
+// 与 V2B 时间线断言无关；node 无 rAF/布局，桩空
+function liveScheduleTick() {}
+
 // V2D25 演进桩：data-state 属性 + classList.remove（shimmer 移除）记录
 const timeEl = { textContent: '', style: {}, classList: { add() {} } };
 const dot = { className: '', style: {} };

@@ -216,7 +216,10 @@ def test_v2c12_5_component_isolation_static():
     # 直接调 mdReply 渲染五区战报（同 V2A 豁免先例）；段外仍仅函数定义一处
     seg = re.search(r"TICKET-DESK-TEL.*?end TICKET-DESK-TEL", src, re.S)
     tel_calls = seg.group(0).count("mdReply(") if seg else 0
-    assert src.count("mdReply(") - tel_calls == 1, "mdReply( 段外仅函数定义一处（调用经 render 间接）"
+    # F29 适配：liveRebuild（窗口化回收后滚回重建历史消息）重放 bobo 消息走
+    # mdReply（与 addMsg 的 render 同款管线），段外 mdReply( 为 函数定义 + 重放调用 = 2
+    assert src.count("mdReply(") - tel_calls == 2, \
+        "mdReply( 段外仅 函数定义 + liveRebuild 重放（bobo 消息走 render 同款管线）；工具卡/思考框不得触碰 markdown"
     # 用户消息保持既有简渲染 md（不进完整管线）
     assert "? mdReply : md" in am
 

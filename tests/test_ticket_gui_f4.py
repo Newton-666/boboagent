@@ -107,8 +107,12 @@ class TestF41Aggregation:
         # 已有聚合卡时：先把最新一步收进聚合卡（吞并），再挂新一步
         assert "aggBody2.appendChild(d)" in src, "持续吞并最新一步"
         assert "roundToolEls = []" in src
-        # 吞并在挂新卡之前（回合中任何时刻只有聚合卡+最新一步）
-        assert "chatEl.appendChild(div)" in src
+        # F29 适配：吞并在挂新卡之前（回合中任何时刻只有聚合卡+最新一步）。
+        # F29 把挂卡改为 liveMount(toolUnit, div)（chatEl.appendChild 内部化进实时窗口化），
+        # 断言改查 liveMount 存在且位置在吞并循环（roundToolEls.forEach）之后
+        assert "liveMount(toolUnit, div)" in src, "F29: 新一步经 liveMount 挂入"
+        assert src.index("liveMount(toolUnit, div)") > src.index("roundToolEls.forEach"), \
+            "吞并（forEach）必须在挂新卡（liveMount）之前"
 
     def test_aggregation_title_updates_realtime(self):
         src = GUI_FILE.read_text(encoding="utf-8")

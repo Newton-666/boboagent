@@ -86,10 +86,12 @@ def test_f6c_1_static_asserts():
     assert "contains('tool-agg')" in src, "F6C: 需支持隔聚合卡向前找配对思考"
 
     # ── F6C 核心：两处吞并循环均先移入配对思考框 ──
-    assert "if (tb2) aggBody2.appendChild(tb2);" in src, \
-        "F6C: 已有聚合卡吞并须先移入配对思考框（思考在前）"
-    assert "if (tb) aggBody.appendChild(tb);" in src, \
-        "F6C: 建聚合卡吞并须先移入配对思考框（思考在前）"
+    # F29 适配：配对思考移入聚合卡的同时做数据模型同步 liveAggSwallowThink，
+    # 子串断言按 F29 形态拆分（appendChild 与数据同步并存）
+    assert "aggBody2.appendChild(tb2)" in src and "liveAggSwallowThink(aggUnit2, tb2)" in src, \
+        "F6C: 已有聚合卡吞并须先移入配对思考框（思考在前）+ 数据模型同步"
+    assert "aggBody.appendChild(tb)" in src and "liveAggSwallowThink(aggUnit, tb)" in src, \
+        "F6C: 建聚合卡吞并须先移入配对思考框（思考在前）+ 数据模型同步"
     assert "aggBody2.appendChild(d);" in src and "aggBody.appendChild(d);" in src, \
         "F6C: 工具卡吞并保留（F4-1 语义不破）"
 
@@ -131,9 +133,25 @@ def _node_simulation_script(with_missing_think: bool, no_think_second: bool = Fa
     # V2D25 配套：TOOL_ICONS/toolIcon/prefersReducedMotion（addTool 引用，桩必须带上）
     ic_m = re.search(r"var TOOL_ICONS = \{[^;]*\};", src)
     assert ic_m, "V2D25: 需要 var TOOL_ICONS 映射"
+    # F29 配套：实时窗口化基础设施（addTool 引用 liveMount/liveAggSwallow*/
+    # liveScrollBottom；liveMount 引用 liveUnits/liveUidSeq/liveBotPh/liveScheduleTick）
+    f29_state = (
+        "var liveUnits = []; var liveUidSeq = 0; var liveTopPh = null; var liveBotPh = null;"
+        " var liveWindowTop = -1; var liveWindowBot = -1; var liveTickRAF = null;"
+    )
+    f29_live = [
+        f29_state,
+        _extract_func(src, "liveDetach"),
+        _extract_func(src, "liveAggSwallow"),
+        _extract_func(src, "liveAggSwallowThink"),
+        _extract_func(src, "liveMount"),
+        "function liveScheduleTick() {}",  # 覆盖桩：node 无 rAF；tick 与聚合吞并断言无关
+        _extract_func(src, "liveScrollBottom"),
+    ]
     fns = "\n".join(
         [tf_m.group(0), ic_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
-        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
+        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")] +
+        f29_live
     )
     # 每步 (思考文本或 None, 工具 id)；默认每步带思考
     steps = [(f"思考{i}", f"t{i}") for i in range(1, 6)]

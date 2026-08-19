@@ -157,6 +157,10 @@ function isForeignSession(data) {{
   return true;
 }}
 
+// TICKET-GUI-F29 适配桩：message.delta 收尾调 liveScrollBottom（滚动跟随）+
+// thinkBoxEl._liveUnit 数据同步，与 F6B 合并语义断言无关；node 无 DOM 布局，桩空
+function liveScrollBottom() {{}}
+
 {handler}
 
 // ── 场景 A：末尾紧邻折叠思考框（中间无工具卡）→ 追加合并，不新建 ──

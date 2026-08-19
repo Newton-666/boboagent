@@ -197,11 +197,27 @@ def test_v2d25_3_shimmer_node():
     - 历史卡：无 shimmer、data-state=done、dot done"""
     src = _gui()
     icons = _extract_var(src, "TOOL_ICONS")
+    # F29 配套：实时窗口化基础设施（addTool 引用 liveMount/liveAggSwallow*/liveScrollBottom；
+    # updateToolResult 引用 liveScheduleTick；liveMount 引用 liveUnits/liveUidSeq/liveBotPh）
+    f29_state = (
+        "var liveUnits = []; var liveUidSeq = 0; var liveTopPh = null; var liveBotPh = null;"
+        " var liveWindowTop = -1; var liveWindowBot = -1; var liveTickRAF = null;"
+    )
+    f29_live = [
+        f29_state,
+        _extract_func(src, "liveDetach"),
+        _extract_func(src, "liveAggSwallow"),
+        _extract_func(src, "liveAggSwallowThink"),
+        _extract_func(src, "liveMount"),
+        "function liveScheduleTick() {}",  # 覆盖桩：node 无 rAF；tick 与 D2.5 断言无关
+        _extract_func(src, "liveScrollBottom"),
+    ]
     fns = "\n".join(
         [icons, _extract_var(src, "TOOL_FRIENDLY"), _extract_array(src, "WRITE_TOOLS")] +
         [_extract_func(src, n) for n in
          ("toolIcon", "prefersReducedMotion", "esc", "isWriteToolEl", "swallowThinkBox",
-          "aggHeadArrowText", "addTool", "updateToolResult", "buildHistToolCard")]
+          "aggHeadArrowText", "addTool", "updateToolResult", "buildHistToolCard")] +
+        f29_live
     )
     js = r"""
 const assert = require('assert');

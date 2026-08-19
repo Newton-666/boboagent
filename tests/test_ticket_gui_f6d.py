@@ -72,7 +72,13 @@ def _run_node(js: str) -> str:
 
 
 def _gui_fns() -> str:
-    """提取当前 HTML 真实函数 + WRITE_TOOLS 常量（F6D 桩依赖）。"""
+    """提取当前 HTML 真实函数 + WRITE_TOOLS 常量（F6D 桩依赖）。
+
+    F29 适配：addTool 走实时窗口化数据模型（liveMount/liveAggSwallow*/liveScrollBottom），
+    桩必须带上 F29 真实函数（聚合吞并逻辑在 liveAggSwallow/liveAggSwallowThink，
+    桩化会测空壳）；仅 liveScheduleTick 桩空（node 无 requestAnimationFrame，
+    tick 是窗口化渲染路径，与 F6D 聚合吞并断言无关）。
+    """
     src = GUI_FILE.read_text(encoding="utf-8")
     wt_m = re.search(r"var WRITE_TOOLS = \[[^\]]*\];", src)
     assert wt_m, "F6D: 需要 var WRITE_TOOLS 名单"
@@ -82,9 +88,25 @@ def _gui_fns() -> str:
     # V2D25 配套：TOOL_ICONS/toolIcon/prefersReducedMotion（addTool 引用，桩必须带上）
     ic_m = re.search(r"var TOOL_ICONS = \{[^;]*\};", src)
     assert ic_m, "V2D25: 需要 var TOOL_ICONS 映射"
+    # F29 配套：实时窗口化基础设施（addTool 引用 liveMount/liveAggSwallow*/
+    # liveScrollBottom；liveMount 引用 liveUnits/liveUidSeq/liveBotPh/liveScheduleTick）
+    f29_state = (
+        "var liveUnits = []; var liveUidSeq = 0; var liveTopPh = null; var liveBotPh = null;"
+        " var liveWindowTop = -1; var liveWindowBot = -1; var liveTickRAF = null;"
+    )
+    f29_live = [
+        f29_state,
+        _extract_func(src, "liveDetach"),
+        _extract_func(src, "liveAggSwallow"),
+        _extract_func(src, "liveAggSwallowThink"),
+        _extract_func(src, "liveMount"),
+        "function liveScheduleTick() {}",  # 覆盖桩：node 无 rAF；tick 与聚合吞并断言无关
+        _extract_func(src, "liveScrollBottom"),
+    ]
     return "\n".join(
         [tf_m.group(0), ic_m.group(0), wt_m.group(0), _extract_func(src, "isWriteToolEl")] +
-        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")]
+        [_extract_func(src, n) for n in ("toolIcon", "prefersReducedMotion", "esc", "addTool", "swallowThinkBox", "aggHeadArrowText")] +
+        f29_live
     )
 
 
@@ -122,10 +144,13 @@ def test_f6d_1_static_asserts():
     # ── 规则 2：聚合吞并按类型分流 ──
     assert "hasSwallowable" in src, "F6D: 建聚合卡前检查有无可吞元素（编辑流不建空卡）"
     assert "isWriteToolEl(d)) return;" in src, "F6D: 吞并循环跳过写类工具卡"
-    # F4-1 / F6C 要素保留
+    # F4-1 / F6C 要素保留（F29 适配：配对思考移入聚合卡的同时做数据模型同步
+    # liveAggSwallowThink，子串断言按 F29 形态拆分——appendChild 与数据同步并存）
     assert "roundTotalCount >= 2" in src and "roundToolEls = []" in src, "F4-1 不破"
-    assert "if (tb2) aggBody2.appendChild(tb2);" in src and \
-        "if (tb) aggBody.appendChild(tb);" in src, "F6C 配对思考移入不破"
+    assert "aggBody2.appendChild(tb2)" in src and "liveAggSwallowThink(aggUnit2, tb2)" in src, \
+        "F6C 配对思考移入不破（F29 数据模型同步）"
+    assert "aggBody.appendChild(tb)" in src and "liveAggSwallowThink(aggUnit, tb)" in src, \
+        "F6C 配对思考移入不破（F29 数据模型同步）"
     assert "aggBody2.appendChild(d);" in src and "aggBody.appendChild(d);" in src, \
         "F6C 工具卡吞并不破"
     # 视觉零新增
@@ -240,6 +265,9 @@ function createThinkBox() {{
   el._thinkText = '';
   return el;
 }}
+// TICKET-GUI-F29 适配桩：message.delta 收尾调 liveScrollBottom（滚动跟随），
+// 与 F6D 合并语义断言无关；node 无 DOM 布局，桩空
+function liveScrollBottom() {{}}
 // TICKET-GUI-F10 兼容桩：真实 delta 块首行 isForeignSession 闸门（F10 新增），
 // 本测试全部调用均不带 session_id（无 sid 恒放行），放行桩与真实语义等价（闸门语义由 test_f10_1 守住）
 let currentSessionId = null;

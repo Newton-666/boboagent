@@ -202,6 +202,9 @@ function ensureGatewayClient() {
         mainWindow.webContents.send('backend-message', msg)
       } else {
         pendingMessages.push(msg)
+        // TICKET-GUI-F29: 窗口重建期缓冲上限 200 条，超限丢最旧（重建是短窗口期，
+        // 丢几条早期事件可接受，防主进程 OOM——与 renderer DOM 上限同一治本思路）
+        if (pendingMessages.length > 200) pendingMessages.shift()
       }
       // TICKET-DESK-V4: 只读投影 —— 同一条现成事件流镜像给小组件（只监听不响应）
       if (widgetWindow) {

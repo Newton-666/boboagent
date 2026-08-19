@@ -166,11 +166,26 @@ def _f10_node_script() -> str:
     场景 3：切回 A → A 事件放行；clearBgActive 清标记；无 sid 事件放行
     """
     src = GUI_FILE.read_text(encoding="utf-8")
+    # F29 配套：真实 delta/status 回调引用 liveMount/liveScrollBottom/liveScheduleTick
+    # （liveMount 引用 liveUnits/liveUidSeq/liveBotPh），桩必须带上 F29 真实函数
+    f29_state = (
+        "var liveUnits = []; var liveUidSeq = 0; var liveTopPh = null; var liveBotPh = null;"
+        " var liveWindowTop = -1; var liveWindowBot = -1; var liveTickRAF = null;"
+    )
+    f29_live = [
+        f29_state,
+        _extract_func(src, "liveDetach"),
+        _extract_func(src, "liveAggSwallow"),
+        _extract_func(src, "liveAggSwallowThink"),
+        _extract_func(src, "liveMount"),
+        "function liveScheduleTick() {}",  # 覆盖桩：node 无 rAF；tick 与会话隔离断言无关
+        _extract_func(src, "liveScrollBottom"),
+    ]
     fns = "\n".join([
         _extract_func(src, "isForeignSession"),
         _extract_func(src, "markBgActive"),
         _extract_func(src, "clearBgActive"),
-    ])
+    ] + f29_live)
     # 顶层活跃位容器（var 声明，非函数体，需单独提取）
     bg_m = re.search(r"var bgActiveSids = \{\};", src)
     assert bg_m, "F10: 需要 var bgActiveSids 顶层容器"
