@@ -2345,6 +2345,24 @@ on('notes.tree', function(payload) {
   });
 }); */
 
+// 票 P0-5：memory.changed 实时刷新 —— 面板打开则重载（快照对比 → diff 红删绿增
+// 实时冒出）；未打开只更新导航 count，不打扰（吸取 notes.changed 自动弹窗教训）。
+on('memory.changed', function(payload) {
+  if (!payload) return;
+  var mv = document.getElementById('memory-view');
+  var open = mv && mv.style.display !== 'none';
+  if (open) {
+    loadMemoryPanel();
+  } else {
+    call('memory.list', {}).then(function(r) {
+      if (r && r.stats) {
+        var c = document.getElementById('memory-count');
+        if (c) c.textContent = r.stats.total_entries;
+      }
+    });
+  }
+});
+
 // ── Project Plugin ──
 var _projectTree = null;
 

@@ -163,11 +163,100 @@ def _entry_age_days(entry):
         return 0
 
 
+# ── 票 P0-5：偏好变更替换（确定性规则，零 LLM 淘汰判断）────────────────
+# DISCUSSION 174-177 红线：淘汰判据不能纯 LLM（无锚点）。本票判据全部为
+# 确定性字符串规则——同主题（共享显著子串）+ 语义反转关键词，可测试可复现。
+_REVERSE_KEYWORDS = (
+    "改为", "改成", "不再是", "不再", "不喜欢", "不喝", "不爱",
+    "不要", "以后不",
+)
+# 停用词：两文本共享这些通用词不算同主题证据（防误替换）。
+_STOPWORDS = (
+    "用户", "偏好", "喜欢", "记忆", "知识", "我", "你", "他", "她", "它",
+    "的", "了", "要", "是", "在", "从", "到", "对", "和", "与", "以及",
+    "现在", "以后", "之前", "以前", "最后", "最终", "一直", "曾经",
+    "这个", "那个", "一个", "一种", "一些", "东西", "内容", "信息",
+    "方式", "风格", "模式", "设置", "希望", "需要", "要求", "觉得",
+    "认为", "比较", "非常", "特别", "希望", "继续", "保持", "变成",
+    "开始", "选择", "使用", "采用", "采取", "进行", "完成", "实现",
+)
+
+
+def _shared_salient_token(text_a: str, text_b: str):
+    """确定性同主题判定：两文本共享 ≥3 字符的非停用词连续子串。
+
+    规则（可测试，零 LLM）：
+      1. 短文本取 3..8 字符滑动窗口，全部子串入 set；
+      2. 与长文本做包含匹配（子串 in 长文本），按长度降序取第一个；
+      3. 排除停用词 / 反转关键词（"改为""不喜"等碎片不算主题证据）；
+      4. 纯数字子串不算。
+    返回显著子串（None = 不同主题）。专有名词（冰美式/dirty/emoji）天然命中，
+    通用词（用户/偏好/喜欢）被停用词排除——"同主题但不反转"不会误判。
+    """
+    if not text_a or not text_b:
+        return None
+    short, long_text = (text_a, text_b) if len(text_a) <= len(text_b) else (text_b, text_a)
+    n = len(short)
+    max_w = min(8, n)
+    for wlen in range(max_w, 2, -1):  # 8→3，取最长匹配
+        for i in range(n - wlen + 1):
+            sub = short[i:i + wlen]
+            if sub in long_text and sub not in _STOPWORDS:
+                if sub.isdigit():
+                    continue
+                if any(k in sub for k in _REVERSE_KEYWORDS):
+                    continue  # 反转关键词碎片（"不喜"/"改为"）不算主题词
+                return sub
+    return None
+
+
+def _detect_replace(data: dict, new_text: str):
+    """偏好变更替换检测：新文本含反转关键词 + 与某非归档旧条同主题。
+
+    确定性：按 id 升序遍历，取**最后一个**匹配（= 最近写入的旧条）。
+    返回旧条 id（None = 不替换）。
+    """
+    if not any(k in new_text for k in _REVERSE_KEYWORDS):
+        return None
+    replaced = None
+    for e in data.get("entries", []):
+        if e.get("archived", False):
+            continue
+        old_text = e.get("text", "") or ""
+        if not old_text.strip() or old_text.strip() == new_text.strip():
+            continue
+        if _shared_salient_token(old_text, new_text):
+            replaced = e.get("id")
+    return replaced
+
+
+def _emit_changed(action: str, entry_id, extra: dict | None = None):
+    """票 P0-5：记忆变更事件 → event_bus（引擎日志总线，可观测）。
+
+    living_notes._emit 同款注入模式：失败静默降级，记忆写入是主路径、
+    事件是旁路。前端实时广播由 gateway handler 层（server_utils.emit）负责。
+    """
+    try:
+        from core.event_bus import event_bus as _ebus
+        data = {
+            "action": action,
+            "entry_id": entry_id,
+            "changed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        if extra:
+            data.update(extra)
+        _ebus.write("memory.changed", data)
+    except Exception:
+        pass
+
+
 def add_entry(text, entry_type="general", tags=None, folder=""):
-    """添加记忆条目（带容量检查）。
+    """添加记忆条目（带容量检查 + 票 P0-5 偏好变更替换）。
 
     票 P0-1：entry_type 经 normalize_type 收敛到六类枚举（USER_PREF/RULES/
     FACT/ACHIEVEMENT/LESSON/GOAL），旧枚举与未知值不再原样入库。
+    票 P0-5：同主题 + 反转关键词 → 旧条 archived+signal_score 归零（物理
+    不删，可回溯）+ 新条写入 + 审计 REPLACE + memory.changed 事件。
     """
     if not text or not text.strip():
         return None
@@ -210,9 +299,28 @@ def add_entry(text, entry_type="general", tags=None, folder=""):
         "archived": False,      # 归档后不再注入（不删除，可回溯）
         "is_draft": False,      # 草稿条目，满足条件时自动归档
     }
+    # 票 P0-5：偏好变更替换检测（确定性规则，零 LLM）——旧条归档 + 新条写入
+    replaced_id = _detect_replace(data, text)
+    if replaced_id is not None:
+        old_text = ""
+        for e in entries:
+            if e.get("id") == replaced_id:
+                old_text = e.get("text", "") or ""
+                e["archived"] = True
+                e["signal_score"] = 0  # 偏好反转 = 彻底失效，一次到位（非 5 分小降）
+                e["replaced_by"] = entry_id
+                e["replaced_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                break
+        _audit_log("REPLACE", replaced_id,
+                   f"from_id={replaced_id} to_id={entry_id} "
+                   f"text={old_text[:60]!r} → {text[:60]!r}")
     entries.append(entry)
     data['entries'] = entries
     _save(data)
+    if replaced_id is not None:
+        _emit_changed("replace", entry_id, {"from_id": replaced_id})
+    else:
+        _emit_changed("add", entry_id)
     return entry
 
 
@@ -625,7 +733,13 @@ def list_memories() -> dict:
     entries = data.get("entries", [])
     groups = {t: {"count": 0, "chars": 0, "entries": []} for t in MEMORY_TYPES}
     total_chars = 0
+    active_entries = 0
     for e in entries:
+        # 票 P0-5：归档条目不进面板（REPLACE 旧条 archived → 前端快照对比
+        # 自然显示红色删除；活记忆视图不含归档残留）
+        if e.get("archived", False):
+            continue
+        active_entries += 1
         t = normalize_type(e.get("type"))
         txt = e.get("text", "") or ""
         total_chars += len(txt)
@@ -643,7 +757,7 @@ def list_memories() -> dict:
     return {
         "groups": groups,
         "stats": {
-            "total_entries": len(entries),
+            "total_entries": active_entries,
             "total_chars": total_chars,
             "total_tokens_est": round(total_chars / 4),
             "usage_percent": round(total_chars / MAX_TOTAL_CHARS * 100, 1) if MAX_TOTAL_CHARS > 0 else 0,
@@ -669,6 +783,7 @@ def delete_memory(entry_id, reason="user_request", source="gui") -> dict:
                 _save(data)
                 _audit_log("DELETE", entry_id,
                            f"reason={reason} source={source} text={removed.get('text','')[:80]!r}")
+                _emit_changed("delete", entry_id, {"reason": reason, "source": source})
                 return {"success": True, "removed": {"id": removed.get("id"), "type": removed.get("type")}}
         return {"error": f"未找到 ID: {entry_id}"}
 
@@ -689,6 +804,7 @@ def update_memory_type(entry_id, new_type, source="gui") -> dict:
                 e["type"] = new_type
                 _save(data)
                 _audit_log("RETYPE", entry_id, f"from={old_type} to={new_type} source={source}")
+                _emit_changed("retype", entry_id, {"from": old_type, "to": new_type})
                 return {"success": True, "entry": {"id": entry_id, "type": new_type, "changed": True}}
         return {"error": f"未找到 ID: {entry_id}"}
 
