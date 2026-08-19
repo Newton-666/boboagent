@@ -58,7 +58,8 @@
 
 | 票 | 干什么 | 状态 |
 |---|---|---|
-| **P0-1 记忆六类分类 + Memory 模块 UI（2026-08-19 开票，自进化系统第一票）** | 自进化施工开始（快照 snapshot/pre-self-evolving-20260818 已打）。记忆六类（USER_PREF/RULES/FACT/ACHIEVEMENT/LESSON/GOAL）+ 656 条历史迁移（确定性启发式+人工抽查）+ 指针校验 + 侧栏 Memory 模块（diff 增删/token 统计/手动编辑）。独立价值：解决现有 656 条失控 + 空分类 | ✅ 已合并推送（2026-08-19，回滚标签 rollback/pre-p0-1 在远端）；Memory 面板实弹通过 |
+| **P0-1 记忆六类分类 + Memory 模块 UI（2026-08-19 开票，自进化系统第一票）** | 自进化施工开始（快照 snapshot/pre-self-evolving-20260818 已打）。记忆六类（USER_PREF/RULES/FACT/ACHIEVEMENT/LESSON/GOAL）+ 656 条历史迁移（确定性启发式+人工抽查）+ 指针校验 + 侧栏 Memory 模块（diff 增删/token 统计/手动编辑）。独立价值：解决现有 656 条失控 + 空分类 | ✅ 已合并推送（2026-08-19，回滚标签 rollback/pre-p0-1 在远端）；Memory 面板实弹通过
+| **REASONING-ECHO thinking 模式 reasoning_content 回传（2026-08-19 开票，P0-1 施工阻塞 bug 定案）** | DeepSeek thinking 模式要求两个 user 消息之间夹工具轮时 assistant 必须回传 reasoning_content（否则 400）。根因：收集✅（llm_caller:552）→ 落盘❌（engine 存 thinking 而非 reasoning_content）→ 回传❌（发送侧 0 处转换）。修复：injector.build_messages 发送副本 thinking→reasoning_content（方案 B，不动 history），压缩路径覆盖 + 回归测试 | 📋 排队（票 docs/tickets/TICKET-REASONING-ECHO.md） | |
 | **VSC-2C 工作目录感知 + 工具图标 SVG + 对比度核验（2026-08-17 owner 实弹热修）** | ①bobo 感知不到 VS Code 打开的文件夹（send 入口 project_root 错误依赖选区）；②工具图标 emoji→桌面端同款细线 SVG（L4）；③对比度核验。终审已过（npm 91/91、pytest 2722/2/1、md5 3/3），owner 实弹通过（部署新代码后 3 问题解决） | ✅ 终审通过，待收编（feat/ticket-vsc-2c 工作区 6M+2新，未 commit） |
 | **VSC-2D 裸 HTML 元素化修复（2026-08-18 开票）** | bobo 回复里未包代码块的裸 HTML 被 marked+DOMPurify 当真渲染成 DOM→标签文本消失/被盖住/字变灰。根因实证 + 修复方案已 node 实测。修：marked 自定义 html renderer 转义为文本 | 📋 排队（票 docs/tickets/TICKET-VSC-2D.md） |
 | **VSC-2E VS Code AUTO 模式支持（2026-08-18 开票，owner 实弹）** | ①写审批闸门 _guarded_execute 不感知 AUTO→AUTO 开了照样弹审批（根因实证 engine.py:204 决策树 vs engine_adapter 闸门）；②VS Code 面板补 AUTO 开关（对齐桌面端 #auto-toggle，走既有 /auto 命令零后端新 RPC） | 📋 排队（票 docs/tickets/TICKET-VSC-2E.md） |
