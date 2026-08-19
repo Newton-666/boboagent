@@ -76,6 +76,50 @@
 - 后端除 memory.list/memory.delete 两个 RPC + v5_memory 枚举外零改动；
 - 桌面端 CSS 零新增色值（复用现有 diff/列表视觉）。
 
+## 施工阻塞记录：DeepSeek thinking 模式 400（2026-08-19 17:23 排查定案）
+
+**现象**：bobo 施工中途一次 LLM 调用返回
+`HTTP 400 {"error":{"message":"The reasoning_content in the thinking mode must be passed back to the API."}}`，
+引擎走 error→responding→done 收尾（该轮未完成）。
+
+**根因链（Kimi 独立排查 + Hermes 结论交叉确认）**：
+1. **收集侧 ✅**：`core/llm_caller.py:552` 从流式 delta 提取 `reasoning_content`
+   存 `result["reasoning"]`（票 P）；
+2. **落盘侧 ❌**：`core/engine.py:1646` 存成 `msg["thinking"] = thinking`
+   （为 GUI-F8 折叠框设计，字段名不是 DeepSeek 认识的 `reasoning_content`）；
+3. **回传侧 ❌**：`core/injector.py:399` `messages = [system] + engine.history`
+   原样发送——**全代码库发送侧 0 处把 thinking 转回 reasoning_content**。
+
+**触发条件（官方规则，非"任何多轮都触发"）**：
+DeepSeek [Thinking Mode 文档](https://api-docs.deepseek.com/guides/thinking_mode/)：
+**两个 user 消息之间**若模型执行过工具调用，中间 assistant 的 `reasoning_content`
+必须参与上下文拼接并在后续所有轮次回传，否则 400。
+- bobo 平时 history 只有开头一个 user 消息，工具轮全在其后 → 不构成
+  "user…工具轮…user" 结构 → 一直正常（间歇性原因）；
+- 本次 messages 出现第二个 user 消息（GATE ledger re-injection / 承诺检测回注 /
+  COST-2 动态块写回 history——injector.py:760 注释明确"messages 内 user dict 与
+  engine.history 共享引用 → 附加同时写回 history"）→ 触发结构成立 → 400。
+
+**事件链取证（events.jsonl 17:23:45）**：205 条消息成功调用（13.97s，返回工具
+调用）→ 编辑冲突检测（"retry after verification"）→ 重试调用 msg_count=108
+（压缩/截断后 history 104 条 + 4 注入）→ 400 bad_request（226ms）→
+error→responding→done。msg_count 205→108 骤降 = 重试前 `_truncate_history`/
+压缩改变了消息结构。
+
+**修复方向（未实施，等 owner 拍板）**：
+- 方案 B（推荐）：`injector.build_messages` 返回前，对发送副本中 assistant 消息
+  把 `thinking` 复制/改名为 `reasoning_content`（不动 history/存档，GUI-F8 不受影响）；
+  需覆盖压缩后路径（压缩摘要消息可能带 tool_calls 结构）；
+- 方案 A（2 行）：engine.py:1646 落盘时同时写 `msg["reasoning_content"]=thinking`；
+  代价：存档 history 落盘新字段，压缩路径摘要消息无 thinking → 覆盖不全；
+- 需补回归测试：构造"两个 user 之间夹工具轮"的 history，断言发送副本带
+  `reasoning_content`。
+
+**影响面**：仅 thinking 模式 + 多轮工具调用场景；单轮问答不触发。P0-1 施工
+被卡一轮后 bobo 重试继续完成（未 commit），本记录留存排查链路供修复票使用。
+
+---
+
 ## 验收标准（终审逐条复跑）
 
 1. 专项：

@@ -72,8 +72,8 @@ def test_add_entry_writes_mirror(mirror_env):
     assert mirror_env["mirror"].exists()
     content = mirror_env["mirror"].read_text(encoding="utf-8")
     assert f"[#{entry['id']}] 新记忆ABC" in content
-    # 小节按 type 分
-    assert "## knowledge" in content
+    # 小节按 type 分（票 P0-1：旧枚举 knowledge 归一为六类 FACT）
+    assert "## FACT" in content
 
 
 # ── 验收 2：覆盖条目 → 镜像行更新，其他行不变 ─────────

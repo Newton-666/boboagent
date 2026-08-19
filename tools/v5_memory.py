@@ -31,6 +31,46 @@ def _memory_backup() -> str:
 MAX_TOTAL_CHARS = 100000  # 总记忆字符限制（约 36k tokens）
 MAX_SINGLE_ENTRY_CHARS = 5000  # 单条记忆字符限制
 
+# ── 票 P0-1：记忆六类（v5_memory entry_type 规范化）────────────────────
+# USER_PREF：用户画像（偏好/喜欢/习惯）——最高权重，注入优先级最高
+# RULES：约束（要求/必须/禁止）——最高权重，不轻易淘汰
+# FACT：事实决策（含 KEY_DECISION 归并）——默认兜底类
+# ACHIEVEMENT：成果（完成/交付，存指针指向产物）
+# LESSON：经验教训（教训/坑/原因）
+# GOAL：用户目标（D1 定案：目标≠画像≠事实，Hermes 21.2）
+MEMORY_TYPES = ("USER_PREF", "RULES", "FACT", "ACHIEVEMENT", "LESSON", "GOAL")
+
+# 旧枚举 → 六类映射（KEY_DECISION 归并 FACT；OBSERVATION 属事实观察）
+_LEGACY_TYPE_MAP = {
+    "KEY_DECISION": "FACT",
+    "OBSERVATION": "FACT",
+    "GENERAL": "FACT",
+    "KNOWLEDGE": "FACT",
+    "MEMORY": "FACT",
+}
+
+
+def normalize_type(entry_type) -> str:
+    """票 P0-1：任意 entry_type 收敛到六类枚举之一。
+
+    规则：六类直接命中；旧枚举（KEY_DECISION/OBSERVATION/GENERAL/KNOWLEDGE/
+    MEMORY）走 _LEGACY_TYPE_MAP；其余未知值兜底 FACT（不拒绝——LLM 乱传
+    type 是常态，拒绝会丢记忆）。
+    """
+    t = str(entry_type or "").strip().upper().replace(" ", "_")
+    if not t:
+        return "FACT"
+    if t in MEMORY_TYPES:
+        return t
+    if t in _LEGACY_TYPE_MAP:
+        return _LEGACY_TYPE_MAP[t]
+    # 模糊匹配：以合法类为前缀的变体（如 "USER_PREFERENCE" → USER_PREF）
+    for m in MEMORY_TYPES:
+        if m.startswith(t) or t.startswith(m):
+            return m
+    return "FACT"
+
+
 # 读改写操作锁：并行 save_memory 调用时防止 lost-update（审计 #14）
 _write_lock = threading.Lock()
 
@@ -124,10 +164,15 @@ def _entry_age_days(entry):
 
 
 def add_entry(text, entry_type="general", tags=None, folder=""):
-    """添加记忆条目（带容量检查）"""
+    """添加记忆条目（带容量检查）。
+
+    票 P0-1：entry_type 经 normalize_type 收敛到六类枚举（USER_PREF/RULES/
+    FACT/ACHIEVEMENT/LESSON/GOAL），旧枚举与未知值不再原样入库。
+    """
     if not text or not text.strip():
         return None
     
+    entry_type = normalize_type(entry_type)
     # 单条记忆长度检查
     if len(text) > MAX_SINGLE_ENTRY_CHARS:
         print(f"⚠️ 记忆太长 ({len(text)} 字符)，已截断至 {MAX_SINGLE_ENTRY_CHARS}")
@@ -547,6 +592,141 @@ def memory_stats() -> dict:
         "high_signal_pct": round(high / total * 100, 1),
         "avg_score": round(avg, 1),
     }
+
+
+# ── 票 P0-1：Memory 模块 RPC 支撑（六类分组 / 删除审计 / 改 type / 指针校验）────
+
+_AUDIT_LOG = BOBO_DATA_DIR / "logs" / "memory_audit.log"
+
+
+def _audit_log(action: str, entry_id, detail: str):
+    """记忆变更审计日志（负面通道，P0-5 衔接）。写 data/logs/memory_audit.log。
+
+    每次删除/改 type 都留痕：时间戳 + 动作 + 条目 id + 详情。
+    """
+    try:
+        _AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(_AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat(timespec='seconds')}] {action} id={entry_id} {detail}\n")
+    except Exception:
+        pass  # 审计失败静默降级，不阻塞主流程
+
+
+def list_memories() -> dict:
+    """票 P0-1：memory.list —— 六类分组 + 统计。
+
+    返回结构：
+      {"groups": {类名: {"count": n, "chars": c, "entries": [条目(不含全文?)]}},
+       "stats": {"total_entries": n, "total_chars": c, "total_tokens_est": n,
+                 "usage_percent": n}}
+    token 估算 = chars / 4（中英混合经验值，精确预算 P2-3 另票）。
+    """
+    data = _load()
+    entries = data.get("entries", [])
+    groups = {t: {"count": 0, "chars": 0, "entries": []} for t in MEMORY_TYPES}
+    total_chars = 0
+    for e in entries:
+        t = normalize_type(e.get("type"))
+        txt = e.get("text", "") or ""
+        total_chars += len(txt)
+        g = groups[t]
+        g["count"] += 1
+        g["chars"] += len(txt)
+        g["entries"].append({
+            "id": e.get("id"),
+            "text": txt[:120] + ("…" if len(txt) > 120 else ""),
+            "full_len": len(txt),
+            "signal_score": e.get("signal_score", 100),
+            "archived": bool(e.get("archived", False)),
+            "timestamp": e.get("timestamp", ""),
+        })
+    return {
+        "groups": groups,
+        "stats": {
+            "total_entries": len(entries),
+            "total_chars": total_chars,
+            "total_tokens_est": round(total_chars / 4),
+            "usage_percent": round(total_chars / MAX_TOTAL_CHARS * 100, 1) if MAX_TOTAL_CHARS > 0 else 0,
+        },
+    }
+
+
+def delete_memory(entry_id, reason="user_request", source="gui") -> dict:
+    """票 P0-1：memory.delete —— 删除条目 + 审计日志。
+
+    复用 delete_entry 的删除语义（absorbed/stale/user_request 三原因校验），
+    追加审计留痕。P0-5 负面通道衔接点。
+    """
+    if reason not in ("absorbed", "stale", "user_request"):
+        return {"error": f"非法删除原因: {reason!r}（允许: absorbed/stale/user_request）"}
+    with _write_lock:
+        data = _load()
+        entries = data.get("entries", [])
+        for i, e in enumerate(entries):
+            if e.get("id") == entry_id:
+                removed = entries.pop(i)
+                data["entries"] = entries
+                _save(data)
+                _audit_log("DELETE", entry_id,
+                           f"reason={reason} source={source} text={removed.get('text','')[:80]!r}")
+                return {"success": True, "removed": {"id": removed.get("id"), "type": removed.get("type")}}
+        return {"error": f"未找到 ID: {entry_id}"}
+
+
+def update_memory_type(entry_id, new_type, source="gui") -> dict:
+    """票 P0-1：改条目 type（六类枚举校验）+ 审计日志。
+
+    验收 d 需要（改 type 重新分组）。仅允许改 type，文本改动留给 P0-5。
+    """
+    new_type = normalize_type(new_type)
+    with _write_lock:
+        data = _load()
+        for e in data.get("entries", []):
+            if e.get("id") == entry_id:
+                old_type = e.get("type")
+                if old_type == new_type:
+                    return {"success": True, "entry": {"id": entry_id, "type": new_type, "changed": False}}
+                e["type"] = new_type
+                _save(data)
+                _audit_log("RETYPE", entry_id, f"from={old_type} to={new_type} source={source}")
+                return {"success": True, "entry": {"id": entry_id, "type": new_type, "changed": True}}
+        return {"error": f"未找到 ID: {entry_id}"}
+
+
+def verify_memory_links() -> dict:
+    """票 P0-1：指针可达性校验 —— 引用本地路径的条目定期校验，失效降权/标记。
+
+    规则：text 中含绝对路径（/Users/...）或相对项目路径（library/、docs/、
+    apps/ 等）的条目，取第一个路径校验 os.path.exists；失效 → 标记
+    link_broken=True + signal_score 降 5（不低于 0，注入优先级下沉）。
+    """
+    import re
+    data = _load()
+    entries = data.get("entries", [])
+    broken = []
+    checked = 0
+    changed = False
+    path_re = re.compile(r"(?:/Users/[^\s,，;；）)]+|[A-Za-z0-9_./-]+/library/[^\s,，;；）)]+|library/[^\s,，;；）)]+|docs/[^\s,，;；）)]+)")
+    for e in entries:
+        txt = e.get("text", "") or ""
+        m = path_re.search(txt)
+        if not m:
+            continue
+        p = m.group(0).rstrip(".,:：;；")
+        # 仅校验存在性；网络 URL 与模糊路径跳过
+        if p.startswith(("http://", "https://", "~/")):
+            continue
+        if p.endswith((".py", ".js", ".md", ".json", ".html", ".cjs")) or "/" in p:
+            checked += 1
+            if not os.path.exists(p):
+                broken.append({"id": e.get("id"), "path": p, "text": txt[:80]})
+                if not e.get("link_broken", False):
+                    e["link_broken"] = True
+                    e["signal_score"] = max(0, e.get("signal_score", 100) - 5)
+                    changed = True
+    if changed:
+        _save(data)
+    return {"checked": checked, "broken": len(broken), "broken_entries": broken[:20]}
 
 
 def register(reg):

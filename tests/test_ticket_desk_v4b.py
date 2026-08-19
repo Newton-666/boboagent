@@ -236,7 +236,10 @@ def test_v4b_5_engine_gateway_zero_diff():
     # 票 VSC-2B（2026-08-17）特批：bobo_tui_gateway/handlers/sessions.py
     #（session.set_write_approval RPC + 会话级写审批开关），diff 必须含 VSC-2B 标记
     VSC2B_ALLOWED = {"bobo_tui_gateway/handlers/sessions.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED]
+    # 票 P0-1（2026-08-19）特批：bobo_tui_gateway/server.py + handlers/memory.py
+    #（Memory 面板 RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
+    P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
@@ -254,8 +257,8 @@ def test_v4b_5_engine_gateway_zero_diff():
         assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
     for f in sorted(COST3_ALLOWED & set(changed)):
         r7 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout), \
-            f"{f} 的改动缺 COST-3/DESK-P1 特批标记，未授权改动被拦截"
+        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout), \
+            f"{f} 的改动缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
     for f in sorted(DESK_P1_ALLOWED & set(changed)):
         r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         # 票 VSC-2B：engine_adapter.py 复用该文件（写审批闸门），diff 标记兼容
@@ -267,6 +270,9 @@ def test_v4b_5_engine_gateway_zero_diff():
     for f in sorted(VSC2B_ALLOWED & set(changed)):
         r_v2b = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "VSC-2B" in r_v2b.stdout, f"{f} 的改动缺 VSC-2B 特批标记，未授权改动被拦截"
+    for f in sorted(P0_1_ALLOWED & set(changed)):
+        r_p01 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "P0-1" in r_p01.stdout, f"{f} 的改动缺 P0-1 特批标记，未授权改动被拦截"
     if not changed:
         return
     src = (ROOT / "bobo_tui_gateway" / "entry.py").read_text(encoding="utf-8")

@@ -57,6 +57,19 @@
 
 ## 五、纪律提醒（教训册新条目）
 
+- **write_obsidian 写错路径（第 4/5 次，2026-08-19 教训）**：bobo 收工报告
+  TICKET-P0-1完成报告.md 又用 write_obsidian 写进 Obsidian vault
+  （~/Desktop/Obsidian note/agent开发/）而非项目 library/agent开发/（VSC-2B、
+  GUI-F23、GUI-F24、GUI-F25 同款，本次第 5 次）。已手动拷贝+删除修正。
+  **待治本**：bobo 收工汇报工具链强制检查"完成报告固定落 library/agent开发/"
+  （或 write_obsidian 增加 project-root 校验）。待开票或纪律注入。
+- **DeepSeek thinking 模式 400：reasoning_content 必须回传（2026-08-19 排查）**：
+  引擎收集 reasoning 存 `msg["thinking"]`（GUI-F8 用），发送侧从不回传
+  `reasoning_content`。触发规则：**两个 user 消息之间**若有工具调用轮，
+  assistant 必须带 reasoning_content 回传，否则 400（间歇性：平时单 user 结构
+  不触发）。排查链路见 TICKET-P0-1.md 施工阻塞记录。修复方向：发送副本
+  thinking→reasoning_content 转换（方案 B）。待开修复票。
+
 - **deploy 是实弹前置**：VSC 票改 media/ 或 src/ 后，实弹前必须
   `scripts/deploy.sh` + Reload Window，且终审应验证扩展目录版本特征
   （2026-08-17 教训：VSC-2B/2C 从未 deploy，owner 实弹一直跑 VSC-2 旧版）

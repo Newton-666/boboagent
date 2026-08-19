@@ -91,7 +91,7 @@ class TestI18nClean:
         """金标准 2：关键映射逐条落地。"""
         html = INDEX.read_text(encoding="utf-8")
         must_have = [
-            ">New chat<",
+            ">New session<",
             'placeholder="Search..."',
             "No sessions yet",
             "No matches",
@@ -201,16 +201,17 @@ class TestWelcomeMinimal:
 class TestSidebarFold:
 
     def test_collapse_button_in_header(self):
-        """金标准 9（GUI-F22 结构同步）：折叠按钮（SVG）位于 #sidebar 顶部、Session 头之前。"""
+        """金标准 9（GUI-F22 结构同步 + 票 P0-1 改版）：折叠按钮（SVG）位于
+        #sidebar 顶部、首个导航项（New session）之前。"""
         html = INDEX.read_text(encoding="utf-8")
         # GUI-F22：折叠按钮从 sidebar-header 移出置顶（Session section 头之上）
         idx_collapse = html.find('id="sidebar-collapse"')
         assert idx_collapse != -1, "折叠按钮应存在"
         idx_sidebar = html.find('<div id="sidebar">')
-        idx_session = html.find("toggleSection('session')")
+        idx_session = html.find('id="nav-new-session"')
         assert idx_sidebar != -1 and idx_session != -1
         assert idx_sidebar < idx_collapse < idx_session, \
-            "顺序应为 #sidebar 开头 → 折叠按钮 → Session 头（F22 置顶）"
+            "顺序应为 #sidebar 开头 → 折叠按钮 → 首个导航项（F22 置顶）"
         seg = html[idx_collapse:idx_collapse + 400]
         assert "viewBox=\"0 0 16 16\"" in seg, "SVG viewBox 16"
         assert 'stroke-width="1.25"' in seg, "细线 1.25 工艺"
@@ -259,18 +260,24 @@ class TestSidebarFold:
         assert not new_colors, f"DESK-P2 段引入新色值: {new_colors}"
 
     def test_new_chat_after_icon(self):
-        """金标准 14（GUI-F22 结构同步）：折叠图标置顶（Session 头前），
-        sidebar-header 内依次 New chat → 搜索框 → session 列表。"""
+        """金标准 14（GUI-F22 结构同步 + 票 P0-1 改版）：折叠图标置顶（首导航项前），
+        New session 为导航项（sidebar-header 外）；Session 固定展开区内依次
+        搜索框 → session 列表。"""
         html = INDEX.read_text(encoding="utf-8")
-        # F22：折叠按钮在 #sidebar 顶部；header 内只剩 new-chat → 搜索框
+        # 票 P0-1 改版：New session 提升为导航项（nav-new-session），不再在 header 内
+        idx_nav = html.find('id="nav-new-session"')
+        assert idx_nav != -1, "New session 导航项应存在"
+        # 折叠按钮在导航项之前（置顶）
+        idx_collapse = html.find('id="sidebar-collapse"')
+        assert 0 <= idx_collapse < idx_nav, "折叠图标应在首导航项之前（F22 置顶）"
+        # Session 固定展开区（body-session）内：搜索框 → session 列表
         idx = html.find('id="sidebar-header"')
         seg = html[idx:idx + 900]
-        i_new = seg.find('id="new-chat"')
         i_search = seg.find('id="session-search"')
-        assert 0 <= i_new < i_search, "顺序应为 New chat → 搜索框（header 内）"
-        # 折叠按钮在 header 之前（置顶）
-        idx_collapse = html.find('id="sidebar-collapse"')
-        assert 0 <= idx_collapse < idx, "折叠图标应在 header 之前（F22 置顶）"
+        i_list = seg.find('id="session-list"')
+        assert 0 <= i_search < i_list, "顺序应为 搜索框 → session 列表（header 内）"
+        # New session 导航项在折叠按钮之后、Session 固定区之前
+        assert idx_nav < idx, "New session 导航项应在 Session 固定区之前"
 
 
 # ═══════════════════════════════════════════════════════════════════════

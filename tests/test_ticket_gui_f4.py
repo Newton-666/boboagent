@@ -169,9 +169,14 @@ class TestF44ButtonLayout:
 
     def test_auto_toggle_moved_left_of_stop_btn(self):
         src = GUI_FILE.read_text(encoding="utf-8")
-        # stop-btn 右缘 right:64px；auto-toggle 右缘必须 > 64+28=92px（stop 左缘）
-        assert "#auto-toggle { position:absolute; right:104px" in src, "auto-toggle 左移至 right:104px"
-        assert "#stop-btn { position:absolute; right:64px" in src, "stop-btn 位置保持不变"
+        # F26 重构（TICKET-GUI-F26）：三键移入 #input-actions flex 容器，去 absolute。
+        # auto-toggle 仍在 stop-btn 左侧（DOM 顺序），flex 布局保证不重叠。
+        assert "#input-actions" in src, "三键应移入 #input-actions flex 容器"
+        toggle_i = src.index('<button id="auto-toggle"')
+        stop_i = src.index('<button id="stop-btn"')
+        assert toggle_i < stop_i, "auto-toggle 应在 stop-btn 左侧（DOM 顺序）"
+        toggle_css = re.search(r"#auto-toggle \{[^}]*\}", src).group(0)
+        assert "position:absolute" not in toggle_css, "F26 后 auto-toggle 不再 absolute 定位"
 
     def test_no_overlap_geometry(self):
         src = GUI_FILE.read_text(encoding="utf-8")

@@ -295,92 +295,21 @@ def test_v2b_dom_before_script():
 
 # ── 铁律 0 闸：既有 CSS 零改动（V2A 标记之前的 style 段与 HEAD 逐字节一致）──
 def test_v2b_css_zero_change_on_existing():
-    """style 块中 TICKET-DESK-V2A 标记之前的所有规则，必须与基线版本完全一致。
-    只允许新增（V2A 段 + V2B 段都是追加在末尾），禁止改动任何既有 CSS 属性值。
-    基线选择同 V2A 测试：HEAD 不含 V2A 时直接用 HEAD；合并后切回滚标签。"""
+    """铁律 0 闸（动态基线，P0-1 起）：style 块中当前票标记之前的所有规则，
+    必须与票起点 HEAD 逐字节一致。只允许在票段内新增，禁止改动任何既有属性值。
+    基线=HEAD（票起点 commit），不再用 rollback/pre-desk-v2a——后续票
+    （P2/V2B/C/D/F26/F27/TEL）已在 style 中间插段/改既有值，旧基线必然误报
+    （main 上已失败，P0-1 修复时收敛为动态基线，与 v2a 同款）。"""
     head = subprocess.run(["git", "show", "HEAD:apps/desktop/dist/index.html"],
                           capture_output=True, text=True, cwd=str(ROOT))
     assert head.returncode == 0, "git show HEAD 失败"
-    base_src = head.stdout
-    if "/* ══ TICKET-DESK-V2A" in base_src:
-        tag = subprocess.run(["git", "show", "rollback/pre-desk-v2a:apps/desktop/dist/index.html"],
-                             capture_output=True, text=True, cwd=str(ROOT))
-        assert tag.returncode == 0, "合并后需以 rollback/pre-desk-v2a 标签为基线"
-        base_src = tag.stdout
-    old_style = re.search(r"<style[^>]*>(.*?)</style>", base_src, re.S).group(1)
+    old_style = re.search(r"<style[^>]*>(.*?)</style>", head.stdout, re.S).group(1)
     new_style = re.search(r"<style[^>]*>(.*?)</style>", _gui(), re.S).group(1)
-    v2a_pos = new_style.find("/* ══ TICKET-DESK-V2A")
-    assert v2a_pos > 0, "V2A 注释块应在 style 块内"
-    # V2A 特批豁免（owner 打磨单）：.del/.re 旧规则 → .act 体系重构，双向剔除后比对
-    old_seg = re.search(
-        r"\.session-item \.del \{[^}]*\}\n\.session-item:hover \.del \{[^}]*\}\n"
-        r"\.session-item \.re \{[^}]*\}\n\.session-item:hover \.re \{[^}]*\}\n", old_style)
-    assert old_seg, "基线中应能找到旧 .del/.re 规则段"
-    old_style = old_style.replace(old_seg.group(0), "")
-    new_pre = new_style[:v2a_pos]
-    new_seg = re.search(
-        r"/\* V2A 打磨（owner 反馈 2026-08-13）：行内操作三键统一 \.act.*?"
-        r"\.session-item \.stitle \{[^}]*\}\n", new_pre, re.S)
-    assert new_seg, "新 style 中应能找到 .act 打磨段"
-    new_pre = new_pre.replace(new_seg.group(0), "")
-    # V2D6 特批豁免（owner 票 DESK-V2D6 钉死）：思考框中性化须迁移既有 CSS
-    # （去蓝迁米白灰系/三跳点弱橙）。双向剔除 V2D6 改动的规则行后，其余既有 CSS 仍逐字节锁死。
-    V2D6_PAIRS = (
-        (r"\.think-box \{ [^}]* \}\n", r"\.think-box \{ [^}]* \}\n"),
-        (r"\.think-box \.think-label \{ [^}]* \}\n", r"\.think-box \.think-label \{ [^}]* \}\n"),
-        (r"\.think-dot \{ [^}]* \}\n", r"\.think-dot \{ [^}]* \}\n"),
-    )
-    for pat_old, pat_new in V2D6_PAIRS:
-        m_old = re.search(pat_old, old_style)
-        m_new = re.search(pat_new, new_pre)
-        assert m_old and m_new, f"V2D6 豁免规则应在基线/新版中同时存在: {pat_old}"
-        old_style = old_style.replace(m_old.group(0), "")
-        new_pre = new_pre.replace(m_new.group(0), "")
-    # .think-box.done（fadeIn 0.2s 完成态淡入）为 V2D6 新增规则，基线无 —— 仅从新版剔除
-    done_rule = ".think-box.done { animation:fadeIn 0.2s ease-out; }\n"
-    assert done_rule in new_pre, "新版中应能找到 .think-box.done 新增规则"
-    new_pre = new_pre.replace(done_rule, "")
-    # V2D7 特批豁免（owner 票钉死）：药丸墨痕化 + 信息蓝全面退役迁移既有 CSS 值。
-    # 双向剔除 V2D7 改动的规则行（V2A 标记之前部分）后，其余既有 CSS 仍逐字节锁死。
-    V2D7_PAIRS = (
-        r"\.msg \.txt \.diff-file \{ [^}]* \}\n",
-        r"\.msg \.txt th \{ [^}]* \}\n",
-        r"\.preview-btn \{ [^}]* \}\n",
-        r"\.tool-detail \.td-args \{ [^}]* \}\n",
-        r"\.tool-result \.td-args \{ [^}]* \}\n",
-        r"\.tool-detail \.diff-file, \.tool-result \.diff-file \{ [^}]* \}\n",
-        r"#status-mode\.office \{ [^}]* \}\n",
-    )
-    for pat in V2D7_PAIRS:
-        m_old = re.search(pat, old_style)
-        m_new = re.search(pat, new_pre)
-        assert m_old and m_new, f"V2D7 豁免规则应在基线/新版中同时存在: {pat}"
-        old_style = old_style.replace(m_old.group(0), "")
-        new_pre = new_pre.replace(m_new.group(0), "")
-    # DESK-P1 特批豁免（owner 票 TICKET-DESK-P1 钉死）：ASCII BOBO 大字（#welcome-logo）
-    # → 文案标题（#welcome-title）+ project pill 锚点段（均位于 V2A 标记之前）。
-    # 双向剔除该段后比对，其余既有 CSS 仍逐字节锁死。
-    old_welcome = re.search(r"#welcome-logo \{[^}]*\}\n", old_style)
-    assert old_welcome, "基线中应能找到 #welcome-logo 规则"
-    old_style = old_style.replace(old_welcome.group(0), "")
-    new_welcome = re.search(r"/\* 票 DESK-P1：.*?#welcome-title \{[^}]*\}\n", new_pre, re.S)
-    assert new_welcome, "新版中应能找到 #welcome-title 规则段（含前后注释）"
-    new_pre = new_pre.replace(new_welcome.group(0), "")
-    pill_seg = re.search(
-        r"/\* === DESK-P1 project pill ===.*?#project-menu \.prj-empty \{[^}]*\}\n", new_pre, re.S)
-    assert pill_seg, "新版中应能找到 DESK-P1 project pill 锚点段"
-    new_pre = new_pre.replace(pill_seg.group(0), "")
-    # DESK-P2 特批豁免（owner 票 TICKET-DESK-P2）：侧栏折叠图标 CSS 锚点段
-    # （/* === DESK-P2 === */ ... /* === end DESK-P2 === */）仅存在于新版，单向剔除。
-    p2_seg = re.search(r"/\* === DESK-P2 === \*/.*?/\* === end DESK-P2 === \*/\n", new_pre, re.S)
-    assert p2_seg, "新版中应能找到 DESK-P2 锚点段"
-    new_pre = new_pre.replace(p2_seg.group(0), "")
-    # DESK-P2：.welcome-sub 规则已随副标题元素删除（欢迎屏极简），基线单向剔除。
-    old_sub = re.search(r"\.welcome-sub \{[^}]*\}\n", old_style)
-    assert old_sub, "基线中应能找到 .welcome-sub 规则"
-    old_style = old_style.replace(old_sub.group(0), "")
-    assert new_pre.rstrip() == old_style.rstrip(), \
-        "V2A 之前既有 CSS 必须逐字节等于基线（除特批 .act 重构段与 V2D6/V2D7/DESK-P1/DESK-P2 豁免段外零改动）"
+    # 新 style 中 P0-1 段起点前 = 票起点 HEAD 全文（P0-1 只允许追加在 style 末尾）
+    p01_pos = new_style.find("/* 票 P0-1：Memory 面板")
+    assert p01_pos > 0, "P0-1 注释块应在 style 块内"
+    new_pre = new_style[:p01_pos]
+    assert new_pre == old_style, "P0-1 之前的所有既有 CSS 必须与票起点 HEAD 逐字节一致"
 
 
 # ── 铁律 0 补充闸：V2B diff 不得删除任何 style 块内规则（V2A 段同样）───

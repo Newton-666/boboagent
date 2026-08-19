@@ -112,10 +112,12 @@ def shutdown_sessions():
 
 
 # ── 注册所有 handler 模块 ──
+# 票 P0-1：新增 memory handler 模块（Memory 面板 RPC：memory.list/delete/update/
+# verify_links），零干涉守卫白名单同步（tests/test_ticket_desk_v4.py 等）。
 
-from bobo_tui_gateway.handlers import sessions, configs, models, prompts, tools, misc
+from bobo_tui_gateway.handlers import sessions, configs, models, prompts, tools, misc, memory
 
-for mod in (sessions, configs, models, prompts, tools, misc):
+for mod in (sessions, configs, models, prompts, tools, misc, memory):
     if mod is configs:
         mod.register(method, _engine_cache)
     else:
