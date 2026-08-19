@@ -96,7 +96,10 @@ def test_p0_1_add_entry_normalized(tmp_memory):
 def test_p0_1_migration_no_residue():
     data = json.loads(KB.read_text(encoding="utf-8"))
     entries = data["entries"]
-    assert len(entries) == 656
+    # 迁移完成态基线 656 条（2026-08-19 收编时）；真实库会随对话沉淀增长
+    # （2026-08-19 P0-3 收编实测 657：+1 条真实记忆"咖啡偏好改 dirty"），
+    # 故断言"≥基线且无六类外残留"，不锁精确条数（迁移正确性=分类，非计数）。
+    assert len(entries) >= 656, f"条目数低于迁移基线: {len(entries)}"
     dirty = [e for e in entries if e.get("type") not in SIX_TYPES]
     assert not dirty, f"六类外残留 {len(dirty)} 条: {[e['id'] for e in dirty[:10]]}"
 
