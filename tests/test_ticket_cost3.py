@@ -87,7 +87,7 @@ class TestWorkAnchorMoved:
         assert anchors == [], "跳过路径锚点也不得留在 history"
 
     def test_injector_injects_work_anchor_tail_block(self, monkeypatch, tmp_path):
-        """金标准 2：work_anchor 随 COST-2 动态块注入最后 user content 前部。"""
+        """金标准 2：work_anchor 随 COST-2 动态块注入尾部 system（票 COST-6 方案 B）。"""
         self._patch_budget(monkeypatch)
         EventBus.reset(str(tmp_path / "ev3"))
         eng = _mk_engine(MockLLMCaller([text_response("x")]), "cost3-003")
@@ -101,12 +101,14 @@ class TestWorkAnchorMoved:
             extra_categories=set(),
             session_id="cost3-003",
         )
-        last_user = next((m for m in reversed(msgs) if m.get("role") == "user"), None)
-        assert last_user is not None, "应有最后 user 消息"
-        content = str(last_user.get("content", ""))
-        assert "[工作锚点" in content, "work_anchor 应注入最后 user 的动态块"
+        assert msgs[-1]["role"] == "system", "动态块应为尾部 system（COST-6 方案 B）"
+        content = str(msgs[-1].get("content", ""))
+        assert "[工作锚点" in content, "work_anchor 应注入尾部 system 动态块"
         assert "当前任务 X" in content, "锚点应含当前任务"
         assert "COST-2 动态块" in content, "应走 COST-2 动态块机制"
+        # 用户输入保持在 user 消息（不写回，前缀稳定）
+        assert str(msgs[-2]["content"]) == "当前任务 X" \
+            if msgs[-2].get("role") == "user" else True
 
     def test_history_stable_across_rounds(self, monkeypatch, tmp_path):
         """金标准 3：相邻两轮——R1 的 user（含动态块）逐字节出现在 R2 历史区。"""

@@ -113,12 +113,13 @@ def test_c1_anchor_not_in_first_three(injector):
 # ── C2：锚点在历史消息区之前（冻结段固定位）──
 
 def test_c2_anchor_in_current_user_message(injector):
-    """NOW 锚点附加在当前轮 user 消息内容前部（消息序列末尾，前缀不受影响）。"""
+    """NOW 锚点在尾部 system 动态块内（消息序列末尾，前缀不受影响；票 COST-6 方案 B）。"""
     msgs = _build(injector)
     now_idx, _ = _find_anchor(msgs)
     assert now_idx is not None
-    assert msgs[now_idx]["role"] == "user", f"NOW 应在 user 消息内（index={now_idx}）"
-    assert now_idx == len(msgs) - 1, f"NOW 所在 user 消息应为最后一个消息（index={now_idx}）"
+    assert msgs[now_idx]["role"] == "system", \
+        f"NOW 应在尾部 system 动态块内（index={now_idx}）"
+    assert now_idx == len(msgs) - 1, f"动态块应为最后一个消息（index={now_idx}）"
 
 
 # ── C3：小时级精度（同小时两轮一致，跨小时才变）──
@@ -176,7 +177,7 @@ def test_c4_budget_now_kept(injector, silence_event_bus):
 # ── C5：历史消息区零改动 ──
 
 def test_c5_history_region_unchanged(injector):
-    """动态块附加在 user 消息内容前部；历史消息区 role 序列与顺序不变。"""
+    """动态块注入为尾部 system（票 COST-6 方案 B）；历史消息区零改动。"""
     history = [
         {"role": "user", "content": "第一轮问题"},
         {"role": "assistant", "content": "第一轮回答"},
@@ -189,14 +190,15 @@ def test_c5_history_region_unchanged(injector):
     got = [(m["role"], m["content"]) for m in msgs if m["role"] in ("user", "assistant")]
     # role 序列与顺序不变
     assert [r for r, _ in got] == [r for r, _ in expect], "历史消息区 role 序列被改动"
-    # 非当前轮消息逐字节不变；当前轮 user 附加动态块
+    # 所有历史消息（含当前轮 user）逐字节不变——动态块不再写回 user
     for i, (r, c) in enumerate(expect):
-        if i == len(expect) - 1:
-            continue  # 当前轮 user：允许附加动态块
-        assert got[i][1] == c, f"历史消息内容被改动: index={i}"
-    last_content = got[-1][1]
-    assert "【COST-2 动态块】" in last_content, "当前轮 user 应附加动态块"
-    assert last_content.endswith("当前轮问题"), "剥离动态块后应保留原始输入"
+        assert got[i][1] == c, f"历史消息内容被改动: index={i} content={c!r}"
+    # 动态块在尾部 system（最后一个消息），user/assistant 区无动态块标记
+    assert msgs[-1]["role"] == "system", "动态块应为尾部 system"
+    assert "【COST-2 动态块】" in str(msgs[-1]["content"]), "尾部 system 应含动态块"
+    # 用户输入保持在 user 消息（动态块不写回 user，前缀稳定）
+    assert str(msgs[-2]["content"]) == "当前轮问题" \
+        if msgs[-2].get("role") == "user" else True
 
 
 # ── C6：GUIDANCE 仍在自查协议之后（E3b 语义保持）──
@@ -280,19 +282,23 @@ def test_c7_head_static_across_rounds():
         tools_schema=[], extra_categories=set(), session_id="s1",
     )
     assert len(r2) > len(r1), "R2 应比 R1 多（assistant 回复 + 新 user 输入）"
-    assert all(r1[i] == r2[i] for i in range(len(r1))), \
-        "R2 前缀未覆盖 R1 全部（动态块方案未生效，前缀缓存必然作废）"
-    # 动态块实时刷新：主题乙出现在 R2 最后一个 user 消息内
+    # 票 COST-6 方案 B：R1 尾部 = system 动态块（不写回 history）；R2 前缀
+    # 覆盖 R1 全部非动态块消息（system 头部 + 历史 user/assistant 逐字节相同）
+    r1_body = r1[:-1] if r1[-1].get("role") == "system" and \
+        str(r1[-1].get("content", "")).startswith("【COST-2 动态块】") else r1
+    assert all(r1_body[i] == r2[i] for i in range(len(r1_body))), \
+        "R2 前缀未覆盖 R1 历史区（方案 B 前缀稳定未生效）"
+    # 动态块实时刷新：主题乙出现在 R2 尾部 system 动态块内
     assert "主题乙" in str(r2[-1].get("content", "")), "动态块应实时刷新（主题乙）"
-    # history 无冻结块污染（只有 user/assistant）
+    # history 无动态块污染（只有 user/assistant，纯用户输入）
     assert all(m["role"] in ("user", "assistant") for m in eng.history), \
-        "history 不应有 system 冻结块"
+        "history 不应有动态块 system 污染"
 
 
 # ── C8：proactive 知识连接搬移（full 模式 insert(0) → 尾部）──
 
 def test_c8_proactive_moved_to_tail():
-    """proactive 知识连接不得留在 messages[0]（前缀第一位）；移入当前 user 消息内。"""
+    """proactive 知识连接不得留在 messages[0]（前缀第一位）；移入尾部 system 动态块。"""
     history = [{"role": "user", "content": "问题"},
                {"role": "assistant", "content": "回答"}]
     msgs = _build_with(history + [{"role": "user", "content": "当前轮"}],
@@ -300,6 +306,6 @@ def test_c8_proactive_moved_to_tail():
     first = str(msgs[0].get("content", ""))
     assert not first.startswith("以下是你之前的知识记录"), \
         f"proactive 连接仍在 messages[0]（前缀第一位）: {first[:40]}"
-    last_user = max(i for i, m in enumerate(msgs) if m.get("role") == "user")
-    assert "以下是你之前的知识记录" in str(msgs[last_user].get("content", "")), \
-        "proactive 连接应移入当前 user 消息内"
+    assert msgs[-1]["role"] == "system", "动态块应为尾部 system（票 COST-6 方案 B）"
+    assert "以下是你之前的知识记录" in str(msgs[-1].get("content", "")), \
+        "proactive 连接应移入尾部 system 动态块内"
