@@ -634,6 +634,8 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
+        if ln.startswith("data/eval/"):
+            continue  # 探针运行产物目录（截图/评估输出，非代码；.gitignore 强制跟踪）
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
             continue
         # 票 DESK-P1 特批：tools/execute_terminal.py 会话 project_root 非空时

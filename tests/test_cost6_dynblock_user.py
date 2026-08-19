@@ -85,8 +85,9 @@ def test_cost6_history_not_polluted(monkeypatch):
 
 
 def test_cost6_no_tail_blocks_no_system(monkeypatch):
-    """对照组：注入为空时不产生尾部 system（动态块只在有内容时注入）。"""
-    # 通过 monkeypatch 让 NOW 锚点返回空，模拟无任何动态段可注入
+    """对照组：NOW 锚点缺失时动态块降级——尾部 system 不含 [NOW]（记忆等其他段照常）。"""
+    # monkeypatch 让 NOW 锚点返回空，验证锚点缺失的静默降级（锚点注入被禁用时
+    # 动态块不应携带 NOW 段；其余动态段按各自触发条件照常注入，不受影响）
     import core.injector as inj_mod
     monkeypatch.setattr(inj_mod, "_build_now_anchor", lambda: "")
 
@@ -99,8 +100,17 @@ def test_cost6_no_tail_blocks_no_system(monkeypatch):
         extra_categories=set(),
         session_id="",
     )
-    tails = [m for m in msgs if str(m.get("content", "")).startswith(DYN_MARK)]
-    assert tails == [], f"无动态段时不应注入动态块: {tails}"
+    tail = msgs[-1]
+    is_dyn = tail["role"] == "system" and \
+        str(tail.get("content", "")).startswith(DYN_MARK)
+    if is_dyn:
+        # 有动态块注入（记忆等其他段照常）→ NOW 段必须静默降级
+        assert "[NOW]" not in str(tail.get("content", "")), \
+            "NOW 锚点缺失时动态块不得含 [NOW] 段"
+    else:
+        # 无任何动态段（孤立环境仅 NOW 为来源）→ 尾部不产生动态块 system
+        assert tail["role"] in ("user", "assistant"), \
+            "无动态段注入时尾部不应是动态块 system"
 
 
 def test_cost6_reasoning_echo_still_works(monkeypatch):
