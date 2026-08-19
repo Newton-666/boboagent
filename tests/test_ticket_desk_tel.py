@@ -525,8 +525,8 @@ def test_tel_8_zero_interference():
         # project_root 属性（engine_adapter 会话创建时落库）
         if ln in ("core/context.py", "core/engine.py"):
             r7 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout), \
-                f"{ln} 缺 COST-3/DESK-P1 特批标记，未授权改动被拦截"
+            assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout), \
+                f"{ln} 缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
@@ -565,6 +565,12 @@ def test_tel_8_zero_interference():
         if ln == "bobo_tui_gateway/handlers/sessions.py":
             r_v2b = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "VSC-2B" in r_v2b.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
+            continue
+        # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory 面板
+        # RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
+            r_p01 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "P0-1" in r_p01.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
         assert not ln.startswith("bobo_tui_gateway/"), f"零干涉铁律违反：gateway 被改动 {ln}"
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
@@ -614,6 +620,11 @@ def test_tel_8_zero_interference():
             r_v2b2 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "VSC-2B" in r_v2b2.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
+        # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory RPC）
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
+            r_p01b = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "P0-1" in r_p01b.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
@@ -623,6 +634,12 @@ def test_tel_8_zero_interference():
         if ln == "tools/execute_terminal.py":
             r10 = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "DESK-P1" in r10.stdout, f"{ln} 缺 DESK-P1 特批标记，未授权改动被拦截"
+            continue
+        # 票 P0-1 特批：tools/v5_memory.py + tools/memory_migrate.py（记忆六类
+        # 枚举 + 656 条迁移脚本），diff 必须含 P0-1 标记
+        if ln in ("tools/v5_memory.py", "tools/memory_migrate.py"):
+            r_p01t = subprocess.run(["git", "diff", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "P0-1" in r_p01t.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
         if ln.startswith("tests/") or ln.startswith("apps/desktop/electron/test/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）

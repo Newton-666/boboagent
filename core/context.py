@@ -659,11 +659,13 @@ class ContextMixin:
     def _precipitate_memory(self, entries: list):
         """将 LLM 产出的知识条目写入 knowledge_base.json（信号分 100）。
 
-        条目格式：KEY_DECISION: xxx / USER_PREF: xxx / FACT: xxx
-        失败静默降级，不阻塞压缩。
+        条目格式：KEY_DECISION: xxx / USER_PREF: xxx / FACT: xxx / RULES: xxx
+        / ACHIEVEMENT: xxx / LESSON: xxx / GOAL: xxx
+        票 P0-1：etype 经 v5_memory.normalize_type 收敛六类（KEY_DECISION →
+        FACT，旧枚举/未知值兜底），不再原样入库。失败静默降级，不阻塞压缩。
         """
         try:
-            from tools.v5_memory import add_entry
+            from tools.v5_memory import add_entry, normalize_type
             for entry in entries:
                 # 解析 TYPE: content 格式
                 if ":" in entry:
@@ -676,7 +678,7 @@ class ContextMixin:
                 if content:
                     add_entry(
                         text=content,
-                        entry_type=etype,
+                        entry_type=normalize_type(etype),
                         tags=["compression"],
                         folder="compressed",
                     )
