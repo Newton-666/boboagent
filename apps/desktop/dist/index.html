@@ -2160,7 +2160,7 @@ function memToggleGroup(hd) {
 
 function memDelete(id) {
   call('memory.delete', { entry_id: id, reason: 'user_request' }).then(function(r) {
-    if (r && r.result && r.result.success) {
+    if (r && r.success) {
       showToast('ok', 'Memory #' + id + ' deleted (audit logged)');
       loadMemoryPanel();
     } else {
@@ -2171,7 +2171,7 @@ function memDelete(id) {
 
 function memChangeType(id, newType) {
   call('memory.update', { entry_id: id, type: newType }).then(function(r) {
-    if (r && r.result && r.result.success) {
+    if (r && r.success) {
       showToast('ok', 'Memory #' + id + ' changed to ' + newType);
       loadMemoryPanel();
     } else {
@@ -2182,12 +2182,13 @@ function memChangeType(id, newType) {
 
 function loadMemoryPanel() {
   call('memory.list', {}).then(function(r) {
-    if (!r || !r.result) {
+    // call() resolve 的是 JSON-RPC 的 msg.result（即 data 本体），不是 {result:...} 包装
+    if (!r || !r.groups) {
       var g = document.getElementById('memory-groups');
-      if (g) g.innerHTML = '<div class="mem-empty">Load failed — gateway may need a restart (memory.list unavailable).</div>';
+      if (g) g.innerHTML = '<div class="mem-empty">Load failed — memory.list unavailable.</div>';
       return;
     }
-    var data = r.result;
+    var data = r;
     var st = data.stats;
     document.getElementById('memory-stats').textContent =
       st.total_entries + ' entries · ' + st.total_chars + 'ch · ~' + st.total_tokens_est + ' tok · ' + st.usage_percent + '%';
