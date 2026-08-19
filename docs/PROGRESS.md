@@ -57,6 +57,16 @@
 
 ## 五、纪律提醒（教训册新条目）
 
+- **数据备份禁止推公开远端（2026-08-19 排查）**：发现远端公开仓库
+  `backup/data-snapshot` 分支含 2026-08-11 的 knowledge_base 全量快照
+  （436 条真实记忆）——已删除远端+本地分支（commit 69123f07）。残余风险：
+  已 clone 副本无法回收，GitHub GC 前可被 fsck 找回；owner 自查该快照
+  有无高危内容。**规则**：数据快照备份走本地/私有渠道（tar/私有盘），
+  禁止推公开远端；gitignore 已兜底（knowledge_base*.json + data/*）。
+  附：全面排查确认——main 及全分支无真实记忆/无 .env/无硬编码密钥
+  （仅文档含本地路径 /Users/niuqingwei 用户名暴露）；experiments/cost1a
+  memory.jsonl 为实验模拟数据非真实记忆。
+
 - **write_obsidian 写错路径（第 4/5 次，2026-08-19 教训）**：bobo 收工报告
   TICKET-P0-1完成报告.md 又用 write_obsidian 写进 Obsidian vault
   （~/Desktop/Obsidian note/agent开发/）而非项目 library/agent开发/（VSC-2B、
