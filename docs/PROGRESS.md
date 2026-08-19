@@ -73,6 +73,13 @@
   GUI-F23、GUI-F24、GUI-F25 同款，本次第 5 次）。已手动拷贝+删除修正。
   **待治本**：bobo 收工汇报工具链强制检查"完成报告固定落 library/agent开发/"
   （或 write_obsidian 增加 project-root 校验）。待开票或纪律注入。
+- **收编后必须重启 gateway，否则旧进程跑旧代码（2026-08-19 教训）**：
+  COST-6 方案 B（动态块改尾部 system）21:14 提交、22:03 收编，但 gateway
+  一直是 20:25 旧进程 36568——bobo 施工 GUI-F29 时长会话再次 400
+  （"reasoning_content must be passed back"），**误以为 COST-6 没修好**。
+  实为旧进程未加载新代码。已重启（47874，22:18）后验证方案 B 生效。
+  规则：**任何改动 core/ 后，收编完立即重启 gateway + 桌面端窗口**，
+  再让 bobo 施工；出现"修过了还复现"先查进程启动时间 vs commit 时间。
 - **DeepSeek thinking 模式 400：reasoning_content 必须回传（2026-08-19 排查）**：
   引擎收集 reasoning 存 `msg["thinking"]`（GUI-F8 用），发送侧从不回传
   `reasoning_content`。触发规则：**两个 user 消息之间**若有工具调用轮，
