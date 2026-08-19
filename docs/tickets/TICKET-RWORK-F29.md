@@ -101,7 +101,31 @@ liveRecycle(...)` 把**底部最新消息**也回收了。**完全没有"最新�
 - 验证：滚动到历史区 → 发新 prompt → 底部 prompt+回复可见；
   滚回底部 → 全部消息重建完整。
 
-### 6. 收口纪律
+### 6. 行为回归⑤（新增，owner 实弹 2026-08-19 深夜）：向上滚动停住 + 被拉回底部
+
+**owner 实弹**：底部运行中向上滚动看历史 → **滚到一个地方就停住（滚不动）**，
+然后**自动跳回当前底部**。
+
+**根因（Kimi 定位，两个叠加）**：
+1. **被拉回底部**：`liveScrollBottom` 的 `near` 判定
+   `scrollTop + clientHeight >= scrollHeight - 80`（index.html:1846）——
+   **窗口化回收把上方消息换成占位（高度为估算值）时 scrollHeight 漂移变小**
+   → 用户明明在历史区，`scrollTop + clientHeight` 却 ≥ `scrollHeight - 80`
+   → **误判"贴近底部" → 强制 scrollTop = scrollHeight → 拉回底部**；
+2. **滚不动停住**：`liveWindowTick` 重建（回收/重建/占位）改变 DOM 高度，
+   浏览器对 scrollTop 做 clamp → **视觉上停在某处滚不动**（内容位置没保持）。
+
+**修复要求**：
+- **liveScrollBottom 的"贴近底部"判定必须排除占位高度估算误差**：
+  用**数据模型**（liveWindowBot 是否覆盖消息流末尾）为主判据，
+  scrollTop 兜底判据的阈值要基于**真实已渲染节点**而非估算 scrollHeight；
+- **窗口重建必须保持内容位置**：liveWindowTick 重建前后记录"当前可视的
+  第一个 unit"，重建后 scrollTop 对齐到该 unit（防止 clamp 跳变）；
+- **"最新消息永不回收"（返工项 5）同时解决**"滚回底部后内容缺失"；
+- 验证：底部运行中连续上滚看历史，不拉回、不停住；新消息追加不打断；
+  滚回底部正常。
+
+### 7. 收口纪律
 
 - 施工代码**必须 commit**（首轮 3 个 docs commit 但施工代码在工作区未提交）；
 - 全量 pytest 0 失败 + jsdom 测试 + Electron e2e 复跑全过；
