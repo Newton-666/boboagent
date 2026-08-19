@@ -3263,6 +3263,21 @@ on('message.delta', function(data) {
       }
     }
     thinkText += t;
+    // TICKET-GUI-F27：thinking 流式活动刷新——收到内容重置 10s/30s 计时器
+    //（推理模型思考可 >30s，固定 30s 硬超时必然误报 "API unresponsive"；
+    // 只有 30s 完全无流（真挂起）才提示超时）
+    if (thinkBoxEl) {
+      if (thinkBoxEl._warnTimer) { clearTimeout(thinkBoxEl._warnTimer); thinkBoxEl._warnTimer = null; }
+      if (thinkBoxEl._killTimer) {
+        clearTimeout(thinkBoxEl._killTimer);
+        thinkBoxEl._killTimer = setTimeout(function() {
+          if (thinkBoxEl && thinkBoxEl.parentNode) {
+            thinkBoxEl.querySelector('.think-text').textContent = 'API unresponsive. Retry later or click ✕ to stop.';
+            thinkBoxEl.querySelector('.think-label').innerHTML = '<span style="color:#f48771">⚠ Timeout</span>';
+          }
+        }, 30000);
+      }
+    }
     var txt = thinkBoxEl.querySelector('.think-text');
     if (txt) { txt.textContent = thinkText; chatEl.scrollTop = chatEl.scrollHeight; }
   }
