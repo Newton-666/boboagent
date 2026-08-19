@@ -757,8 +757,10 @@ class PromptInjector:
         #    个 user 消息（本轮输入）的 content 前部 —— 位于消息序列末尾，历史
         #    消息区逐字节稳定 → R2 前缀 == R1 全部（命中率 ~100%），且每轮内容
         #    照常刷新（纪律场景/记忆 touch/NOW 小时级都实时，无冻结锁死）。
-        #    注：messages 内 user dict 与 engine.history 共享引用 → 附加同时写回
-        #    history，下一轮该 user 消息（含动态块）成为前缀的一部分。
+        #    注：原实现"附加到最后一个 user 写回 history"（共享引用 mutate）——
+        #    票 COST-6 发现该写回制造"双 user 夹工具轮"触发结构（400），
+        #    已改方案 B：动态块注入为尾部 system 消息（不写回 history），
+        #    前缀稳定论证见下方 8.5 段实现注释。
         _TAIL_ORDER = {"proactive": 0, "memory": 1, "note_pointers": 2,
                        "change_log": 3, "read_files": 4, "pending_diff": 5,
                        "discipline": 6,
@@ -771,20 +773,22 @@ class PromptInjector:
                 _tail_blocks, key=lambda b: _TAIL_ORDER.get(b[0], 99))
             _dyn_text = "\n\n".join(c for _n, c in _ordered)
             _DYN_MARK = "【COST-2 动态块】"
-            _last_user = None
-            for _m in reversed(messages):
-                if _m.get("role") == "user":
-                    _last_user = _m
-                    break
-            if _last_user is not None:
-                _orig = str(_last_user.get("content") or "")
-                if not _orig.startswith(_DYN_MARK):
-                    _last_user["content"] = (
-                        _DYN_MARK + "\n" + _dyn_text
-                        + ("\n\n" + _orig if _orig else "")
-                    )
-            else:
-                messages.append({"role": "user", "content": _DYN_MARK + "\n" + _dyn_text})
+            # 票 COST-6（方案 B 定案）：动态块注入为"尾部 system"消息——
+            # 不写回 history、不占 user 角色。
+            # 消除"双 user 夹工具轮"触发结构（400 根因：动态块写回使 history
+            # 出现两个 user 消息（user#0 与 user#104 均含动态块）中间夹大量
+            # 工具轮 → DeepSeek 要求其中 assistant 的 reasoning_content 回传
+            # → 缺失即 400，REASONING-ECHO 修回传不修结构，故复现）。
+            # 前缀稳定论证：history 从此不被动态块污染（纯用户输入逐字节
+            # 不变），跨轮公共前缀 = [system + 历史区]；动态块在消息序列
+            # 末尾逐轮变化，不影响前缀 → 缓存命中率保持（改前基线
+            # e2e_cost2_probe R3=99.9%，改后同探针对比，见完成报告）。
+            # 注：COST-2 实测 5.3% 塌方的是"system 插在 user 之前"（锚点
+            # 逐轮漂移 + 头部变化）；本方案固定尾部位置，不漂移。
+            messages.append({
+                "role": "system",
+                "content": _DYN_MARK + "\n" + _dyn_text,
+            })
 
         # ── 9. 技能标准（票 TICKET-E3b：未命中清单已删，仅命中才注入）──
         # 票 COST-2：收集已前移至 8.5 段 3a（必须在统一注入之前）；此处仅
