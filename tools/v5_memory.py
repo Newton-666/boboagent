@@ -733,11 +733,13 @@ def list_memories() -> dict:
     entries = data.get("entries", [])
     groups = {t: {"count": 0, "chars": 0, "entries": []} for t in MEMORY_TYPES}
     total_chars = 0
+    active_entries = 0
     for e in entries:
         # 票 P0-5：归档条目不进面板（REPLACE 旧条 archived → 前端快照对比
         # 自然显示红色删除；活记忆视图不含归档残留）
         if e.get("archived", False):
             continue
+        active_entries += 1
         t = normalize_type(e.get("type"))
         txt = e.get("text", "") or ""
         total_chars += len(txt)
@@ -755,7 +757,7 @@ def list_memories() -> dict:
     return {
         "groups": groups,
         "stats": {
-            "total_entries": len(entries),
+            "total_entries": active_entries,
             "total_chars": total_chars,
             "total_tokens_est": round(total_chars / 4),
             "usage_percent": round(total_chars / MAX_TOTAL_CHARS * 100, 1) if MAX_TOTAL_CHARS > 0 else 0,
