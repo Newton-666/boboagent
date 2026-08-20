@@ -780,9 +780,15 @@ class PromptInjector:
         skill_stds = engine.skill_loader.load_standards()
         if skill_stds:
             _skill_combined = "\n\n---\n\n".join(skill_stds)
+            # ── 票 TICKET-SKILL-ACTIVE-1：主动使用指令（COST-2 注入块内追加）──
+            # 让"检查 skill 匹配"成为显式决策而非被动关键词命中：收到任务先判断
+            # 是否命中标准，命中严格按标准执行，不命中正常执行且无需声明（owner
+            # 红线：只约束执行能力、不约束表达能力；"无需声明"防每轮机械化）。
             _tail_blocks.append((
                 "skill",
                 "## 项目标准 — 以下规则优先级高于一切，违反即不合格\n\n"
+                "[主动使用] 收到任务时，第一步先判断：这个任务是否匹配以下某条"
+                "标准？匹配 → 严格按标准执行；不匹配 → 正常执行（无需声明）。\n\n"
                 + _skill_combined,
             ))
             budget_stats["skills"] = {"chars": len(_skill_combined),
