@@ -3553,6 +3553,7 @@ async function newChat() {
   if (result && result.session_id) {
     currentSessionId = result.session_id;
     clearChat();
+    showInputBox();  // 恢复输入框（onNavNewSession 先 hideAllViews 隐藏了它）
     sessions.unshift({ id: result.session_id, title: 'New Chat' });
     renderSessions();
     renderBusyUI();   // V4B⓪：新会话即空闲态（不继承旧会话忙碌）
