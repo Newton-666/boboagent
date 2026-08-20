@@ -1,6 +1,8 @@
 # Web Design Standard v2
 
-> keywords: web, 网页, 网站, 落地页, 主页, 首页, blog, 博客, HTML, CSS, 前端, 页面, 设计, 布局, UI, 界面, 官网, landing, homepage, 做个, 做一个
+> keywords: web, 网页, 网站, 落地页, 主页, 首页, blog, 博客, HTML, CSS, 前端, 页面, 设计, 布局, UI, 界面, 官网, landing, homepage
+> excludes: 做饭, 决定, 方案, 计划, 文档, 邮件
+> 价值: 用户要网页/前端页面时命中 → 约束先视觉探索+说明书确认再写完整 HTML（日常"做个饭/做个决定"不注入）
 > Bobo 在做任何网页相关任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：

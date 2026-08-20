@@ -1,6 +1,8 @@
 # Git Workflow Standard v1
 
-> keywords: git, GitHub, push, commit, merge, branch, 提交, 合并, 推送, 分支, PR, pull request, 版本, 回退, 回滚, undo, revert, 备份
+> keywords: git, GitHub, push, commit, merge, branch, 提交, 合并, 推送, 分支, PR, pull request, 回退, 回滚, undo, revert
+> excludes: 新版本, 发布了, 更新了什么, 有什么新功能
+> 价值: 用户要做 git 操作（提交/合并/回退/分支）时命中 → 约束提交纪律与回滚安全（"软件新版本"讨论不注入）
 > Bobo 在做任何 Git 操作时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：

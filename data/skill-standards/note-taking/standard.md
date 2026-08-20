@@ -1,8 +1,9 @@
 # Note Taking Standard v1
 
-> keywords: 记下来, 保存, 笔记, 记录, 写入, 追加, Obsidian, 备忘录, 存档, 存一下, 帮我记, 记住这个, save, note, write, append
-> excludes: 代码, bug, 修复, error, 编译, 报错, 崩溃
+> keywords: 记下来, 笔记, 记录, Obsidian, 备忘录, 存一下, 帮我记, 记住这个, save, note, write
+> excludes: 代码, bug, 修复, error, 编译, 报错, 崩溃, 日志, 配置, 文件, 数据, 设置
 > requires: git-workflow
+> 价值: 用户要记录内容到笔记时命中 → 约束先搜后写+append 优先+frontmatter+写后验证（"保存文件/写配置"等非笔记场景不注入）
 > Bobo 在做任何笔记写入/记录任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：

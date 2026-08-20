@@ -1,8 +1,9 @@
 # Research Standard v1
 
-> keywords: 帮我查, 查一下, 搜一下, 调研, 搜索, 研究, 对比, 区别, vs, versus, 找一下, 有没有, search, research, look up, find, what is, how to, 怎么做, 怎么用, 什么意思, 和哪个好, 选哪个
-> excludes: 修, bug, 报错, 崩溃, error, 网页, 设计, 配色
+> keywords: 帮我查, 查一下, 搜一下, 调研, 搜索, 研究, 对比, 区别, vs, versus, search, research, 和哪个好, 选哪个
+> excludes: 修, bug, 报错, 崩溃, error, 网页, 设计, 配色, 有没有人, 有没有时间, 有没有空
 > requires: note-taking
+> 价值: 用户要查资料/调研/对比时命中 → 约束多源交叉验证+标注来源+不编造（日常口语"有没有/找一下"不注入）
 > Bobo 在做任何信息搜集/调研任务时必须遵守本文档。本文件是硬约束，不是建议。
 >
 > **工作流（必须遵守，不可跳过）**：

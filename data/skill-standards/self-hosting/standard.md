@@ -1,6 +1,7 @@
 # Self-Hosting Standard v2（bobo 改 bobo 铁律）
 
 > keywords: BOBO_Project_Backup, boboagent, 自迭代, self-hosting, bobo 源码, bobo 自己, feat/, 改 bobo
+> 价值: 用户要改 bobo 自身源码/自托管迭代时命中 → 约束自托管安全边界与备份纪律（平时不注入）
 > requires: git-workflow
 > 当任务涉及修改 bobo 自身源码（BOBO_Project_Backup 仓库）时必须遵守本文档。本文件是硬约束，不是建议。
 > **适用范围**：仅修改 bobo 自身仓库时生效。操作其他项目的仓库时，git 全量操作（含 merge/push）正常使用，不受本文限制。
