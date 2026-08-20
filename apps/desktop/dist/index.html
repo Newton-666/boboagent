@@ -676,26 +676,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <span class="nav-label">Memory</span>
       <span class="nav-count" id="memory-count" style="margin-left:auto;">0</span>
     </div>
-    <div class="nav-item nav-static" id="nav-session" title="Session">
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><line x1="5" y1="5.5" x2="11" y2="5.5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="10.5" x2="8.5" y2="10.5"/></svg>
-      <span class="nav-label">Session</span>
-    </div>
-    <!-- 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 改为 Memory 式导航项
-         （SVG + 名称 + hover 高亮），点击在右侧主区列出全部 skills（preset/custom）——
-         不再是左侧折叠分区。 -->
+    <!-- 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 导航项 —— 与 Memory
+         同款（SVG + 名称 + hover 高亮），位于 Memory 与 Session 之间；
+         点击在主区域（#main）列出全部 skills。 -->
     <div class="nav-item" id="nav-skills" onclick="onNavSkills()" title="Skills">
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5 H7 L8.5 5.5 H13.5 V12.5 H2.5 Z"/><path d="M5 8 H11 M5 10 H9"/></svg>
       <span class="nav-label">Skills</span>
       <span class="nav-count" id="skills-count" style="margin-left:auto;">0</span>
     </div>
-    <div id="skills-view" style="display:none;flex:1;overflow-y:auto;padding:24px 16px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-        <button id="skills-close" onclick="closeSkillsView()" title="Close skills view (back to chat)"
-          style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:13px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">✕</button>
-        <span style="font-size:13px;font-weight:600;color:var(--text);">Skills</span>
-        <span id="skills-stats" style="font-size:11px;color:var(--text-muted);"></span>
-      </div>
-      <div id="skills-groups"></div>
+    <div class="nav-item nav-static" id="nav-session" title="Session">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><line x1="5" y1="5.5" x2="11" y2="5.5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="10.5" x2="8.5" y2="10.5"/></svg>
+      <span class="nav-label">Session</span>
     </div>
     <!-- Session 固定展开区（不折叠；New session 已提升为导航项，Search 保留）-->
     <div class="section-bd" id="body-session">
@@ -729,6 +720,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       </div>
       <div id="memory-diff" style="margin:0 0 8px;display:none;"></div>
       <div id="memory-groups"></div>
+    </div>
+    <!-- Skills 主面板（票 TICKET-SKILL-PANEL v2：与 Memory 同款独立视图，
+         ✕ 关闭回到 chat；preset/custom 分组 + on/off 开关）-->
+    <div id="skills-view" style="display:none;flex:1;overflow-y:auto;padding:24px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button id="skills-close" onclick="closeSkillsView()" title="Close skills view (back to chat)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:13px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">✕</button>
+        <span style="font-size:13px;font-weight:600;color:var(--text);">Skills</span>
+        <span id="skills-stats" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div id="skills-groups"></div>
     </div>
     <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
     <div id="chat"></div>
