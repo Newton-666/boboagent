@@ -3367,6 +3367,9 @@ on('gateway.ready', async function() {
 
 var streamingId = null;
 var thinkText = '';
+// TICKET-GUI-F19b：推理过程独立缓冲（reasoning.delta 流）——与正文 thinkText 分离，
+// 推理实时滚动显示在思考框；正文到达后思考框转显正文，推理内容 complete 时收进折叠框。
+var reasoningText = '';
 var toolsCalledThisRound = false;
 var thinkBoxEl = null;
 // TICKET-DESK-V2D5：认知状态条 —— 本轮记忆注入条数（memory_injected 回合内增量）+ 本轮工具调用数（tool.start 计数）
@@ -3439,6 +3442,7 @@ function toggleThinkBox(tb) {
 function stopThinking() {
   showStop(false);   // TICKET-D1d ⑤
   setSidBusy(currentSessionId, false); renderBusyUI();   // V4B⓪：中断后立即恢复当前会话空闲态
+  reasoningText = '';   // TICKET-GUI-F19b：中断即弃推理缓冲，防残留进下回合
   if (thinkBoxEl) {
     if (thinkBoxEl._warnTimer) clearTimeout(thinkBoxEl._warnTimer);
     if (thinkBoxEl._killTimer) clearTimeout(thinkBoxEl._killTimer);
@@ -3456,6 +3460,7 @@ on('message.start', function(data) {
   thinkText = '';
   toolsCalledThisRound = false;
   streamingId = null;
+  reasoningText = '';   // TICKET-GUI-F19b：新回合重置推理缓冲
   welcomeEl.style.display = 'none';
   thinkBoxEl = createThinkBox();
 });
@@ -3514,6 +3519,23 @@ on('message.delta', function(data) {
     }
   }
 });
+// TICKET-GUI-F19b：推理过程实时流（reasoning.delta）——模型思考期间思考框实时滚动。
+// 之前桌面端漏监听此事件：模型思考 10-40 秒（deepseek thinking 模式）期间思考框空白，
+// 用户感知"回复变慢"。TUI 端（entry.js recordReasoningDelta）早有此通道，桌面端补齐。
+on('reasoning.delta', function(data) {
+  if (isForeignSession(data)) return;
+  var t = data ? data.text || '' : '';
+  if (!t) return;
+  if (!thinkBoxEl) thinkBoxEl = createThinkBox();
+  reasoningText += t;
+  var txt = thinkBoxEl.querySelector('.think-text');
+  if (txt) {
+    txt.textContent = reasoningText;
+    // TICKET-GUI-F19：与 message.delta 同款滚动锚定（仅底部附近跟随）
+    var nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
+    if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
+  }
+});
 on('message.complete', function(data) {
   if (isForeignSession(data)) return;
   setSidBusy(data ? data.session_id : '', false);   // V4B⓪：清该会话忙碌位
@@ -3529,6 +3551,12 @@ on('message.complete', function(data) {
   var split = splitThinking(t);
   var body = split.body;
   var thinking = split.thinking;
+  // TICKET-GUI-F19b：推理过程独立流（reasoning.delta）——若本轮有推理内容且 final_text
+  // 未含思考段（DeepSeek thinking 模式推理走独立通道），用它作为折叠框内容；否则用剥离段。
+  if (!thinking && reasoningText.trim()) {
+    thinking = reasoningText.trim();
+  }
+  reasoningText = '';   // 消费即清，防串回合
   if (body && body.trim()) {
     if (thinking) {
       // TICKET-GUI-F6（缺陷 1）：思考分段后 thinkBoxEl 可能已被 tool.start 置空，
