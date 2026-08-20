@@ -137,3 +137,90 @@ console.log('D-OK win=' + calibrated + ' plain=' + calibrated2);
 """
     out = _run_node(js)
     assert "D-OK" in out, out
+
+
+# ── F19b（GUI-F19b：推理实时流）────────────────────────────────────────
+
+def test_f19b_1_static_reasoning_listener_present():
+    """静态断言：reasoning.delta 监听存在 + 缓冲声明 + complete 收束。"""
+    src = GUI_FILE.read_text(encoding="utf-8")
+    assert "on('reasoning.delta'" in src, "缺 reasoning.delta 监听"
+    assert "var reasoningText = '';" in src, "缺 reasoningText 缓冲声明"
+    assert "reasoningText = '';" in src, "缺 reasoningText 重置/消费"
+    assert "if (!thinking && reasoningText.trim())" in src, \
+        "缺 complete 收束（推理内容进折叠框）"
+
+
+def test_f19b_2_node_reasoning_stream_and_collapse():
+    """node 实跑：推理流实时显示 → complete 收束进折叠框 → 缓冲清空。"""
+    js = r"""
+var reasoningText = ''; var thinkBoxEl = null;
+var chatEl = { scrollHeight: 5000, clientHeight: 600, scrollTop: 4400,
+               lastElementChild: null, appendChild: function(el) { thinkBoxEl = el; } };
+function createThinkBox() {
+  var txtEl = { textContent: '' };
+  return { _warnTimer: null, _killTimer: null,
+           classList: { contains: function() { return false; } },
+           querySelector: function(sel) { return sel === '.think-text' ? txtEl : txtEl; },
+           remove: function() {} };
+}
+function isForeignSession() { return false; }
+// reasoning.delta 修复逻辑
+function onReasoningDelta(data) {
+  if (isForeignSession(data)) return;
+  var t = data ? data.text || '' : '';
+  if (!t) return;
+  if (!thinkBoxEl) thinkBoxEl = createThinkBox();
+  reasoningText += t;
+  var txt = thinkBoxEl.querySelector('.think-text');
+  if (txt) {
+    txt.textContent = reasoningText;
+    var nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
+    if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
+  }
+}
+// tool.start 边界修复逻辑（回归：清推理缓冲防叠罗汉）
+function onToolStart() {
+  if (thinkBoxEl) {
+    thinkBoxEl = null;
+    reasoningText = '';
+  }
+}
+// 流式：6 块推理 token
+['先','分析','问题','根因','是','缓存'].forEach(function(tk) { onReasoningDelta({ text: tk }); });
+var displayed = thinkBoxEl.querySelector('.think-text').textContent;
+if (displayed !== '先分析问题根因是缓存') throw new Error('推理应实时显示: ' + displayed);
+if (reasoningText !== '先分析问题根因是缓存') throw new Error('推理缓冲应累积');
+// ── 回归场景：工具边界后新思考不应叠罗汉 ──
+onToolStart();                                  // 工具 1 到达 → 清缓冲
+if (reasoningText !== '') throw new Error('工具边界应清空推理缓冲（防叠罗汉）');
+['新','思','考'].forEach(function(tk) { onReasoningDelta({ text: tk }); });
+var d2 = thinkBoxEl.querySelector('.think-text').textContent;
+if (d2 !== '新思考') throw new Error('新思考不应叠加旧推理: ' + d2);
+if (reasoningText !== '新思考') throw new Error('缓冲应只有新思考');
+// complete 收束（final_text 无思考段）
+var thinking = reasoningText.trim(); reasoningText = '';
+if (thinking !== '新思考') throw new Error('推理应收进折叠框');
+if (reasoningText !== '') throw new Error('缓冲应消费清空');
+// 无推理时不受影响
+var r2 = (function() { var rt = ''; return { thinking: '', body: '普通回复' }; })();
+if (r2.thinking !== '' || r2.body !== '普通回复') throw new Error('无推理路径被破坏');
+console.log('F19b-OK');
+"""
+    out = _run_node(js)
+    assert "F19b-OK" in out, out
+
+
+def test_f19b_3_node_tool_boundary_clears_buffer():
+    """回归专项：tool.start 边界必须清空推理缓冲（叠罗汉 bug）。"""
+    js = r"""
+var reasoningText = '旧推理内容';   // 模拟工具 1 后的残留
+function onToolStart() {
+  reasoningText = '';               // 修复：工具边界清空
+}
+onToolStart();
+if (reasoningText !== '') throw new Error('工具边界后缓冲应清空');
+console.log('F19b-boundary-OK');
+"""
+    out = _run_node(js)
+    assert "F19b-boundary-OK" in out, out

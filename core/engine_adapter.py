@@ -211,6 +211,15 @@ def run_engine(
                     "text": data.get("text", ""),
                     "session_id": sid,
                 })
+            elif event_type == "reasoning.delta":
+                # TICKET-GUI-F19b：推理过程独立通道转发（桌面端实时滚动思考框）。
+                # 此前漏此分支 → reasoning 事件在 gateway 层被丢弃，桌面端思考框
+                # 空白直到正文到达（用户感知"回复变慢 10 秒"）。TUI 端 entry.js
+                # 已有 recordReasoningDelta 消费，此处补桌面端转发，两端口径一致。
+                emit("reasoning.delta", sid, {
+                    "text": data.get("text", ""),
+                    "session_id": sid,
+                })
             elif event_type == "status.update":
                 emit("status.update", sid, {
                     "kind": data.get("kind", ""),
