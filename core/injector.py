@@ -794,6 +794,18 @@ class PromptInjector:
             budget_stats["skills"] = {"chars": len(_skill_combined),
                                       "truncated": False}
 
+            # ── 票 TICKET-SKILL-ACTIVE-2：skill 激活事件（COST-2 注入块内追加）──
+            # 标准命中注入时 emit 一次（每轮一条防刷屏；同名标准不重复——天然
+            # 满足）。payload {skill_name}= 标准首行标题（去 # 号）。前端据此
+            # 渲染"Skill 工具卡"，让用户看到 bobo 正在按 XX 标准工作。
+            try:
+                from core.event_bus import event_bus as _ebus2
+                _first_line = skill_stds[0].strip().splitlines()[0] if skill_stds else ""
+                _skill_name = _first_line.lstrip("#").strip() or "Skill"
+                _ebus2.write("skill.activate", {"skill_name": _skill_name})
+            except Exception:
+                logger.debug("skill.activate emit 失败（静默降级）")
+
         # 3) 统一注入 + 票 COST-2：动态块附加到当前轮 user 消息内容前部
         #    （前缀稳定化终极方案）。实弹暴露：动态段若以 system 消息插在 user
         #    消息之前，锚点逐轮漂移（R1 的 T 块在 R1u 前、R2 的 T 块在 R2u 前）
@@ -893,15 +905,17 @@ class PromptInjector:
         # （见上方 COST-2 注释），补字段必须浅拷贝 dict，绝不 mutate 原 dict
         # （否则存档/恢复带 reasoning_content，GUI-F8 折叠框读取路径要复查）。
         # 判断依据是"工具轮"而非"有无思考"：带 tool_calls 的 assistant 一律补
-        # （有 thinking 用 thinking，压缩摘要无 thinking 则补空串——DeepSeek
-        # 是否接受空串由实弹定案，见 TICKET-REASONING-ECHO 报告）；
+        # （有 thinking 用 thinking，无 thinking 则跳过不补——2026-08-20 实弹
+        # 定案：DeepSeek 拒绝 reasoning_content 空串（HTTP 400），接受完全跳过
+        # （不带该字段）。TICKET-REASONING-ECHO 报告第 69-70 行悬案实弹闭合）；
         # 纯文本 assistant（编辑冲突注入等，无 tool_calls）不补。
         _echoed = []
         for _m in messages:
             if isinstance(_m, dict) and _m.get("role") == "assistant" \
                     and (_m.get("tool_calls") or _m.get("thinking")):
                 _m2 = dict(_m)
-                _m2["reasoning_content"] = _m.get("thinking") or ""
+                if _m.get("thinking"):
+                    _m2["reasoning_content"] = _m["thinking"]
                 _echoed.append(_m2)
             else:
                 _echoed.append(_m)

@@ -158,8 +158,9 @@ def test_echo_survives_orphan_clean():
 
 def test_empty_thinking_echoed_as_empty_string():
     """压缩摘要消息结构：assistant 带 tool_calls 但无 thinking（归档剔除字段）。
-    验证空串回传路径（DeepSeek 是否接受 reasoning_content:"" 由实弹定案；
-    此处锁定行为：无 thinking 字段不补，thinking 为空串补空串）。"""
+    实弹定案（2026-08-20）：DeepSeek 拒绝 reasoning_content 空串（HTTP 400
+    'reasoning_content must be passed back'），接受完全跳过（不带该字段）。
+    此处锁定行为：thinking 空串 → 不补 reasoning_content 字段。"""
     history = [
         {"role": "user", "content": "第一轮"},
         {"role": "assistant", "content": None,
@@ -172,15 +173,15 @@ def test_empty_thinking_echoed_as_empty_string():
     msgs, _ = _build(history)
     ta = [m for m in msgs
           if m.get("role") == "assistant" and m.get("tool_calls")][0]
-    assert ta.get("reasoning_content") == "", "thinking 空串 → reasoning_content 空串"
+    assert "reasoning_content" not in ta, "thinking 空串 → 跳过不补（实弹定案）"
 
 
-# ── 验收：压缩摘要结构（带 tool_calls、无 thinking 字段）→ 补空串 ────
+# ── 验收：压缩摘要结构（带 tool_calls、无 thinking 字段）→ 跳过 ────
 
 def test_compressed_summary_tool_calls_echoed_empty():
     """压缩归档剔除 thinking 字段（context.py 只保留 role/content/tool_calls
-    等），摘要 assistant 带 tool_calls 但无 thinking → 回传空串（DeepSeek
-    是否接受由实弹定案；测试锁定"工具轮一律补"的发送侧行为）。"""
+    等），摘要 assistant 带 tool_calls 但无 thinking → 跳过不补（2026-08-20
+    实弹定案：空串 400、跳过被接受）。"""
     history = [
         {"role": "user", "content": "第一轮"},
         {"role": "assistant", "content": "（压缩摘要）前段完成工具调用",
@@ -193,4 +194,4 @@ def test_compressed_summary_tool_calls_echoed_empty():
     ta = [m for m in msgs
           if m.get("role") == "assistant" and m.get("tool_calls")][0]
     assert "thinking" not in ta, "摘要消息本无 thinking 字段"
-    assert ta.get("reasoning_content") == "", "工具轮无 thinking → 补空串"
+    assert "reasoning_content" not in ta, "工具轮无 thinking → 跳过不补（实弹定案）"
