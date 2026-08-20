@@ -44,3 +44,30 @@
 git checkout rollback/pre-scroll-fix-20260819 -- apps/desktop/dist/index.html
 # 或 git revert 028b12eb
 ```
+
+---
+
+## 追加：GUI-F19b 推理过程实时流（2026-08-19 补票）
+
+### 问题（owner 实弹）
+发消息后思考框 10 秒空白才输出——感知回复明显变慢。
+
+### 根因
+deepseek-chat thinking 模式下模型先思考 10-40 秒（events 实测间隔
+15.2s/11.6s/24.6s/41.9s），推理过程后端经 `reasoning.delta` 实时推送
+（engine.py:1533 `_on_reasoning`），TUI 端早已监听（entry.js:58993
+`recordReasoningDelta`），**但桌面端漏监听该事件** → 推理内容全被吞，
+思考框空白直到正文（message.delta）到达。
+
+### 修法（提交 38df87a6，分支 feat/reasoning-delta-desktop）
+1. 声明 `reasoningText` 独立缓冲（与正文 thinkText 分离）
+2. `message.start` 重置缓冲
+3. 新增 `on('reasoning.delta')`：推理实时滚动显示思考框（含 F19 同款滚动锚定）
+4. `message.complete` 收束：final_text 无思考段时用 reasoningText 折叠；
+   `stopThinking` 中断即清缓冲防残留
+
+### 验证
+- F19 专项 6/6（新增 F19b 静态断言 + node 实跑 12 项行为断言）
+- 全量 pytest 2797 passed（较上轮 +2 为新增用例；6 failed 为基线已有，零回归）
+- node --check 语法通过
+- 回滚标签：`rollback/pre-reasoning-fix-20260819`（7c16bb2f）
