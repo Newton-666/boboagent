@@ -530,7 +530,8 @@ def test_tel_8_zero_interference():
         # 票 P0-2 特批：engine.py _run_sedimentation 追加信号判定 hook
         # （通道 A，只记录不动作，写 data/logs/signal_log.jsonl），diff 必须含 P0-2 标记
         if ln in ("core/context.py", "core/engine.py",
-                  "core/profile_writer.py", "core/signal_detector.py"):  # PROFILE 系列
+                  "core/profile_writer.py", "core/signal_detector.py",
+                  "core/skill_loader.py"):  # PROFILE + SKILL 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
                     or "P0-2" in r7.stdout), \
@@ -576,7 +577,7 @@ def test_tel_8_zero_interference():
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory 面板
         # RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
-        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"):
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py", "bobo_tui_gateway/handlers/skills.py"):
             r_p01 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
@@ -629,7 +630,7 @@ def test_tel_8_zero_interference():
             assert "VSC-2B" in r_v2b2.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory RPC）
-        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"):
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py", "bobo_tui_gateway/handlers/skills.py"):
             r_p01b = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01b.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
@@ -639,9 +640,10 @@ def test_tel_8_zero_interference():
             continue  # 探针运行产物目录（截图/评估输出，非代码；.gitignore 强制跟踪）
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
             continue
-        # 票 PROFILE 系列特批：core/profile_writer.py + core/signal_detector.py
-        # （USER.md 引擎写入闸门 + 行为信号两级检测），diff 必须含 COST-3 标记
-        if ln in ("core/profile_writer.py", "core/signal_detector.py"):
+        # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
+        # + core/skill_loader.py（USER.md 引擎写入闸门 + 行为信号两级检测 + skill
+        # 治理开关），diff 必须含 COST-3 标记
+        if ln in ("core/profile_writer.py", "core/signal_detector.py", "core/skill_loader.py"):
             r_prof = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "COST-3" in r_prof.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
             continue

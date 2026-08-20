@@ -226,7 +226,8 @@ def test_v4b_5_engine_gateway_zero_diff():
     # COST-3（2026-08-16）特批：core/context.py + core/engine.py（工作锚点属性化 +
     # 工具集会话内全量稳定），diff 必须含 COST-3 标记
     COST3_ALLOWED = {"core/context.py", "core/engine.py",
-                     "core/profile_writer.py", "core/signal_detector.py"}  # PROFILE 系列
+                     "core/profile_writer.py", "core/signal_detector.py",
+                     "core/skill_loader.py"}  # PROFILE + SKILL 系列
     # DESK-P1（2026-08-17）特批：core/engine_adapter.py + core/tool_runner.py（会话
     # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
     # cwd），diff 必须含 DESK-P1 标记
@@ -239,7 +240,7 @@ def test_v4b_5_engine_gateway_zero_diff():
     VSC2B_ALLOWED = {"bobo_tui_gateway/handlers/sessions.py"}
     # 票 P0-1（2026-08-19）特批：bobo_tui_gateway/server.py + handlers/memory.py
     #（Memory 面板 RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
-    P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"}
+    P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py", "bobo_tui_gateway/handlers/skills.py"}
     unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):

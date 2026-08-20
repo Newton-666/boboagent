@@ -118,9 +118,9 @@ def shutdown_sessions():
 # rollback/save，设置页 Profile 仪表盘；handler 注册模式沿用 P0-1 Memory 面板的
 # ok/err 约定，守卫白名单已登记 desk_v4/v4b/tel）。
 
-from bobo_tui_gateway.handlers import sessions, configs, models, prompts, tools, misc, memory, profile
+from bobo_tui_gateway.handlers import sessions, configs, models, prompts, tools, misc, memory, profile, skills
 
-for mod in (sessions, configs, models, prompts, tools, misc, memory, profile):
+for mod in (sessions, configs, models, prompts, tools, misc, memory, profile, skills):
     if mod is configs:
         mod.register(method, _engine_cache)
     else:

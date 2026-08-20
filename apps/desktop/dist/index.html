@@ -637,6 +637,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .profile-history-row.src-user { background:rgba(232,145,58,0.12); border-radius:4px; padding-left:8px; }
 .profile-diff-user { color:#8a5a00; font-weight:600; }
 .profile-edit-wrap textarea:focus { box-shadow:0 0 0 1px rgba(232,145,58,0.4); border-radius:4px; }
+/* ── 票 TICKET-SKILL-PANEL：Skills 分区（追加在 P0-1 基线 CSS 之后，纯新增）── */
+#body-skill.closed { display:none; }
+.skill-group { padding:2px 8px 6px; }
+.skill-group-title { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.4px; padding:4px 2px 2px; }
+.skill-empty { font-size:12px; color:var(--text-muted); padding:4px 8px; line-height:1.5; }
+.skill-row { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:3px 8px; border-radius:4px; font-size:12px; color:var(--text2); }
+.skill-row:hover { background:var(--hover); }
+.skill-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.skill-toggle { background:var(--bg); border:1px solid var(--border); border-radius:999px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--text-muted); min-width:36px; text-align:center; font-family:inherit; }
+.skill-toggle:hover { border-color:var(--text3); }
+.skill-toggle.on { background:var(--green); border-color:var(--green); color:#fff; }
 </style>
 <!-- TICKET-GUI-F16: KaTeX 样式（vendor 本地，数学公式排版；字体相对路径 fonts/） -->
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -673,6 +684,15 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
     </div>
     <div class="section-bd" id="body-plugin">
       <div id="plugin-list"></div>
+    </div>
+    <!-- TICKET-SKILL-PANEL：Skills 分区（治理先行 A 票——preset 可关可开，
+         custom 为 B 票自动沉淀位，空状态给引导文案；与 Plugin 同款折叠）-->
+    <div class="section-hd" onclick="toggleSection('skill')">
+      <span class="section-arrow" id="arr-skill">▼</span>
+      <span class="section-label">Skills</span>
+    </div>
+    <div class="section-bd" id="body-skill">
+      <div id="skill-list"></div>
     </div>
     <div id="sidebar-footer"><span id="status-mode"></span><button id="widget-toggle" title="Live widget (read-only)">Widget</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
   </div>
@@ -2608,6 +2628,65 @@ async function loadSessions() {
   }
   // 票 P0-1：连接就绪后顺带加载 Memory 面板数据（填充 count + 首次快照）
   loadMemoryPanel();
+  // 票 TICKET-SKILL-PANEL：连接就绪后顺带加载 Skills 面板数据（治理开关）
+  loadSkills();
+}
+// TICKET-SKILL-PANEL：Skills 分区渲染（preset/custom 分组 + on/off 开关）。
+// 数据来自 skills.list RPC：{preset: [{name, enabled}], custom: [{name, enabled}]}。
+// 开关点击 → skills.toggle → 重拉刷新（后端下一轮注入即生效，见 skill_loader）。
+function renderSkills(data) {
+  var el = document.getElementById('skill-list');
+  if (!el) return;
+  el.innerHTML = '';
+  if (!data) return;
+  var groups = [['Preset', data.preset || []], ['Custom', data.custom || []]];
+  for (var gi = 0; gi < groups.length; gi++) {
+    var gname = groups[gi][0], items = groups[gi][1];
+    var g = document.createElement('div');
+    g.className = 'skill-group';
+    var gt = document.createElement('div');
+    gt.className = 'skill-group-title';
+    gt.textContent = gname;
+    g.appendChild(gt);
+    if (!items.length) {
+      var empty = document.createElement('div');
+      empty.className = 'skill-empty';
+      empty.textContent = (gname === 'Custom')
+        ? 'bobo \u81ea\u52a8\u6c89\u6dc0\u7684 skill \u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc'
+        : '\u6682\u65e0\u9884\u8bbe skill';
+      g.appendChild(empty);
+      el.appendChild(g);
+      continue;
+    }
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var row = document.createElement('div');
+      row.className = 'skill-row';
+      var name = document.createElement('span');
+      name.className = 'skill-name';
+      name.textContent = it.name;
+      name.title = it.name;
+      row.appendChild(name);
+      var tg = document.createElement('button');
+      tg.className = 'skill-toggle' + (it.enabled ? ' on' : '');
+      tg.textContent = it.enabled ? 'on' : 'off';
+      tg.setAttribute('data-skill', it.name);
+      tg.onclick = (function(skillName, cur) {
+        return function() {
+          call('skills.toggle', { skill_name: skillName, enabled: !cur }).then(function() {
+            loadSkills();
+          });
+        };
+      })(it.name, it.enabled);
+      row.appendChild(tg);
+      g.appendChild(row);
+    }
+    el.appendChild(g);
+  }
+}
+async function loadSkills() {
+  var result = await call('skills.list');
+  if (result && (result.preset || result.custom)) renderSkills(result);
 }
 function startRename(s, span) {
   var input = document.createElement('input');

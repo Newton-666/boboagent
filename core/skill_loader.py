@@ -14,8 +14,31 @@
 import logging
 import os as _os
 import re as _sre
+import json
 
 logger = logging.getLogger(__name__)
+
+# ── 票 TICKET-SKILL-PANEL：skill 治理开关（COST-2 注入链白名单内追加，
+# COST-3 特批标记）──
+# data/skills/enabled.json：{"<skill 目录名>": true/false}，默认 true。
+# 关掉的 skill 不注入（用户可关、可开，治理先行——自动沉淀 B 票的 skill
+# 一出生就在治理之下）。文件缺失/损坏 → 全 true（不破坏现有注入）。
+_ENABLED_FILE = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "data", "skills", "enabled.json",
+)
+
+
+def _load_enabled() -> dict:
+    """读 enabled.json → {skill_name: bool}；缺失/损坏返回 {}（= 全默认开）。"""
+    try:
+        with open(_ENABLED_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            return {k: bool(v) for k, v in raw.items()}
+    except (OSError, ValueError):
+        pass
+    return {}
 
 
 class SkillLoader:
@@ -86,6 +109,12 @@ class SkillLoader:
                     if req_name not in top_set and req_name in entries:
                         top_set.add(req_name)
                         top_names.append(req_name)
+
+            # ── 票 TICKET-SKILL-PANEL：治理开关——关掉的 skill 不注入（含
+            # requires 连带拉入的：用户关了就是关了，一视同仁）──
+            enabled = _load_enabled()
+            if enabled:
+                top_names = [n for n in top_names if enabled.get(n, True)]
 
             return [entries[name]["content"] for name in top_names]
         except Exception:
