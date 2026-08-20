@@ -648,6 +648,14 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .skill-toggle { background:var(--bg); border:1px solid var(--border); border-radius:999px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--text-muted); min-width:36px; text-align:center; font-family:inherit; }
 .skill-toggle:hover { border-color:var(--text3); }
 .skill-toggle.on { background:var(--green); border-color:var(--green); color:#fff; }
+/* 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 主面板样式 —— 与 Memory
+ * 面板同款（13px 正文 / 12px label / 分组标签），纯新增 class，零改动既有规则。 */
+.skills-sec-label { font-size:12px; font-weight:600; color:var(--text-muted); margin:14px 0 6px; }
+.skills-list { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg2); }
+.skills-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; font-size:13px; color:var(--text2); border-bottom:1px solid var(--border); }
+.skills-row:last-child { border-bottom:none; }
+.skills-row:hover { background:var(--hover); }
+.skills-name { word-break:break-all; }
 </style>
 <!-- TICKET-GUI-F16: KaTeX 样式（vendor 本地，数学公式排版；字体相对路径 fonts/） -->
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -672,6 +680,23 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><line x1="5" y1="5.5" x2="11" y2="5.5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="10.5" x2="8.5" y2="10.5"/></svg>
       <span class="nav-label">Session</span>
     </div>
+    <!-- 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 改为 Memory 式导航项
+         （SVG + 名称 + hover 高亮），点击在右侧主区列出全部 skills（preset/custom）——
+         不再是左侧折叠分区。 -->
+    <div class="nav-item" id="nav-skills" onclick="onNavSkills()" title="Skills">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5 H7 L8.5 5.5 H13.5 V12.5 H2.5 Z"/><path d="M5 8 H11 M5 10 H9"/></svg>
+      <span class="nav-label">Skills</span>
+      <span class="nav-count" id="skills-count" style="margin-left:auto;">0</span>
+    </div>
+    <div id="skills-view" style="display:none;flex:1;overflow-y:auto;padding:24px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button id="skills-close" onclick="closeSkillsView()" title="Close skills view (back to chat)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:13px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">✕</button>
+        <span style="font-size:13px;font-weight:600;color:var(--text);">Skills</span>
+        <span id="skills-stats" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div id="skills-groups"></div>
+    </div>
     <!-- Session 固定展开区（不折叠；New session 已提升为导航项，Search 保留）-->
     <div class="section-bd" id="body-session">
       <div id="sidebar-header"><input id="session-search" type="text" placeholder="Search..." style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;" /></div>
@@ -687,13 +712,6 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
     </div>
     <!-- TICKET-SKILL-PANEL：Skills 分区（治理先行 A 票——preset 可关可开，
          custom 为 B 票自动沉淀位，空状态给引导文案；与 Plugin 同款折叠）-->
-    <div class="section-hd" onclick="toggleSection('skill')">
-      <span class="section-arrow" id="arr-skill">▼</span>
-      <span class="section-label">Skills</span>
-    </div>
-    <div class="section-bd" id="body-skill">
-      <div id="skill-list"></div>
-    </div>
     <div id="sidebar-footer"><span id="status-mode"></span><button id="widget-toggle" title="Live widget (read-only)">Widget</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
   </div>
   <div id="main">
@@ -2153,7 +2171,7 @@ function toggleSection(name) {
 
 // ── 票 P0-1 改版：导航项（New session / Memory / Session）+ Memory 主面板视图 ──
 function setNavActive(id) {
-  ['nav-new-session', 'nav-memory', 'nav-session'].forEach(function(n) {
+  ['nav-new-session', 'nav-memory', 'nav-session', 'nav-skills'].forEach(function(n) {
     var el = document.getElementById(n);
     if (el) el.classList.toggle('active', el.id === id);
   });
@@ -2188,6 +2206,83 @@ function onNavMemory() {
 
 function closeMemoryView() {
   showMainChat();
+}
+
+// ── 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 主面板视图 ──
+// 与 Memory 同款：左侧栏导航项（SVG+名称+hover 高亮）→ 点击主区列出全部
+// skills（preset/custom 分组 + on/off 开关）。skills.list/toggle RPC 后端已有。
+function onNavSkills() {
+  var sv = document.getElementById('skills-view');
+  if (!sv) return;
+  var w = document.getElementById('welcome');
+  var c = document.getElementById('chat');
+  if (w) w.style.display = 'none';
+  if (c) c.style.display = 'none';
+  sv.style.display = 'block';
+  setNavActive('nav-skills');
+  loadSkillsPanel();
+}
+
+function closeSkillsView() {
+  showMainChat();
+}
+
+function loadSkillsPanel() {
+  call('skills.list', {}).then(function(r) {
+    var g = document.getElementById('skills-groups');
+    if (!g) return;
+    if (!r || (!r.preset && !r.custom)) {
+      g.innerHTML = '<div class="mem-empty">Load failed — skills.list unavailable.</div>';
+      return;
+    }
+    var preset = r.preset || [], custom = r.custom || [];
+    var total = preset.length + custom.length;
+    var st = document.getElementById('skills-stats');
+    if (st) st.textContent = total + ' skills';
+    var cnt = document.getElementById('skills-count');
+    if (cnt) cnt.textContent = total;
+    var html = '';
+    // Preset 组
+    html += '<div class="skills-sec-label">Preset</div>';
+    if (preset.length === 0) {
+      html += '<div class="mem-empty">No preset skills.</div>';
+    } else {
+      html += '<div class="skills-list">';
+      preset.forEach(function(it) {
+        html += renderSkillRow(it);
+      });
+      html += '</div>';
+    }
+    // Custom 组（B 票自动沉淀后出现）
+    html += '<div class="skills-sec-label">Custom</div>';
+    if (custom.length === 0) {
+      html += '<div class="mem-empty">Auto-generated skills will appear here when bobo learns a repeatable workflow.</div>';
+    } else {
+      html += '<div class="skills-list">';
+      custom.forEach(function(it) {
+        html += renderSkillRow(it);
+      });
+      html += '</div>';
+    }
+    g.innerHTML = html;
+  });
+}
+
+function renderSkillRow(it) {
+  var name = String(it.name || '');
+  var on = !!it.enabled;
+  return '<div class="skills-row">' +
+    '<span class="skills-name">' + esc(name) + '</span>' +
+    '<button class="skill-toggle' + (on ? ' on' : '') + '" ' +
+    'onclick="toggleSkill(this, \'' + name.replace(/'/g, "\\'") + '\')">' +
+    (on ? 'on' : 'off') + '</button></div>';
+}
+
+function toggleSkill(btn, name) {
+  var cur = btn.classList.contains('on');
+  call('skills.toggle', { skill_name: name, enabled: !cur }).then(function() {
+    loadSkillsPanel();  // 刷新（后端下一轮注入即生效）
+  });
 }
 
 // ── 票 P0-1：Memory 面板（六类分组 + diff 增删 + 手动编辑）────────────────
@@ -2628,65 +2723,8 @@ async function loadSessions() {
   }
   // 票 P0-1：连接就绪后顺带加载 Memory 面板数据（填充 count + 首次快照）
   loadMemoryPanel();
-  // 票 TICKET-SKILL-PANEL：连接就绪后顺带加载 Skills 面板数据（治理开关）
-  loadSkills();
-}
-// TICKET-SKILL-PANEL：Skills 分区渲染（preset/custom 分组 + on/off 开关）。
-// 数据来自 skills.list RPC：{preset: [{name, enabled}], custom: [{name, enabled}]}。
-// 开关点击 → skills.toggle → 重拉刷新（后端下一轮注入即生效，见 skill_loader）。
-function renderSkills(data) {
-  var el = document.getElementById('skill-list');
-  if (!el) return;
-  el.innerHTML = '';
-  if (!data) return;
-  var groups = [['Preset', data.preset || []], ['Custom', data.custom || []]];
-  for (var gi = 0; gi < groups.length; gi++) {
-    var gname = groups[gi][0], items = groups[gi][1];
-    var g = document.createElement('div');
-    g.className = 'skill-group';
-    var gt = document.createElement('div');
-    gt.className = 'skill-group-title';
-    gt.textContent = gname;
-    g.appendChild(gt);
-    if (!items.length) {
-      var empty = document.createElement('div');
-      empty.className = 'skill-empty';
-      empty.textContent = (gname === 'Custom')
-        ? 'bobo \u81ea\u52a8\u6c89\u6dc0\u7684 skill \u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc'
-        : '\u6682\u65e0\u9884\u8bbe skill';
-      g.appendChild(empty);
-      el.appendChild(g);
-      continue;
-    }
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i];
-      var row = document.createElement('div');
-      row.className = 'skill-row';
-      var name = document.createElement('span');
-      name.className = 'skill-name';
-      name.textContent = it.name;
-      name.title = it.name;
-      row.appendChild(name);
-      var tg = document.createElement('button');
-      tg.className = 'skill-toggle' + (it.enabled ? ' on' : '');
-      tg.textContent = it.enabled ? 'on' : 'off';
-      tg.setAttribute('data-skill', it.name);
-      tg.onclick = (function(skillName, cur) {
-        return function() {
-          call('skills.toggle', { skill_name: skillName, enabled: !cur }).then(function() {
-            loadSkills();
-          });
-        };
-      })(it.name, it.enabled);
-      row.appendChild(tg);
-      g.appendChild(row);
-    }
-    el.appendChild(g);
-  }
-}
-async function loadSkills() {
-  var result = await call('skills.list');
-  if (result && (result.preset || result.custom)) renderSkills(result);
+  // 票 TICKET-SKILL-PANEL v2：连接就绪后加载 Skills 计数（填充左侧栏 badge）
+  loadSkillsPanel();
 }
 function startRename(s, span) {
   var input = document.createElement('input');

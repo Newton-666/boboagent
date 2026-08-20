@@ -108,126 +108,81 @@ def test_b3b_enabled_file_does_not_break_returns(tmp_path):
         sl._ENABLED_FILE = real
 
 
-# ── 前端静态测试 ─────────────────────────────────────────────────────
+# ── 前端静态测试（v2：Memory 式导航项 + 主面板）────────────────────
 
 def test_f1_static_sidebar_section():
     src = GUI_FILE.read_text(encoding="utf-8")
-    # 分区 HTML：折叠头 + 内容体 + list 容器
-    assert "toggleSection('skill')" in src, "Skills 分区折叠头缺失"
-    assert 'id="arr-skill"' in src, "缺折叠箭头 id"
-    assert 'id="body-skill"' in src, "缺分区内容体"
-    assert 'id="skill-list"' in src, "缺 skill-list 容器"
+    # v2：左侧栏 nav-item（SVG + 名称 + hover 高亮，同 Memory 模式）
+    assert 'id="nav-skills"' in src, "缺 nav-skills 导航项"
+    assert "onNavSkills()" in src, "缺 onNavSkills 点击处理"
+    assert 'class="nav-label">Skills</span>' in src, "缺 Skills 名称"
+    # v2：主面板视图（同 Memory 的 memory-view 模式）
+    assert 'id="skills-view"' in src, "缺 skills-view 主面板"
+    assert 'id="skills-groups"' in src, "缺 skills-groups 容器"
+    assert 'id="skills-stats"' in src, "缺 skills-stats"
     assert "TICKET-SKILL-PANEL" in src, "缺票标记"
-    # 渲染函数存在
-    for fn in ("renderSkills", "loadSkills"):
-        assert "function " + fn in src or "async function " + fn in src, f"缺 {fn}"
+    # 渲染函数存在（v2 版）
+    for fn in ("loadSkillsPanel", "renderSkillRow", "toggleSkill", "closeSkillsView"):
+        assert "function " + fn in src, f"缺 {fn}"
     # toggle 调用接线
     assert "skills.toggle" in src and "skills.list" in src, "缺 RPC 调用"
-    # CSS 纯新增（行/开关/空状态/分组标题）
-    for cls in (".skill-row", ".skill-toggle", ".skill-toggle.on",
-                ".skill-empty", ".skill-group-title", "#body-skill.closed"):
+    # setNavActive 包含 nav-skills
+    assert "'nav-skills'" in src, "setNavActive 应含 nav-skills"
+    # CSS 纯新增（主面板行/开关/分组标签）
+    for cls in (".skills-row", ".skill-toggle", ".skill-toggle.on",
+                ".skills-sec-label", ".skills-list"):
         assert cls in src, f"缺 CSS: {cls}"
-    # 空状态文案（B 票引导；I18n 铁律 → \u 转义存储，运行时解析为中文）
-    assert "\\u81ea\\u52a8\\u6c89\\u6dc0" in src, "缺 custom 空状态文案（\\u 转义）"
-    assert "\\u6682\\u65e0\\u9884\\u8bbe" in src, "缺 preset 空状态文案（\\u 转义）"
-    # 解码后等于中文原文（防转义写错）
-    assert "bobo 自动沉淀的 skill 会出现在这里" == (
-        "bobo \u81ea\u52a8\u6c89\u6dc0\u7684 skill \u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc"
-    ), "转义与中文不一致"
+    # 空状态文案（Custom 引导；英文——v2 主面板用英文保持 I18n 合规）
+    assert "Auto-generated skills will appear here" in src, "缺 custom 空状态文案"
 
 
-# ── 前端 node 桩测试 ─────────────────────────────────────────────────
+# ── 前端 node 桩测试（v2：renderSkillRow + toggleSkill）────────────────
 
 def _extract_render_skills():
-    """提取 renderSkills 函数源码（用于 node 桩实跑）。"""
+    """提取 renderSkillRow 函数源码（用于 node 桩实跑）。"""
     src = extract_main_js()
-    return extract_func(src, "renderSkills")
-
-
-def _js_make_el_stub():
-    """JS 版最小 DOM 元素桩（node 无 DOM；支持 renderSkills 的最小操作集）。"""
-    return r"""
-    function makeEl(tag) {
-        return { tagName: tag.toUpperCase(), className: '', textContent: '',
-            dataset: {}, children: [], innerHTML: '', style: {},
-            setAttribute: function(k, v) { this.dataset[k] = v; },
-            appendChild: function(c) { this.children.push(c); c.parentNode = this; },
-            set innerHTML(v) { this.children = []; }
-        };
-    }
-"""
+    return extract_func(src, "renderSkillRow")
 
 
 def test_f2_node_render_groups():
-    """node 桩：renderSkills 渲染 preset/custom 分组 + on/off 开关 + 空状态。"""
+    """node 桩：renderSkillRow 渲染单行（名称 + on/off 开关 + class）。"""
     fn = _extract_render_skills()
     js = f"""
-    var chatEl = {{ children: [] }};
-    {_js_make_el_stub()}
-    var skillListEl = makeEl('div');
-    var document = {{ getElementById: function(id) {{
-        if (id === 'skill-list') return skillListEl;
-        return null;
-    }}, createElement: makeEl }};
-    function call(m, p) {{ return Promise.resolve({{}}); }}
-    function loadSkills() {{}}
+    function esc(s) {{ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }}
+    function toggleSkill() {{}}
     {fn}
-    var data = {{
-        preset: [{{ name: 'code-fix', enabled: true }}, {{ name: 'git-workflow', enabled: false }}],
-        custom: []
-    }};
-    renderSkills(data);
-    var html = JSON.stringify(skillListEl.children.map(function(g) {{
-        return {{ cls: g.className, title: (g.children[0]||{{}}).textContent,
-            rows: (g.children.slice(1)||[]).map(function(r) {{
-                return {{ cls: r.className, name: (r.children[0]||{{}}).textContent,
-                    tg: (r.children[1]||{{}}).textContent,
-                    tgCls: (r.children[1]||{{}}).className,
-                    dataSkill: (r.children[1]||{{}}).dataset ? (r.children[1]||{{}}).dataset['data-skill'] : null }};
-            }}),
-            empty: (g.children[1]||{{}}).textContent }};
-    }}));
-    var groups = JSON.parse(html);
-    if (groups.length !== 2) throw new Error('应有两个分组: ' + groups.length);
-    if (groups[0].title !== 'Preset') throw new Error('第一组应为 Preset');
-    if (groups[1].title !== 'Custom') throw new Error('第二组应为 Custom');
-    var rows = groups[0].rows;
-    if (rows.length !== 2) throw new Error('preset 应有 2 行');
-    if (rows[0].name !== 'code-fix' || rows[0].tg !== 'on') throw new Error('code-fix 应 on');
-    if (rows[0].tgCls.indexOf('on') === -1) throw new Error('on 态缺 .on class');
-    if (rows[1].name !== 'git-workflow' || rows[1].tg !== 'off') throw new Error('git-workflow 应 off');
-    if (rows[1].tgCls.indexOf('on') !== -1) throw new Error('off 态不应有 .on class');
-    if (groups[1].empty !== 'bobo 自动沉淀的 skill 会出现在这里')
-        throw new Error('custom 空状态文案错误: ' + groups[1].empty);
-    console.log('F2-OK groups=' + groups.length + ' rows=' + rows.length);
+    var rowOn = renderSkillRow({{ name: 'code-fix', enabled: true }});
+    var rowOff = renderSkillRow({{ name: 'git-workflow', enabled: false }});
+    if (rowOn.indexOf('code-fix') === -1) throw new Error('on 行缺名称');
+    if (rowOn.indexOf('skill-toggle on') === -1) throw new Error('on 行缺 .on class');
+    if (rowOn.indexOf('>on<') === -1) throw new Error('on 行按钮应为 on');
+    if (rowOff.indexOf('git-workflow') === -1) throw new Error('off 行缺名称');
+    if (rowOff.indexOf('skill-toggle') === -1) throw new Error('off 行缺 toggle class');
+    if (rowOff.indexOf('skill-toggle on') !== -1) throw new Error('off 行不应有 .on');
+    if (rowOff.indexOf('>off<') === -1) throw new Error('off 行按钮应为 off');
+    console.log('F2-OK rowOn=' + rowOn.length + ' rowOff=' + rowOff.length);
     """
     out = run_node(js)
     assert "F2-OK" in out, f"node 桩渲染失败: {out}"
 
 
 def test_f2b_node_toggle_calls_rpc():
-    """node 桩：开关点击调用 skills.toggle（enabled 取反）+ 刷新。"""
-    fn = _extract_render_skills()
+    """node 桩：toggleSkill 点击调用 skills.toggle（enabled 取反）。"""
+    src = extract_main_js()
+    fn = extract_func(src, "toggleSkill")
     js = f"""
-    var chatEl = {{ children: [] }};
-    {_js_make_el_stub()}
-    var skillListEl = makeEl('div');
-    var document = {{ getElementById: function(id) {{
-        if (id === 'skill-list') return skillListEl;
-        return null;
-    }}, createElement: makeEl }};
     var calls = [];
     function call(m, p) {{ calls.push({{ m: m, p: p }}); return Promise.resolve({{}}); }}
-    var refreshCount = 0;
-    function loadSkills() {{ refreshCount++; }}
+    function loadSkillsPanel() {{}}
     {fn}
-    renderSkills({{ preset: [{{ name: 'code-fix', enabled: true }}], custom: [] }});
-    var btn = skillListEl.children[0].children[1].children[1];
-    btn.onclick();
+    // 模拟 on 态按钮（class 含 'on'）→ toggle 应传 enabled=false
+    var btnOn = {{ classList: {{ contains: function(c) {{ return c === 'on'; }} }} }};
+    toggleSkill(btnOn, 'code-fix');
+    // 注意 toggleSkill 的 call 是异步的（.then 里刷新），此处只验证调用参数
     if (calls.length !== 1) throw new Error('应调一次 skills.toggle');
     if (calls[0].m !== 'skills.toggle') throw new Error('method 应为 skills.toggle');
     if (calls[0].p.skill_name !== 'code-fix' || calls[0].p.enabled !== false)
-        throw new Error('toggle 参数应取反: ' + JSON.stringify(calls[0].p));
+        throw new Error('on 态应传 enabled=false: ' + JSON.stringify(calls[0].p));
     console.log('F2B-OK toggle=' + JSON.stringify(calls[0].p));
     """
     out = run_node(js)
