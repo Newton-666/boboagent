@@ -3159,6 +3159,11 @@ function renderHistWindow() {
 // 窗口化滚动监听（rAF 节流，滚动丝滑不卡顿）
 var histWindowRAF = null;
 function histWindowOnScroll() {
+  // TICKET-GUI-F19：回合进行中（思考/工具/回复流式，currentBusy=true）不重建。
+  // 用 currentBusy() 而非 thinkBoxEl：工具执行阶段 thinkBoxEl 已被 tool.start 收束置 null，
+  // 但回合仍在跑（tool 卡/diff 实时更新中）——此时重建会清掉实时节点。
+  // currentBusy 覆盖整个回合（message.start 置 busy → complete/中断清 busy）。
+  if (currentBusy()) return;
   if (histWindowRAF) return;
   histWindowRAF = requestAnimationFrame(function() {
     histWindowRAF = null;
@@ -3498,7 +3503,15 @@ on('message.delta', function(data) {
       }
     }
     var txt = thinkBoxEl.querySelector('.think-text');
-    if (txt) { txt.textContent = thinkText; chatEl.scrollTop = chatEl.scrollHeight; }
+    if (txt) {
+      txt.textContent = thinkText;
+      // TICKET-GUI-F19：滚动锚定 —— 用户上翻历史时不被流式强制拉回底部。
+      // 死循环根因（RWORK-F29 项6）：无条件 scrollTop=scrollHeight 触发 scroll 事件
+      // → 窗口化重建（renderHistWindow innerHTML=''）→ 清掉实时 thinking 框 → 卡屏。
+      // 仅当用户已在底部附近（<80px）才跟随滚动；上翻时不动 scrollTop，不触发重建。
+      var nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
+      if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
+    }
   }
 });
 on('message.complete', function(data) {
@@ -3542,6 +3555,10 @@ on('message.complete', function(data) {
   }
   loadSessions();
   refreshCtxStats();   // TICKET-DESK-V2B：回合结束刷新上下文仪表盘
+  // TICKET-GUI-F19：回合结束立即校准窗口化坐标系（用实测高度重建一次）。
+  // 把"跳"从"用户下次滚动时"提前到"回合刚结束瞬间"——用户注意力在回复内容上，
+  // 感知最弱；此后滚动时坐标系已准，无位置错位。
+  if (histWindowUnits) renderHistWindow();
   // TICKET-GUI-F13：回合结束把最终展开姿势落盘（重启回放按姿势还原现场原样）
   if (currentSessionId) recordPose(currentSessionId);
 });
