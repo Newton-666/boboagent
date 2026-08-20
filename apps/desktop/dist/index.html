@@ -2179,9 +2179,16 @@ function setNavActive(id) {
   });
 }
 
-function showMainChat() {
+// 视图互斥（owner 实弹：点开 A 必须覆盖 B——memory/skills/chat 只显示一个）
+function hideAllViews() {
   var mv = document.getElementById('memory-view');
   if (mv) mv.style.display = 'none';
+  var sv = document.getElementById('skills-view');
+  if (sv) sv.style.display = 'none';
+}
+
+function showMainChat() {
+  hideAllViews();
   var w = document.getElementById('welcome');
   var c = document.getElementById('chat');
   if (w) w.style.display = '';
@@ -2190,13 +2197,14 @@ function showMainChat() {
 }
 
 function onNavNewSession() {
-  closeMemoryView();
+  hideAllViews();  // 覆盖 memory/skills 等视图（互斥），回到聊天区
   if (typeof newChat === 'function') newChat();
 }
 
 function onNavMemory() {
   var mv = document.getElementById('memory-view');
   if (!mv) return;
+  hideAllViews();  // 覆盖 skills 等其它视图（互斥）
   var w = document.getElementById('welcome');
   var c = document.getElementById('chat');
   if (w) w.style.display = 'none';
@@ -2216,6 +2224,7 @@ function closeMemoryView() {
 function onNavSkills() {
   var sv = document.getElementById('skills-view');
   if (!sv) return;
+  hideAllViews();  // 覆盖 memory 等其它视图（互斥）
   var w = document.getElementById('welcome');
   var c = document.getElementById('chat');
   if (w) w.style.display = 'none';
@@ -2863,8 +2872,9 @@ function updateSessionTitle(sid, text) {
 // F3-2 点击必应答（立即加载指示、失败显式报错、连点以后一次为准）；
 // F3-3 历史全文恢复（归档 archived_messages 拼接 + 压缩分隔线）。
 async function loadSession(sid) {
-  // 票 P0-1 改版：点会话自动关 Memory 主面板，回到正常聊天区
-  closeMemoryView();
+  // 票 P0-1 改版：点会话自动关 Memory 主面板，回到正常聊天区；
+  // TICKET-SKILL-PANEL v2 扩展：hideAllViews 一并覆盖 skills 等其它视图（互斥）
+  hideAllViews();
   // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
   if (currentSessionId !== sid) {
     // TICKET-GUI-F13：离开当前会话前，把现场展开姿势落盘（重启回放按姿势还原）
