@@ -620,6 +620,18 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .profile-diff-del { color:#8a3a2c; }
 .profile-rollback-btn { font-size:12px; padding:1px 6px; border:1px solid var(--border); border-radius:4px; background:var(--bg3); color:var(--text2); cursor:pointer; font-family:inherit; flex-shrink:0; }
 .profile-rollback-btn:hover { color:var(--text); border-color:var(--text-muted); }
+/* 票 TICKET-PROFILE-4 v2：可编辑编辑器（白底）+ 历史按来源着色（diff 式整行高亮）*/
+.profile-edit-wrap { background:#fff; border:1px solid var(--border); border-radius:8px; padding:12px; margin:2px 0 18px; }
+.profile-edit-wrap textarea { width:100%; min-height:200px; border:none; outline:none; resize:vertical; font-family:'SF Mono',Monaco,Menlo,monospace; font-size:12px; line-height:1.6; color:#333; background:transparent; box-sizing:border-box; }
+.profile-edit-actions { display:flex; align-items:center; gap:10px; margin-top:8px; padding-top:10px; border-top:1px solid rgba(0,0,0,0.06); }
+.profile-save-btn { padding:6px 18px; border-radius:6px; border:none; cursor:pointer; font:inherit; font-size:13px; background:#e8913a; color:#fff; }
+.profile-save-btn:hover { opacity:0.9; }
+.profile-save-btn:disabled { opacity:0.5; cursor:default; }
+.profile-save-hint { font-size:11px; color:var(--text-muted); }
+/* 历史着色：绿=auto 添加 / 红=auto 删除 / 黄=用户手动编辑（整行高亮，diff 式）*/
+.profile-history-row.src-user { background:rgba(232,145,58,0.12); border-radius:4px; padding-left:8px; }
+.profile-diff-user { color:#8a5a00; font-weight:600; }
+.profile-edit-wrap textarea:focus { box-shadow:0 0 0 1px rgba(232,145,58,0.4); border-radius:4px; }
 </style>
 <!-- TICKET-GUI-F16: KaTeX 样式（vendor 本地，数学公式排版；字体相对路径 fonts/） -->
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -783,7 +795,16 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <!-- TICKET-PROFILE-4：Profile 仪表盘页面（当前用户模型 + 更新历史）。
            页面文案走 JS \u 转义（DESK-P2 金标准：index.html 非注释区零中文）。 -->
       <div class="settings-page" id="page-profile" style="display:none">
-        <div class="profile-view" id="profile-user-md"></div>
+        <!-- 区块 1：用户模型编辑器（白底可编辑 + Save，用户绝对权威） -->
+        <div class="settings-sec-label" id="profile-edit-label"></div>
+        <div class="profile-edit-wrap">
+          <textarea id="profile-edit-area" spellcheck="false"></textarea>
+          <div class="profile-edit-actions">
+            <button class="profile-save-btn" id="profile-save-btn">Save</button>
+            <span class="profile-save-hint" id="profile-save-hint"></span>
+          </div>
+        </div>
+        <!-- 区块 2：更新历史（独立区块，GitHub 式，按来源着色） -->
         <div class="profile-history" id="profile-history"></div>
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
@@ -4106,42 +4127,16 @@ document.getElementById('settings-icon').onclick = function() {
   });
   document.getElementById('settings-modal').classList.add('open');
 };
-// TICKET-PROFILE-4：设置页 Profile 仪表盘 —— profile.get 渲染 USER.md 分区 +
-// 更新历史（倒序、限 20、回滚交互）。profile.rollback 成功后原地刷新两区。
+// TICKET-PROFILE-4 v2：设置页 Profile 仪表盘 —— 区块 1 可编辑编辑器（白底 +
+// Save，用户绝对权威）+ 区块 2 更新历史（独立，GitHub 式，按来源着色）。
 function renderProfileUserMd(userMd) {
-  var el = document.getElementById('profile-user-md');
-  if (!el) return;
+  var label = document.getElementById('profile-edit-label');
+  var area = document.getElementById('profile-edit-area');
+  if (!label || !area) return;
   // 页面文案走 \u 转义（DESK-P2 金标准：index.html 非注释区零中文）
-  var labelMd = '\u5f53\u524d\u7528\u6237\u6a21\u578b';   // 当前用户模型
-  var loading = '\u52a0\u8f7d\u4e2d\u2026';               // 加载中…
-  var emptyMd = '\uff08\u6682\u65e0\u7528\u6237\u6a21\u578b\uff09';  // （暂无用户模型）
-  var emptySec = '\uff08\u6682\u65e0\uff09';             // （暂无）
-  var html = '<div class="settings-sec-label">' + labelMd + '</div>';
-  if (!userMd || !userMd.trim()) {
-    el.innerHTML = html + '<div class="profile-empty">' + loading + '</div>';
-    return;
-  }
-  // 分区标题（\u 转义：偏好/禁忌/工作流，DESK-P2）
-  var sections = ['## \u504f\u597d', '## \u7981\u5fcc', '## \u5de5\u4f5c\u6d41'];
-  var lines = userMd.split('\n');
-  var current = null;
-  var bySec = {};
-  sections.forEach(function(s) { bySec[s] = []; });
-  lines.forEach(function(l) {
-    var t = l.trim();
-    if (t.indexOf('## ') === 0) { current = sections.indexOf(t) >= 0 ? t : null; return; }
-    if (current) bySec[current].push(l);
-  });
-  sections.forEach(function(s) {
-    html += '<div class="profile-sec">' + esc(s.replace('## ', '')) + '</div>';
-    var entries = bySec[s].filter(function(l) { return l.trim().indexOf('- ') === 0; });
-    if (entries.length === 0) {
-      html += '<div class="profile-empty">' + emptySec + '</div>';
-    } else {
-      entries.forEach(function(l) { html += '<div class="profile-line">' + esc(l) + '</div>'; });
-    }
-  });
-  el.innerHTML = html;
+  label.textContent = '\u5f53\u524d\u7528\u6237\u6a21\u578b\uff08\u53ef\u7f16\u8f91\uff09';
+  // 当前用户模型（可编辑）
+  area.value = userMd || '';
 }
 function fmtProfileTs(ts) {
   var d = new Date(ts * 1000);
@@ -4173,10 +4168,18 @@ function renderProfileHistory(versions) {
   }
   versions.forEach(function(v) {
     var ts = v.ts || 0;
-    html += '<div class="profile-history-row">' +
+    var src = v.signal_source || 'user';
+    // 着色：绿=auto 添加 / 红=auto 删除 / 黄=用户手动编辑（diff 式整行高亮）
+    var rowCls = 'profile-history-row';
+    var diffHtml = profileDiffHtml(v.diff || v.entry || '');
+    if (src === 'user_edit') {
+      rowCls += ' src-user';
+      diffHtml = '<span class="profile-diff-user">' + esc(v.diff || v.entry || '') + '</span>';
+    }
+    html += '<div class="' + rowCls + '">' +
       '<span class="profile-history-time">' + fmtProfileTs(ts) + '</span>' +
       '<span class="profile-cat-badge">' + esc(v.category || '') + '</span>' +
-      '<span class="profile-history-diff">' + profileDiffHtml(v.diff || v.entry || '') + '</span>' +
+      '<span class="profile-history-diff">' + diffHtml + '</span>' +
       '<button class="profile-rollback-btn" data-ts="' + ts + '" title="\u56de\u6eda">\u27f2</button>' +
       '</div>';
   });
@@ -4206,6 +4209,30 @@ function loadProfilePanel() {
 // 点击 Profile tab 时懒加载（tab 切换 JS 已通用，不动）
 var profileTabEl = document.querySelector('.settings-tab[data-tab="profile"]');
 if (profileTabEl) profileTabEl.addEventListener('click', loadProfilePanel);
+// TICKET-PROFILE-4 v2：Save 按钮 —— 用户手动编辑 USER.md 后保存（绝对权威）
+var profileSaveBtn = document.getElementById('profile-save-btn');
+var profileEditArea = document.getElementById('profile-edit-area');
+var profileSaveHint = document.getElementById('profile-save-hint');
+if (profileSaveBtn) profileSaveBtn.addEventListener('click', function() {
+  if (!profileEditArea) return;
+  var newMd = profileEditArea.value;
+  profileSaveBtn.disabled = true;
+  call('profile.save', { user_md: newMd }).then(function(r) {
+    profileSaveBtn.disabled = false;
+    if (r && r.message) {
+      // 保存失败
+      window.alert('\u4fdd\u5b58\u5931\u8d25: ' + r.message);  // 保存失败
+      return;
+    }
+    renderProfileUserMd(r ? r.user_md || '' : '');
+    renderProfileHistory(r ? r.versions || [] : []);
+    if (profileSaveHint) {
+      // 已保存（黄色=用户手动编辑）
+      profileSaveHint.textContent = '\u5df2\u4fdd\u5b58\uff08\u9ec4\u8272 = \u7528\u6237\u624b\u52a8\u7f16\u8f91\uff09';
+      setTimeout(function() { profileSaveHint.textContent = ''; }, 3000);
+    }
+  });
+});
 // Provider → model linkage
 document.getElementById('cfg-provider').addEventListener('change', function() {
   var models = {

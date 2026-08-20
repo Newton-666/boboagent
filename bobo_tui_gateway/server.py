@@ -114,8 +114,9 @@ def shutdown_sessions():
 # ── 注册所有 handler 模块 ──
 # 票 P0-1：新增 memory handler 模块（Memory 面板 RPC：memory.list/delete/update/
 # verify_links），零干涉守卫白名单同步（tests/test_ticket_desk_v4.py 等）。
-# TICKET-PROFILE-4：新增 profile RPC（profile.get/rollback，设置页 Profile 仪表盘；
-# handler 注册模式沿用 P0-1 Memory 面板的 ok/err 约定）
+# 票 P0-1 延伸（TICKET-PROFILE-4）：新增 profile handler 模块（profile.get/
+# rollback/save，设置页 Profile 仪表盘；handler 注册模式沿用 P0-1 Memory 面板的
+# ok/err 约定，守卫白名单已登记 desk_v4/v4b/tel）。
 
 from bobo_tui_gateway.handlers import sessions, configs, models, prompts, tools, misc, memory, profile
 

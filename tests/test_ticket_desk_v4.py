@@ -120,7 +120,7 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     VSC2B_ALLOWED = {"bobo_tui_gateway/handlers/sessions.py"}
     # 票 P0-1（2026-08-19）特批：bobo_tui_gateway/server.py + handlers/memory.py
     #（Memory 面板 RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
-    P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"}
+    P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"}
     unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(COST1B_ALLOWED & set(changed)):

@@ -575,7 +575,7 @@ def test_tel_8_zero_interference():
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory 面板
         # RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
-        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"):
             r_p01 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
@@ -628,7 +628,7 @@ def test_tel_8_zero_interference():
             assert "VSC-2B" in r_v2b2.stdout, f"{ln} 缺 VSC-2B 特批标记，未授权改动被拦截"
             continue
         # 票 P0-1 特批：bobo_tui_gateway/server.py + handlers/memory.py（Memory RPC）
-        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py"):
+        if ln in ("bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py"):
             r_p01b = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01b.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue

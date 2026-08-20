@@ -71,14 +71,19 @@ def test_f21_1_static_tab_and_page():
     m = re.search(r'<div class="settings-tab"\s+data-tab="profile">Profile</div>', src)
     assert m, "设置页缺 Profile tab（data-tab=\"profile\"）"
 
-    # #page-profile 存在，含当前用户模型区 + 更新历史区
+    # #page-profile 存在，含可编辑编辑器区 + 更新历史区（v2：白底 textarea + Save）
     assert 'id="page-profile"' in src, "缺 #page-profile 页面"
-    assert 'id="profile-user-md"' in src, "缺当前用户模型区（profile-user-md）"
+    assert 'id="profile-edit-area"' in src, "缺可编辑编辑器区（profile-edit-area）"
+    assert 'id="profile-save-btn"' in src, "缺 Save 按钮（profile-save-btn）"
     assert 'id="profile-history"' in src, "缺更新历史区（profile-history）"
+    # v2 历史着色：用户手动编辑 = 黄色高亮（src-user + profile-diff-user）
+    assert "src-user" in src, "缺用户手动编辑行着色 class（src-user）"
+    assert "profile-diff-user" in src, "缺用户手动编辑 diff 高亮 class（profile-diff-user）"
     # 空状态文案（v1 验收重点：jsonl 无数据时优雅空状态）。
     # 页面文案走 \u 转义（DESK-P2 金标准：index.html 非注释区零中文）→ 断言转义串
     assert "\\u6682\\u65e0\\u66f4\\u65b0\\u8bb0\\u5f55" in src, "缺更新历史空状态文案（\\u 转义）"
-    assert "\\uff08\\u6682\\u65e0\\uff09" in src, "缺空分区（暂无）渲染（\\u 转义）"
+    assert "\\u5f53\\u524d\\u7528\\u6237\\u6a21\\u578b" in src, "缺当前用户模型标签（\\u 转义）"
+    assert "\\uff08\\u53ef\\u7f16\\u8f91\\uff09" in src, "缺可编辑标签（\\u 转义）"
 
     # 回滚交互：确认弹窗 + profile.rollback 调用
     assert "profile.rollback" in src, "缺 profile.rollback 调用"
@@ -176,6 +181,63 @@ def test_f21_3b_rollback_unknown_ts_returns_error(tmp_path, monkeypatch):
     assert "未找到" in r["error"]["message"]
 
 
+# ── F21-6：后端实跑（profile.save 用户手动编辑保存）────────────────────
+
+def test_f21_6_save_user_edit(tmp_path, monkeypatch):
+    from bobo_tui_gateway.handlers import profile as ph
+
+    user_md = tmp_path / "USER.md"
+    user_md.write_text(_USER_MD, encoding="utf-8")
+    versions = tmp_path / "profile_versions.jsonl"
+    kb = tmp_path / "knowledge_base.json"
+    kb.write_text(json.dumps({"entries": [], "profile": {}}, ensure_ascii=False),
+                  encoding="utf-8")
+
+    monkeypatch.setattr(ph, "_USER_MD_PATH", user_md)
+    monkeypatch.setattr(ph, "_VERSIONS_FILE", versions)
+    monkeypatch.setattr(ph, "_KB_PATH", kb)
+    import core.profile_writer as pw
+    monkeypatch.setattr(pw, "_USER_MD_PATH", user_md)
+    monkeypatch.setattr(pw, "_VERSIONS_FILE", versions)
+    monkeypatch.setattr(pw, "_KB_PATH", kb)
+
+    # 用户手动编辑：偏好分区加一条
+    edited = _USER_MD.replace(
+        "## 偏好\n- 代码评审意见的输出顺序：先讲风险，再讲优点。\n",
+        "## 偏好\n- 代码评审意见的输出顺序：先讲风险，再讲优点。\n"
+        "- 汇报时先给结论再给细节。\n",
+    )
+    r = ph.handle_profile_save({"user_md": edited}, "rid-3")
+    assert r["id"] == "rid-3"
+    assert "result" in r, f"保存应成功: {r}"
+
+    # USER.md 已更新（含用户新增行）
+    md_text = user_md.read_text(encoding="utf-8")
+    assert "- 汇报时先给结论再给细节。" in md_text, "USER.md 应含用户新增条目"
+
+    # 快照 signal_source=user_edit（黄色高亮的数据标记）
+    lines = [json.loads(ln) for ln in versions.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 1, "应追加 1 条 user_edit 快照"
+    assert lines[0]["signal_source"] == "user_edit", "手动保存应标记 user_edit"
+    assert lines[0]["category"] == "user_edit"
+
+    # knowledge_base 影子同步（新条目进 profile）
+    kb_data = json.loads(kb.read_text(encoding="utf-8"))
+    assert "汇报时先给结论再给细节" in kb_data["profile"]["preference"]["value"]
+
+
+def test_f21_6b_save_empty_rejected(tmp_path, monkeypatch):
+    from bobo_tui_gateway.handlers import profile as ph
+
+    user_md = tmp_path / "USER.md"
+    user_md.write_text(_USER_MD, encoding="utf-8")
+    monkeypatch.setattr(ph, "_USER_MD_PATH", user_md)
+
+    r = ph.handle_profile_save({"user_md": "   "}, "rid-4")
+    assert "error" in r, "空 USER.md 应返回 error"
+    assert "不能为空" in r["error"]["message"]
+
+
 # ── F21-4：node 桩实跑（renderProfileUserMd 分区渲染）──────────────────
 
 def test_f21_4_node_renders_user_md():
@@ -184,7 +246,7 @@ def test_f21_4_node_renders_user_md():
     js = r"""
 var _els = {};
 function getEl(id) {
-  if (!_els[id]) _els[id] = { innerHTML: '' };
+  if (!_els[id]) _els[id] = { innerHTML: '', value: '', textContent: '' };
   return _els[id];
 }
 var document = { getElementById: getEl };
@@ -192,20 +254,19 @@ function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 """ + render + r"""
 var md = '# 用户模型\n\n## 偏好\n- 代码评审意见的输出顺序：先讲风险，再讲优点。\n\n## 禁忌\n（暂无）\n\n## 工作流\n- 直接调用工具建账。\n';
 renderProfileUserMd(md);
-var el = _els['profile-user-md'];
-console.log('NODE_F21_4 ' + JSON.stringify({ html: el.innerHTML }));
+var area = _els['profile-edit-area'];
+console.log('NODE_F21_4 ' + JSON.stringify({ value: area.value, label: _els['profile-edit-label'].textContent }));
 """
     out = _run_node(js)
     m = re.search(r"NODE_F21_4 (\{.*\})", out)
     assert m, f"未输出 NODE_F21_4 标记: {out}"
     st = json.loads(m.group(1))
-    html = st["html"]
-    # 三个分区标题都渲染
-    assert "偏好" in html and "禁忌" in html and "工作流" in html
-    # 空分区（暂无）
-    assert "（暂无）" in html
-    # 条目行渲染（纯文本，保留 - 前缀）
-    assert "- 代码评审意见的输出顺序：先讲风险，再讲优点。" in html
+    value = st["value"]
+    # v2：整个 USER.md 原文填入可编辑 textarea（用户可编辑）
+    assert "## 偏好" in value and "## 禁忌" in value and "## 工作流" in value
+    assert "- 代码评审意见的输出顺序：先讲风险，再讲优点。" in value
+    # 标题带"可编辑"标记
+    assert "可编辑" in st["label"]
 
 
 # ── F21-5：node 桩实跑（renderProfileHistory 渲染）────────────────────
