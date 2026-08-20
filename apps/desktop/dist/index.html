@@ -2875,6 +2875,13 @@ async function loadSession(sid) {
   // 票 P0-1 改版：点会话自动关 Memory 主面板，回到正常聊天区；
   // TICKET-SKILL-PANEL v2 扩展：hideAllViews 一并覆盖 skills 等其它视图（互斥）
   hideAllViews();
+  // 回到聊天区：chat 显示、welcome 隐藏（原 closeMemoryView→showMainChat 语义；
+  // hideAllViews 只隐藏视图不显示 chat，这里必须补显示）
+  var _w = document.getElementById('welcome');
+  var _c = document.getElementById('chat');
+  if (_w) _w.style.display = 'none';
+  if (_c) _c.style.display = '';
+  setNavActive('');
   // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
   if (currentSessionId !== sid) {
     // TICKET-GUI-F13：离开当前会话前，把现场展开姿势落盘（重启回放按姿势还原）
@@ -2917,6 +2924,14 @@ async function loadSession(sid) {
     await renderFullHistory(sid, result);
   }
   chatEl.scrollTop = chatEl.scrollHeight;
+  // 会话有历史消息 → 隐藏 welcome 欢迎页，显示 chat 聊天区（clearChat 会把
+  // welcome 设为 flex，渲染完历史后必须切回 chat；否则 welcome 叠在消息上）
+  if (msgsLen > 0) {
+    var _w2 = document.getElementById('welcome');
+    var _c2 = document.getElementById('chat');
+    if (_w2) _w2.style.display = 'none';
+    if (_c2) _c2.style.display = '';
+  }
   // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
   setMode(result.auto_state ? 'auto' : '');
   call('session.activate', { session_id: sid });
