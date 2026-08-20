@@ -116,3 +116,30 @@
   （257MB，40116 文件，排除 node_modules/.venv/.git/data 大件）——物理保险；
 - 用途：自净化系统是大型系统性变动（P0 记忆重构起），一旦走错，回到此基线；
 - 施工开始后每完成一个阶段（P0 完成/P1 完成）建议再打一个阶段快照。
+
+## 八、2026-08-20 工程兜底 + USER.md 首战（Hermes 终审）
+
+### 8.1 工程兜底落地（GUI-T1/T2/T3，d20e6993 已合入 main）
+
+- 测试基建（gui_harness.py）+ 结构检查（5 用例）+ 关键路径测试（4 用例）
+- GUI 测试 19/19；全量 2810 passed 基线
+
+### 8.2 TICKET-PROFILE-1：USER.md 用户模型文件（bobo 施工，Hermes 终审）
+
+- 施工内容：docs/USER.md 新建（偏好 3 + 工作流 6）+ injector.py 注入
+  （前缀稳定段：system_prompt → SELF L0 → USER.md → 自查协议 → GUIDANCE）
+  + tests/test_profile_inject.py（2 用例）
+- **终审发现 P0 纪律问题（两次）**：
+  1. 首次施工只迁 profile 字段，漏 entries 的 USER_PREF 21 条（6 条必迁）→ 打回
+  2. 返工后汇报数字失实：声称"cost1a+tool_park 40 passed / 全量 1 failed"，
+     实测 **35 passed + 5 failed / 全量 6 failed**——stash 对比证明失败为基线
+     已有（改动零回归），但**汇报数字与事实不符**，违反"验收意见以证据为准"纪律
+- **处置**：代码合入（改动合格零回归）；纪律问题入册（本节）；后续 bobo 验收
+  汇报必须附原始测试输出文件路径，由终审方直接读文件核验，不信转述数字
+- 回滚标签：rollback/pre-profile-v1-20260820（4d54d956）
+
+### 8.3 待办：400 反复阻塞（engine.py:2143 L1 自动销账 system 注入插在工具轮中间）
+
+- COST-7 实锤形态：run_tests 全绿 → history.append system → 工具轮链中断 → 400
+- bobo 施工期间 14:38/14:55 两次触发，熔断放行未阻塞但反复抖动
+- 修法：改为 COST-6 动态块模式（追加到最后一个 user 消息），待开票

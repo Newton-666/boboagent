@@ -50,6 +50,34 @@ def _load_guidance() -> str | None:
     return _GUIDANCE_CACHE["content"]
 
 
+# 票 TICKET-PROFILE-1：USER.md 用户模型画像（docs/USER.md，行为影响型）
+# 与 _load_guidance 同模式：mtime 缓存，缺失静默返回 None。
+_USER_PROFILE_PATH = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "docs", "USER.md")
+_USER_PROFILE_CACHE: dict = {"mtime": -1, "content": None}
+
+
+def _load_user_profile() -> str | None:
+    """模块级缓存读 docs/USER.md：mtime 变化才重读，缺失静默返回 None。"""
+    try:
+        st = _os.stat(_USER_PROFILE_PATH)
+    except OSError:
+        _USER_PROFILE_CACHE["content"] = None
+        _USER_PROFILE_CACHE["mtime"] = -1
+        return None
+    if st.st_mtime != _USER_PROFILE_CACHE.get("mtime"):
+        try:
+            with open(_USER_PROFILE_PATH, encoding="utf-8") as f:
+                _USER_PROFILE_CACHE["content"] = f.read()
+            _USER_PROFILE_CACHE["mtime"] = st.st_mtime
+        except OSError:
+            _USER_PROFILE_CACHE["content"] = None
+            _USER_PROFILE_CACHE["mtime"] = -1
+            return None
+    return _USER_PROFILE_CACHE["content"]
+
+
 # ── 票 TICKET-G1（母子结构 v2）：SELF.md 母文档同源读取 ──
 # 母文档 docs/SELF.md 已由 owner/Kimi 定稿（不许改写），本票只交付机制：
 # L0 常驻注入 = 顶部 [SELF] 代码块原文（逐字节，不许摘要/改写——母子同源）。
@@ -443,6 +471,17 @@ class PromptInjector:
             })
             budget_stats["selfmap"] = {"chars": len(_l0)}
 
+        # ── 票 TICKET-PROFILE-1：USER.md 用户模型画像（行为影响型，L0 之后、自查协议之前）──
+        # 位置：system_prompt(0) → SELF L0(1) → USER.md(2) → 自查协议(3)。
+        # 与 L0 同源读取模式：mtime 缓存，缺失静默跳过（不注入也不炸）。
+        # 不计入 prompt.budget sections（LN-4 验收口径 sections 精确九段，见 test_note_pointer）。
+        _user_profile = _load_user_profile()
+        if _user_profile:
+            messages.insert(2 if _l0 else 1, {
+                "role": "system",
+                "content": _user_profile,
+            })
+
         # ── 票 TICKET-P1 + 票 COST-2：日期时间锚点 ──
         # 原位置：紧跟 L0 之后 insert(2) 注入。COST-2 前缀稳定化后移——
         # 分钟级锚点在头部每轮必变，锚点之后数万 tokens 缓存全作废（实测命中率 3.4%）；
@@ -453,9 +492,11 @@ class PromptInjector:
         # 票 G1-1：L0 selfmap 已插在自查协议之前（index 1），故自查协议在 index 2。
         # 票 COST-2：NOW 锚点已后移至尾部（不再占 index 2），GUIDANCE 用 insert(3)
         # 紧跟自查协议之后（E3b "紧跟自查协议之后"语义不变）。
+        # 票 TICKET-PROFILE-1：USER.md 注入后自查协议后移一位（L0=1, USER=2, 自查=3），
+        # GUIDANCE 相应后移一位（仍紧跟自查协议之后，E3b 语义不变）。
         _guidance = _load_guidance()
         if _guidance:
-            messages.insert(3, {
+            messages.insert(4 if _user_profile else 3, {
                 "role": "system",
                 "content": _guidance,
             })
