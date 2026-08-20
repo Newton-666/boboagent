@@ -1,16 +1,18 @@
-"""profile_writer.py — USER.md 用户模型画像的引擎侧唯一写入入口（票 TICKET-PROFILE-2）。
+"""profile_writer.py — USER.md 用户模型画像的引擎侧唯一写入入口（票 TICKET-PROFILE-2/2b）。
 
 职责：
 1. write_user_profile(new_entry, category)：写入前过"行为模板过滤"
    （偏好模板"偏好/喜欢 X 方式" / 禁忌模板"不要/别/禁止 X" / 工作流模板"先 X 再 Y"），
    纯事实（如"喜欢冰美式"）→ 拒绝并返回 reason="not_behavioral"；
-2. 写入时自动追加版本快照 data/profile_versions.jsonl
+2. 写入成功后同步 docs/USER.md（权威载体）：新增追加 / "（暂无）"替换 / 更新替换
+   对应行（不追加重复），原子写（tmp + replace），手动初始条目保留；
+3. 写入时自动追加版本快照 data/profile_versions.jsonl
    （{"ts", "category", "entry", "diff", "reason", "signal_source"}，与 events.jsonl 同构追加式）；
-3. 写入动作 emit profile.update 事件（payload: category/entry/diff，后端事件先行，
+4. 写入动作 emit profile.update 事件（payload: category/entry/diff，后端事件先行，
    前端工具卡展示是下一票）。
 
-边界：本模块只写 data/knowledge_base.json 的 profile 段与版本快照 jsonl；
-USER.md 由迁移流程生成，本模块不改 USER.md。
+权威关系（票 TICKET-PROFILE-2b）：docs/USER.md 是行为影响型画像的权威载体
+（常驻 prompt），data/knowledge_base.json 的 profile 段是影子。
 """
 
 import json
@@ -30,6 +32,15 @@ logger = logging.getLogger(__name__)
 # 数据文件路径（测试可 monkeypatch 重定向）
 _KB_PATH = Path(BOBO_DATA_DIR) / "knowledge_base.json"
 _VERSIONS_FILE = Path(BOBO_DATA_DIR) / "profile_versions.jsonl"
+# USER.md 权威载体（与 core/injector.py 的 _USER_PROFILE_PATH 同文件）
+_USER_MD_PATH = Path(__file__).resolve().parent.parent / "docs" / "USER.md"
+
+# category → USER.md 分区标题
+_SECTION_TITLES = {
+    "preference": "## 偏好",
+    "taboo": "## 禁忌",
+    "workflow": "## 工作流",
+}
 
 _lock = threading.Lock()
 
@@ -121,6 +132,89 @@ def _last_snapshot_entry(category: str) -> str | None:
         return None
 
 
+def _atomic_write_user_md(lines: list[str]) -> bool:
+    """原子写 USER.md（tmp + replace，绝不允许半写状态）。"""
+    try:
+        tmp = _USER_MD_PATH.with_suffix(".md.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+            if lines:
+                f.write("\n")
+        tmp.replace(_USER_MD_PATH)
+        return True
+    except OSError as e:
+        logger.warning("profile_writer: 原子写 USER.md 失败: %s", e)
+        return False
+
+
+def _sync_user_md(category: str, new_entry: str, last_entry: str | None) -> bool:
+    """同步 docs/USER.md：USER.md 是行为影响型画像的权威载体。
+
+    规则（票 TICKET-PROFILE-2b）：
+    - 分区已含 `- {new_entry}` → 不追加（去重）
+    - 分区当前为"（暂无）" → 替换为实际条目
+    - 更新（同 category 旧值 = last_entry 存在且分区含该行）→ 替换对应行，不追加重复
+    - 新增 → 分区末尾追加一行
+    - USER.md 缺失/分区缺失 → 跳过同步（返回 True，不失败）
+
+    Returns:
+        bool：写入成功或跳过返回 True；IO 失败返回 False（调用方整体失败）。
+    """
+    try:
+        if not _USER_MD_PATH.exists():
+            return True  # 权威载体缺失：跳过同步（profile 影子照写）
+        with open(_USER_MD_PATH, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        logger.warning("profile_writer: 读 USER.md 失败: %s", e)
+        return False
+
+    title = _SECTION_TITLES.get(category)
+    if title is None:
+        return True
+
+    # 定位分区：[sec_start+1, sec_end)
+    sec_start = None
+    sec_end = len(lines)
+    for i, ln in enumerate(lines):
+        if sec_start is None:
+            if ln.strip() == title:
+                sec_start = i
+        elif ln.startswith("## "):
+            sec_end = i
+            break
+    if sec_start is None:
+        return True  # 分区缺失：跳过
+
+    body = lines[sec_start + 1:sec_end]
+
+    # 去重：分区已含同文本条目
+    if any(ln.strip() == f"- {new_entry}" for ln in body):
+        return True
+
+    # （暂无）→ 替换
+    for i in range(sec_start + 1, sec_end):
+        if lines[i].strip() == "（暂无）":
+            lines[i] = f"- {new_entry}"
+            return _atomic_write_user_md(lines)
+
+    # 更新：last_entry（上次写入的快照末条）行 → 替换
+    if last_entry:
+        for i in range(sec_start + 1, sec_end):
+            if lines[i].strip() == f"- {last_entry}":
+                lines[i] = f"- {new_entry}"
+                return _atomic_write_user_md(lines)
+
+    # 新增：分区末尾追加（跳过尾部空行，插在最后一个非空行后）
+    insert_at = sec_end
+    j = sec_end - 1
+    while j > sec_start and lines[j].strip() == "":
+        j -= 1
+    insert_at = j + 1
+    lines.insert(insert_at, f"- {new_entry}")
+    return _atomic_write_user_md(lines)
+
+
 def write_user_profile(
     new_entry: str,
     category: str,
@@ -165,7 +259,14 @@ def write_user_profile(
         # ── diff（版本快照用）──
         diff = f"+ {new_entry}" if not old_value else f"{old_value} → {new_entry}"
 
-        # ── 写入 knowledge_base.json profile 段 ──
+        # ── 权威载体 USER.md 先写（票 TICKET-PROFILE-2b：USER.md 是权威，profile 是影子）──
+        # last_entry = 上次写入的快照末条：同 category 更新时替换对应行（不追加重复）；
+        # 手动初始条目（无快照记录）永不替换 → 保留。
+        synced = _sync_user_md(category, new_entry, last_snap)
+        if not synced:
+            return {"ok": False, "reason": "user_md_write_failed", "version": None}
+
+        # ── 写入 knowledge_base.json profile 段（影子）──
         profile[category] = {
             "value": new_entry,
             "updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
