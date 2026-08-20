@@ -81,13 +81,12 @@ def test_f21_1_static_tab_and_page():
     assert "profile-diff-user" in src, "缺用户手动编辑 diff 高亮 class（profile-diff-user）"
     # 空状态文案（v1 验收重点：jsonl 无数据时优雅空状态）。
     # 页面文案走 \u 转义（DESK-P2 金标准：index.html 非注释区零中文）→ 断言转义串
-    assert "\\u6682\\u65e0\\u66f4\\u65b0\\u8bb0\\u5f55" in src, "缺更新历史空状态文案（\\u 转义）"
-    assert "\\u5f53\\u524d\\u7528\\u6237\\u6a21\\u578b" in src, "缺当前用户模型标签（\\u 转义）"
-    assert "\\uff08\\u53ef\\u7f16\\u8f91\\uff09" in src, "缺可编辑标签（\\u 转义）"
+    assert "No updates yet" in src, "缺更新历史空状态文案（英文）"
+    assert "User Profile (Editable)" in src, "缺当前用户模型标签（英文）"
 
     # 回滚交互：确认弹窗 + profile.rollback 调用
     assert "profile.rollback" in src, "缺 profile.rollback 调用"
-    assert "\\u56de\\u6eda\\u5230" in src, "缺回滚确认弹窗文案（\\u 转义）"
+    assert "Roll back to" in src, "缺回滚确认弹窗文案（英文）"
 
 
 # ── F21-2：静态断言（gateway RPC 注册）─────────────────────────────────
@@ -266,7 +265,7 @@ console.log('NODE_F21_4 ' + JSON.stringify({ value: area.value, label: _els['pro
     assert "## 偏好" in value and "## 禁忌" in value and "## 工作流" in value
     assert "- 代码评审意见的输出顺序：先讲风险，再讲优点。" in value
     # 标题带"可编辑"标记
-    assert "可编辑" in st["label"]
+    assert "Editable" in st["label"]
 
 
 # ── F21-5：node 桩实跑（renderProfileHistory 渲染）────────────────────
@@ -302,7 +301,7 @@ console.log('NODE_F21_5 ' + JSON.stringify({ emptyHtml: emptyHtml, html: html })
     st = json.loads(m.group(1))
 
     # 空状态文案（v1 验收重点）
-    assert "暂无更新记录" in st["emptyHtml"], "空状态缺指定文案"
+    assert "No updates yet" in st["emptyHtml"], "空状态缺指定文案（英文）"
 
     # 有数据：行 / 徽标 / diff 红绿 / 回滚按钮
     assert "profile-history-row" in st["html"]

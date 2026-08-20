@@ -807,7 +807,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
         <!-- 区块 2：更新历史（独立区块，GitHub 式，按来源着色） -->
         <div class="profile-history" id="profile-history"></div>
       </div>
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <div style="position:sticky;bottom:0;background:var(--bg2);margin-top:20px;padding:16px 24px 20px;border-top:1px solid var(--border);display:flex;gap:8px;z-index:2;">
         <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">Save</button>
         <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">Cancel</button>
       </div>
@@ -4134,7 +4134,7 @@ function renderProfileUserMd(userMd) {
   var area = document.getElementById('profile-edit-area');
   if (!label || !area) return;
   // 页面文案走 \u 转义（DESK-P2 金标准：index.html 非注释区零中文）
-  label.textContent = '\u5f53\u524d\u7528\u6237\u6a21\u578b\uff08\u53ef\u7f16\u8f91\uff09';
+  label.textContent = 'User Profile (Editable)';
   // 当前用户模型（可编辑）
   area.value = userMd || '';
 }
@@ -4159,8 +4159,8 @@ function renderProfileHistory(versions) {
   var el = document.getElementById('profile-history');
   if (!el) return;
   // 页面文案走 \u 转义（DESK-P2 金标准：index.html 非注释区零中文）
-  var labelHist = '\u66f4\u65b0\u5386\u53f2';   // 更新历史
-  var emptyHist = '\u6682\u65e0\u66f4\u65b0\u8bb0\u5f55\u2014\u2014\u5f53 bobo \u5b66\u5230\u4f60\u7684\u65b0\u504f\u597d\u65f6\u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc';  // 暂无更新记录——当 bobo 学到你的新偏好时会出现在这里
+  var labelHist = 'Update History';
+  var emptyHist = 'No updates yet \u2014 when bobo learns a new preference, it will appear here.';
   var html = '<div class="settings-sec-label">' + labelHist + '</div>';
   if (!versions || versions.length === 0) {
     el.innerHTML = html + '<div class="profile-empty">' + emptyHist + '</div>';
@@ -4180,7 +4180,7 @@ function renderProfileHistory(versions) {
       '<span class="profile-history-time">' + fmtProfileTs(ts) + '</span>' +
       '<span class="profile-cat-badge">' + esc(v.category || '') + '</span>' +
       '<span class="profile-history-diff">' + diffHtml + '</span>' +
-      '<button class="profile-rollback-btn" data-ts="' + ts + '" title="\u56de\u6eda">\u27f2</button>' +
+      '<button class="profile-rollback-btn" data-ts="' + ts + '" title="Roll back">\u27f2</button>' +
       '</div>';
   });
   el.innerHTML = html;
@@ -4190,9 +4190,9 @@ function renderProfileHistory(versions) {
       var row = btn.closest('.profile-history-row');
       var timeText = row ? row.querySelector('.profile-history-time').textContent : '';
       // 回滚到 <时间> 的版本？（\u 转义，DESK-P2）
-      if (!window.confirm('\u56de\u6eda\u5230 ' + timeText + ' \u7684\u7248\u672c\uff1f')) return;
+      if (!window.confirm('Roll back to ' + timeText + '?')) return;
       call('profile.rollback', { ts: ts }).then(function(r) {
-        if (r && r.message) { window.alert('\u56de\u6eda\u5931\u8d25: ' + r.message); return; }
+        if (r && r.message) { window.alert('Rollback failed: ' + r.message); return; }
         renderProfileUserMd(r ? r.user_md || '' : '');
         renderProfileHistory(r ? r.versions || [] : []);
       });
@@ -4201,7 +4201,7 @@ function renderProfileHistory(versions) {
 }
 function loadProfilePanel() {
   call('profile.get', {}).then(function(r) {
-    if (r && r.message) { window.alert('\u52a0\u8f7d\u5931\u8d25: ' + r.message); return; }
+    if (r && r.message) { window.alert('Load failed: ' + r.message); return; }
     renderProfileUserMd(r ? r.user_md || '' : '');
     renderProfileHistory(r ? r.versions || [] : []);
   });
@@ -4221,14 +4221,14 @@ if (profileSaveBtn) profileSaveBtn.addEventListener('click', function() {
     profileSaveBtn.disabled = false;
     if (r && r.message) {
       // 保存失败
-      window.alert('\u4fdd\u5b58\u5931\u8d25: ' + r.message);  // 保存失败
+      window.alert('Save failed: ' + r.message);
       return;
     }
     renderProfileUserMd(r ? r.user_md || '' : '');
     renderProfileHistory(r ? r.versions || [] : []);
     if (profileSaveHint) {
       // 已保存（黄色=用户手动编辑）
-      profileSaveHint.textContent = '\u5df2\u4fdd\u5b58\uff08\u9ec4\u8272 = \u7528\u6237\u624b\u52a8\u7f16\u8f91\uff09';
+      profileSaveHint.textContent = 'Saved (yellow = your manual edit)';
       setTimeout(function() { profileSaveHint.textContent = ''; }, 3000);
     }
   });
