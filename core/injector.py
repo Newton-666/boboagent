@@ -794,15 +794,29 @@ class PromptInjector:
             budget_stats["skills"] = {"chars": len(_skill_combined),
                                       "truncated": False}
 
-            # ── 票 TICKET-SKILL-ACTIVE-2：skill 激活事件（COST-2 注入块内追加）──
+            # ── 票 TICKET-SKILL-ACTIVE-2：skill 激活事件（COST-2 特批标记）──
             # 标准命中注入时 emit 一次（每轮一条防刷屏；同名标准不重复——天然
             # 满足）。payload {skill_name}= 标准首行标题（去 # 号）。前端据此
             # 渲染"Skill 工具卡"，让用户看到 bobo 正在按 XX 标准工作。
+            # 双通道（PROFILE-3 死代码教训，COST-2 授权）：① event_bus 落盘
+            # （审计）；② gateway socket 广播前端（延迟 import + 容错）。
             try:
                 from core.event_bus import event_bus as _ebus2
                 _first_line = skill_stds[0].strip().splitlines()[0] if skill_stds else ""
                 _skill_name = _first_line.lstrip("#").strip() or "Skill"
                 _ebus2.write("skill.activate", {"skill_name": _skill_name})
+                try:
+                    from bobo_tui_gateway.transport import write_json
+                    write_json({
+                        "jsonrpc": "2.0", "method": "event",
+                        "params": {
+                            "type": "skill.activate",
+                            "payload": {"skill_name": _skill_name},
+                            "session_id": getattr(engine, "sid", "") or "",
+                        },
+                    })
+                except Exception:
+                    pass  # gateway 不可用（纯 core/测试）→ 静默，审计仍完整
             except Exception:
                 logger.debug("skill.activate emit 失败（静默降级）")
 
