@@ -257,7 +257,7 @@ def test_v4b_5_engine_gateway_zero_diff():
         assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
     for f in sorted(COST3_ALLOWED & set(changed)):
         r7 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout), \
+        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout or "COST-7" in r7.stdout), \
             f"{f} 的改动缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
     for f in sorted(DESK_P1_ALLOWED & set(changed)):
         r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)

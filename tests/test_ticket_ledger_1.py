@@ -266,8 +266,14 @@ class TestLedger1AutoSuggest:
         final = _run_with_capture(engine, "修 A 并跑测试")
 
         assert engine.state == engine.STATE_DONE
-        sys_msgs = [m.get("content", "") for m in engine.history if m.get("role") == "system"]
-        assert any("测试全绿强完成信号" in c for c in sys_msgs), "全绿后未注入建议"
+        # 票 LEDGER-400：注入改为追加到最后一个 user 消息（独立 system 插工具轮
+        # 中间会触发 DeepSeek 400）。断言改为：history 中任意消息含建议即算注入。
+        all_msgs = [m.get("content", "") for m in engine.history]
+        assert any("测试全绿强完成信号" in c for c in all_msgs), "全绿后未注入建议"
+        # 且不产生独立的 system 消息（400 根因结构断言）
+        sys_msgs = [m for m in engine.history if m.get("role") == "system"]
+        assert not any("测试全绿强完成信号" in (m.get("content") or "") for m in sys_msgs), \
+            "建议不应以独立 system 消息注入（400 根因）"
         # 台账最终全 done（模型采纳建议）
         assert engine.task_ledger[0]["status"] == "done"
         assert engine.task_ledger[0].get("evidence") == "2302 passed"
