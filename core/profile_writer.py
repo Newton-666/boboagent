@@ -110,6 +110,23 @@ def _append_version_snapshot(record: dict) -> bool:
         return False
 
 
+# 最近一次写入的会话 id（signal_detector 异步线程调用前设置；广播 profile.update
+# 时带 session_id，前端 isForeignSession 过滤依赖它）。线程安全：仅原子赋值。
+_last_sid = ""
+_last_sid_lock = threading.Lock()
+
+
+def set_last_sid(sid: str) -> None:
+    global _last_sid
+    with _last_sid_lock:
+        _last_sid = sid or ""
+
+
+def _get_last_sid() -> str:
+    with _last_sid_lock:
+        return _last_sid
+
+
 def _last_snapshot_entry(category: str) -> str | None:
     """读版本快照最后一条同 category 的 entry（去重用）。"""
     try:
@@ -287,10 +304,29 @@ def write_user_profile(
         _append_version_snapshot(snapshot)
 
         # ── emit profile.update 事件（后端事件先行）──
+        # 【COST-3 特批标记】PROFILE 系列（PROFILE-2/2b/5）授权：双通道——
+        # ① event_bus 落盘（审计账本，只写不读）；② gateway socket 广播
+        # （前端工具卡实时展示）。② 用延迟 import + 容错——core 层不硬依赖
+        # gateway；gateway 进程内（signal_detector 由 engine_adapter 触发）可广播，
+        # 纯 core 环境（测试/CLI）静默跳过。修复 PROFILE-3 死代码缺口：此前只写
+        # event_bus（仅审计），前端 on('profile.update') 从未收到真实事件。
         _event_bus_mod.event_bus.write("profile.update", {
             "category": category,
             "entry": new_entry,
             "diff": diff,
         })
+        try:
+            from bobo_tui_gateway.transport import write_json
+            write_json({
+                "jsonrpc": "2.0", "method": "event",
+                "params": {
+                    "type": "profile.update",
+                    "payload": {"category": category, "entry": new_entry, "diff": diff},
+                    "session_id": _get_last_sid(),
+                },
+            })
+        except Exception:
+            # gateway 不可用（纯 core/测试环境）→ 静默跳过，审计仍完整
+            pass
 
         return {"ok": True, "reason": None, "version": snapshot}

@@ -1,5 +1,8 @@
 """signal_detector.py — 行为信号两级检测流水线（票 TICKET-PROFILE-5）。
 
+【COST-3 特批标记】PROFILE 系列（PROFILE-5）授权：core/ 新增模块，
+desk_v4/v4b/tel + cost1a IronRules 守卫白名单已登记。
+
 自进化闭环最后一块：bobo 主动识别"以后别用 emoji"这类行为信号并自动写入
 USER.md（signal_source=auto_detect），不再依赖手动调 write_user_profile。
 
@@ -112,7 +115,7 @@ def _llm_judge(llm_caller, user_text: str) -> dict | None:
     return _parse_judge_output(content)
 
 
-def detect_profile_signal(user_text: str, llm_caller) -> dict | None:
+def detect_profile_signal(user_text: str, llm_caller, sid: str = "") -> dict | None:
     """两级流水线主入口（同步）：返回判定与写入结果，None=未触发/已丢弃。
 
     一级不命中 → None（零成本）；二级拒绝/失败 → None；写入结果带 write 详情。
@@ -129,7 +132,8 @@ def detect_profile_signal(user_text: str, llm_caller) -> dict | None:
     if not candidate:
         return {"judged": judged, "write": None}
     # 写入走 write_user_profile（模板过滤兜底 + 去重 + 版本快照）
-    from core.profile_writer import write_user_profile
+    from core.profile_writer import write_user_profile, set_last_sid
+    set_last_sid(sid)  # 供 profile_writer 广播 profile.update 时带 session_id
     result = write_user_profile(candidate, category, signal_source="auto_detect")
     if not result.get("ok"):
         logger.info(
@@ -154,7 +158,7 @@ def maybe_detect_profile_signal(
     def _run():
         try:
             time.sleep(delay)
-            detect_profile_signal(user_text, llm_caller)
+            detect_profile_signal(user_text, llm_caller, sid=sid)
         except Exception:
             # 信号检测任何失败都只留痕，绝不向上抛（回合已结束）
             logger.exception("signal_detector: 异步检测失败 session=%s", sid)

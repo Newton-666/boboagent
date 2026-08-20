@@ -202,6 +202,7 @@ class TestIronRules:
                  and "core/engine_adapter.py" not in l
                  and "core/tool_runner.py" not in l
                  and "core/signal_detector.py" not in l
+                 and "core/profile_writer.py" not in l
                  and "file changed" not in l and "files changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 

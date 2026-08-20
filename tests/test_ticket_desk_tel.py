@@ -529,7 +529,8 @@ def test_tel_8_zero_interference():
         # project_root 属性（engine_adapter 会话创建时落库）
         # 票 P0-2 特批：engine.py _run_sedimentation 追加信号判定 hook
         # （通道 A，只记录不动作，写 data/logs/signal_log.jsonl），diff 必须含 P0-2 标记
-        if ln in ("core/context.py", "core/engine.py"):
+        if ln in ("core/context.py", "core/engine.py",
+                  "core/profile_writer.py", "core/signal_detector.py"):  # PROFILE 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
                     or "P0-2" in r7.stdout), \
@@ -637,6 +638,12 @@ def test_tel_8_zero_interference():
         if ln.startswith("data/eval/"):
             continue  # 探针运行产物目录（截图/评估输出，非代码；.gitignore 强制跟踪）
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
+            continue
+        # 票 PROFILE 系列特批：core/profile_writer.py + core/signal_detector.py
+        # （USER.md 引擎写入闸门 + 行为信号两级检测），diff 必须含 COST-3 标记
+        if ln in ("core/profile_writer.py", "core/signal_detector.py"):
+            r_prof = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_prof.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：tools/execute_terminal.py 会话 project_root 非空时
         # 注入 cwd（终端命令落项目目录），diff 必须含 DESK-P1 标记

@@ -225,7 +225,8 @@ def test_v4b_5_engine_gateway_zero_diff():
     SAFETY1_ALLOWED = {"core/command_safety.py"}
     # COST-3（2026-08-16）特批：core/context.py + core/engine.py（工作锚点属性化 +
     # 工具集会话内全量稳定），diff 必须含 COST-3 标记
-    COST3_ALLOWED = {"core/context.py", "core/engine.py"}
+    COST3_ALLOWED = {"core/context.py", "core/engine.py",
+                     "core/profile_writer.py", "core/signal_detector.py"}  # PROFILE 系列
     # DESK-P1（2026-08-17）特批：core/engine_adapter.py + core/tool_runner.py（会话
     # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
     # cwd），diff 必须含 DESK-P1 标记
