@@ -414,7 +414,7 @@ RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
 def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
-    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None, _interrupt_event=None):
+    def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None, _interrupt_event=None, thinking_disabled=False):
         # 票 INT-1：非流式/流式共用入口前检查——中断已置位则直接抛异常短路
         # （仿 execute_terminal 的 _interrupt_event 注入方式，tool_runner/engine 注入，
         # 不暴露在 schema，LLM 无法伪造）
@@ -431,6 +431,12 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
             "temperature": _temperature,
             "max_tokens": _max_tokens,
         }
+        # 票 TICKET-PROFILE-5（P5-400 修复，COST-1c 特批标记）：独立冷调用
+        # （如信号精判）可显式关闭 thinking——不携带 reasoning_content 回传链，
+        # 杜绝 "reasoning_content must be passed back" HTTP 400（异步线程并发
+        # 破坏主流程回传状态的根因规避）。
+        if thinking_disabled:
+            payload["thinking"] = {"type": "disabled"}
         # 票 PERF-1 事故 2：length 空正文翻倍重试标志（调用级，跨 attempt/流式非流式只重试一次）
         _length_retried = False
         # 如果调用方传了 tools_override，用它替换默认的 tools_schema

@@ -100,6 +100,8 @@ def _llm_judge(llm_caller, user_text: str) -> dict | None:
             ],
             use_tools=False,
             max_tokens=_JUDGE_MAX_TOKENS,
+            # 【COST-3 特批标记】P5-400 修复：独立冷调用关 thinking（thinking_disabled）
+            thinking_disabled=True,
         )
     except Exception:
         logger.warning("signal_detector: LLM 精判调用失败，静默丢弃", exc_info=True)
