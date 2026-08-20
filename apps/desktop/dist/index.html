@@ -3599,6 +3599,9 @@ on('tool.start', function(data) {
     collapseThinkBox(thinkBoxEl, thinkText);
     thinkBoxEl = null;
     thinkText = '';
+    // TICKET-GUI-F19b（回归修复）：工具边界同时清推理缓冲——此前漏清导致
+    // 下一次思考在旧推理上追加（"叠罗汉"越滚越长，回合结束才整体收进折叠框）
+    reasoningText = '';
   }
   toolsCalledThisRound = true;
   // TICKET-DESK-V2D5：本轮工具调用计数（认知状态条数据源）

@@ -179,14 +179,28 @@ function onReasoningDelta(data) {
     if (nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
   }
 }
+// tool.start 边界修复逻辑（回归：清推理缓冲防叠罗汉）
+function onToolStart() {
+  if (thinkBoxEl) {
+    thinkBoxEl = null;
+    reasoningText = '';
+  }
+}
 // 流式：6 块推理 token
 ['先','分析','问题','根因','是','缓存'].forEach(function(tk) { onReasoningDelta({ text: tk }); });
 var displayed = thinkBoxEl.querySelector('.think-text').textContent;
 if (displayed !== '先分析问题根因是缓存') throw new Error('推理应实时显示: ' + displayed);
 if (reasoningText !== '先分析问题根因是缓存') throw new Error('推理缓冲应累积');
+// ── 回归场景：工具边界后新思考不应叠罗汉 ──
+onToolStart();                                  // 工具 1 到达 → 清缓冲
+if (reasoningText !== '') throw new Error('工具边界应清空推理缓冲（防叠罗汉）');
+['新','思','考'].forEach(function(tk) { onReasoningDelta({ text: tk }); });
+var d2 = thinkBoxEl.querySelector('.think-text').textContent;
+if (d2 !== '新思考') throw new Error('新思考不应叠加旧推理: ' + d2);
+if (reasoningText !== '新思考') throw new Error('缓冲应只有新思考');
 // complete 收束（final_text 无思考段）
 var thinking = reasoningText.trim(); reasoningText = '';
-if (thinking !== '先分析问题根因是缓存') throw new Error('推理应收进折叠框');
+if (thinking !== '新思考') throw new Error('推理应收进折叠框');
 if (reasoningText !== '') throw new Error('缓冲应消费清空');
 // 无推理时不受影响
 var r2 = (function() { var rt = ''; return { thinking: '', body: '普通回复' }; })();
@@ -195,3 +209,18 @@ console.log('F19b-OK');
 """
     out = _run_node(js)
     assert "F19b-OK" in out, out
+
+
+def test_f19b_3_node_tool_boundary_clears_buffer():
+    """回归专项：tool.start 边界必须清空推理缓冲（叠罗汉 bug）。"""
+    js = r"""
+var reasoningText = '旧推理内容';   // 模拟工具 1 后的残留
+function onToolStart() {
+  reasoningText = '';               // 修复：工具边界清空
+}
+onToolStart();
+if (reasoningText !== '') throw new Error('工具边界后缓冲应清空');
+console.log('F19b-boundary-OK');
+"""
+    out = _run_node(js)
+    assert "F19b-boundary-OK" in out, out
