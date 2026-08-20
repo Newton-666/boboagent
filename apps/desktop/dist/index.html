@@ -2180,6 +2180,16 @@ function setNavActive(id) {
 }
 
 // 视图互斥（owner 实弹：点开 A 必须覆盖 B——memory/skills/chat 只显示一个）
+// 当前激活视图追踪：'nav-memory' | 'nav-skills' | ''（聊天）。异步回调
+// （loadSession await 返回）据此判断"是否该抢回聊天视图"——用户已切走
+// 则不抢（修复竞态：点 session 后立刻点 memory，loadSession 返回不再覆盖）。
+var _activeView = '';
+
+function setView(v) {
+  _activeView = v;
+  setNavActive(v);
+}
+
 function hideAllViews() {
   var mv = document.getElementById('memory-view');
   if (mv) mv.style.display = 'none';
@@ -2193,7 +2203,7 @@ function showMainChat() {
   var c = document.getElementById('chat');
   if (w) w.style.display = '';
   if (c) c.style.display = '';
-  setNavActive('');
+  setView('');
 }
 
 function onNavNewSession() {
@@ -2210,7 +2220,7 @@ function onNavMemory() {
   if (w) w.style.display = 'none';
   if (c) c.style.display = 'none';
   mv.style.display = 'block';
-  setNavActive('nav-memory');
+  setView('nav-memory');
   loadMemoryPanel();
 }
 
@@ -2230,7 +2240,7 @@ function onNavSkills() {
   if (w) w.style.display = 'none';
   if (c) c.style.display = 'none';
   sv.style.display = 'block';
-  setNavActive('nav-skills');
+  setView('nav-skills');
   loadSkillsPanel();
 }
 
@@ -2881,7 +2891,7 @@ async function loadSession(sid) {
   var _c = document.getElementById('chat');
   if (_w) _w.style.display = 'none';
   if (_c) _c.style.display = '';
-  setNavActive('');
+  setView('');
   // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
   if (currentSessionId !== sid) {
     // TICKET-GUI-F13：离开当前会话前，把现场展开姿势落盘（重启回放按姿势还原）
@@ -2912,6 +2922,12 @@ async function loadSession(sid) {
     return;
   }
   clearChat();
+  // 竞态防护：用户已在 await 期间切到 memory/skills → 恢复该视图的显示状态
+  // （clearChat 会把 welcome 设 flex，切走时必须把 welcome 压回去，防叠层）
+  if (_activeView !== '') {
+    var _w3 = document.getElementById('welcome');
+    if (_w3) _w3.style.display = 'none';
+  }
   // TICKET-GUI-F24：切会话回显该会话已保存的 request（无则空面板——不串）
   reqSyncFromSession(result.request);
   // TICKET-GUI-F13：长会话（现存消息 > HIST_WINDOW_THRESHOLD）走窗口化惰性渲染
@@ -2926,7 +2942,9 @@ async function loadSession(sid) {
   chatEl.scrollTop = chatEl.scrollHeight;
   // 会话有历史消息 → 隐藏 welcome 欢迎页，显示 chat 聊天区（clearChat 会把
   // welcome 设为 flex，渲染完历史后必须切回 chat；否则 welcome 叠在消息上）
-  if (msgsLen > 0) {
+  // 竞态防护：用户已在 await 期间切到 memory/skills（_activeView 非空）→
+  // 不抢回 chat（修复：点 session 后立刻点 memory，loadSession 返回不再覆盖）
+  if (msgsLen > 0 && _activeView === '') {
     var _w2 = document.getElementById('welcome');
     var _c2 = document.getElementById('chat');
     if (_w2) _w2.style.display = 'none';
