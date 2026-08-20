@@ -1134,3 +1134,16 @@ X"）/工作流模板（"先 X 再 Y"）匹配才进；纯事实（"喜欢冰美
 1. USER.md 文件初始内容（从现有 profile 记忆迁移 + owner 手工标定）；
 2. 注入实现（injector.py 前缀稳定段插入 USER.md）；
 3. 写入闸门（diff 可见 + 渐进授权 + 可回滚 + 测试断言边界）。
+
+### 24.8 修正的展示形态（owner 拍板：走 B + diff 复用）
+
+**写入归引擎 + 展示走现成工具卡体系：**
+
+- 引擎写入 USER.md 时 emit 工具事件 `profile.update`（检测靠 LLM、写入归引擎）；
+- 前端工具卡显示：新增 `TOOL_ICONS['profile_update']` SVG（人形+铅笔，14×14
+  细线，L4 手绘纪律）+ 标题 "edit profile"；
+- 卡内嵌 diffBlock（复用 1986 行 .diff-block：绿 add/红 del 高亮）——与
+  edit_file 的 diff 完全同 style；
+- 语义：橙色 = Bobo 的手笔 → profile 修正 = Bobo 改自己的认知，工具卡呈现
+  恰好符合"纸与印章"的语义分层；
+- 前端零新组件（工具卡/SVG/diffBlock 全现成），只加 1 个 SVG + 1 个标题映射。
