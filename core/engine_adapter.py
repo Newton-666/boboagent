@@ -494,6 +494,20 @@ def run_engine(
             "usage": last_usage[0],
         })
 
+        # ── 票 TICKET-PROFILE-5：行为信号两级检测（异步，不阻塞主流程）──
+        # 复用 DESK-P1 的回合收尾模式：message.complete 发出后主线程零用户可见
+        # 事件/零调用（ENG-1 保持）；检测在独立 daemon 线程执行（含小延迟错开
+        # 收尾写盘），关键词门卫命中才 +1 次 LLM 精判，写入走 write_user_profile
+        # （signal_source=auto_detect，模板过滤兜底）。任何失败只留痕不上抛。
+        try:
+            from core.signal_detector import maybe_detect_profile_signal
+            maybe_detect_profile_signal(sid, text, llm_caller)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "profile5: 信号检测触发失败 session=%s", sid
+            )
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
