@@ -508,6 +508,20 @@ def run_engine(
                 "profile5: 信号检测触发失败 session=%s", sid
             )
 
+        # ── 票 TICKET-SKILL-ACTIVE-3：skill 自动沉淀（异步，零打扰）──
+        # 与 PROFILE-5 同款收尾模式（daemon 线程 + 延迟错开写盘，DESK-P1 白名单
+        # 文件内复用既有挂载点）。一级数量门卫零成本；命中才 +1 次
+        # thinking_disabled 冷调用精判；不值得静默。任何失败只留痕不上抛
+        # （owner 红线：完全不打扰）。
+        try:
+            from core.skill_sedimenter import maybe_sediment_skill
+            maybe_sediment_skill(sid, llm_caller)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "skill-active3: 自动沉淀触发失败 session=%s", sid
+            )
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)

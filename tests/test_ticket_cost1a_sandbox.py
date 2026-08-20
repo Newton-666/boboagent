@@ -192,6 +192,8 @@ class TestIronRules:
         # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal cwd）；
         # 票 TICKET-PROFILE-5 特批白名单：core/signal_detector.py（行为信号两级检测
         # 流水线：关键词门卫 + LLM 精判，owner 授权，diff 须含 PROFILE-5 标记）；
+        # 票 TICKET-SKILL-ACTIVE-3 特批白名单：core/skill_sedimenter.py（skill
+        # 自动沉淀流水线：数量门卫 + LLM 精判 + 自动 save_skill，diff 须含 COST-3 标记）；
         # 过滤掉特批文件行与 --stat 汇总行（"1 file changed"）
         lines = [l for l in r.stdout.strip().splitlines()
                  if l.strip() and "core/llm_caller.py" not in l
@@ -204,6 +206,7 @@ class TestIronRules:
                  and "core/signal_detector.py" not in l
                  and "core/profile_writer.py" not in l
                  and "core/skill_loader.py" not in l
+                 and "core/skill_sedimenter.py" not in l
                  and "file changed" not in l and "files changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 

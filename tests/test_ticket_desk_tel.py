@@ -531,7 +531,7 @@ def test_tel_8_zero_interference():
         # （通道 A，只记录不动作，写 data/logs/signal_log.jsonl），diff 必须含 P0-2 标记
         if ln in ("core/context.py", "core/engine.py",
                   "core/profile_writer.py", "core/signal_detector.py",
-                  "core/skill_loader.py"):  # PROFILE + SKILL 系列
+                  "core/skill_loader.py", "core/skill_sedimenter.py"):  # PROFILE + SKILL 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
                     or "P0-2" in r7.stdout), \
