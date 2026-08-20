@@ -593,7 +593,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 /* === end P0-1 Memory === */
 /* 票 owner 设置弹窗实弹反馈（2026-08-20）：大尺寸 + 字体统一（Hermes 三档体系）。
  * 追加覆盖（原规则在 P0-1 段前保持基线，此处后声明覆盖——不破坏 v2a/v2b 守卫）。 */
-#settings-panel { width:min(calc(100vw - 48px), 1280px); height:calc(100vh - 48px); font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size:13px; line-height:1.55; }
+#settings-panel { width:min(calc(100vw - 48px), 1280px); height:calc(100vh - 48px); font-family:-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size:13px; line-height:1.55; position:relative; }
 #settings-nav { width:150px; min-width:150px; }
 .settings-tab, #settings-content, .settings-page input, .settings-page select { font-family:inherit; }
 #settings-content { font-size:13px; }
@@ -807,10 +807,10 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
         <!-- 区块 2：更新历史（独立区块，GitHub 式，按来源着色） -->
         <div class="profile-history" id="profile-history"></div>
       </div>
-      <div style="position:sticky;bottom:0;background:var(--bg2);margin-top:20px;padding:16px 24px 20px;border-top:1px solid var(--border);display:flex;gap:8px;z-index:2;">
-        <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">Save</button>
-        <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">Cancel</button>
-      </div>
+    </div>
+    <div style="position:absolute;bottom:16px;right:24px;display:flex;gap:8px;z-index:3;">
+      <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">Save</button>
+      <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">Cancel</button>
     </div>
   </div>
 </div>
