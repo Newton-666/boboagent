@@ -2195,10 +2195,24 @@ function hideAllViews() {
   if (mv) mv.style.display = 'none';
   var sv = document.getElementById('skills-view');
   if (sv) sv.style.display = 'none';
+  // 视图模式下输入框必须一起隐藏（#main 是 flex 列，input-box 在视图下方
+  // 会露出来——owner 实弹：点 memory/skills 后"下面还有对话框"）
+  var ib = document.getElementById('input-box');
+  if (ib) ib.style.display = 'none';
+  var cs = document.getElementById('ctx-stats-wrap');
+  if (cs) cs.style.display = 'none';
+}
+
+function showInputBox() {
+  var ib = document.getElementById('input-box');
+  if (ib) ib.style.display = '';
+  var cs = document.getElementById('ctx-stats-wrap');
+  if (cs) cs.style.display = '';
 }
 
 function showMainChat() {
   hideAllViews();
+  showInputBox();  // 恢复输入框（hideAllViews 已隐藏）
   var w = document.getElementById('welcome');
   var c = document.getElementById('chat');
   if (w) w.style.display = '';
@@ -2885,6 +2899,7 @@ async function loadSession(sid) {
   // 票 P0-1 改版：点会话自动关 Memory 主面板，回到正常聊天区；
   // TICKET-SKILL-PANEL v2 扩展：hideAllViews 一并覆盖 skills 等其它视图（互斥）
   hideAllViews();
+  showInputBox();  // 恢复输入框（hideAllViews 已隐藏；回到聊天区必须能输入）
   // 回到聊天区：chat 显示、welcome 隐藏（原 closeMemoryView→showMainChat 语义；
   // hideAllViews 只隐藏视图不显示 chat，这里必须补显示）
   var _w = document.getElementById('welcome');
