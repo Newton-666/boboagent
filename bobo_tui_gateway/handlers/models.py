@@ -8,7 +8,11 @@ from config import BOBO_DATA_DIR
 
 def handle_model_options(params: dict, rid: str) -> dict:
     """返回所有 provider 及其 model 列表，供 TUI ModelPicker 渲染。
-    API key 的检查只读环境变量，不经过 LLM。"""
+    API key 的检查只读环境变量，不经过 LLM。
+    TICKET-PROVIDER-ADAPTER：本地 provider（lmstudio/ollama）models 声明为空
+    时，动态查询其 /v1/models 接口拿真实可用模型列表（LM Studio 管模型仓库，
+    动态查询才是事实源）。查询失败静默回退空列表。
+    """
     from core.provider import PROVIDERS, get_provider
     from config import API_MODEL_NAME, API_KEY
 
@@ -17,7 +21,12 @@ def handle_model_options(params: dict, rid: str) -> dict:
 
     for slug, cfg in PROVIDERS.items():
         env_key = cfg.get("env_key", "")
-        models = cfg.get("models", [])
+        models = list(cfg.get("models", []))
+        # 本地 provider 且声明无模型 → 动态查 /v1/models（LM Studio 已加载/可用的）
+        if not models and "localhost" in cfg.get("base_url", ""):
+            live = _fetch_local_models(cfg.get("base_url", ""))
+            if live:
+                models = live
         # 如果 provider 有 env_key，检查是否已配置
         authenticated = True
         if env_key:
@@ -40,6 +49,22 @@ def handle_model_options(params: dict, rid: str) -> dict:
         "provider": active_provider_name,
         "providers": providers_out,
     })
+
+
+def _fetch_local_models(base_url: str) -> list:
+    """查询本地 OpenAI 兼容端点的 /v1/models，返回模型 id 列表。失败 → []。"""
+    try:
+        import requests
+        # 本地端点禁代理（同 llm_caller 的代理劫持修复）
+        proxies = {"http": None, "https": None}
+        url = base_url.replace("/chat/completions", "/models")
+        r = requests.get(url, timeout=5, proxies=proxies)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        return [m.get("id", "") for m in (data.get("data") or []) if m.get("id")]
+    except Exception:
+        return []
 
 
 def handle_model_save_key(params: dict, rid: str, engine_cache: dict) -> dict:
