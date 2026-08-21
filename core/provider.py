@@ -36,6 +36,7 @@ PROVIDERS = {
         # TICKET-E4b：deepseek-v4-flash / v4-pro 官方真实窗口 1M（2026-04 发布）。
         # 128000 保留为老型号兜底；model_context 按型号覆盖。
         "model_context": {"deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000},
+        "dynamic_models": True,  # 动态拉 /v1/models（DeepSeek 上新模型自动可见，实测 3 个含 vision）
         # TICKET-PROVIDER-ADAPTER：协议声明（thinking 字段=reasoning_content，
         # 工具轮后必须回传，支持显式关 thinking）
         "reasoning": {
@@ -138,6 +139,7 @@ PROVIDERS = {
         "model_context": {"kimi-k3": 1000000, "kimi-k2.6": 262144, "kimi-k2.7-code-highspeed": 262144},
         "temperature": 1.0,
         "max_tokens": 32768,
+        "dynamic_models": True,  # 动态拉 /v1/models（实测 12 个，含 kimi-k2.7-code + vision 系列）
         # Kimi K3：OpenAI 兼容端点实弹验证（2026-08-20）——thinking 字段=
         # reasoning_content（与 DeepSeek 同名，非 thinking）；工具轮后需回传
         # reasoning_content 内容；支持显式关 thinking（{"thinking":{"type":"disabled"}}）

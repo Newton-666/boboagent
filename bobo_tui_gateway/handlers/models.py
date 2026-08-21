@@ -22,15 +22,17 @@ def handle_model_options(params: dict, rid: str) -> dict:
     for slug, cfg in PROVIDERS.items():
         env_key = cfg.get("env_key", "")
         models = list(cfg.get("models", []))
-        # 本地 provider 且声明无模型 → 动态查 /v1/models（LM Studio 已加载/可用的）
-        if not models and "localhost" in cfg.get("base_url", ""):
-            live = _fetch_local_models(cfg.get("base_url", ""))
-            if live:
-                models = live
-        # TICKET-PROVIDER-ADAPTER：GLM 等声明了 dynamic_models=True 的远程
-        # provider → 动态查官方 /v1/models（避免手写模型名过时）
+        # TICKET-PROVIDER-ADAPTER（动态模型）：对非本地 provider 优先尝试
+        # /v1/models 动态拉取——厂商上新模型（如 DeepSeek vision、Kimi k2.7）
+        # bobo 自动看到，无需手动改 provider.py。失败（端点不兼容/无 key/超时）
+        # → 静默回退到写死的 models 列表（保守兜底）。
         if cfg.get("dynamic_models") and "localhost" not in cfg.get("base_url", ""):
             live = _fetch_local_models(cfg.get("base_url", ""), env_key=env_key)
+            if live:
+                models = live
+        # 本地 provider 且声明无模型 → 动态查（LM Studio 已加载的）
+        elif not models and "localhost" in cfg.get("base_url", ""):
+            live = _fetch_local_models(cfg.get("base_url", ""))
             if live:
                 models = live
         # 如果 provider 有 env_key，检查是否已配置
