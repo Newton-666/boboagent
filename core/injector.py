@@ -909,12 +909,13 @@ class PromptInjector:
         except Exception:
             pass
 
-        # ── 票 REASONING-ECHO：thinking → reasoning_content 回传（方案 B）──
+        # ── 票 REASONING-ECHO：thinking → 协议字段回传（方案 B）──
         # DeepSeek thinking 模式铁律：两个 user 消息之间若夹工具轮，中间
         # assistant 的 reasoning_content 必须随上下文回传，否则 HTTP 400
         # （"reasoning_content in the thinking mode must be passed back"）。
         # 引擎落盘字段是 thinking（GUI-F8 折叠框内部名，engine.py:1646），
-        # 发送侧必须转回 DeepSeek 认识的 reasoning_content。
+        # 发送侧必须转回协议认识的字段（DeepSeek=reasoning_content，
+        # Kimi=thinking——TICKET-PROVIDER-ADAPTER 读 provider 声明）。
         # 铁律：只改发送副本——messages 内层 dict 与 engine.history 共享引用
         # （见上方 COST-2 注释），补字段必须浅拷贝 dict，绝不 mutate 原 dict
         # （否则存档/恢复带 reasoning_content，GUI-F8 折叠框读取路径要复查）。
@@ -923,13 +924,23 @@ class PromptInjector:
         # 定案：DeepSeek 拒绝 reasoning_content 空串（HTTP 400），接受完全跳过
         # （不带该字段）。TICKET-REASONING-ECHO 报告第 69-70 行悬案实弹闭合）；
         # 纯文本 assistant（编辑冲突注入等，无 tool_calls）不补。
+        # 回传字段名：仅 echo_required=True 的 provider 需要（DeepSeek/Kimi）。
+        _echo_field = "reasoning_content"
+        try:
+            from core.provider import get_provider, resolve_provider
+            _proto = get_provider(resolve_provider().get("name", "")) or {}
+            _rproto = _proto.get("reasoning") or {}
+            if _rproto.get("echo_required"):
+                _echo_field = _rproto.get("field") or "reasoning_content"
+        except Exception:
+            pass  # 解析失败 → 保守用 reasoning_content（DeepSeek 兼容）
         _echoed = []
         for _m in messages:
             if isinstance(_m, dict) and _m.get("role") == "assistant" \
                     and (_m.get("tool_calls") or _m.get("thinking")):
                 _m2 = dict(_m)
                 if _m.get("thinking"):
-                    _m2["reasoning_content"] = _m["thinking"]
+                    _m2[_echo_field] = _m["thinking"]
                 _echoed.append(_m2)
             else:
                 _echoed.append(_m)

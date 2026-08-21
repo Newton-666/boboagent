@@ -76,12 +76,16 @@ def shutdown_sessions(ctx):
 def _get_llm_caller(engine_cache):
     if "_llm" not in engine_cache:
         from core.llm_caller import create_llm_caller
-        from core.provider import resolve_provider
+        from core.provider import get_provider, resolve_provider
         from tools import TOOLS_SCHEMA
         # resolve_provider() 实时读取 os.environ，不用 import 时冻结的模块常量
         cfg = resolve_provider()
+        # TICKET-PROVIDER-ADAPTER（COST-1c 特批标记）：传入 provider 协议声明
+        # （reasoning/tools），llm_caller 读声明行事——新 provider 纯注册零改代码。
+        proto = get_provider(cfg["name"]) or {}
         engine_cache["_llm"] = create_llm_caller(
-            cfg["api_key"], cfg["base_url"], cfg["model"], TOOLS_SCHEMA
+            cfg["api_key"], cfg["base_url"], cfg["model"], TOOLS_SCHEMA,
+            provider_proto=proto,
         )
     return engine_cache["_llm"]
 

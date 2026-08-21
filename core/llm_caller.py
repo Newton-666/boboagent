@@ -413,16 +413,45 @@ MAX_RETRIES = 2        # 最大重试次数（初始请求 + 2 次重试 = 共 3
 RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
 
-def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None):
+def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema: list = None,
+                      provider_proto: dict = None):
+    """创建 LLM 调用器。
+
+    TICKET-PROVIDER-ADAPTER（COST-1c 特批标记）：provider_proto = provider 的
+    reasoning/tools 协议声明（见 core/provider.py）。None → DeepSeek 兼容默认
+    （reasoning_content / echo_required=True / disable_supported=True）。适配层
+    原则：本函数只读声明，不写死任何 provider 专属字段——新 provider 纯注册即可。
+    """
+    # ── 协议声明解析（保守默认：无声明按无 thinking 处理）──
+    _reasoning_proto = (provider_proto or {}).get("reasoning") or {}
+    _r_field = _reasoning_proto.get("field") or "reasoning_content"  # 思考字段名
+    _r_echo = _reasoning_proto.get("echo_required", False)           # 工具轮后回传
+    _r_thinking = _reasoning_proto.get("thinking_mode", False)       # 默认 thinking
+    _r_disable = _reasoning_proto.get("disable_supported", False)    # 可关 thinking
+    _tools_proto = (provider_proto or {}).get("tools") or {}
+    _t_parallel = _tools_proto.get("parallel", False)                # 并行工具
+    # TICKET-PROVIDER-ADAPTER：provider 声明的 temperature 约束（如 kimi-k3
+    # 只允许 1.0）——优先于环境变量默认 0.3；环境变量显式设置仍可覆盖。
+    _r_temperature = provider_proto.get("temperature") if isinstance(provider_proto, dict) else None
+
     def call_llm(messages, use_tools=True, stream_callback=None, retry_callback=None, tools_override=None, session_id=None, reasoning_callback=None, max_tokens=None, _interrupt_event=None, thinking_disabled=False):
         # 票 INT-1：非流式/流式共用入口前检查——中断已置位则直接抛异常短路
         # （仿 execute_terminal 的 _interrupt_event 注入方式，tool_runner/engine 注入，
         # 不暴露在 schema，LLM 无法伪造）
         if _interrupt_event is not None and _interrupt_event.is_set():
             raise LLMInterrupted("user interrupt before llm call")
-        # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）
+        # 支持环境变量覆盖（reasoning 模型需要 temperature=1.0, max_tokens 更大）。
+        # TICKET-PROVIDER-ADAPTER：provider 声明的 temperature 优先（如 kimi=1.0）；
+        # 环境变量 BOBO_TEMPERATURE 显式设置仍可覆盖。
         import os as _os
-        _temperature = float(_os.environ.get("BOBO_TEMPERATURE", "0.3"))
+        _env_temp = _os.environ.get("BOBO_TEMPERATURE")
+        if _env_temp is not None:
+            try:
+                _temperature = float(_env_temp)
+            except ValueError:
+                _temperature = _r_temperature if _r_temperature is not None else 0.3
+        else:
+            _temperature = _r_temperature if _r_temperature is not None else 0.3
         _max_tokens = (max_tokens if max_tokens is not None
                        else int(_os.environ.get("BOBO_MAX_TOKENS", "8192")))
         payload = {
@@ -435,7 +464,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
         # （如信号精判）可显式关闭 thinking——不携带 reasoning_content 回传链，
         # 杜绝 "reasoning_content must be passed back" HTTP 400（异步线程并发
         # 破坏主流程回传状态的根因规避）。
-        if thinking_disabled:
+        # TICKET-PROVIDER-ADAPTER：仅当声明 disable_supported=True 才发关闭
+        # 参数（不支持的 provider 发了会 400/忽略）。DeepSeek/Kimi 系均为
+        # {"thinking": {"type": "disabled"}} 形态；不支持者保守不发。
+        if thinking_disabled and _r_disable:
             payload["thinking"] = {"type": "disabled"}
         # 票 PERF-1 事故 2：length 空正文翻倍重试标志（调用级，跨 attempt/流式非流式只重试一次）
         _length_retried = False
@@ -554,8 +586,11 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     continue
                                 _dl = _c[0].get("delta", {})
                                 # 票 P：reasoning_content 独立收集（reasoning 模型思考过程）
-                                # 不混入正文；也是生命体征，收到即刷新看门狗
-                                _rc = _dl.get("reasoning_content") or ""
+                                # 不混入正文；也是生命体征，收到即刷新看门狗。
+                                # TICKET-PROVIDER-ADAPTER：字段名读声明（_r_field）。
+                                _rc = _dl.get(_r_field) or ""
+                                if not _rc and _r_field != "reasoning_content":
+                                    _rc = _dl.get("reasoning_content") or ""  # 兜底兼容
                                 if _rc:
                                     reasoning_buf += _rc
                                     if reasoning_callback:
@@ -594,7 +629,9 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     _body = json.loads(_all_raw.decode("utf-8", "replace"))
                                     _msg = _body.get("choices", [{}])[0].get("message", {})
                                     full_content = _msg.get("content") or ""
-                                    reasoning_buf = (_msg.get("reasoning_content") or "") or reasoning_buf
+                                    reasoning_buf = (_msg.get(_r_field) or "") or reasoning_buf
+                                    if not reasoning_buf and _r_field != "reasoning_content":
+                                        reasoning_buf = (_msg.get("reasoning_content") or "") or reasoning_buf
                                     _finish_reason = (_body.get("choices", [{}])[0]
                                                       .get("finish_reason") or _finish_reason)  # 票 PERF-1
                                     if _msg.get("tool_calls"):
