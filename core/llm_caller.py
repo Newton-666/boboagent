@@ -133,12 +133,20 @@ def _post_with_headers_watchdog(
     for _headers_attempt in range(2):  # 初始 1 次 + 硬上限 1 次重试
         _start = time.time()
         _q = _queue.Queue(maxsize=1)
-        _sock_holder = {"sock": None}
+        # TICKET-PROVIDER-ADAPTER（并发竞态修复）：_sock_holder 从共享 dict
+        # 改为 threading.local——多线程并发调用时（主流程 + signal_detector +
+        # skill_sedimenter + 压缩等异步组件），全局 patch 的 _new_conn 会被
+        # 其他线程覆盖，导致 A 线程超时 shutdown 了 B 线程的连接（SSE 断流
+        # received=0，elapsed<300ms——LM Studio 本地慢响应放大竞态窗口）。
+        # threading.local：每个线程自己的 sock 槽，互不干扰。
+        _sock_holder = _threading.local()
+        _sock_holder.sock = None
         _retried = _headers_attempt > 0
 
         def _patched_new_conn(conn):
+            # 只记录本线程创建的 socket（线程局部，不污染其他线程的连接）
             sock = _original_new_conn(conn)
-            _sock_holder["sock"] = sock
+            _sock_holder.sock = sock
             return sock
 
         def _worker():
@@ -197,7 +205,7 @@ def _post_with_headers_watchdog(
 
         # headers 阶段总预算耗尽：打断 socket
         _elapsed_ms = int((time.time() - _start) * 1000)
-        _sock = _sock_holder["sock"]
+        _sock = _sock_holder.sock  # threading.local（并发安全，只动本线程连接）
         if _sock is not None:
             _close_socket(_sock)
         _t.join(timeout=2.0)
