@@ -171,15 +171,16 @@ PROVIDERS = {
         "name": "GLM (Zhipu)",
         "env_key": "GLM_API_KEY",
         "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-        "models": ["glm-4-plus", "glm-4-air", "glm-4-flash"],
+        "models": ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7"],  # 兜底（官方 /v1/models 动态拉取优先）
+        "dynamic_models": True,  # 设置页动态查官方 /v1/models（模型名永不过时）
         "context_length": 128000,
-        # 智谱 GLM：OpenAI 兼容端点。glm-4.5 系支持 thinking（reasoning_content
-        # 字段）；4 系默认无 thinking。保守声明：字段名=reasoning_content，
-        # 不回传（大多数模型不需要）；temperature 自由。
+        # 智谱 GLM：OpenAI 兼容端点。GLM-4.5+ 支持 thinking（reasoning_content
+        # 字段）；官方 /v1/models 可实时查询（models.py 对非 localhost 也支持
+        # 动态拉取——见 _fetch_remote_models）。
         "reasoning": {
             "field": "reasoning_content",
             "echo_required": False,
-            "thinking_mode": False,
+            "thinking_mode": True,
             "stream_reasoning": True,
             "disable_supported": False,
         },

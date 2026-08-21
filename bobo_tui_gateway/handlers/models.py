@@ -27,6 +27,12 @@ def handle_model_options(params: dict, rid: str) -> dict:
             live = _fetch_local_models(cfg.get("base_url", ""))
             if live:
                 models = live
+        # TICKET-PROVIDER-ADAPTER：GLM 等声明了 dynamic_models=True 的远程
+        # provider → 动态查官方 /v1/models（避免手写模型名过时）
+        if cfg.get("dynamic_models") and "localhost" not in cfg.get("base_url", ""):
+            live = _fetch_local_models(cfg.get("base_url", ""), env_key=env_key)
+            if live:
+                models = live
         # 如果 provider 有 env_key，检查是否已配置
         authenticated = True
         if env_key:
@@ -51,14 +57,21 @@ def handle_model_options(params: dict, rid: str) -> dict:
     })
 
 
-def _fetch_local_models(base_url: str) -> list:
-    """查询本地 OpenAI 兼容端点的 /v1/models，返回模型 id 列表。失败 → []。"""
+def _fetch_local_models(base_url: str, env_key: str = "") -> list:
+    """查询 OpenAI 兼容端点的 /v1/models，返回模型 id 列表。失败 → []。
+
+    本地端点（localhost）禁代理；远程端点带 Authorization（env_key 对应 key）。
+    """
     try:
         import requests
-        # 本地端点禁代理（同 llm_caller 的代理劫持修复）
         proxies = {"http": None, "https": None}
         url = base_url.replace("/chat/completions", "/models")
-        r = requests.get(url, timeout=5, proxies=proxies)
+        headers = {}
+        if env_key:
+            key = os.environ.get(env_key, "")
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+        r = requests.get(url, timeout=10, proxies=proxies, headers=headers)
         if r.status_code != 200:
             return []
         data = r.json()
