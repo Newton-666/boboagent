@@ -1320,3 +1320,29 @@ bobo 换到另一个项目（无 Hermes 终审/无守卫）→ 立刻回到"测�
 把上述方法论做成 bobo 的通用 skill / system prompt 纪律，
 让 bobo 对任何代码项目都按"理解→最小改→实弹验证→日志诊断→证据汇报"
 模式工作。自进化（bobo 改 bobo）只是该能力第一次应用场景。
+
+## 二十七、图片输入管道（2026-08-21 Hermes 设计，owner 拍板先放）
+
+> owner 用 deepseek-v4-flash-vision-exp 验证：bobo 能正确识别图片内容
+> （实弹：识别红色图）——模型是视觉模型，但**接口层缺视觉输入通道**。
+> bobo 自诊断精准："不是模型能力问题，是缺图像视觉输入接口"。
+
+### 现状
+- llm_caller payload 只发文本（content 是 str），无 multimodal image_url
+- read_local_file 拒收 .png/.jpg（只处理文本类）
+- bobo 无法"看"图片（PIL 读元信息≠视觉推理）
+
+### 方案（两步，先验证价值）
+- 第一步（最小闭环）：read_local_file 加图片分支——bobo 读图片→base64
+  → 喂 vision 模型（deepseek-v4-flash-vision-exp），真正"看"
+  - 改 2 处：read_local_file.py + llm_caller multimodal 兼容（content str→list，
+    文本零影响，图片能发）
+  - 怎么拿 llm_caller：方案 A 工具内自建（resolve_provider+create，独立简单）vs
+    方案 B gateway 注入（复用连接）——倾向 A
+- 第二步（以后）：前端图片上传（用户发图进聊天）+ provider vision 声明
+
+### Computer Use（owner 洞察，未来方向）
+- vision 模型理论上能看屏幕，但 Computer Use 三层：看（易）→操作（中）→闭环（难）
+- 建立在"看图"之上——先通看图，再想看屏幕+操作
+- 待办：图片输入管道完成后评估
+
