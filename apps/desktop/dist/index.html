@@ -4370,7 +4370,8 @@ function renderApiKeyTable(data) {
       '</span>';
     if (needsKey) {
       html += '<input class="apikey-input" type="password" data-provider="' + p.slug +
-        '" placeholder="' + (p.authenticated ? '•••••• (leave blank to keep)' : 'Enter API Key') + '" />';
+        '" autocomplete="new-password" ' +
+        'placeholder="' + (p.authenticated ? '•••••• (leave blank to keep)' : 'Enter API Key') + '" />';
     } else {
       html += '<span class="apikey-none">No API key needed</span>';
     }
