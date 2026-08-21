@@ -29,7 +29,7 @@ PROVIDERS = {
         "name": "DeepSeek",
         "env_key": "DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com/v1/chat/completions",
-        "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
         # 128K：DeepSeek 实际上下文窗口为 128K（deepseek-chat / deepseek-reasoner）。
         # 错误的高估会让 token 预算失效，宁可低估。
         "context_length": 128000,
