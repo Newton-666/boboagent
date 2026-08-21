@@ -144,12 +144,19 @@ def _post_with_headers_watchdog(
         def _worker():
             try:
                 _urllib3_connection.HTTPConnection._new_conn = _patched_new_conn
+                # TICKET-PROVIDER-ADAPTER：本地地址禁用代理——requests 默认走
+                # 系统代理（如 lmclient/Clash 7892），本地模型端点（lmstudio/
+                # ollama localhost）会被代理劫持返回 502（实弹 2026-08-20）。
+                _proxies = None
+                if url.startswith("http://localhost") or url.startswith("http://127.0.0.1"):
+                    _proxies = {"http": None, "https": None}
                 _resp = requests.post(
                     url,
                     json=json,
                     headers=headers,
                     timeout=timeout,
                     stream=stream,
+                    proxies=_proxies,
                 )
                 _q.put(("ok", _resp))
             except Exception as _exc:  # noqa: BLE001
@@ -483,8 +490,11 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
         }
+        # TICKET-PROVIDER-ADAPTER：api_key 为空（本地模型如 lmstudio/ollama）
+        # 时不发 Authorization——LM Studio 对空 Bearer 返回 502（实弹 2026-08-20）
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         # 事件总线用于 headers stall / stream stall / reasoning 事件
         from core.event_bus import event_bus as _event_bus
