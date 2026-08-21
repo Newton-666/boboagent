@@ -50,6 +50,73 @@ def _load_guidance() -> str | None:
     return _GUIDANCE_CACHE["content"]
 
 
+# ── 票 TICKET-SKILL-LLM-MATCH：skill 摘要块组装（省 token，替代原 join 全文）──
+# 原 skill 注入段 join 全文导致 token 爆炸（skills 段 6595 字符 / 预算 1920，
+# 超标 3.4 倍，COST-2 实测定）。现改为只注入摘要 + 路径指针 + 按需读全文指引。
+_SKILL_STDS_DIR = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "data", "skill-standards")
+_SKILL_DIR_CACHE: dict = None
+
+
+def _skill_dir_map() -> dict:
+    """扫描 skill-standards 目录，返回 {title: dirname} 映射（模块级缓存）。
+
+    用于从标准全文首行标题反查目录名，构造 read_local_file 路径指针。
+    目录缺失/不可读时返回空 dict（路径指针退化为 title 派生，测试 mock 场景）。
+    """
+    global _SKILL_DIR_CACHE
+    if _SKILL_DIR_CACHE is not None:
+        return _SKILL_DIR_CACHE
+    mapping: dict = {}
+    try:
+        if _os.path.isdir(_SKILL_STDS_DIR):
+            for d in _os.listdir(_SKILL_STDS_DIR):
+                p = _os.path.join(_SKILL_STDS_DIR, d, "standard.md")
+                if _os.path.isfile(p):
+                    try:
+                        with open(p, encoding="utf-8") as f:
+                            first = f.readline().lstrip("# ").strip()
+                        if first:
+                            mapping[first] = d
+                    except OSError:
+                        pass
+    except OSError:
+        mapping = {}
+    _SKILL_DIR_CACHE = mapping
+    return mapping
+
+
+def _build_skill_summary_block(content: str) -> str:
+    """从标准全文解析摘要块（name + keywords + 前500字符 + 路径指针），不含全文。
+
+    供注入管道组装 skill 摘要段，替代原 join 全文（token 爆炸根因）。
+    """
+    lines = content.splitlines()
+    title = lines[0].lstrip("# ").strip() if lines else "Skill"
+    kw = ""
+    m = _re.search(r"keywords:\s*(.+)", content, _re.I)
+    if m:
+        kw = m.group(1).strip()
+    summary = " ".join(lines[1:]).strip()[:500]
+    dirname = _skill_dir_map().get(title, title)
+    path = f"data/skill-standards/{dirname}/standard.md"
+    block = f"### {title}\n"
+    if kw:
+        block += f"> 触发词: {kw}\n"
+    if summary:
+        block += f"> 摘要: {summary}\n"
+    block += f"> 全文: read_local_file {path}"
+    return block
+
+
+# 摘要注入后的统一尾部指引：告诉模型"这只是摘要，需全文就 read_local_file"。
+# 并入 _skill_combined 变量（不在"主动使用"指令段内，避免该段过长）。
+_SKILL_TAIL = ("\n\n[技能标准] 以下只注入摘要（省 token）。若任务需要完整流程/"
+               "步骤细节，务必 read_local_file 读对应标准全文——不要因摘要不全而"
+               "保守或猜测，读到全文后严格按标准执行。\n")
+
+
 # 票 TICKET-PROFILE-1：USER.md 用户模型画像（docs/USER.md，行为影响型）
 # 与 _load_guidance 同模式：mtime 缓存，缺失静默返回 None。
 _USER_PROFILE_PATH = _os.path.join(
@@ -777,9 +844,17 @@ class PromptInjector:
         # 3a) 技能标准收集（票 TICKET-E3b：未命中清单已删，仅命中才注入）
         # 票 COST-2：必须在本段统一注入之前收集；原第 9 段（注入后）append
         # 到 messages 末尾，位置逐轮漂移导致前缀错位（详见第 9 段注释）。
-        skill_stds = engine.skill_loader.load_standards()
+        # ── 票 TICKET-SKILL-LLM-MATCH：LLM 语义判断匹配（COST-2/COST-3 特批）──
+        # skill_loader 缺 llm_caller 时从 engine 注入（不改 engine.py 构造）。
+        skill_loader = engine.skill_loader
+        if not getattr(skill_loader, "_llm_caller", None) and getattr(engine, "llm_caller", None):
+            skill_loader._llm_caller = engine.llm_caller
+        skill_stds = skill_loader.load_standards()
         if skill_stds:
-            _skill_combined = "\n\n---\n\n".join(skill_stds)
+            # 注入摘要（不含全文）：name + keywords + 前500字符 + 读全文指引 + 路径指针。
+            # 原 join 全文导致 token 爆炸（skills 段 6595 字符 / 预算 1920，超标 3.4 倍）。
+            _skill_blocks = [_build_skill_summary_block(s) for s in skill_stds]
+            _skill_combined = "\n\n".join(_skill_blocks) + _SKILL_TAIL
             # ── 票 TICKET-SKILL-ACTIVE-1：主动使用指令（COST-2 注入块内追加）──
             # 让"检查 skill 匹配"成为显式决策而非被动关键词命中：收到任务先判断
             # 是否命中标准，命中严格按标准执行，不命中正常执行且无需声明（owner
