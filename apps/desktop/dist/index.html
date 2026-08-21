@@ -4487,19 +4487,21 @@ document.getElementById('settings-close').onclick = function() {
 document.getElementById('settings-save').onclick = function() {
   var key = document.getElementById('cfg-apikey').value.trim();
   var model = document.getElementById('cfg-model').value;
-  if (key) {
-    call('setup.submit', { provider: document.getElementById('cfg-provider').value, api_key: key }).then(function(res) {
-      if (res && res.ok === false) {
-        addStatus('Settings failed: ' + (res.error || 'Unknown error'));
-      } else {
-        addStatus('Saved');
-        if (model) call('config.set', { model: model });
-      }
-    });
-  } else {
-    addStatus('Please enter API Key');
-  }
-  document.getElementById('settings-modal').classList.remove('open');
+  var provider = document.getElementById('cfg-provider').value;
+  // TICKET-PROVIDER-ADAPTER：provider 选择必须保存——config.set 支持
+  // "<model> --provider <provider>" 格式（configs.py 解析，写 BOBO_PROVIDER +
+  // API_MODEL_NAME 到 .env + 热生效）。key 可选——本地 provider 无 key 也能保存。
+  var steps = [];
+  // 1. provider + model 写入（model 没选时只发 provider 占位）
+  var modelArg = model || 'deepseek-v4-flash';
+  steps.push(call('config.set', { key: 'model', value: modelArg + ' --provider ' + provider })
+    .catch(function() { return null; }));
+  // 2. key 写入（填了才写）
+  if (key) steps.push(call('setup.submit', { provider: provider, api_key: key }).catch(function() { return null; }));
+  Promise.all(steps).then(function() {
+    addStatus('Saved — provider applied');
+    document.getElementById('settings-modal').classList.remove('open');
+  });
 };
 document.getElementById('settings-clear').onclick = function() {
   if (!confirm('Delete all sessions? This cannot be undone.')) return;
