@@ -64,6 +64,7 @@ OPENAI_API_KEY=sk-***
 | `google` | Gemini | `reasoning_content` | ❌ | 未实弹 |
 | `openrouter` | 聚合 | `reasoning_content` | ❌ | 未实弹 |
 | `ollama` | 本地（无 key） | `reasoning_content` | ❌ | 未实弹 |
+| `glm` | 智谱（OpenAI 兼容，动态拉模型） | `reasoning_content` | ❌ | ✅ 实弹 2026-08-21 |
 | `custom` | 自定义端点 | `reasoning_content` | ❌ | 未实弹 |
 
 > echo_required = 工具轮后必须回传 thinking 内容（DeepSeek/Kimi 要求，否则 400）。
