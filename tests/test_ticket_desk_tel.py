@@ -641,6 +641,9 @@ def test_tel_8_zero_interference():
         if ln.startswith("data/skill-standards/"):
             continue  # skill 标准内容（SKILL 系列票授权：SKILL-AUDIT-1 价值审查
             # 收紧触发词/补价值行，纯内容非代码，零干涉铁律不辖）
+        if ln == "data/obsidian_alias_map.json":
+            continue  # Obsidian 语义搜索映射表（TICKET-OBSIDIAN-SEARCH-C：中文 query
+            # → 英文文件夹名对照，自学习写回；数据文件非代码）
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
             continue
         # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
@@ -689,6 +692,13 @@ def test_tel_8_zero_interference():
         if ln in ("tools/signal_logger.py", "tools/signal_library_stats.py"):
             r_p02 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-2" in r_p02.stdout, f"{ln} 缺 P0-2 特批标记，未授权改动被拦截"
+            continue
+        # 票 OBSIDIAN-SEARCH-C 特批：tools/obsidian_tools.py（search_obsidian 三路
+        # 匹配 + 语义兜底：映射表 → LLM 辅助 → 自学习写回），diff 必须含
+        # OBSIDIAN-SEARCH-C 标记（docstring 票标），否则未授权改动被拦截
+        if ln == "tools/obsidian_tools.py":
+            r_osc = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-OBSIDIAN-SEARCH-C" in r_osc.stdout, f"{ln} 缺 OBSIDIAN-SEARCH-C 特批标记，未授权改动被拦截"
             continue
         assert False, f"意外改动文件: {ln}"
 

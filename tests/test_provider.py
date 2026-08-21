@@ -53,7 +53,8 @@ class TestListProviders:
         assert "google" in providers
         assert "ollama" in providers
         assert "custom" in providers
-        assert len(providers) == 8  # deepseek, openai, anthropic, openrouter, google, ollama, moonshot, custom
+        # TICKET-PROVIDER-ADAPTER：新增 glm + lmstudio（共 10 个）
+        assert len(providers) == 10  # deepseek, openai, anthropic, openrouter, google, ollama, moonshot, lmstudio, glm, custom
 
     def test_returns_list(self):
         assert isinstance(list_providers(), list)
@@ -73,7 +74,7 @@ class TestResolveProvider:
         assert result["name"] == "deepseek"
         assert result["api_key"] == ""  # no key set
         assert "deepseek.com" in result["base_url"]
-        assert result["model"] == "deepseek-v4-pro"
+        assert result["model"] == "deepseek-v4-flash"  # TICKET-PROVIDER-ADAPTER：默认 flash（原 pro）
 
     def test_explicit_name_overrides_env(self, monkeypatch):
         monkeypatch.setenv("BOBO_PROVIDER", "deepseek")

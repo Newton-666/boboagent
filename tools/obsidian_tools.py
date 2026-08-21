@@ -6,6 +6,7 @@ import os
 import re
 import time
 import subprocess
+import json
 from pathlib import Path
 from config import OBSIDIAN_VAULT, BOBO_FOLDER, BLOCKED_FOLDERS
 
@@ -148,17 +149,48 @@ def _is_blocked_path(path: str) -> bool:
     return False
 
 
-def search_obsidian_notes(query: str) -> str:
+def search_obsidian_notes(query: str, llm_caller=None) -> str:
+    """搜索 Obsidian 笔记——三路匹配 + 语义兜底（TICKET-OBSIDIAN-SEARCH-C）。
+
+    三路匹配（确定性）：内容 grep（现有）+ 文件名子串 + 路径子串，
+    合并去重，排序：文件名命中 > 路径命中 > 内容命中；结果带类型标记
+    [内容]/[文件名]/[路径]。三路全空 → 语义兜底：映射表（毫秒级）→
+    LLM 辅助（thinking_disabled 冷调用，候选存回映射表自学习）→ 都无则
+    "未找到"（保持现状语义）。
+    """
     if not query:
         return "❌ 请提供搜索关键词"
-    
+
     target_dir = OBSIDIAN_VAULT
     if not os.path.exists(target_dir):
         return f"❌ Obsidian 仓库不存在: {OBSIDIAN_VAULT}"
-    
-    results = []
-    
-    # 优先使用 grep（C 语言实现，比 Python os.walk 快 50-100 倍）
+
+    # 三路匹配：内容 grep + 文件名 + 路径（path -> 优先级标记，1=文件名 2=路径 3=内容）
+    hits: dict[str, int] = {}
+    _content_match(query, target_dir, hits)
+    _name_path_match(query, target_dir, hits)
+
+    if not hits:
+        # 语义兜底（方案 C）：映射表 → LLM 辅助 → 未找到
+        semantic_hits = _semantic_fallback(query, llm_caller)
+        if semantic_hits:
+            results = [{"path": p, "tag": "语义"} for p in semantic_hits]
+        else:
+            return f"📝 没有找到包含 '{query}' 的笔记"
+    else:
+        tag_map = {1: "文件名", 2: "路径", 3: "内容"}
+        ordered = sorted(hits.items(), key=lambda kv: kv[1])  # 1 优先
+        results = [{"path": p, "tag": tag_map[pri]} for p, pri in ordered]
+
+    display = results[:20]
+    summary = f"📝 找到 {len(results)} 条笔记"
+    if len(results) > 20:
+        summary += f"（显示前 20 条）"
+    return summary + ":\n" + "\n".join(f"- [{r['tag']}] {r['path']}" for r in display)
+
+
+def _content_match(query: str, target_dir: str, hits: dict) -> None:
+    """三路之一：内容 grep（现有逻辑，C 语言实现优先）。"""
     grep_found = []
     try:
         exclude_args = []
@@ -167,9 +199,7 @@ def search_obsidian_notes(query: str) -> str:
             if folder:
                 exclude_args.extend(["--exclude-dir", folder])
         cmd = ["grep", "-ril"] + exclude_args + [query, target_dir]
-        grep_result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=15
-        )
+        grep_result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if grep_result.returncode == 0 and grep_result.stdout.strip():
             grep_found = [
                 os.path.relpath(f, OBSIDIAN_VAULT)
@@ -178,39 +208,179 @@ def search_obsidian_notes(query: str) -> str:
             ]
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass  # grep 不可用或超时时回退到 Python 方法
-    
+
     if grep_found:
-        results = grep_found
+        for rel in grep_found:
+            hits.setdefault(rel, 3)  # 内容命中；已有更高优先级则不覆盖
     else:
-        # 回退：Python os.walk 方法
+        # 回退：Python os.walk 内容匹配（只读 .md，上限 100）
+        count = 0
         for root, dirs, files in os.walk(target_dir):
             if _is_blocked_path(root):
                 continue
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             for file in files:
-                if file.endswith('.md'):
-                    filepath = os.path.join(root, file)
-                    try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            if query.lower() in content.lower():
-                                rel_path = os.path.relpath(filepath, OBSIDIAN_VAULT)
-                                results.append(rel_path)
-                    except Exception:
-                        pass
-                if len(results) >= 100:  # 防止搜索过大
-                    break
-            if len(results) >= 100:
+                if not file.endswith('.md'):
+                    continue
+                filepath = os.path.join(root, file)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        if query.lower() in content.lower():
+                            rel = os.path.relpath(filepath, OBSIDIAN_VAULT)
+                            hits.setdefault(rel, 3)
+                            count += 1
+                except Exception:
+                    pass
+                if count >= 100:
+                    return
+            if count >= 100:
+                return
+
+
+def _name_path_match(query: str, target_dir: str, hits: dict) -> None:
+    """三路之二/三：文件名子串 + 目录路径子串匹配（不读文件内容，快）。"""
+    q = query.lower()
+    if not q:
+        return
+    for root, dirs, files in os.walk(target_dir):
+        if _is_blocked_path(root):
+            continue
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        # 路径命中（当前目录路径含 query）
+        rel_dir = os.path.relpath(root, target_dir)
+        if rel_dir != '.' and q in rel_dir.lower():
+            # 该目录下所有 .md 都算路径命中（带优先级 2）
+            for dir_file in files:
+                if dir_file.endswith('.md'):
+                    rel = os.path.relpath(os.path.join(root, dir_file), target_dir)
+                    hits.setdefault(rel, 2)
+        for file in files:
+            if not file.endswith('.md'):
+                continue
+            rel = os.path.relpath(os.path.join(root, file), target_dir)
+            if q in file.lower():  # 文件名命中（最高优先级 1）
+                hits[rel] = 1
+
+
+# ── 语义兜底（TICKET-OBSIDIAN-SEARCH-C：映射表 + LLM 辅助 + 自学习）──
+
+_ALIAS_MAP_FILE = Path(__file__).resolve().parent.parent / "data" / "obsidian_alias_map.json"
+
+
+def _load_alias_map() -> dict:
+    """读映射表 {中文 query: [英文文件夹名]}；缺失/损坏 → 空 dict。"""
+    try:
+        with open(_ALIAS_MAP_FILE, encoding='utf-8') as f:
+            raw = json.load(f)
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_alias_map(mapping: dict) -> None:
+    """自学习写回（原子写：tmp + rename）。失败静默（不影响主流程）。"""
+    try:
+        _ALIAS_MAP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _ALIAS_MAP_FILE.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding='utf-8')
+        tmp.replace(_ALIAS_MAP_FILE)
+    except OSError:
+        pass
+
+
+def _top_level_folders(limit: int = 40) -> list:
+    """vault 顶层目录名（LLM 候选池；排除屏蔽目录与隐藏目录）。"""
+    out = []
+    try:
+        for name in sorted(os.listdir(OBSIDIAN_VAULT)):
+            p = os.path.join(OBSIDIAN_VAULT, name)
+            if os.path.isdir(p) and not name.startswith('.') and not _is_blocked_path(p):
+                out.append(name)
+            if len(out) >= limit:
                 break
-    
-    if not results:
-        return f"📝 没有找到包含 '{query}' 的笔记"
-    
-    display = results[:20]
-    summary = f"📝 找到 {len(results)} 条笔记"
-    if len(results) > 20:
-        summary += f"（显示前 20 条）"
-    return summary + ":\n" + "\n".join(f"- {r}" for r in display)
+    except OSError:
+        pass
+    return out
+
+
+_LLM_GUESS_PROMPT = """你是 Obsidian 笔记库目录匹配器。用户想搜索一个主题，但笔记库的文件夹是英文名。
+
+文件夹列表：
+{folders}
+
+用户查询：{query}
+
+从文件夹列表中选出与查询主题最相关的 1-3 个文件夹名（语义相关即可，无需字面匹配）。
+- 有相关 → 只输出 JSON：{{"folders": ["文件夹1", "文件夹2"]}}
+- 无相关 → 只输出 JSON：{{"folders": []}}
+只输出 JSON 对象，不要任何其他文字。"""
+
+
+def _llm_guess_folders(query: str, llm_caller) -> list:
+    """LLM 兜底：thinking_disabled 冷调用（P5-400 同款防 400），返回候选文件夹名。"""
+    folders = _top_level_folders()
+    if not folders or llm_caller is None:
+        return []
+    prompt = _LLM_GUESS_PROMPT.format(folders=", ".join(folders), query=query)
+    try:
+        resp = llm_caller(
+            [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"为查询『{query}』选出相关文件夹。"},
+            ],
+            use_tools=False,
+            max_tokens=120,
+            # 【COST-3 特批标记】P5-400 修复同款：独立冷调用关 thinking
+            thinking_disabled=True,
+        )
+    except Exception:
+        return []
+    content = ""
+    try:
+        content = resp["choices"][0]["message"].get("content", "") or ""
+    except (KeyError, IndexError, TypeError):
+        return []
+    m = re.search(r"\{.*\}", content, re.S)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return []
+    cands = data.get("folders") if isinstance(data, dict) else None
+    if not isinstance(cands, list):
+        return []
+    return [str(c).strip() for c in cands if str(c).strip()][:3]
+
+
+def _semantic_fallback(query: str, llm_caller) -> list:
+    """语义兜底主流程：映射表 → LLM 猜 → 自学习写回。返回命中 relpath 列表。"""
+    # 第一层：映射表（免费毫秒级）
+    mapping = _load_alias_map()
+    candidates = [c for c in (mapping.get(query) or []) if isinstance(c, str)]
+    source = "map"
+    if not candidates:
+        # 第二层：LLM 辅助（映射表未命中才调用）
+        candidates = _llm_guess_folders(query, llm_caller)
+        source = "llm"
+    if not candidates:
+        return []
+    # 用候选名做文件名/路径匹配（候选本身可能是文件夹名，三路内搜索）
+    hits: dict[str, int] = {}
+    for cand in candidates:
+        _name_path_match(cand, OBSIDIAN_VAULT, hits)
+    if not hits:
+        return []
+    ordered = sorted(hits.items(), key=lambda kv: kv[1])
+    # 自学习：LLM 兜底命中 → 写回映射表（用一次记录一次，越来越全）
+    if source == "llm":
+        mapping.setdefault(query, [])
+        for c in candidates:
+            if c not in mapping[query]:
+                mapping[query].append(c)
+        _save_alias_map(mapping)
+    return [p for p, _ in ordered]
 
 
 def read_obsidian_note(filename: str, section: int = 0) -> str:
