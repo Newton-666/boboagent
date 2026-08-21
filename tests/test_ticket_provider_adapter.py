@@ -63,7 +63,7 @@ def _mock_llm_caller(proto, msg_field, msg_value="思考中"):
 
     captured = {}
 
-    def _fake_post(url, json=None, headers=None, timeout=None, stream=False):
+    def _fake_post(url, json=None, headers=None, timeout=None, stream=False, proxies=None):
         import json as _json_mod
         captured["payload"] = json or {}
         # 非流式响应：message 带 {msg_field} 字段
@@ -132,7 +132,7 @@ def test_p6_thinking_disable_gated():
 
     captured = {}
 
-    def _fake_post(url, json=None, headers=None, timeout=None, stream=False):
+    def _fake_post(url, json=None, headers=None, timeout=None, stream=False, proxies=None):
         import json as _json_mod
         captured["payload"] = json or {}
         body = b'{"choices": [{"message": {"content": "ok"}}]}'
@@ -178,7 +178,7 @@ def test_p6b_temperature_from_declaration():
     import core.llm_caller as lc
     captured = {}
 
-    def _fake_post(url, json=None, headers=None, timeout=None, stream=False):
+    def _fake_post(url, json=None, headers=None, timeout=None, stream=False, proxies=None):
         import json as _json_mod
         captured["payload"] = json or {}
         body = _json_mod.dumps({
@@ -231,7 +231,7 @@ def test_p7_conservative_default_no_proto():
     import core.llm_caller as lc
     captured = {}
 
-    def _fake_post(url, json=None, headers=None, timeout=None, stream=False):
+    def _fake_post(url, json=None, headers=None, timeout=None, stream=False, proxies=None):
         import json as _json_mod
         captured["payload"] = json or {}
         body = _json_mod.dumps({

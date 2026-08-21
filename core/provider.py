@@ -167,6 +167,24 @@ PROVIDERS = {
         },
         "tools": {"native": True, "parallel": False, "json_mode": False},
     },
+    "glm": {
+        "name": "GLM (Zhipu)",
+        "env_key": "GLM_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "models": ["glm-4-plus", "glm-4-air", "glm-4-flash"],
+        "context_length": 128000,
+        # 智谱 GLM：OpenAI 兼容端点。glm-4.5 系支持 thinking（reasoning_content
+        # 字段）；4 系默认无 thinking。保守声明：字段名=reasoning_content，
+        # 不回传（大多数模型不需要）；temperature 自由。
+        "reasoning": {
+            "field": "reasoning_content",
+            "echo_required": False,
+            "thinking_mode": False,
+            "stream_reasoning": True,
+            "disable_supported": False,
+        },
+        "tools": {"native": True, "parallel": True, "json_mode": True},
+    },
     "custom": {
         "name": "Custom",
         "env_key": "CUSTOM_API_KEY",
