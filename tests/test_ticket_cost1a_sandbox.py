@@ -207,6 +207,7 @@ class TestIronRules:
                  and "core/profile_writer.py" not in l
                  and "core/skill_loader.py" not in l
                  and "core/skill_sedimenter.py" not in l
+                 and "core/provider.py" not in l   # TICKET-PROVIDER-CONTEXT-MODEL 授权
                  and "file changed" not in l and "files changed" not in l]
         assert lines == [], f"core/ 有改动: {r.stdout.strip()}"
 

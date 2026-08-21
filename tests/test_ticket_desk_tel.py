@@ -531,7 +531,8 @@ def test_tel_8_zero_interference():
         # （通道 A，只记录不动作，写 data/logs/signal_log.jsonl），diff 必须含 P0-2 标记
         if ln in ("core/context.py", "core/engine.py",
                   "core/profile_writer.py", "core/signal_detector.py",
-                  "core/skill_loader.py", "core/skill_sedimenter.py"):  # PROFILE + SKILL 系列
+                  "core/skill_loader.py", "core/skill_sedimenter.py",
+                  "core/provider.py"):  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
                     or "P0-2" in r7.stdout), \
@@ -644,7 +645,7 @@ def test_tel_8_zero_interference():
         if ln == "data/obsidian_alias_map.json":
             continue  # Obsidian 语义搜索映射表（TICKET-OBSIDIAN-SEARCH-C：中文 query
             # → 英文文件夹名对照，自学习写回；数据文件非代码）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py":
             continue
         # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
         # + core/skill_loader.py（USER.md 引擎写入闸门 + 行为信号两级检测 + skill

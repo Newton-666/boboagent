@@ -24,6 +24,11 @@ A provider is defined by:
   (These keep a partially-declared provider runnable without protocol mismatch.)
 """
 
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
 PROVIDERS = {
     "deepseek": {
         "name": "DeepSeek",
@@ -37,6 +42,8 @@ PROVIDERS = {
         # 128000 保留为老型号兜底；model_context 按型号覆盖。
         "model_context": {"deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000,
                           "deepseek-v4-flash-vision-exp": 1000000},  # vision-exp 同 v4-flash 系 1M（owner 实弹修复 2026-08-21）
+        # COST-3：v4 系前缀继承 → 未来 deepseek-v4-* 新模型自动 1M，消除逐条枚举漏登记
+        "context_family": {"deepseek-v4-": 1000000},
         "dynamic_models": True,  # 动态拉 /v1/models（DeepSeek 上新模型自动可见，实测 3 个含 vision）
         # TICKET-PROVIDER-ADAPTER：协议声明（thinking 字段=reasoning_content，
         # 工具轮后必须回传，支持显式关 thinking）
@@ -136,8 +143,10 @@ PROVIDERS = {
         "env_key": "MOONSHOT_API_KEY",
         "base_url": "https://api.moonshot.cn/v1/chat/completions",
         "models": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code-highspeed"],
-        "context_length": 1048576,  # k3=1M
+        "context_length": 128000,  # COST-3 兜底：moonshot-v1 系等未声明模型回退 128K（kimi-k3 走 model_context 精确 1M）
         "model_context": {"kimi-k3": 1000000, "kimi-k2.6": 262144, "kimi-k2.7-code-highspeed": 262144},
+        # COST-3：kimi-k2.x 家族继承 → 未来 kimi-k2.* 新模型自动 256K；kimi-k3 精确 1M 命中优先
+        "context_family": {"kimi-k2.": 262144},
         "temperature": 1.0,
         "max_tokens": 32768,
         "dynamic_models": True,  # 动态拉 /v1/models（实测 12 个，含 kimi-k2.7-code + vision 系列）
@@ -208,6 +217,30 @@ PROVIDERS = {
 }
 
 
+def _match_context_length(provider: dict, model_name: str) -> int | None:
+    """解析模型上下文窗口，按优先级：精确 → 前缀家族 → 正则家族 → None。
+
+    COST-3：把 model_context 从"逐条精确枚举"升级为"精确修正 + 前缀/家族继承"。
+    未来 deepseek-v4-* / kimi-k2.* 等新模型自动继承家族窗口，消除漏登记就回退默认
+    低估（如 vision-exp 漏 1M → 回退 128K）的病根。返回 None 由调用方回退 provider
+    默认并打 warn 告警，不再静默低估。
+    """
+    if not model_name:
+        return None
+    model_context = provider.get("model_context") or {}
+    if model_name in model_context:
+        return model_context[model_name]
+    # 前缀家族继承：如 deepseek-v4-* → 1M、kimi-k2.x → 256K
+    for prefix, ctx in (provider.get("context_family") or {}).items():
+        if model_name.startswith(prefix):
+            return ctx
+    # 正则家族：如 moonshot-v1.* 等未精确命中的系
+    for pattern, ctx in (provider.get("context_family_regex") or {}).items():
+        if re.search(pattern, model_name):
+            return ctx
+    return None
+
+
 def get_provider(name: str) -> dict | None:
     """Return the provider config dict, or None if unknown."""
     return PROVIDERS.get(name)
@@ -261,9 +294,14 @@ def resolve_provider(provider_name: str = None, env_file: str = None) -> dict:
     if not model and provider["models"]:
         model = provider["models"][0]
 
-    # 每模型上下文窗口：model_context[model] → provider context_length → 128k 兜底
-    model_ctx = (provider.get("model_context") or {}).get(model)
-    context_len = model_ctx or provider.get("context_length", 128000)
+    # 每模型上下文窗口：精确 → 家族继承 → provider 默认（COST-3，不再静默低估）
+    model_ctx = _match_context_length(provider, model)
+    if model_ctx is None:
+        logger.warning(
+            "COST-3 模型窗口未确认：%s/%s 未声明 context，回退 provider 默认 %s。"
+            "请补登记 model_context 或 context_family，避免窗口被低估。",
+            name, model, provider.get("context_length", 128000))
+    context_len = model_ctx if model_ctx is not None else provider.get("context_length", 128000)
 
     return {
         "name": name,
@@ -286,11 +324,14 @@ def get_context_length(provider_name: str = None, model_name: str = None) -> int
         except ValueError:
             pass
     cfg = resolve_provider(provider_name)
-    # 如果指定了 model_name，再查一次 model_context（resolve_provider 已用 os.environ 中的 model）
-    if model_name and cfg.get("model") != model_name:
-        provider = get_provider(cfg["name"])
-        if provider:
-            model_ctx = (provider.get("model_context") or {}).get(model_name)
-            if model_ctx:
-                return model_ctx
+    provider = get_provider(cfg["name"])
+    # 显式指定 model_name 时再查一次（resolve_provider 已按 os.environ 中的 model 解析）
+    if model_name and provider and cfg.get("model") != model_name:
+        model_ctx = _match_context_length(provider, model_name)
+        if model_ctx is not None:
+            return model_ctx
+        logger.warning(
+            "COST-3 模型窗口未确认：%s/%s 未声明 context，回退 provider 默认 %s。",
+            cfg["name"], model_name, provider.get("context_length", 128000))
+        return provider.get("context_length", 128000)
     return cfg.get("context_length", 128000)

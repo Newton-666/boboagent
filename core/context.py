@@ -106,6 +106,11 @@ _FIXED_OVERHEAD_TOKENS = 25000
 def _get_context_budget(_engine=None) -> int:
     """返回当前模型的上下文预算（token 数），TICKET-024 重构。
 
+    COST-2：窗口从 provider 声明体系化取得（get_context_length——精确→前缀/家族继承→
+    provider 默认兜底→缺失 warn 告警），压缩阈值不再受"新模型漏声明→静默低估"影响。
+    COST-3：窗口解析复用 provider.py 的 _match_context_length（精确→前缀→正则→默认兜底），
+    context.py 只取最终窗口值，压缩阈值随窗口自动算对。
+
     预算 = (context_length - max_tokens 预留 - 固定开销) × BOBO_CONTEXT_BUDGET_RATIO
 
     固定开销 = 工具 schema + system prompt + 记忆注入（实测约 20-25K token）。

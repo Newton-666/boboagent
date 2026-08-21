@@ -109,7 +109,8 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     # 工具集会话内全量稳定），diff 必须含 COST-3 标记
     COST3_ALLOWED = {"core/context.py", "core/engine.py",
                      "core/profile_writer.py", "core/signal_detector.py",
-                     "core/skill_loader.py", "core/skill_sedimenter.py"}  # PROFILE + SKILL 系列
+                     "core/skill_loader.py", "core/skill_sedimenter.py",
+                     "core/provider.py"}  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列
     # DESK-P1（2026-08-17）特批：core/engine_adapter.py + core/tool_runner.py（会话
     # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
     # cwd），diff 必须含 DESK-P1 标记

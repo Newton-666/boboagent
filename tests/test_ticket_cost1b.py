@@ -363,7 +363,8 @@ def test_c8_core_zero_diff_guard():
                if x not in ("core/llm_caller.py", "core/injector.py", "core/command_safety.py",
                             "core/context.py", "core/engine.py",
                             "core/engine_adapter.py", "core/tool_runner.py",
-                            "core/skill_loader.py", "core/skill_sedimenter.py")]
+                            "core/skill_loader.py", "core/skill_sedimenter.py",
+                            "core/provider.py")]  # TICKET-PROVIDER-CONTEXT-MODEL 授权
     assert changed == [], f"core/ 有改动，违反铁律: {changed}"
 
 
