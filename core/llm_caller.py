@@ -412,7 +412,10 @@ def _classify_error(exception: Exception = None, status_code: int = None,
 
 # 超时配置（秒）
 CONNECT_TIMEOUT = 10   # 建立连接的超时时间
-READ_TIMEOUT = 30      # 初始 POST 读超时（接收首字节够用，不再用于 SSE 流块间间隙）
+# 初始 POST 读超时（接收首字节够用，不再用于 SSE 流块间间隙）。
+# TICKET-PROVIDER-ADAPTER：本地模型（lmstudio/ollama）首 token 慢（Qwen3
+# 思考 30-60s）——支持环境变量 BOBO_READ_TIMEOUT 放宽；默认 30s 保持云端行为。
+READ_TIMEOUT = int(__import__("os").environ.get("BOBO_READ_TIMEOUT", "30"))
 # SSE 流块间间隙看门狗由 _SseWatchdog + BOBO_SSE_READ_TIMEOUT 管理
 
 # 重试配置
