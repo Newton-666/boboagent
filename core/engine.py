@@ -1337,6 +1337,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 and self._interrupt_event.is_set()):
                             raise LLMInterrupted("interrupt during living notes")
                         kw.setdefault("_interrupt_event", self._interrupt_event)
+                        # TICKET-PROVIDER-ADAPTER（COST-3 特批标记，P5-400 同款教训）：
+                        # living_notes 在异步线程里用主流程 llm_caller 实例做独立
+                        # 新对话（无历史、use_tools=False）——必须 thinking_disabled=True
+                        # 冷调用，否则与主流程工具轮链并发时破坏 DeepSeek thinking
+                        # 回传状态 → HTTP 400 "reasoning_content must be passed back"
+                        # （实弹 2026-08-21 18:34，living_notes 超时线程 + 主流程并发）。
+                        kw.setdefault("thinking_disabled", True)
                         return self.llm_caller(prompt, **kw)
                     write_living_notes(
                         takeaways,

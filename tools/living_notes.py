@@ -48,7 +48,10 @@ _ENV_OFF = "BOBO_LIVING_NOTES"
 # 票 PERF-1 事故 1（要求 a）：成文 LLM 调用硬超时（秒）
 # 根因：write_living_notes 的 llm_call 无超时保护，网络故障时干等 ~120s
 # 钉死收尾回合（2026-08-13 12:59-13:01 铁证）。超时立即降级，绝不钉死回合。
-_LN_LLM_TIMEOUT = 30
+_LN_LLM_TIMEOUT = 90  # 【COST-3 特批标记】TICKET-PROVIDER-ADAPTER：> llm_caller
+# READ_TIMEOUT(60)，避免 ThreadPoolExecutor 先超时产生"僵尸线程"（底层调用
+# 继续跑，与主流程并发破坏 thinking 回传状态 → 400，实弹 2026-08-21 18:34）。
+# 超时保护仍在，只是让正常调用有足够时间完成。
 
 # 固定骨架章节（LN-2R：所有主题笔记统一）
 _SKELETON_SECTIONS = ["概述", "关键结论", "决策与原因", "待办与未决", "时间线"]

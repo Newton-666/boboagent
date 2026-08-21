@@ -662,6 +662,12 @@ def test_tel_8_zero_interference():
             r_p01t = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-1" in r_p01t.stdout, f"{ln} 缺 P0-1 特批标记，未授权改动被拦截"
             continue
+        # 票 TICKET-PROVIDER-ADAPTER 特批：tools/living_notes.py（成文 LLM 超时
+        # 90s + 冷调用纪律），diff 必须含 COST-3 标记
+        if ln == "tools/living_notes.py":
+            r_ln = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_ln.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("tests/") or ln.startswith("apps/desktop/electron/test/"):
             continue  # 测试文件配套改动（铁律针对 core/gateway/TUI/widget 代码）
         # 票 DESK-P2 特批：apps/desktop/electron/widget.html（小组件界面文案全英文化），
