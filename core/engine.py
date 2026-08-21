@@ -2128,6 +2128,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls,
                                     thinking=self._last_reasoning or None)
+            # 票 TICKET-PROVIDER-ADAPTER（COST-3，400 第 4 引信）：_last_reasoning
+            # 是全局单值，工具轮链中若不清，下一条 assistant 会复用上一条的
+            # reasoning → 历史多条 assistant 共享同一 thinking → REASONING-ECHO
+            # 给多条补同一 reasoning_content → DeepSeek 拒绝 → HTTP 400。
+            # 落 history 后立即消费即清（下一条 assistant 无新 reasoning 则不落）。
+            self._last_reasoning = ""
             self._append_to_history("tool", tool_results=tool_results)
             # ── 票 L1：自动销账辅助（建议性，模型可推翻）──
             # 检测强完成信号：run_tests 全绿（N passed 且无 failed）→ 注入建议，
@@ -2277,6 +2283,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     _hist_content = (_hist_content or "") + _recon
                 self._append_to_history("assistant", _hist_content,
                                         thinking=self._last_reasoning or None)
+                self._last_reasoning = ""  # 落历史即清（防纯文本 assistant 复用残留 reasoning）
                 # 引用追踪：LLM 回复中若引用了注入的记忆，自动加分
                 if getattr(self.proactive, '_last_memory_ids', None):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
