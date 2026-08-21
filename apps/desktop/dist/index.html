@@ -656,6 +656,16 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .skills-row:last-child { border-bottom:none; }
 .skills-row:hover { background:var(--hover); }
 .skills-name { word-break:break-all; }
+/* 票 TICKET-PROVIDER-ADAPTER：API Key 表格样式（每 provider 一行：
+ * 左名称+状态点，右 key 输入框；本地 provider 显示无需 key）*/
+.apikey-table { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg2); }
+.apikey-row { display:flex; align-items:center; gap:10px; padding:7px 12px; border-bottom:1px solid var(--border); }
+.apikey-row:last-child { border-bottom:none; }
+.apikey-name { min-width:130px; font-size:13px; color:var(--text2); font-weight:500; white-space:nowrap; }
+.apikey-dot { color:var(--green); font-size:10px; }
+.apikey-input { flex:1; font-family:inherit; font-size:13px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px 8px; box-sizing:border-box; outline:none; }
+.apikey-input:focus { border-color:#e8913a; }
+.apikey-none { flex:1; font-size:12px; color:var(--text-muted); }
 </style>
 <!-- TICKET-GUI-F16: KaTeX 样式（vendor 本地，数学公式排版；字体相对路径 fonts/） -->
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -816,8 +826,10 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
         </select>
       </div>
       <div class="settings-page" id="page-api" style="display:none">
-        <label>API Key</label>
-        <input id="cfg-apikey" type="password" placeholder="Enter API Key" />
+        <!-- TICKET-PROVIDER-ADAPTER：API Key 表格——每个 provider 一行，
+             左边 provider 名（+状态），右边 key 输入框。动态渲染（model.options
+             RPC 返回 providers 含 authenticated/key_env）。 -->
+        <div class="apikey-table" id="apikey-table" style="margin-bottom:12px;"></div>
         <label>Base URL <span style="font-weight:400;font-size:11px;">(optional)</span></label>
         <input id="cfg-baseurl" type="text" placeholder="Leave empty for Provider default" />
         <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
@@ -4339,6 +4351,37 @@ function populateProviderSelect(data) {
     if (m === mprev || m === data.model) opt.selected = true;
     msel.appendChild(opt);
   });
+  // TICKET-PROVIDER-ADAPTER：API Key 表格渲染（每个 provider 一行）
+  renderApiKeyTable(data);
+}
+
+// API Key 表格：左边 provider 名（+已配置状态），右边 key 输入框。
+// key 存 JS 全局 apikeys（Save 时逐个提交），本地 provider 显示"无需 key"。
+var apikeys = {};
+function renderApiKeyTable(data) {
+  var tbl = document.getElementById('apikey-table');
+  if (!tbl) return;
+  var html = '';
+  (data.providers || []).forEach(function(p) {
+    var needsKey = p.auth_type === 'api_key';
+    html += '<div class="apikey-row">' +
+      '<span class="apikey-name">' + esc(p.name) +
+      (p.authenticated ? ' <span class="apikey-dot" title="Configured">●</span>' : '') +
+      '</span>';
+    if (needsKey) {
+      html += '<input class="apikey-input" type="password" data-provider="' + p.slug +
+        '" placeholder="' + (p.authenticated ? '•••••• (leave blank to keep)' : 'Enter API Key') + '" />';
+    } else {
+      html += '<span class="apikey-none">No API key needed</span>';
+    }
+    html += '</div>';
+  });
+  tbl.innerHTML = html;
+  // 收集输入框引用
+  apikeys = {};
+  tbl.querySelectorAll('.apikey-input').forEach(function(inp) {
+    inp.addEventListener('input', function() { apikeys[inp.dataset.provider] = inp.value.trim(); });
+  });
 }
 document.getElementById('settings-icon').onclick = function() {
   // 动态拉 provider 列表（适配层：注册即出现在设置页）
@@ -4485,19 +4528,22 @@ document.getElementById('settings-close').onclick = function() {
   document.getElementById('settings-modal').classList.remove('open');
 };
 document.getElementById('settings-save').onclick = function() {
-  var key = document.getElementById('cfg-apikey').value.trim();
   var model = document.getElementById('cfg-model').value;
   var provider = document.getElementById('cfg-provider').value;
   // TICKET-PROVIDER-ADAPTER：provider 选择必须保存——config.set 支持
   // "<model> --provider <provider>" 格式（configs.py 解析，写 BOBO_PROVIDER +
-  // API_MODEL_NAME 到 .env + 热生效）。key 可选——本地 provider 无 key 也能保存。
+  // API_MODEL_NAME 到 .env + 热生效）。
   var steps = [];
   // 1. provider + model 写入（model 没选时只发 provider 占位）
   var modelArg = model || 'deepseek-v4-flash';
   steps.push(call('config.set', { key: 'model', value: modelArg + ' --provider ' + provider })
     .catch(function() { return null; }));
-  // 2. key 写入（填了才写）
-  if (key) steps.push(call('setup.submit', { provider: provider, api_key: key }).catch(function() { return null; }));
+  // 2. API Key 表格：每个填了 key 的 provider 逐个提交（留空的跳过=保留原值；
+  //    重新填 = 替换原值——用户要求的替换语义）
+  Object.keys(apikeys).forEach(function(slug) {
+    var k = apikeys[slug];
+    if (k) steps.push(call('setup.submit', { provider: slug, api_key: k }).catch(function() { return null; }));
+  });
   Promise.all(steps).then(function() {
     addStatus('Saved — provider applied');
     document.getElementById('settings-modal').classList.remove('open');
