@@ -35,7 +35,8 @@ PROVIDERS = {
         "context_length": 128000,
         # TICKET-E4b：deepseek-v4-flash / v4-pro 官方真实窗口 1M（2026-04 发布）。
         # 128000 保留为老型号兜底；model_context 按型号覆盖。
-        "model_context": {"deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000},
+        "model_context": {"deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000,
+                          "deepseek-v4-flash-vision-exp": 1000000},  # vision-exp 同 v4-flash 系 1M（owner 实弹修复 2026-08-21）
         "dynamic_models": True,  # 动态拉 /v1/models（DeepSeek 上新模型自动可见，实测 3 个含 vision）
         # TICKET-PROVIDER-ADAPTER：协议声明（thinking 字段=reasoning_content，
         # 工具轮后必须回传，支持显式关 thinking）
