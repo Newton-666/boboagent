@@ -22,6 +22,7 @@ message.complete 后主线程零调用，本模块在子线程中运行）。
 
 import json
 import logging
+import re
 import threading
 import time
 
@@ -167,3 +168,82 @@ def maybe_detect_profile_signal(
 
     t = threading.Thread(target=_run, daemon=True, name="profile5-signal")
     t.start()
+
+
+# ── TICKET-PROFILE-PARADIGM-VALIDATE：约束框架判断（纯验证辅助，不改主流程、不进生产路径）──
+# 【COST-3 特批标记】PROFILE 系列授权：core/signal_detector.py 加纯验证辅助函数，
+# 不接主流程、不影响 detect_profile_signal/maybe_detect_profile_signal 行为。
+
+# 强话题限定词（单一领域 → 降为话题细节，非跨场景行为范式）
+_STRONG_TOPIC = ("数学", "微积分", "评测", "K3", "代数", "几何", "物理", "化学", "编译", "API")
+
+# 一次性信号词（这类样本无论含多少偏好词，都应丢弃）
+_ONCE_PAT = re.compile(r"这次|先定评测集|先.*测一下")
+# 纠正信号词（应修正旧条目而非新增）
+_CORRECT_PAT = re.compile(r"别再用|别再|不要每次|不要每[次一]|不要每次都")
+# 显式指令词（记住 + 非话题限定 → 直接进）
+_INSTR_PAT = re.compile(r"记住")
+# 长期行为词（跨场景可复用）
+_REUSE_PAT = re.compile(r"以后|每次|都|任何|偏好|喜欢|先.+再|习惯")
+# 思维链条（表达"先 X 再 Y / 每次 / 都"等长期思考模式）
+_CHAIN_PAT = re.compile(r"都|任何|先.+再|每次|以后|习惯")
+# 可操作（具体可执行的长期行为）
+_ACT_PAT = re.compile(r"(以后|每次|都|任何).*(用|写|记|讲|说|做|测|画)|先.+再")
+
+
+def _judge_by_constraints(sample: str) -> dict:
+    """约束框架判断（纯验证辅助函数，不改主流程）。
+
+    对单条样本做 7 维约束评分 → 判定画像信号类别，用于与词眼判断（detect_profile_signal
+    的 keyword_gate + LLM）做小规模对比验证（TICKET-PROFILE-PARADIGM-VALIDATE）。
+
+    返回：
+      {"classify": "profile|memory|discard|correction|instruction",
+       "dims": {7 维打分}, "reason": "判定依据"}
+
+    归类对齐写 USER.md 与否：
+      profile / instruction → 写 USER.md
+      memory / discard / correction → 不写（discard 丢弃，memory 存记忆，correction 修正旧条目）
+
+    7 维约束：
+      diversity    跨场景多样性（0=单一话题, 1=跨场景）
+      chain        思维链条（长期思考模式）
+      reusable     可跨回合复用
+      actionable   可执行（具体长期行为，非一次性步骤）
+      evidence     行为证据（"偏好/喜欢/不要/别"等明确立场）
+      causality    因果（因为/所以/避免/而非）
+      consistency  一致性（非一次性、非纠正则视为一致）
+    """
+    s = sample.strip()
+    topic_hits = [w for w in _STRONG_TOPIC if w in s]
+    chain = 1 if _CHAIN_PAT.search(s) else 0
+    reusable = 1 if (_REUSE_PAT.search(s) and not _ONCE_PAT.search(s)) else 0
+    actionable = 1 if _ACT_PAT.search(s) else 0
+    evidence = 1 if re.search(r"偏好|喜欢|不要|别|讨厌|其实", s) else 0
+    causality = 1 if re.search(r"因为|所以|避免|导致|而非", s) else 0
+    dims = {
+        "diversity": 0 if topic_hits else 1,
+        "chain": chain,
+        "reusable": reusable,
+        "actionable": actionable,
+        "evidence": evidence,
+        "causality": causality,
+        "consistency": 1,
+    }
+
+    # 判定优先级：discard > correction > instruction > 话题/范式
+    if _ONCE_PAT.search(s):
+        return {"classify": "discard", "dims": dims, "reason": "一次性请求/步骤，应丢弃"}
+    if _CORRECT_PAT.search(s):
+        return {"classify": "correction", "dims": dims, "reason": "纠正旧条目，应修正写入"}
+    if _INSTR_PAT.search(s) and not topic_hits:
+        return {"classify": "instruction", "dims": dims, "reason": "显式指令，直接进 USER.md"}
+    # 话题细节：强话题限定 + 长期词 → 单一领域偏好，存记忆不入 USER.md
+    if topic_hits and (reusable or actionable):
+        return {"classify": "memory", "dims": dims, "reason": "话题细节（限定单一领域），存记忆不入 USER.md"}
+    # 跨场景行为范式
+    if reusable and actionable:
+        return {"classify": "profile", "dims": dims, "reason": "跨场景可复用可操作行为范式，写 USER.md"}
+    if reusable and not actionable:
+        return {"classify": "profile", "dims": dims, "reason": "长期偏好但可操作性弱，仍按范式写入"}
+    return {"classify": "profile", "dims": dims, "reason": "默认按行为范式写入"}
