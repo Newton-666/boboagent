@@ -217,6 +217,39 @@ PROVIDERS = {
 }
 
 
+# ── Vision 能力声明（TICKET-VISION-INPUT，COST-3 特批标记）──
+# 哪些 provider/model 支持图像输入（多模态）。默认无 vision（未声明=False）。
+# 非 vision 模型发图 → 由调用方（read_local_file 图片分支）明确报错，不静默。
+# DeepSeek：vision 模型名含 "vision"（如 deepseek-v4-flash-vision-exp，owner 实弹 2026-08-21）。
+# OpenAI：gpt-4o 系列支持图像输入；Google：Gemini 2.0 系列支持；OpenRouter 透传各家。
+_VISION_RULES = {
+    "deepseek": {"substring": "vision"},            # 任何含 vision 的 deepseek 模型
+    "openai": {"models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]},
+    "google": {"models": ["gemini-2.0-flash", "gemini-2.0-pro"]},
+    "openrouter": {"substring": "gpt-4o"},
+    "moonshot": {"substring": "vision"},            # kimi vision 系列（若有）
+}
+
+
+def supports_vision(provider_name: str, model_name: str) -> bool:
+    """判断 provider/model 是否支持图像输入（vision）。
+
+    规则：per-provider _VISION_RULES（models 精确列表 / substring 子串匹配）。
+    未声明 / 未命中 = False（保守：非 vision 模型发图 → 调用方明确报错而非静默）。
+    """
+    if not model_name:
+        return False
+    rule = _VISION_RULES.get((provider_name or "").lower())
+    if not rule:
+        return False
+    if model_name in (rule.get("models") or []):
+        return True
+    sub = rule.get("substring")
+    if sub and sub in model_name:
+        return True
+    return False
+
+
 def _match_context_length(provider: dict, model_name: str) -> int | None:
     """解析模型上下文窗口，按优先级：精确 → 前缀家族 → 正则家族 → None。
 

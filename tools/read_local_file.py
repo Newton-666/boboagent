@@ -9,6 +9,61 @@ TOOL_NAME = "read_local_file"
 # 读取目录时每个文件最多显示的行数
 DIR_PREVIEW_LINES = 30
 
+# TICKET-VISION-INPUT：图片扩展名 → 走视觉描述分支（真正让视觉模型看图，非元信息）
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+
+
+def _describe_image(filepath: str, max_chars: int = 40000) -> str:
+    """图片 → base64 data URL → 视觉描述（真正看图，非读取元信息）。
+
+    TICKET-VISION-INPUT：支持 vision 的模型 → 构造多模态消息（image_url + base64）
+    调视觉模型返回描述；非 vision 模型 → 明确报错（不静默）。
+    依赖：core.provider.supports_vision 判定 provider/model 是否支持图像输入。
+    """
+    import base64
+    import mimetypes
+    from core.provider import resolve_provider, supports_vision
+
+    try:
+        with open(filepath, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+    except OSError as e:
+        return f"错误: 读取图片失败: {e}"
+
+    mime = mimetypes.guess_type(filepath)[0] or "image/png"
+    data_url = f"data:{mime};base64,{b64}"
+
+    cfg = resolve_provider()
+    model = cfg.get("model", "")
+    if not supports_vision(cfg.get("name", ""), model):
+        return (f"错误: 当前模型 {model}（provider={cfg.get('name')}）不支持图像输入 vision。"
+                f"请切换到支持 vision 的模型（如 deepseek-v4-flash-vision-exp）。")
+
+    from core.llm_caller import create_llm_caller
+    llm = create_llm_caller(cfg.get("api_key", ""), cfg.get("base_url", ""), model)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "请描述这张图片的内容（颜色、物体、文字、场景）。用中文简洁回答。"},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ],
+    }]
+    try:
+        resp = llm(messages, use_tools=False, max_tokens=1024, thinking_disabled=True)
+    except Exception as e:
+        return f"错误: 视觉模型调用失败: {e}"
+    if isinstance(resp, dict) and resp.get("error"):
+        return f"错误: 视觉模型返回错误: {resp['error']}"
+    content = ""
+    try:
+        content = resp["choices"][0]["message"].get("content", "") or ""
+    except (KeyError, IndexError, TypeError):
+        content = ""
+    if not content:
+        return f"{filepath}\n\n[视觉描述] （模型未返回内容）"
+    return f"{filepath}\n\n[视觉描述] {content[:max_chars]}" + \
+        (f"\n... (内容已截断，共 {len(content)} 字符)" if len(content) > max_chars else "")
+
 
 def _read_single_file(filepath: str, max_chars: int = 40000,
                       offset: int = 0, limit: int | None = None) -> str:
@@ -165,8 +220,10 @@ def execute(filepath: str, max_chars: int = 40000,
     if not path.exists():
         return f"错误: 路径不存在: {filepath}"
 
-    # 安全: 二进制文件检测
+    # 安全: 二进制文件检测（图片走视觉分支，绕过二进制拦截 TICKET-VISION-INPUT）
     if path.is_file():
+        if path.suffix.lower() in IMAGE_EXTENSIONS:
+            return _describe_image(str(path), max_chars)
         warning = safe_read_check(str(path))
         if warning:
             return warning
