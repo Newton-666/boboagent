@@ -83,10 +83,18 @@ def show(x: float, y: float, duration: float = 0.25):
 
 
 def move_to(x: float, y: float, duration: float = 0.25):
-    """平滑移动光标到 (x, y)（插值动画，跟手）。"""
+    """平滑移动光标到 (x, y)（插值动画，跟手）。
+
+    （TICKET-COMPUTER-USE-CURSOR v2，COST-3 特批标记）移动前保证 panel 可见
+    （orderFront_）——此前仅 _ensure_panel 首次 orderFront，若 panel 曾被
+    orderOut/移出屏幕，后续 move_to 只移动不显示 → 用户看不到光标。
+    """
+    global _visible
     try:
         with _cursor_lock:
             panel = _ensure_panel()
+            panel.orderFront_(None)  # 保证可见（每次移动前）
+            _visible = True
             sx, sy = panel.frame().origin.x, panel.frame().origin.y
             steps = max(8, int(duration * 40))
             for i in range(1, steps + 1):
