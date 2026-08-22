@@ -68,9 +68,17 @@ function frontendLog(line) {
 // ── Python backend management ──────────────────────────────────────────
 
 function resolvePython() {
-  // Try configured python, then common paths
+  // Try configured python, then project venv, then common paths.
+  // 优先项目 .venv：它有 pyobjc（computer_use/AX 树依赖 ApplicationServices），
+  // 系统 python3 没有 pyobjc → computer_use 加载失败（报 'No module named ApplicationServices'）。
   const configured = process.env.BOBO_PYTHON
   if (configured && fs.existsSync(configured)) return configured
+
+  // 项目 .venv（Apple Silicon / Intel 通用，pyobjc 在 site-packages）
+  for (const rel of ['.venv/bin/python', 'venv/bin/python']) {
+    const p = path.join(__dirname, '..', '..', '..', rel)
+    if (fs.existsSync(p)) return p
+  }
 
   // Homebrew paths (Apple Silicon / Intel)
   for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3', 'python3', 'python']) {
