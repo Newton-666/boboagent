@@ -251,14 +251,48 @@ def _describe(image_path: str) -> str:
         return f"[视觉描述] 调用失败: {e}"
 
 
+def _window_id(pid: int) -> int | None:
+    """按 pid 找该应用的主窗口 CGWindowID（screencapture -l 用）。
+
+    （TICKET-COMPUTER-USE-BACKGROUND 修正，COST-3 特批标记）用 CGWindowList
+    （按窗口 ID 截，不管前台/层级——后台并行核心：
+    Safari 在后台被 bobo 窗口盖住也能截到 Safari 内容）。
+    """
+    try:
+        wins = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+        for w in wins or []:
+            if int(w.get("kCGWindowOwnerPID", 0)) == int(pid) and \
+               w.get("kCGWindowLayer", 0) == 0:
+                return int(w.get("kCGWindowNumber", 0))
+    except Exception:
+        pass
+    return None
+
+
 def _capture_png(pid=None) -> str:
     """截屏到临时 PNG，返回路径。
 
-    pid 且能找到目标 AXWindow frame → 按窗口区域截（票 B：目标应用在后台也能截到，非前台可见）；
-    否则全屏；区域截失败回退全屏；全屏失败返回错误串。
+    后台并行铁律（owner 定，COST-3 特批标记）：**截图必须截目标应用窗口，
+    不截当前屏幕/前台**。优先级：
+      ① screencapture -l <windowid>（按窗口 ID 截，非前台/被盖住也能截到目标窗口）
+      ② 失败 → AXWindow frame -R 区域截（目标应用区域）
+      ③ 再失败 → 返回错误（**绝不回退全屏**——全屏=截前台=截到 bobo 自己，错）
     """
     fd, path = tempfile.mkstemp(suffix=".png", prefix="cu_cap_")
     os.close(fd)
+    # ① 按窗口 ID 截（最稳：目标窗口内容，不管前台是谁）
+    if pid:
+        wid = _window_id(pid)
+        if wid:
+            try:
+                subprocess.run(["screencapture", "-x", "-l", str(wid), path],
+                               check=True, timeout=10)
+                if os.path.exists(path) and os.path.getsize(path) > 0:
+                    return path
+            except Exception:
+                pass
+    # ② AXWindow frame 区域截（目标应用区域）
     region = None
     if pid:
         try:
@@ -272,17 +306,19 @@ def _capture_png(pid=None) -> str:
             region = None
     if region:
         try:
-            subprocess.run(["screencapture", "-x", "-R", region, path], check=True, timeout=10)
+            subprocess.run(["screencapture", "-x", "-R", region, path],
+                           check=True, timeout=10)
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path
         except Exception:
-            region = None  # 区域截失败 → 回退全屏
-    if not region:
-        try:
-            subprocess.run(["screencapture", "-x", path], check=True, timeout=10)
-        except Exception as e:
-            return f"错误: 截屏失败: {e}"
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        return f"错误: 截屏失败（大小异常）——请确认屏幕录制权限已授权"
-    return path
+            pass
+    # ③ 失败返回错误（绝不回退全屏——全屏=前台=截错对象）
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    return (f"错误: 无法截取目标应用窗口（pid={pid}）——screencapture -l/-R 均失败，"
+            "未回退全屏（全屏会截到当前前台而非目标应用，违背后台并行铁律）。")
 
 
 def action_capture(describe: bool = False) -> str:
