@@ -1,4 +1,4 @@
-"""computer_use — AX 树驱动的电脑操作工具（TICKET-COMPUTER-USE-CORE）。
+"""computer_use — AX 树驱动的电脑操作工具（TICKET-COMPUTER-USE-CORE / TICKET-COMPUTER-USE-ACTION，COST-3 特批标记）。
 
 铁律（owner 定）：
 - 权限首用弹窗引导（禁静默默认开启操作）：首次调用检测 Screen Recording /
@@ -322,8 +322,59 @@ def action_type(text: str) -> str:
     return "错误: 输入失败（无法发送 cmd+v）"
 
 
+def action_open_app(app_name: str) -> str:
+    """打开指定应用（NSWorkspace.launchApplication / 'open -a' 兜底）。
+
+    ——补全原子操作：bobo 想"帮我在谷歌搜索/在 Pages 操作"时能直接 open_app，
+    不用写 applescript 造轮子（TICKET-COMPUTER-USE-ACTION）。
+    """
+    if not app_name or not str(app_name).strip():
+        return "错误: 请提供 app_name（如 'Safari'/'Pages'/'Finder'）"
+    app = str(app_name).strip()
+    try:
+        ws = NSWorkspace.sharedWorkspace()
+        if ws.launchApplication(app):
+            return f"已打开应用 {app}"
+    except Exception:
+        pass  # NSWorkspace 在新版 macOS 签名/反馈不稳定，走 open -a 兜底
+    try:
+        r = subprocess.run(["open", "-a", app], capture_output=True, timeout=8)
+        if r.returncode == 0:
+            return f"已打开应用 {app}（open -a 兜底）"
+        return f"错误: 打开应用 {app} 失败: {(r.stderr or b'').decode('utf-8', 'ignore').strip()}"
+    except Exception as e:
+        return f"错误: 打开应用 {app} 异常: {e}"
+
+
+def action_scroll(direction: str = "down", amount: int = 3) -> str:
+    """滚动页面（CGEvent scroll wheel）。direction: up/down/left/right。
+
+    ——补全原子操作：网页/长文档滚动，不用写 applescript（TICKET-COMPUTER-USE-ACTION）。
+    """
+    if direction not in ("up", "down", "left", "right"):
+        return "错误: direction 需为 up/down/left/right"
+    try:
+        n = int(amount)
+    except (TypeError, ValueError):
+        n = 3
+    if n < 1:
+        n = 1
+    # 滚轮正负：向下/向右为正（内容上移），向上/向左为负
+    if direction in ("down", "right"):
+        val = n
+    else:
+        val = -n
+    try:
+        ev = Quartz.CGEventCreateScrollWheelEvent(
+            None, Quartz.kCGScrollEventUnitLine, 1, val)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        return f"已滚动 {direction} {n} 行"
+    except Exception as e:
+        return f"错误: 滚动失败: {e}"
+
+
 def execute(action: str, element=None, coordinate=None, text=None, key=None,
-            describe: bool = False) -> str:
+            describe: bool = False, app_name=None, direction=None, amount=None) -> str:
     """computer_use 工具入口。
 
     Args:
@@ -347,8 +398,12 @@ def execute(action: str, element=None, coordinate=None, text=None, key=None,
         return action_type(text)
     elif action == "key":
         return action_key(key)
+    elif action == "open_app":
+        return action_open_app(app_name)
+    elif action == "scroll":
+        return action_scroll(direction=direction, amount=amount)
     else:
-        return (f"错误: 未知 action '{action}'。支持 capture / click / type / key。"
+        return (f"错误: 未知 action '{action}'。支持 capture / click / type / key / open_app / scroll。"
                 "首次使用需在系统设置授权屏幕录制+辅助功能。")
 
 
@@ -358,15 +413,19 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "AX 树驱动的电脑操作，覆盖整个 macOS（系统级通用，不限特定软件）：截屏看屏幕+AX 树元素索引（capture，默认不调 vision，快）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导（不自动开权限，不碰凭据）。\\n【何时用我——通用判断准则】操作对象在【界面层】时用我，比代码工具更优：① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/窗口，任何 Apple 应用如 Finder/Pages/Word/Safari/Notes/系统设置）→ 用我点/输入，界面元素用代码工具够不着。② 需要【看到】当前屏幕/系统状态 → 用我 capture。③ 其他工具受限（搜索 API 挂/VPN 不行/没 API）→ 用我直接操作真实浏览器/应用绕过。④ 操作对象是图形界面应用 → 用我，这是唯一能直接操作 GUI 的。⑤ 找文档/文件→我自己打开 Finder/文件夹，用 click+scroll 浏览定位（不只读文本层）。\\n【何时不用我】操作对象在代码/文本/文件层（查函数/读文件/改代码/批量处理）→ 用 read/grep/edit/terminal。\\n【快而精准——操作习惯】信任 AX 树定位（系统给坐标，准）：capture 拿到元素索引后，直接 click element=N 点它（或坐标），不要反复 capture 确认——一次定位就操作，又快又准。不要看到'开关/模式/功能'就想到改代码，界面上的按钮就点它。",
+        "description": "AX 树驱动的电脑操作，覆盖整个 macOS（系统级通用，不限特定软件）：截屏看屏幕+AX 树元素索引（capture，默认不调 vision，快）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）、打开应用（open_app）、滚动页面（scroll）。这是原子操作集（直接做，不写脚本/applescript 造轮子）：open_app 直接打开目标 APP，scroll 滚动窗口。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导（不自动开权限，不碰凭据）。\\n【何时用我——通用判断准则】操作对象在【界面层】时用我，比代码工具更优：① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/窗口，任何 Apple 应用如 Finder/Pages/Word/Safari/Notes/系统设置）→ 用我点/输入/打开应用/滚动，界面元素用代码工具够不着。② 需要【看到】当前屏幕/系统状态 → 用我 capture。③ 其他工具受限（搜索 API 挂/VPN 不行/没 API）→ 用我直接操作真实浏览器/应用绕过。④ 操作对象是图形界面应用 → 用我，这是唯一能直接操作 GUI 的。⑤ 找文档/文件→我自己打开 Finder/文件夹，用 click+scroll 浏览定位（不只读文本层）。\\n【何时不用我】操作对象在代码/文本/文件层（查函数/读文件/改代码/批量处理）→ 用 read/grep/edit/terminal。\\n【快而精准——操作习惯】信任 AX 树定位（系统给坐标，准）：capture 拿到元素索引后，直接 click element=N 点它（或坐标），不要反复 capture 确认——一次定位就操作，又快又准。不要看到'开关/模式/功能'就想到改代码，界面上的按钮就点它。",
         "parameters": {"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["capture", "click", "type", "key"],
+            "action": {"type": "string", "enum": ["capture", "click", "type", "key", "open_app", "scroll"],
                        "description": "操作类型"},
             "element": {"type": "integer", "description": "click：AX 元素索引（capture 返回的 N）"},
             "coordinate": {"type": "array", "items": {"type": "number"},
                            "description": "click：像素坐标 [x, y]"},
             "text": {"type": "string", "description": "type：要输入的文字（不碰密码/凭据）"},
             "key": {"type": "string", "description": "key：组合键（如 'cmd+s'）"},
+            "app_name": {"type": "string", "description": "open_app：要打开的应用名（如 'Safari'/'Pages'）"},
+            "direction": {"type": "string", "enum": ["up", "down", "left", "right"],
+                          "description": "scroll：滚动方向（默认 down）"},
+            "amount": {"type": "integer", "description": "scroll：滚动行数（默认 3）"},
             "describe": {"type": "boolean", "default": True,
                          "description": "capture：是否附视觉描述（默认 True）"},
         }, "required": ["action"]}

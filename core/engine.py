@@ -88,6 +88,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._auto_mode_getter = auto_mode_getter  # 票 A：会话级 AUTO MODE 开关读取器（放 ctx，engine 只读）
         self._computer_use_mode_getter = computer_use_mode_getter  # TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：会话级 computer use 开关读取器
         self._current_intent = None  # 票 TICKET-COMPUTER-USE-INTENT（COST-3）：当前回合意图 {goal,target,means}
+        self._last_cu_result = None  # 票 TICKET-COMPUTER-USE-ACTION（COST-3）：最近一次 computer_use 执行结果（降级排查"工具bug vs 网络"用）
         self.history = []
         # ── 票 DESK-P1（特批标记）：会话项目根。null=默认现状（工作目录即
         # BOBO_Project_Backup），绝对兼容；gateway 经 engine_adapter 注入
@@ -201,6 +202,23 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def _confirm(self, tool_name: str, tool_args: dict, reason: str) -> bool:
         if self.test_mode:
             return True
+        # ── 票 TICKET-COMPUTER-USE-ACTION（COST-3）：computer use 降级检测（先排查，不糊弄）──
+        # computer use 模式下 bobo 想用非 computer_use 工具（bash/curl 等）→ 这是降级动作：
+        # 先排查是"工具 bug"还是"网络/环境"；工具 bug → 拦（说清不糊弄）；网络 → 降级，
+        # auto 模式自动降级放行 / normal 模式走用户确认。绝不"试一下不行就降级"。
+        if self._cu_active() and tool_name != "computer_use":
+            _dg = self._degrade_decide(tool_name, tool_args, reason)
+            if _dg == "deny":
+                return False
+            if _dg == "ask":
+                if self.confirm_callback:
+                    result = self.confirm_callback(tool_name, tool_args, reason)
+                    if result == "all":
+                        self._all_confirmed = True
+                        return True
+                    return bool(result)
+                return False
+            # _dg == "allow"：auto 自动降级 / computer_use 成功后的正常配合 → 走原决策链
         # ── 票 O-1：OFFICE MODE 执法层——BOBO_ROLE 存在即激活（普通模式零变化）。
         # 必须排在 auto 决策树之前：auto 是背景技术，不豁免员工限制
         # （v0.3.1：员工限制由注入的角色携带，与 auto 开关正交）。
@@ -785,6 +803,60 @@ class Engine(ContextMixin, ToolRunnerMixin):
         """computer use 模式是否开（只读 getter）。"""
         return bool(self._computer_use_mode_getter is not None
                     and self._computer_use_mode_getter())
+
+    def _degrade_decide(self, tool_name: str, tool_args: dict, reason: str) -> str:
+        """computer use 降级判定（不"试一下不行就降级"）。
+
+        返回 'allow'/'deny'/'ask'：
+        - deny：还没用 computer_use 就想换工具 / computer_use 工具自身 bug → 拦。
+                工具 bug 说清"这是工具问题"，不靠降级糊弄。
+        - allow：computer_use 正常（灵活配合，34节：bash/writefiles 是辅助可配合）。
+                或网络/环境问题 + auto 模式（自动降级）。
+        - ask：网络/环境问题 + normal 模式 → 降级前先问用户（confirm_callback 弹窗）。
+        """
+        if not self._cu_active() or tool_name == "computer_use":
+            return "allow"
+        last = getattr(self, "_last_cu_result", None)
+        if last is None:
+            return "deny"  # 未试 computer_use 就换工具 → 拦，让 bobo 先试 computer_use
+        if not self._cu_error(last):
+            return "allow"  # computer_use 成功 → 换其他工具是"灵活配合"（34节），放行
+        if self._cu_error_is_tool_bug(last):
+            return "deny"  # 工具 bug，说清不糊弄
+        # 网络/环境问题 → 可降级
+        if self._auto_mode_getter is not None and self._auto_mode_getter():
+            return "allow"  # auto 自动降级
+        return "ask"  # normal 降级 → 问用户
+
+    def _cu_error(self, raw: str) -> bool:
+        """computer_use 返回是否含错误信号。"""
+        if not raw:
+            return False
+        r = str(raw)
+        return r.startswith("错误") or r.startswith("⛔") or "失败" in r
+
+    def _cu_error_is_tool_bug(self, raw: str) -> bool:
+        """排查：computer_use 报错是"工具 bug"还是"网络/环境"。
+
+        工具 bug（权限未授权/AX 不支持/元素越界/截屏失败/打开失败）→ True（不降级糊弄）；
+        网络/环境（连接失败/超时/不可达）→ False（可降级）；未知错误保守视为工具 bug。
+        """
+        if not raw:
+            return False
+        r = str(raw)
+        # 工具 bug 特征
+        if any(k in r for k in ("权限", "未授权", "不支持", "越界", "未识别",
+                                "请先授权", "Accessibility", "Screen Recording",
+                                "截屏失败", "打开应用", "驱动", "元素")):
+            return True
+        # 网络/环境特征
+        if any(k in r for k in ("网络", "连接失败", "超时", "无法连接", "timed out",
+                                "connection", "unreachable", "SSE", "服务不可用")):
+            return False
+        # 未知错误 → 保守视为工具 bug
+        if r.startswith("错误") or r.startswith("⛔"):
+            return True
+        return False
 
     def _cu_system_prompt(self, sys_prompt: str) -> str:
         """computer use 模式 → 注入路由偏好到 system prompt（票 ④）。"""

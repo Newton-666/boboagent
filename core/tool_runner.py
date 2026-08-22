@@ -396,6 +396,13 @@ class ToolRunnerMixin:
                 self._tool_failures[tool_name] = self._tool_failures.get(tool_name, 0) + 1
             else:
                 self._tool_failures[tool_name] = 0
+            # ── 票 TICKET-COMPUTER-USE-ACTION（DESK-P1/VSC-2B 授权标记）：记录最近 computer_use 执行结果 ──
+            # 供 engine._degrade_decide 排查"工具 bug vs 网络问题"（降级不糊弄）。
+            if tool_name == "computer_use":
+                try:
+                    self._last_cu_result = result
+                except Exception:
+                    pass
             # 已移除"连续失败 ≥2 次注入停用提示"的护栏（2026-07-22）：
             # 网络抖动导致连续两次超时不代表工具不可用
 

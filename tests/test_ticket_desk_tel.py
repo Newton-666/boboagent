@@ -721,6 +721,12 @@ def test_tel_8_zero_interference():
             r_osc = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "TICKET-OBSIDIAN-SEARCH-C" in r_osc.stdout, f"{ln} 缺 OBSIDIAN-SEARCH-C 特批标记，未授权改动被拦截"
             continue
+        # 票 TICKET-COMPUTER-USE-ACTION 特批：tools/computer_use.py（补 open_app/scroll
+        # 原子操作，消除"写脚本造轮子"根源），diff 必须含 COST-3 标记
+        if ln == "tools/computer_use.py":
+            r_cu = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_cu.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
         assert False, f"意外改动文件: {ln}"
 
 
