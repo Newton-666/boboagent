@@ -15,6 +15,7 @@ import hashlib
 import subprocess
 import tempfile
 import os
+import time
 
 import ApplicationServices as AS
 import Quartz
@@ -254,20 +255,30 @@ def _describe(image_path: str) -> str:
 def _window_id(pid: int) -> int | None:
     """按 pid 找该应用的主窗口 CGWindowID（screencapture -l 用）。
 
-    （TICKET-COMPUTER-USE-BACKGROUND 修正，COST-3 特批标记）用 CGWindowList
-    （按窗口 ID 截，不管前台/层级——后台并行核心：
-    Safari 在后台被 bobo 窗口盖住也能截到 Safari 内容）。
+    （TICKET-COMPUTER-USE-BACKGROUND 修正 v2，COST-3 特批标记）：
+    - 用 kCGWindowListOptionAll（不只 OnScreenOnly）——后台/最小化窗口也能找到
+      （此前 OnScreenOnly 漏掉后台 Safari 主窗口 → -l 失败 → capture 连续报错）。
+    - 取"最大面积"主窗口（layer==0）——过滤 33px 菜单栏残留/小窗口，
+      避免拿错窗口。screencapture -l 按窗口 ID 截，不管前台/层级。
     """
     try:
         wins = Quartz.CGWindowListCopyWindowInfo(
-            Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+            Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID)
+        best_id, best_area = None, 0
         for w in wins or []:
             if int(w.get("kCGWindowOwnerPID", 0)) == int(pid) and \
                w.get("kCGWindowLayer", 0) == 0:
-                return int(w.get("kCGWindowNumber", 0))
+                b = w.get("kCGWindowBounds", {}) or {}
+                w_ = float(b.get("Width", 0) or 0)
+                h_ = float(b.get("Height", 0) or 0)
+                area = w_ * h_
+                # 过滤极小窗口（菜单栏残留/弹窗），取最大主窗口
+                if area > 10000 and area > best_area:
+                    best_area = area
+                    best_id = int(w.get("kCGWindowNumber", 0))
+        return best_id
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _capture_png(pid=None) -> str:
@@ -345,7 +356,18 @@ def action_capture(describe: bool = False) -> str:
 
 
 def _click_at(x: float, y: float):
-    """在全局坐标 (x, y) 上点一次左键。"""
+    """在全局坐标 (x, y) 上点一次左键。
+
+    （TICKET-COMPUTER-USE-CURSOR，COST-3 特批标记）点击前先移动虚拟光标
+    到目标——用户能看到 bobo 的光标滑到哪再点（透明性，docs 37 节）。
+    虚拟光标失败不影响点击（增强非必需，静默降级）。
+    """
+    try:
+        from core.cursor import move_to
+        move_to(float(x), float(y), duration=0.2)
+        time.sleep(0.05)
+    except Exception:
+        pass
     pt = Quartz.CGPointMake(float(x), float(y))
     down = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, pt, Quartz.kCGMouseButtonLeft)
     up = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, pt, Quartz.kCGMouseButtonLeft)
