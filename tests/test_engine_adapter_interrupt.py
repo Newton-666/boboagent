@@ -71,6 +71,7 @@ def _call_run_engine(monkeypatch, emit, save_fn, engine_cls=None):
         pending_confirm_result={},
         confirm_lock=threading.Lock(),
         auto_mode={},
+        computer_use_mode={},
         current_engines={},
         current_engines_lock=threading.Lock(),
         session_usage={},

@@ -30,7 +30,7 @@ def test_engine_cu_on_injects_route_prompt():
     sp = e._cu_system_prompt("本文")
     assert "computer use 模式" in sp
     assert "computer_use" in sp
-    assert "快速直接" in sp
+    assert "自我认知锚点" in sp  # 票 AWARENESS：路由偏好升级为完整模式自述（原"快速直接"弱提示已被替换）
 
 
 def test_engine_cu_llm_kw_tool_round_thinking():

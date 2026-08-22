@@ -804,17 +804,33 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return bool(self._computer_use_mode_getter is not None
                     and self._computer_use_mode_getter())
 
+    # 票 AWARENESS（COST-3）：computer use 模式下，现有"读/查/写/代码"工具是"辅助/配合"，
+    # 不屏蔽、不作降级拦截——bobo 依意图判断哪个更优就配合用。仅真正绕过 computer_use
+    # 主操作的 shell/网络原语（execute_terminal/bash/curl 等）才走降级排查。
+    _CU_COOPERATION_TOOLS = {
+        "web_search", "web_fetch", "writefiles", "write_obsidian", "append_obsidian",
+        "file_operation", "file_writer", "code_execution", "read_local_file",
+        "grep_code", "list_directory", "read_obsidian", "search_obsidian",
+        "cross_search", "run_tests", "load_result",
+    }
+
     def _degrade_decide(self, tool_name: str, tool_args: dict, reason: str) -> str:
         """computer use 降级判定（不"试一下不行就降级"）。
 
         返回 'allow'/'deny'/'ask'：
-        - deny：还没用 computer_use 就想换工具 / computer_use 工具自身 bug → 拦。
+        - deny：还没用 computer_use 就想绕过硬操作 / computer_use 工具自身 bug → 拦。
                 工具 bug 说清"这是工具问题"，不靠降级糊弄。
         - allow：computer_use 正常（灵活配合，34节：bash/writefiles 是辅助可配合）。
                 或网络/环境问题 + auto 模式（自动降级）。
         - ask：网络/环境问题 + normal 模式 → 降级前先问用户（confirm_callback 弹窗）。
+        修正（票 AWARENESS）：现有"读/查/写/代码"工具是辅助/配合，非降级——computer use 模式
+        不屏蔽、不拦，bobo 判断哪个更优就配合用；仅绕过 computer_use 主操作的 shell/网络原语才排查。
         """
         if not self._cu_active() or tool_name == "computer_use":
+            return "allow"
+        # 票 AWARENESS（COST-3）：配合工具（web_search/writefiles/code 等）在 computer use
+        # 模式下放行（配合，bobo 依意图判断更优），不作为"降级"拦截。
+        if tool_name in self._CU_COOPERATION_TOOLS:
             return "allow"
         last = getattr(self, "_last_cu_result", None)
         if last is None:
@@ -859,12 +875,29 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return False
 
     def _cu_system_prompt(self, sys_prompt: str) -> str:
-        """computer use 模式 → 注入路由偏好到 system prompt（票 ④）。"""
+        """computer use 模式 → 注入"自我认知锚点"（非一句弱提示，完整模式自述，票 AWARENESS，COST-3）。
+
+        owner 洞察：Agent 决策正确性的上游 = 对自己有足够了解。若 bobo 不知道自己处于
+        computer use 模式、不知道有 computer_use 能力、不知应优先用它，就会习惯性走
+        web_search/code 等熟工具（根因不是"工具没屏蔽"，是缺自我认知）。文字约束不住
+        （owner 已验证），必须工程化注入——每次决策上下文都能看到这个模式自述。
+        """
         if not self._cu_active():
             return sys_prompt
         return sys_prompt + (
-            "\n\n【computer use 模式】界面/搜索/操作类任务优先用 computer_use 工具"
-            "快速直接操作，一次定位就操作，不深度推理。")
+            "\n\n### 自我认知锚点（本会话模式自述，任何决策前必读）\n"
+            "1. 你当前**处于 computer use 模式**——本会话被指定为在真实电脑上操作。\n"
+            "2. 你有 **computer_use 工具**：capture（看屏+AX树索引）/ click（点击）/ type（输入）/ "
+            "key（组合键）/ open_app（打开应用）/ scroll（滚动）——你能直接操作电脑的**任何界面**"
+            "（Safari/Pages/Finder/系统设置等）。\n"
+            "3. 做界面/搜索/操作类任务，**应优先用 computer_use**（打字/滑动/点击/打开应用都走它），"
+            "一次定位就操作，快而精准；不要一上来就写脚本/applescript 造轮子。\n"
+            "4. 现有其他工具（web_search/writefiles/code 等）**降为辅助/配合**——不屏蔽、可用，"
+            "但由你判断：若某工具配合比纯 computer_use 更高效，就选它配合；**computer_use 始终是主操作**。\n"
+            "5. **落点铁律**：无论用 computer_use 还是配合工具，操作都发生在**目标系统"
+            "（用户指定的那个系统/APP）上**（34节），不要跳出到文件/文本抽象层。\n"
+            "6. 意图（goal）是决策的根：所有手段围绕 GOAL 展开，换手段不漂移目标。"
+        )
 
     def _cu_llm_kw(self, llm_has_tool_calls: bool) -> dict:
         """computer use 模式 + 工具轮 → thinking_disabled=True（快速直接操作，不深度推理）。"""
