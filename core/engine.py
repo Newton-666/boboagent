@@ -87,6 +87,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.test_mode = test_mode or ('pytest' in sys.modules)
         self._auto_mode_getter = auto_mode_getter  # 票 A：会话级 AUTO MODE 开关读取器（放 ctx，engine 只读）
         self._computer_use_mode_getter = computer_use_mode_getter  # TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：会话级 computer use 开关读取器
+        self._current_intent = None  # 票 TICKET-COMPUTER-USE-INTENT（COST-3）：当前回合意图 {goal,target,means}
         self.history = []
         # ── 票 DESK-P1（特批标记）：会话项目根。null=默认现状（工作目录即
         # BOBO_Project_Backup），绝对兼容；gateway 经 engine_adapter 注入
@@ -2348,6 +2349,16 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def run(self, user_input: str = None, stream: bool = True, depth: int = 0, tool_round: int = 0):
         self._emit_state_change(self.STATE_IDLE, "session start")
         self.current_user_input = user_input
+        # ── 票 TICKET-COMPUTER-USE-INTENT（COST-3 特批标记）：意图判断 → GOAL 常驻锚点 ──
+        # 拿到用户请求 → 先 parse_intent 解析 {goal,target,means}，注入上下文，
+        # 每次工具轮可见 GOAL；行动/换手段回到 GOAL 判断（防手段漂移丢目的）。
+        self._current_intent = None
+        if user_input and not str(user_input).strip().startswith("/"):
+            from core.intent import parse_intent
+            try:
+                self._current_intent = parse_intent(str(user_input), self.llm_caller)
+            except Exception:
+                self._current_intent = None
         self.current_depth = depth
         self.current_tool_round = tool_round
         self._pending_content = None

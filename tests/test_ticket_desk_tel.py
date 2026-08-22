@@ -546,7 +546,13 @@ def test_tel_8_zero_interference():
             assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
                 f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
             continue
-        # 票 TICKET-VISION-CHAT-UPLOAD 特批：core/proactive.py + core/skill_loader.py
+        # 票 TICKET-COMPUTER-USE-INTENT 特批：core/intent.py（意图判断 GOAL/TARGET/MEANS
+        # 约束框架 + 零成本门卫），diff 必须含 COST-3 标记
+        if ln == "core/intent.py":
+            r_int = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_int.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-COMPUTER-USE-ROUTE 特批：core/proactive.py + core/skill_loader.py
         # （多模态 content 兼容：user content 从 str 变 list，_extract_topic/load_standards
         # 的 " ".join 需取 text 部分，防 "sequence item 0: expected str, got list"），
         # diff 必须含 COST-3 标记

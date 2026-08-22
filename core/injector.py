@@ -809,6 +809,19 @@ class PromptInjector:
         except Exception:
             logger.debug("工作锚点注入失败（静默降级）", exc_info=True)
 
+        # ── 票 TICKET-COMPUTER-USE-INTENT（COST-3）：GOAL 常驻锚点注入（每次工具轮可见）──
+        # 意图判断结果 {goal,target,means} 注入尾部动态块 → 每轮 build_messages
+        # 都带当前意图，bobo 行动/换手段回到 GOAL 判断（防手段漂移丢目的）。
+        try:
+            _intent = getattr(engine, "_current_intent", None)
+            if _intent:
+                from core.intent import format_intent_block
+                _ib = format_intent_block(_intent)
+                if _ib:
+                    _tail_blocks.append(("intent", _ib))
+        except Exception:
+            logger.debug("intent 注入失败（静默降级）", exc_info=True)
+
         # ── 票 DESK-P1：会话项目根（project_root 尾部动态段，COST-3 之后顺延）──
         # 有项目时注入"当前项目根"提示（文件操作/终端命令基准目录）；无项目时
         # 零注入（一字节都不许多——缓存前缀稳定红线）。engine.project_root 由
@@ -913,7 +926,7 @@ class PromptInjector:
                        "change_log": 3, "read_files": 4, "pending_diff": 5,
                        "discipline": 6,
                        "selfmap_arch": 7, "selfmap_boundary": 8, "selfmap_rescue": 9,
-                       "skill": 10, "now": 11, "work_anchor": 12,
+                       "skill": 10, "now": 11, "intent": 11.5, "work_anchor": 12,
                        "project_root": 13,  # 票 DESK-P1：COST-3 之后顺延
                        "request": 14}  # 票 GUI-F24：project_root 之后顺延
         if _tail_blocks:
