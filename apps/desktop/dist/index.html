@@ -173,6 +173,17 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
    左移至 right:104px 与停止钮同排，右→左：AUTO开关 / 停止钮 / 发送钮 互不重叠 */
 #auto-toggle { padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
 #auto-toggle:hover { background:var(--hover); }
+/* TICKET-VISION-CHAT-UPLOAD：图片预览缩略图 + 聊天图（图上文下） */
+/* #img-btn：视觉三要素（owner 强调——同一水平线/间距一致/不重叠）。
+ * 走 input-actions 的 flex 流（inherit align-items:center + gap:8px，
+ * 不 absolute），32px 高与 #send 同高、圆形与 #stop-btn 呼应，
+ * 避免默认 button 高度(~21px)导致与 send/auto-toggle 视觉参差。 */
+#img-btn { width:32px; height:32px; border-radius:50%; background:var(--bg3); color:var(--text2); border:1px solid var(--border); cursor:pointer; font-size:18px; line-height:1; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; padding:0; }
+#img-btn:hover { background:var(--hover); }
+.img-preview { position:relative; display:inline-block; margin:6px 0 10px; }
+.img-preview img { max-width:240px; max-height:180px; border-radius:8px; border:1px solid var(--border); display:block; }
+.img-preview button { position:absolute; top:4px; right:4px; width:22px; height:22px; line-height:18px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; border:none; cursor:pointer; font-size:14px; }
+.chat-img { max-width:240px; max-height:180px; border-radius:8px; border:1px solid var(--border); display:block; margin:4px 0 6px; }
 #auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 /* === DESK-P1 project pill ===
  * TICKET-DESK-P1（样式票，独立回溯）：Work with a project pill + 下拉菜单。
@@ -758,6 +769,8 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
       <!-- TICKET-DESK-V2B3：斜杠命令面板（输入框正上方，左对齐；内容 JS 渲染） -->
       <div id="slash-panel" style="display:none"></div>
       <textarea id="input" placeholder="Connecting..." disabled></textarea>
+      <!-- TICKET-VISION-CHAT-UPLOAD：已选图片缩略图预览（图上文下；带移除按钮） -->
+      <div id="img-preview-wrap" style="display:none"></div>
       <!-- TICKET-GUI-F26：auto-toggle/send/stop-btn 移入 input-actions 与 project/request 同行（去 absolute，不再重叠输入框） -->
       <div id="input-actions">
         <div id="project-pill-wrap">
@@ -783,6 +796,8 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
             <div id="req-summary"></div>
           </div>
         </div>
+        <button id="img-btn" title="Attach image (vision)" onclick="imgPick()">＋</button>
+        <input type="file" id="img-file" accept="image/*" style="display:none" />
         <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
         <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
         <button id="send" disabled>↑</button>
@@ -1018,7 +1033,56 @@ function call(m, p) {
     setTimeout(function() { pending.delete(id); resolve({}); }, 120000);
   });
 }
-function sendPrompt(text) {
+// TICKET-VISION-CHAT-UPLOAD：待发送图片状态 + 选图/预览/移除 + 草稿按会话存取
+var pendingImage = null;
+function imgPick() { var fi = document.getElementById('img-file'); if (fi) fi.click(); }
+function setImgPreview(dataUrl) {
+  pendingImage = dataUrl || null;
+  var w = document.getElementById('img-preview-wrap');
+  if (!w) return;
+  if (pendingImage) {
+    w.innerHTML = '<div class="img-preview"><img src="' + pendingImage + '" alt="preview"/><button title="Remove" onclick="clearPendingImage()">×</button></div>';
+    w.style.display = 'block';
+  } else {
+    w.innerHTML = ''; w.style.display = 'none';
+  }
+  saveDraft(currentSessionId);
+}
+function clearPendingImage() { setImgPreview(null); }
+function attachImg(file) {
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function() { setImgPreview(String(r.result)); };
+  r.readAsDataURL(file);
+}
+// 草稿（text+image）按会话持久化到 localStorage
+function saveDraft(sid) {
+  try {
+    var t = document.getElementById('input');
+    localStorage.setItem('boboDraft_' + sid, JSON.stringify({ text: t ? t.value : '', image: pendingImage || '' }));
+  } catch(e) {}
+}
+function restoreDraft(sid) {
+  var t = document.getElementById('input');
+  try {
+    var raw = localStorage.getItem('boboDraft_' + sid);
+    if (raw) {
+      var d = JSON.parse(raw);
+      if (t) t.value = d.text || '';
+      if (t) t.style.height = 'auto';
+      setImgPreview(d.image || null);
+    } else {
+      if (t) t.value = '';
+      setImgPreview(null);
+    }
+  } catch(e) { setImgPreview(null); }
+}
+document.getElementById('img-file') && document.getElementById('img-file').addEventListener('change', function(e) {
+  if (e.target.files && e.target.files[0]) attachImg(e.target.files[0]);
+  this.value = '';
+});
+
+function sendPrompt(text, image) {
   if (!currentSessionId || !window.boboAPI) { debug('Cannot send: no session or API'); return; }
   debug('Sent ✓');
   // TICKET-DESK-V2D5：新回合开始 —— 重置本轮认知计数（记忆增量基线 + 工具调用数）
@@ -1040,8 +1104,12 @@ function sendPrompt(text) {
   sendTimeoutId = setTimeout(_sendTimeoutCheck, 15000);
   // 票 DESK-P1：会话项目根随 prompt.submit 下发（有值才带；null=默认现状，绝对兼容）
   var submitParams = { session_id:currentSessionId, text:text };
+  if (image) submitParams.image = image;
   if (currentProjectRoot) submitParams.project_root = currentProjectRoot;
   window.boboAPI.send({ jsonrpc:'2.0', id:'prompt-'+(++reqId), method:'prompt.submit', params:submitParams });
+  // TICKET-VISION-CHAT-UPLOAD：发送后清挂载图片 + 草稿（textarea 已由调用方清空）
+  if (image) clearPendingImage();
+  else if (pendingImage) saveDraft(currentSessionId);
 }
 
 // ── 票 DESK-P1：Work with a project（项目文件夹模式）──────────────────
@@ -1732,7 +1800,17 @@ function stripDynBlock(text) {
   return text.slice(i + 2);
 }
 
-function addMsg(role, text, id, append) {
+function addMsg(role, text, id, append, image) {
+  // TICKET-VISION-CHAT-UPLOAD：content 可能是多模态 list（text + image_url）
+  if (Array.isArray(text)) {
+    var _ta = '';
+    for (var i = 0; i < text.length; i++) {
+      var _p = text[i];
+      if (_p && _p.type === 'text') _ta += (_p.text || '');
+      else if (_p && _p.type === 'image_url') image = (_p.image_url && _p.image_url.url) || '';
+    }
+    text = _ta;
+  }
   // TICKET-DESK-V4: 用户指令只读广播给小窗（投影数据源；不改任何渲染行为/状态）
   // V4B: 带会话 sid（小窗按钉选过滤，A 的指令不泄漏到钉 B 的小窗）
   if (role === 'user' && text && typeof window !== 'undefined' && window.boboAPI && window.boboAPI.widgetUserMsg) {
@@ -1751,8 +1829,10 @@ function addMsg(role, text, id, append) {
     t.innerHTML = append ? t.innerHTML + render(text) : render(text);
     return;
   }
+  // TICKET-VISION-CHAT-UPLOAD：图上文下（image 在上，文字在下）
+  var imgHtml = (image && role === 'user') ? '<img class="chat-img" src="' + image + '" alt="image"/>' : '';
   var div = document.createElement('div'); div.id = id; div.className = 'msg ' + role;
-  div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div><div class="txt">' + render(text) + '</div>';
+  div.innerHTML = '<div class="who">' + (role==='user'?'You':'Bobo') + '</div>' + imgHtml + '<div class="txt">' + render(text) + '</div>';
   chatEl.appendChild(div); chatEl.scrollTop = chatEl.scrollHeight;
   return div;
 }
@@ -2917,10 +2997,11 @@ async function loadSession(sid) {
   // F3-1: 点击立即同步选中态（不等 resume 返回，杜绝高亮脱节）
   if (currentSessionId !== sid) {
     // TICKET-GUI-F13：离开当前会话前，把现场展开姿势落盘（重启回放按姿势还原）
-    if (currentSessionId) recordPose(currentSessionId);
+    if (currentSessionId) { recordPose(currentSessionId); saveDraft(currentSessionId); }
     currentSessionId = sid;
     renderSessions();
     renderBusyUI();   // V4B⓪：切会话立即按新会话忙碌态刷新输入区/状态条/停止键
+    restoreDraft(sid);  // TICKET-VISION-CHAT-UPLOAD：还原该会话草稿（图+文）
   }
   // F3-2 竞态：本次加载序号；期间再点其他会话，本次结果作废
   var mySeq = ++sessionLoadSeq;
@@ -4260,7 +4341,8 @@ inputEl.addEventListener('compositionend', function() { imeComposing = false; })
 sendEl.addEventListener('click', function() {
   // F1-1: 输入法组词中点发送按钮 → 拦截（半成品拼音不上屏）
   if (imeComposing) return;
-  var text = inputEl.value.trim(); if (!text || !connected || messaging) return;
+  var text = inputEl.value.trim(); var img = pendingImage;
+  if ((!text && !img) || !connected || messaging) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
   hideSlashPanel();
@@ -4271,8 +4353,9 @@ sendEl.addEventListener('click', function() {
     execSlash(text.slice(1));
     return;
   }
-  addMsg('user', text, 'user-' + Date.now());
-  sendPrompt(text);
+  // TICKET-VISION-CHAT-UPLOAD：图文一条消息（图片在上，文字在下）
+  addMsg('user', text, 'user-' + Date.now(), false, img);
+  sendPrompt(text, img);
 });
 // F2-2 + F4-6: AUTO 开关 —— 复用后端现有 slash.exec /auto 通道（翻转会话级 AUTO MODE）。
 // F4-6 修复：必须携带 session_id —— 否则后端 handle_slash_exec 取到空串 sid，
@@ -4313,6 +4396,8 @@ inputEl.addEventListener('input', function() {
   // TICKET-DESK-V2B3：首字符 "/" 弹命令面板（实时过滤；组词中不弹）
   if (this.value.charAt(0) === '/' && connected && !imeComposing) renderSlashPanel(this.value);
   else hideSlashPanel();
+  // TICKET-VISION-CHAT-UPLOAD：草稿（text）随输入实时存 localStorage（按会话）
+  if (currentSessionId) saveDraft(currentSessionId);
 });
 
 // ── Settings ────────────────────────────────────────────────────────────

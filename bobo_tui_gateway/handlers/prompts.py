@@ -134,7 +134,8 @@ def _cancel_engine_and_wait(sid: str, timeout: float = 3.0) -> bool:
 def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     sid = params.get("session_id", "")
     text = params.get("text", "")
-    if not text:
+    _img = params.get("image")  # TICKET-VISION-CHAT-UPLOAD：可选图片 base64 data URL
+    if not text and not _img:
         return err(rid, -32000, "消息不能为空")
 
     # COST-1b：记录用户输入长度（度量层只观测；message.start 事件不带 prompt 内容）
@@ -175,13 +176,36 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
     except Exception:
         pass
 
+    # ── TICKET-VISION-CHAT-UPLOAD：图片 → 多模态 user 消息（图+文一条）──
+    # 带图：text+image 合成 content list 注入 session 历史；engine 侧 text 传空
+    # （避免 engine 再 append 一条 user text 造成重复）。无图：原样 text（绝对兼容）。
+    _send_text = text
+    if _img:
+        from core.provider import resolve_provider, supports_vision
+        _cfg = resolve_provider()
+        if not supports_vision(_cfg.get("name", ""), _cfg.get("model", "")):
+            return err(rid, -32000,
+                       f"当前模型 {_cfg.get('model')}（{_cfg.get('name')}）不支持看图，"
+                       "请切换 vision 模型（如 deepseek-v4-flash-vision-exp）")
+        _st = str(_img).strip()
+        if not _st.startswith("data:"):
+            _st = "data:image/png;base64," + _st
+        _multi = [{"type": "text", "text": text or "请描述这张图片"},
+                  {"type": "image_url", "image_url": {"url": _st}}]
+        with ctx.sessions_lock:
+            session = ctx.sessions.get(sid)
+            if session is not None:
+                session.setdefault("messages", []).append(
+                    {"role": "user", "content": _multi})
+        _send_text = ""  # 已注入历史，engine 不重复加 user text
+
     # 在后台线程中运行引擎，主线程继续处理 stdin
     from core.engine_adapter import run_engine as _run_engine_adapter
 
     thread = threading.Thread(
         target=_run_engine_adapter,
         args=(
-            sid, session, text, emit,
+            sid, session, _send_text, emit,
             lambda: _get_llm_caller(ctx.engine_cache), get_context_length,
             lambda t: register_engine_thread(t, ctx.active_engine_threads, ctx.engine_threads_lock),
             ctx.pending_confirm, ctx.pending_confirm_result, ctx.confirm_lock,
