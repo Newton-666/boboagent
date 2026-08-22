@@ -121,6 +121,53 @@ def _ensure_thread():
         _cursor_thread.start()
 
 
+def drain():
+    """【主线程调用】处理光标命令队列（NSPanel 只能在主线程实例化）。
+
+    （TICKET-COMPUTER-USE-CURSOR v4，COST-3 特批标记）worker 线程只发命令
+    到队列；gateway 主循环每 tick 调本函数，在主线程执行 NSPanel 创建/移动。
+    无命令时零开销（队列空立即返回）。
+    """
+    global _cursor_panel, _visible
+    try:
+        while True:
+            try:
+                cmd = _cmd_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                kind = cmd.get("kind")
+                if kind == "show":
+                    if _cursor_panel is None:
+                        _cursor_panel = _make_panel()
+                    _cursor_panel.setFrameOrigin_(NSMakePoint(cmd["x"], cmd["y"]))
+                    _cursor_panel.orderFront_(None)
+                    _cursor_panel.display()
+                    _visible = True
+                elif kind == "move":
+                    if _cursor_panel is None:
+                        _cursor_panel = _make_panel()
+                    _cursor_panel.orderFront_(None)
+                    sx, sy = _cursor_panel.frame().origin.x, _cursor_panel.frame().origin.y
+                    steps = max(8, int(cmd.get("duration", 0.25) * 40))
+                    for i in range(1, steps + 1):
+                        t = i / steps
+                        e = t * t * (3 - 2 * t)  # ease-in-out 缓动
+                        cx = sx + (cmd["x"] - sx) * e
+                        cy = sy + (cmd["y"] - sy) * e
+                        _cursor_panel.setFrameOrigin_(NSMakePoint(cx, cy))
+                        _cursor_panel.display()
+                        _visible = True
+                elif kind == "hide":
+                    if _cursor_panel is not None:
+                        _cursor_panel.orderOut_(None)
+                    _visible = False
+            except Exception:
+                pass  # 光标失败不影响主流程
+    except Exception:
+        pass
+
+
 def show(x: float, y: float, duration: float = 0.25):
     """显示虚拟光标并平滑移动到 (x, y)。线程安全（dispatch 到光标线程）。"""
     global _visible

@@ -486,6 +486,14 @@ def _run_socket_backend(sock_path: str):
             conn, _ = srv.accept()
         except _socket.timeout:
             # TICKET-GW-MULTI：全部客户端断开才计空闲（任一客户端在线即重置）
+            # TICKET-GW-MULTI 复用 + TICKET-COMPUTER-USE-CURSOR（COST-3 特批标记）：
+            # 主线程 tick 处理虚拟光标命令队列（NSPanel 只能主线程实例化——
+            # worker 线程只发命令，主循环在此 drain，光标才能显示）。
+            try:
+                from core.cursor import drain as _cursor_drain
+                _cursor_drain()
+            except Exception:
+                pass
             if _IDLE_TIMEOUT > 0:
                 if active_client_count() == 0:
                     if _idle_since is None:
