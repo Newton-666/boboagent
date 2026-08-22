@@ -71,7 +71,7 @@ def test_paradigm_validate(monkeypatch, capsys):
     # 路 A 的 write_user_profile 记录版（不真写 USER.md）
     writes = []
 
-    def _mock_write(candidate, category, signal_source=""):
+    def _mock_write(candidate, category, signal_source="", **kwargs):
         writes.append(candidate)
         return {"ok": True, "candidate": candidate, "category": category}
 

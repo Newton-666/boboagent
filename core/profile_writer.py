@@ -164,12 +164,14 @@ def _atomic_write_user_md(lines: list[str]) -> bool:
         return False
 
 
-def _sync_user_md(category: str, new_entry: str, last_entry: str | None) -> bool:
+def _sync_user_md(category: str, new_entry: str, last_entry: str | None,
+                  replace_entry: str | None = None) -> bool:
     """同步 docs/USER.md：USER.md 是行为影响型画像的权威载体。
 
     规则（票 TICKET-PROFILE-2b）：
     - 分区已含 `- {new_entry}` → 不追加（去重）
     - 分区当前为"（暂无）" → 替换为实际条目
+    - 修正（replace_entry 非 None，纠正信号）→ 替换对应的旧条目，不新增覆盖（TICKET-PROFILE-PARADIGM-IMPLEMENT）
     - 更新（同 category 旧值 = last_entry 存在且分区含该行）→ 替换对应行，不追加重复
     - 新增 → 分区末尾追加一行
     - USER.md 缺失/分区缺失 → 跳过同步（返回 True，不失败）
@@ -209,6 +211,18 @@ def _sync_user_md(category: str, new_entry: str, last_entry: str | None) -> bool
     if any(ln.strip() == f"- {new_entry}" for ln in body):
         return True
 
+    # 修正（replace_entry 非 None，纠正信号 TICKET-PROFILE-PARADIGM-IMPLEMENT）：
+    # 找到对应旧条目行 → 替换为 new_entry（不新增覆盖），保持权威结构。
+    # 容错匹配：忽略结尾标点差异（如句号），reference 为旧条目的子串或相等。
+    if replace_entry:
+        for i in range(sec_start + 1, sec_end):
+            entry_text = lines[i].strip()
+            if entry_text.startswith("- "):
+                entry_text = entry_text[2:].strip()
+            if replace_entry in entry_text or (entry_text and entry_text in replace_entry):
+                lines[i] = f"- {new_entry}"
+                return _atomic_write_user_md(lines)
+
     # （暂无）→ 替换
     for i in range(sec_start + 1, sec_end):
         if lines[i].strip() == "（暂无）":
@@ -236,6 +250,8 @@ def write_user_profile(
     new_entry: str,
     category: str,
     signal_source: str = "user",
+    replace_entry: str | None = None,
+    bypass_template: bool = False,
 ) -> dict:
     """引擎侧唯一写入入口。
 
@@ -254,12 +270,18 @@ def write_user_profile(
         return {"ok": False, "reason": "not_behavioral", "version": None}
 
     # ── 行为模板过滤 ──
-    matched = classify_behavioral(new_entry)
-    if matched is None:
-        return {"ok": False, "reason": "not_behavioral", "version": None}
-    # 调用方 category 未指定时用模板命中的类别；指定了以模板为准（模板是闸门）
-    if category not in ("preference", "taboo", "workflow"):
-        category = matched
+    # bypass_template（instruction 显式指令）：用户明确说"记住/以后都"等指令，
+    # 豁免模板闸门直接写 USER.md（TICKET-PROFILE-PARADIGM-IMPLEMENT）。
+    if bypass_template:
+        if category not in ("preference", "taboo", "workflow"):
+            category = "workflow"
+    else:
+        matched = classify_behavioral(new_entry)
+        if matched is None:
+            return {"ok": False, "reason": "not_behavioral", "version": None}
+        # 调用方 category 未指定时用模板命中的类别；指定了以模板为准（模板是闸门）
+        if category not in ("preference", "taboo", "workflow"):
+            category = matched
 
     with _lock:
         profile = _read_kb_profile()
@@ -279,7 +301,8 @@ def write_user_profile(
         # ── 权威载体 USER.md 先写（票 TICKET-PROFILE-2b：USER.md 是权威，profile 是影子）──
         # last_entry = 上次写入的快照末条：同 category 更新时替换对应行（不追加重复）；
         # 手动初始条目（无快照记录）永不替换 → 保留。
-        synced = _sync_user_md(category, new_entry, last_snap)
+        # replace_entry（纠正信号）→ 对应旧条目替换，不新增覆盖（TICKET-PROFILE-PARADIGM-IMPLEMENT）
+        synced = _sync_user_md(category, new_entry, last_snap, replace_entry)
         if not synced:
             return {"ok": False, "reason": "user_md_write_failed", "version": None}
 
@@ -330,3 +353,120 @@ def write_user_profile(
             pass
 
         return {"ok": True, "reason": None, "version": snapshot}
+
+
+# ── TICKET-PROFILE-PARADIGM-IMPLEMENT：memory 写入 + 污染清理（可回滚）──
+# 【COST-3/P0-1 特批标记】PROFILE 系列授权：加 memory（topic 级）写入入口 + USER.md
+# 污染清理逻辑（识别话题级/一次性条目移出，保留真范式，快照可回滚）。
+
+
+def write_memory_entry(new_entry: str, signal_source: str = "auto_detect") -> dict:
+    """写 topic 级记忆到 knowledge_base.json 的 entries 数组（不进 USER.md）。
+
+    TICKET-PROFILE-PARADIGM-IMPLEMENT：memory（话题级）分流不写 USER.md，存 KB 记忆；
+    带版本快照（category=memory）。去重：同内容不重复追加。
+    """
+    if not isinstance(new_entry, str) or not new_entry.strip():
+        return {"ok": False, "reason": "empty", "version": None}
+    try:
+        with open(_KB_PATH, encoding="utf-8") as f:
+            kb = json.load(f)
+    except (OSError, ValueError):
+        kb = {}
+    if not isinstance(kb, dict):
+        kb = {}
+    entries = kb.get("entries", [])
+    if not isinstance(entries, list):
+        entries = []
+    for e in entries:
+        if isinstance(e, dict) and e.get("content") == new_entry:
+            return {"ok": False, "reason": "duplicate", "version": None}
+    entries.append({"content": new_entry, "ts": time.time(),
+                    "signal_source": signal_source, "type": "USER_PREF"})
+    kb["entries"] = entries
+    try:
+        tmp = _KB_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(kb, f, ensure_ascii=False, indent=1)
+        tmp.replace(_KB_PATH)
+    except OSError as e:
+        logger.warning("profile_writer: 写 KB memory 失败: %s", e)
+        return {"ok": False, "reason": "write_failed", "version": None}
+    snap = {"ts": time.time(), "category": "memory", "entry": new_entry,
+            "diff": f"+ {new_entry}", "reason": "topic_memory", "signal_source": signal_source}
+    _append_version_snapshot(snap)
+    return {"ok": True, "reason": None, "version": snap}
+
+
+def snapshot_user_md() -> dict:
+    """备份当前 docs/USER.md（清理前快照，可回滚）。返回 {ok, backup_path, ts}。"""
+    try:
+        if not _USER_MD_PATH.exists():
+            return {"ok": False, "reason": "missing", "backup_path": None, "ts": None}
+        with open(_USER_MD_PATH, encoding="utf-8") as f:
+            content = f.read()
+        backup_dir = Path(BOBO_DATA_DIR) / "profile_versions"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        bp = backup_dir / f"user_md_{ts}.md"
+        bp.write_text(content, encoding="utf-8")
+        return {"ok": True, "backup_path": str(bp), "ts": ts}
+    except OSError as e:
+        logger.warning("profile_writer: 备份 USER.md 失败: %s", e)
+        return {"ok": False, "reason": "io_error", "backup_path": None, "ts": None}
+
+
+def _section_of(lines: list[str], idx: int) -> str:
+    """返回 lines[idx] 所在分区的标题（不含 '## ' 前缀）。"""
+    for j in range(idx, -1, -1):
+        if lines[j].strip().startswith("## "):
+            return lines[j].strip()[3:]
+    return ""
+
+
+def clean_user_md_pollution(judge_fn=None) -> dict:
+    """清理 docs/USER.md 污染条目（话题级/一次性），保留真范式。
+
+    TICKET-PROFILE-PARADIGM-IMPLEMENT：识别被词眼误写的 topic-level/一次性条目，
+    移出 USER.md（保留 profile/instruction）。清理前 snapshot_user_md 备份（可回滚）；
+    被清理条目记入版本快照（category=cleanup, reason=cleanup_pollution）——动作有据可查。
+
+    judge_fn：单条 → {"classify": ...}；默认 _judge_by_constraints（延迟 import 防循环）。
+    """
+    if judge_fn is None:
+        from core.signal_detector import _judge_by_constraints
+        judge_fn = _judge_by_constraints
+    snap = snapshot_user_md()
+    if not snap.get("ok"):
+        return {"ok": False, "reason": snap.get("reason"), "removed": [], "backup": None, "kept": []}
+    try:
+        with open(_USER_MD_PATH, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        logger.warning("profile_writer: 读 USER.md 失败: %s", e)
+        return {"ok": False, "reason": "io_error", "removed": [], "backup": None, "kept": []}
+    removed = []
+    keep = []
+    for i, ln in enumerate(lines):
+        stripped = ln.strip()
+        if stripped.startswith("- "):
+            entry = stripped[2:].strip()
+            try:
+                res = judge_fn(entry)
+                classify = res.get("classify", "") if isinstance(res, dict) else ""
+            except Exception:
+                classify = "profile"  # 判断异常 → 保守保留，不误删
+            if classify in ("memory", "discard", "correction"):
+                removed.append({"entry": entry, "classify": classify, "section": _section_of(lines, i)})
+                continue  # 污染条目，删除
+        keep.append(ln)
+    if removed:
+        if not _atomic_write_user_md(keep):
+            return {"ok": False, "reason": "write_failed", "removed": removed,
+                    "backup": snap.get("backup_path"), "kept": []}
+        for r in removed:
+            _append_version_snapshot({"ts": time.time(), "category": "cleanup",
+                                      "entry": r["entry"], "diff": f"- {r['entry']}",
+                                      "reason": "cleanup_pollution", "signal_source": "auto_detect"})
+    kept_entries = [ln.strip()[2:] for ln in keep if ln.strip().startswith("- ")]
+    return {"ok": True, "removed": removed, "kept": kept_entries, "backup": snap.get("backup_path")}

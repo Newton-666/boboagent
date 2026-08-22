@@ -29,6 +29,8 @@ import time
 logger = logging.getLogger(__name__)
 
 # ── 一级门卫：指令词（命中任一即进二级精判）──
+# TICKET-PROFILE-PARADIGM-IMPLEMENT：补"偏好/喜欢"（词眼判断的画像信号词），
+# 修 VALIDATE 暴露的漏检真范式（含偏好/喜欢但非"我其实喜欢"被 gate 挡掉）。
 _KEYWORDS = (
     "以后",
     "别",
@@ -39,6 +41,8 @@ _KEYWORDS = (
     "我讨厌",
     "不要再",
     "请记得",
+    "偏好",
+    "喜欢",
 )
 
 # 精判 LLM 提示：判断是否真画像信号 + 提取一句话候选
@@ -121,29 +125,52 @@ def _llm_judge(llm_caller, user_text: str) -> dict | None:
 def detect_profile_signal(user_text: str, llm_caller, sid: str = "") -> dict | None:
     """两级流水线主入口（同步）：返回判定与写入结果，None=未触发/已丢弃。
 
-    一级不命中 → None（零成本）；二级拒绝/失败 → None；写入结果带 write 详情。
+    一级 keyword_gate 不命中 → None（零成本冷门卫）；
+    二级（约束框架 LLM 精判，TICKET-PROFILE-PARADIGM-IMPLEMENT）→ 5 类分流：
+      profile/instruction → write_user_profile（USER.md）
+      memory → write_memory_entry（KB/memory，不进 USER.md）
+      discard → 丢弃
+      correction → write_user_profile(replace_entry=reference)（修正旧条目，不新增覆盖）
     """
     if not keyword_gate(user_text):
         return None
-    judged = _llm_judge(llm_caller, user_text)
+    judged = _judge_by_constraints_llm(llm_caller, user_text)
     if not judged:
         return None  # 精判失败/输出不可解析 → 静默丢弃（与未触发同语义）
-    if judged.get("is_signal") is not True:
-        return {"judged": judged, "write": None}  # 二级拒绝（保留判定供审计/测试）
+    classify = str(judged.get("classify", "")).strip()
     candidate = str(judged.get("candidate", "")).strip()
     category = str(judged.get("category", "preference")).strip()
-    if not candidate:
-        return {"judged": judged, "write": None}
-    # 写入走 write_user_profile（模板过滤兜底 + 去重 + 版本快照）
+    reference = str(judged.get("reference", "")).strip()
+
+    from core import profile_writer
     from core.profile_writer import write_user_profile, set_last_sid
+
+    # discard：一次性 → 丢弃
+    if classify == "discard":
+        return {"judged": judged, "write": None, "classify": classify}
+    # memory：话题级 → KB/memory，不进 USER.md
+    if classify == "memory":
+        if not candidate:
+            return {"judged": judged, "write": None, "classify": classify}
+        res = profile_writer.write_memory_entry(candidate, signal_source="auto_detect")
+        return {"judged": judged, "write": res, "classify": classify}
+    if not candidate:
+        return {"judged": judged, "write": None, "classify": classify}
     set_last_sid(sid)  # 供 profile_writer 广播 profile.update 时带 session_id
-    result = write_user_profile(candidate, category, signal_source="auto_detect")
+    # correction：修正已有条目（replace_entry），不新增覆盖
+    if classify == "correction":
+        result = write_user_profile(candidate, category, signal_source="auto_detect",
+                                    replace_entry=reference or None)
+        return {"judged": judged, "write": result, "classify": classify}
+    # profile → USER.md（模板过滤）；instruction → USER.md（显式指令，豁免模板 TICKET-PROFILE-PARADIGM-IMPLEMENT）
+    result = write_user_profile(candidate, category, signal_source="auto_detect",
+                                bypass_template=(classify == "instruction"))
     if not result.get("ok"):
         logger.info(
-            "signal_detector: 候选被拒 reason=%s candidate=%r",
-            result.get("reason"), candidate,
+            "signal_detector: 候选被拒 reason=%s candidate=%r class=%r",
+            result.get("reason"), candidate, classify,
         )
-    return {"judged": judged, "write": result}
+    return {"judged": judged, "write": result, "classify": classify}
 
 
 def maybe_detect_profile_signal(
@@ -247,3 +274,59 @@ def _judge_by_constraints(sample: str) -> dict:
     if reusable and not actionable:
         return {"classify": "profile", "dims": dims, "reason": "长期偏好但可操作性弱，仍按范式写入"}
     return {"classify": "profile", "dims": dims, "reason": "默认按行为范式写入"}
+
+
+# ── TICKET-PROFILE-PARADIGM-IMPLEMENT：7 维约束框架 LLM 精判（替代词眼 _llm_judge）──
+# 【COST-3 特批标记】PROFILE 系列授权：signal_detector 二级精判从词眼裸判升级为
+# LLM 在 7 维约束框架内判断（套缰绳），输出 5 类（profile/instruction/memory/discard/correction）。
+
+_CONSTRAINTS_PROMPT = """你是用户画像信号裁判。用户对助手说了一句话。请**只在 7 维约束框架内**判断它属于哪类画像信号，套用约束维度，不要凭单一词眼（喜欢/偏好）裸判。
+
+7 维约束（打分依据）：
+- diversity：跨场景多样性——是否只限单一话题（某数学题/某次评测/某工具）？单话题则降级。
+- chain：思维链条——是否表达长期思考习惯（先X再Y/每次/都/任何）。
+- reusable：可复用——能否跨回合复用，还是仅一次性。
+- actionable：可操作——是否为可执行的长期行为方式（非一次性步骤）。
+- evidence：行为证据——是否有行为立场（偏好/喜欢/不要/别等）。
+- causality：因果——是否表达因果（因为/所以/避免/而非）。
+- consistency：一致性——与既有画像一致，非一次性、非纠正。
+
+判断类别（只输出一个）：
+- profile：跨场景可复用可操作的行为范式 → 写 USER.md。
+- instruction：显式指令（"记住/以后都/先X再Y"这类工作流或指令）→ 写 USER.md。
+- memory：话题细节（限定单一领域/主题的偏好）→ 存记忆，不入 USER.md。
+- discard：一次性请求/步骤（"这次/先定评测集/先测一下"）→ 丢弃。
+- correction：纠正信号（"别再用/不要每次都"）→ 修正已有旧条目，不新增。
+
+只输出 JSON：{"classify": "profile|instruction|memory|discard|correction", "category": "preference|taboo|workflow|memory", "candidate": "提炼成一句话", "reference": "被修正的旧条目（仅 correction 时填，否则省略）"}
+只输出 JSON 对象，不要任何其他文字。"""
+
+_JUDGE_CONSTRAINTS_MAX_TOKENS = 250
+
+
+def _judge_by_constraints_llm(llm_caller, user_text: str) -> dict | None:
+    """约束框架二级精判：LLM 在 7 维框定内判断（冷调用 thinking_disabled=True），
+    替代词眼 _llm_judge（裸判）。失败/不可解析 → None（静默丢弃，绝不影响主流程）。
+    """
+    try:
+        resp = llm_caller(
+            [
+                {"role": "system", "content": _CONSTRAINTS_PROMPT},
+                {"role": "user", "content": f"用户消息：{user_text}"},
+            ],
+            use_tools=False,
+            max_tokens=_JUDGE_CONSTRAINTS_MAX_TOKENS,
+            thinking_disabled=True,
+        )
+    except Exception:
+        logger.warning("signal_detector: 约束框架精判调用失败，静默丢弃", exc_info=True)
+        return None
+    if not isinstance(resp, dict) or resp.get("error"):
+        logger.warning("signal_detector: 约束框架精判返回错误: %s", (resp or {}).get("error"))
+        return None
+    content = ""
+    try:
+        content = resp["choices"][0]["message"].get("content", "") or ""
+    except (KeyError, IndexError, TypeError):
+        return None
+    return _parse_judge_output(content)
