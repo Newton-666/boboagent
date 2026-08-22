@@ -202,8 +202,12 @@ def _capture_png() -> str:
     return path
 
 
-def action_capture(describe: bool = True) -> str:
-    """实时看屏幕：截屏 + AX 树元素索引（role/name/坐标）+ 视觉描述。"""
+def action_capture(describe: bool = False) -> str:
+    """实时看屏幕：截屏 + AX 树元素索引（role/name/坐标）。
+
+    默认 describe=False（不调 vision，快——AX 树定位够用，秒级返回）。
+    只有真正需要"看懂内容/视觉理解"才传 describe=True（代价：调 vision，慢）。
+    """
     pid = _front_pid()
     items = _collect_elements(pid)
     path = _capture_png()
@@ -319,7 +323,7 @@ def action_type(text: str) -> str:
 
 
 def execute(action: str, element=None, coordinate=None, text=None, key=None,
-            describe: bool = True) -> str:
+            describe: bool = False) -> str:
     """computer_use 工具入口。
 
     Args:
@@ -354,7 +358,7 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "AX 树驱动的电脑操作：截屏看屏幕+AX 树元素索引（capture）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导提示。\\n\\n【何时用我——通用判断准则，自己判断任务对象在哪层】\\n当任务的操作对象在【可见界面层】时用我，比代码工具（grep/搜索/改代码）更优：\\n① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/应用窗口）→ 用我点/输入，界面元素用代码工具够不着或很绕。\\n② 需要【看到】当前系统状态（屏幕长啥样/开了几个窗口/某应用有没有弹窗/界面卡没卡）→ 用我 capture，其他工具'看不见'屏幕。\\n③ 其他工具做不到/受限（搜索 API 挂了/VPN 不行/没 API/需操作真实浏览器绕过限制）→ 用我直接操作浏览器/应用。\\n④ 操作对象是图形界面应用（Safari/Finder/VSCode/邮件/任何 GUI 应用）→ 用我，这是唯一能直接操作 GUI 的。\\n\\n【何时不用我】操作对象在代码/文本/文件层（查函数定义/读文件/改代码/批量处理）→ 用 read_file/grep/edit_file/terminal 更快；terminal 有现成命令能做 → 不用我。\\n\\n关键：先判断任务对象在哪层——【界面层→用我】，【代码/文本/文件层→用其他工具】。不要看到'开关/模式/功能'就想到改代码，如果是界面上的按钮就点它。",
+        "description": "AX 树驱动的电脑操作，覆盖整个 macOS（系统级通用，不限特定软件）：截屏看屏幕+AX 树元素索引（capture，默认不调 vision，快）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导（不自动开权限，不碰凭据）。\\n【何时用我——通用判断准则】操作对象在【界面层】时用我，比代码工具更优：① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/窗口，任何 Apple 应用如 Finder/Pages/Word/Safari/Notes/系统设置）→ 用我点/输入，界面元素用代码工具够不着。② 需要【看到】当前屏幕/系统状态 → 用我 capture。③ 其他工具受限（搜索 API 挂/VPN 不行/没 API）→ 用我直接操作真实浏览器/应用绕过。④ 操作对象是图形界面应用 → 用我，这是唯一能直接操作 GUI 的。⑤ 找文档/文件→我自己打开 Finder/文件夹，用 click+scroll 浏览定位（不只读文本层）。\\n【何时不用我】操作对象在代码/文本/文件层（查函数/读文件/改代码/批量处理）→ 用 read/grep/edit/terminal。\\n【快而精准——操作习惯】信任 AX 树定位（系统给坐标，准）：capture 拿到元素索引后，直接 click element=N 点它（或坐标），不要反复 capture 确认——一次定位就操作，又快又准。不要看到'开关/模式/功能'就想到改代码，界面上的按钮就点它。",
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["capture", "click", "type", "key"],
                        "description": "操作类型"},
