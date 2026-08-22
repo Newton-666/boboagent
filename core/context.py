@@ -234,6 +234,10 @@ class ContextMixin:
             "notion_setup", "cross_search",
             "copy_to_obsidian", "copy_to_notion",
             "api_register", "api_call", "bobo_config", "bobo_schedule", "wiki_rebuild", "task_ledger",
+            "computer_use",  # TICKET-COMPUTER-USE-AWARENESS 补遗（COST-3 特批标记）：
+            # 此前 computer_use 注册了但未进任何分类 → 被 _get_filtered_tools 裁剪，
+            # bobo 工具集里永远没有它（模式开/锚点注入也拿不到工具，只能用 web_search）。
+            # 放入 general：界面/搜索/操作类任务跨场景可用，与 web_search 互补。
         ],
         "web": [
             "web_search", "web_fetch", "web_extract", "open_url",
