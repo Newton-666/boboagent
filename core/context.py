@@ -56,7 +56,26 @@ def _estimate_tokens(messages: list) -> int:
     enc = _get_encoder()
     total = 0
     for msg in messages:
-        total += len(enc.encode(str(msg)))
+        # TICKET-VISION-CHAT-UPLOAD：多模态 content（list）——图片 base64 若按
+        # str(msg) 转文本估算会爆炸（一张几 MB 图 → base64 字符串几十万 token）。
+        # 正确做法：只对 text 部分编码；image_url 按固定图片 token 估算
+        # （vision 模型按"图"计费，一张约几百-千 token，远小于 base64 字符数），
+        # 防止上下文预算被一张图瞬间打满。
+        _c = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(_c, list):
+            _text_parts = []
+            _img_count = 0
+            for _part in _c:
+                if isinstance(_part, dict):
+                    if _part.get("type") == "image_url":
+                        _img_count += 1
+                    elif _part.get("text"):
+                        _text_parts.append(str(_part["text"]))
+            _text_str = " ".join(_text_parts)
+            total += len(enc.encode(_text_str))
+            total += _img_count * 1000  # 每张图固定 ~1000 token（视觉费，非 base64 文本）
+        else:
+            total += len(enc.encode(str(msg)))
     total += len(messages) * 4
     return total
 
