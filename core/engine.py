@@ -78,13 +78,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
     def __init__(self, llm_caller, tool_executor=None, callback: Callable = None,
                  confirm_callback: Callable = None, test_mode: bool = False,
-                 auto_mode_getter: Callable[[], bool] = None):
+                 auto_mode_getter: Callable[[], bool] = None,
+                 computer_use_mode_getter: Callable[[], bool] = None):
         self.llm_caller = llm_caller
         self.tool_executor = tool_executor or execute_tool
         self.callback = callback
         self.confirm_callback = confirm_callback
         self.test_mode = test_mode or ('pytest' in sys.modules)
         self._auto_mode_getter = auto_mode_getter  # 票 A：会话级 AUTO MODE 开关读取器（放 ctx，engine 只读）
+        self._computer_use_mode_getter = computer_use_mode_getter  # TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：会话级 computer use 开关读取器
         self.history = []
         # ── 票 DESK-P1（特批标记）：会话项目根。null=默认现状（工作目录即
         # BOBO_Project_Backup），绝对兼容；gateway 经 engine_adapter 注入
@@ -776,6 +778,26 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if not _parts:
             return ""
         return "\n\n📋 待人工执行清单\n" + "\n".join(_parts)
+
+    # ── TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：computer use 路由模式 helper 集 ──
+    def _cu_active(self) -> bool:
+        """computer use 模式是否开（只读 getter）。"""
+        return bool(self._computer_use_mode_getter is not None
+                    and self._computer_use_mode_getter())
+
+    def _cu_system_prompt(self, sys_prompt: str) -> str:
+        """computer use 模式 → 注入路由偏好到 system prompt（票 ④）。"""
+        if not self._cu_active():
+            return sys_prompt
+        return sys_prompt + (
+            "\n\n【computer use 模式】界面/搜索/操作类任务优先用 computer_use 工具"
+            "快速直接操作，一次定位就操作，不深度推理。")
+
+    def _cu_llm_kw(self, llm_has_tool_calls: bool) -> dict:
+        """computer use 模式 + 工具轮 → thinking_disabled=True（快速直接操作，不深度推理）。"""
+        if self._cu_active() and llm_has_tool_calls:
+            return {"thinking_disabled": True}
+        return {}
 
     def _build_system_prompt(self) -> str:
         return """你是 Bobo，一个专业的个人智能助手。
@@ -1505,8 +1527,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 # 接近阈值时打补记标记（retroactive mark）
                 self.tracker.retroactive_mark()
 
+        # ── TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：computer use 模式 → 路由偏好注入 system prompt ──
+        _sys_prompt = self._cu_system_prompt(self.system_prompt)
+
         messages = self.injector.build_messages(
-            system_prompt=self.system_prompt,
+            system_prompt=_sys_prompt,
             user_input=self.current_user_input or "",
             tools_schema=TOOLS_SCHEMA,
             extra_categories=self._used_categories,
@@ -1568,6 +1593,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
         )
         _llm_t0 = time.time()
 
+        # ── TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：computer use 模式 + 工具轮 → thinking_disabled=True ──
+        # （快速直接操作工具，不深度推理；关闭模式则不注入，恢复正常 thinking）
+        _call_kw = self._cu_llm_kw(_llm_has_tool_calls)
+
         response = self.llm_caller(
             messages,
             stream_callback=_on_token,
@@ -1576,6 +1605,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             session_id=self.sid,
             reasoning_callback=_on_reasoning,
             _interrupt_event=self._interrupt_event,  # 票 INT-1：流式每 chunk 可中断
+            **_call_kw,
         )
         if isinstance(response, dict) and "error" in response:
             # ── 票 H 运行时孤儿防线 Layer 2：配对类 400 → 清洗重试一次 ──
@@ -1600,6 +1630,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     tools_override=filtered_tools,
                     session_id=self.sid,
                     _interrupt_event=self._interrupt_event,  # 票 INT-1：重试同样可中断
+                    **_call_kw,
                 )
                 if not isinstance(retry_response, dict) or "error" not in retry_response:
                     # 重试成功

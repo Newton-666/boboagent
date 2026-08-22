@@ -104,6 +104,7 @@ def run_engine(
     pending_confirm_result: dict,
     confirm_lock: threading.Lock,
     auto_mode: dict,  # 票 A：会话级 AUTO MODE 开关（/auto 翻转，放 ctx）
+    computer_use_mode: dict,  # TICKET-COMPUTER-USE-ROUTE（DESK-P1/VSC-2B 授权标记）：会话级 computer use 模式开关（复用 auto_mode）
     current_engines: dict,
     current_engines_lock: threading.Lock,
     session_usage: dict,
@@ -322,7 +323,8 @@ def run_engine(
             pass
 
         engine = Engine(llm_caller, _guarded_execute, callback=on_event, confirm_callback=confirm_callback,
-                        auto_mode_getter=lambda: auto_mode.get(sid, False))
+                        auto_mode_getter=lambda: auto_mode.get(sid, False),
+                        computer_use_mode_getter=lambda: computer_use_mode.get(sid, False))  # TICKET-COMPUTER-USE-ROUTE（DESK-P1/VSC-2B 授权标记）
         # 会话 ID：gateway 传真实 sid（格式 20260321_153022_a1b2c3），
         # engine.__init__ 已有 boot-{timestamp}-{随机} 兜底
         engine.sid = sid

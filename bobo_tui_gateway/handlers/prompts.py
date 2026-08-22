@@ -210,6 +210,7 @@ def handle_prompt_submit(params: dict, rid: str, ctx) -> dict:
             lambda t: register_engine_thread(t, ctx.active_engine_threads, ctx.engine_threads_lock),
             ctx.pending_confirm, ctx.pending_confirm_result, ctx.confirm_lock,
             ctx.auto_mode,
+            ctx.computer_use_mode,
             ctx.current_engines, ctx.current_engines_lock,
             ctx.session_usage, ctx.session_usage_lock,
             ctx.save_session_to_disk,
@@ -322,6 +323,19 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
         # 不再依赖对话流内的大段状态文本；slash 返回保留简短确认。
         emit("session.auto_state", sid, {"session_id": sid, "on": bool(auto_mode.get(sid, False))})
         return ok(rid, {"output": f"AUTO MODE 已{state}（会话级）"})
+    elif command == "computer-use" or command.startswith("computer-use "):
+        # TICKET-COMPUTER-USE-ROUTE（COST-1b/COST-1c 授权标记）：/computer-use [on|off] — 会话级 computer use 模式开关（复用 /auto）
+        arg = command[13:].strip().lower()
+        cu_mode = ctx.computer_use_mode
+        if arg == "on":
+            cu_mode[sid] = True
+        elif arg == "off":
+            cu_mode[sid] = False
+        else:
+            cu_mode[sid] = not cu_mode.get(sid, False)
+        state = "开启" if cu_mode.get(sid, False) else "关闭"
+        emit("session.computer_use_state", sid, {"session_id": sid, "on": bool(cu_mode.get(sid, False))})
+        return ok(rid, {"output": f"computer use 模式已{state}（会话级）"})
     elif command == "office" or command.startswith("office "):
         # 票 O-2：/office [on|off] — 会话级 OFFICE MODE 开关（老板专用）。
         # 角色闸：员工环境（BOBO_ROLE=staff|dispatcher）一律拒绝——
@@ -452,6 +466,7 @@ def handle_slash_exec(params: dict, rid: str, ctx) -> dict:
                     lambda t: register_engine_thread(t, ctx.active_engine_threads, ctx.engine_threads_lock),
                     ctx.pending_confirm, ctx.pending_confirm_result, ctx.confirm_lock,
                     ctx.auto_mode,
+                    ctx.computer_use_mode,
                     ctx.current_engines, ctx.current_engines_lock,
                     ctx.session_usage, ctx.session_usage_lock,
                     ctx.save_session_to_disk,

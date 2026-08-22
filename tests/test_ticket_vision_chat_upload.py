@@ -23,6 +23,7 @@ class _FakeCtx:
         self.pending_confirm_result = {}
         self.confirm_lock = threading.Lock()
         self.auto_mode = {}
+        self.computer_use_mode = {}  # TICKET-COMPUTER-USE-ROUTE：migration 后 handle_prompt_submit 需访问
         self.current_engines = {}
         self.current_engines_lock = threading.Lock()
         self.active_engine_threads = {}
