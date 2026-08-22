@@ -11,6 +11,7 @@
 依赖：pyobjc（ApplicationServices AXUIElement + Quartz CGEvent）—— 已在 bobo .venv。
 """
 
+import hashlib
 import subprocess
 import tempfile
 import os
@@ -20,6 +21,10 @@ import Quartz
 from AppKit import NSWorkspace
 
 TOOL_NAME = "computer_use"
+
+# 票 BACKGROUND（COST-3）：目标应用 pid（会话级状态）。open_app 记录后，
+# capture/click 用 target_pid 遍历目标应用（非前台可见，后台并行）；未 open_app 时回退前台。
+_target_pid = 0
 
 # 可交互元素 role（capture 索引 + click element=N 定位用）
 _INTERACTIVE_ROLES = {
@@ -134,6 +139,34 @@ def _front_pid() -> int:
         return 0
 
 
+def _find_pid(app_name: str) -> int:
+    """按应用名查找运行中实例的 pid（NSRunningApplication.localizedName 匹配，不区分大小写）。"""
+    try:
+        ws = NSWorkspace.sharedWorkspace()
+        for ra in ws.runningApplications():
+            nm = (ra.localizedName() or "").lower()
+            if app_name.lower() in nm:
+                return int(ra.processIdentifier())
+    except Exception:
+        pass
+    return 0
+
+
+def _which_pid() -> int:
+    """目标 pid（open_app 记录）优先；未设置时回退前台 pid（向后兼容）。"""
+    global _target_pid
+    if _target_pid:
+        return int(_target_pid)
+    return _front_pid()
+
+
+def _ensure_target() -> str | None:
+    """验证操作目标（键盘/输入前，防静默丢到错误焦点）。票 D（COST-3，缺陷4）。"""
+    if not _which_pid():
+        return "错误: 无操作目标（未 open_app 且未检测到前台应用），拒绝输入（防静默丢焦点）"
+    return None
+
+
 def _iter_elements(root, depth=0):
     """DFS 遍历 AX 树，产生 (el, role, title, frame, depth)。"""
     if depth > _MAX_DEPTH:
@@ -152,16 +185,45 @@ def _iter_elements(root, depth=0):
             yield from _iter_elements(ch, depth + 1)
 
 
+def _element_id(role: str, title: str, frame) -> str:
+    """元素身份（role+title+frame 归一化 hash）。票 C（COST-3）：树重排后仍可按身份匹配防漂移。"""
+    x, y, w, h = frame
+    sig = f"{role}|{title}|{round(x)}|{round(y)}|{round(w)}|{round(h)}"
+    return hashlib.md5(sig.encode("utf-8")).hexdigest()[:8]
+
+
+def _visible(frame) -> bool:
+    """过滤零尺寸/屏幕外元素（缺陷3）：宽高必须为正，且不完全在屏幕外。"""
+    x, y, w, h = frame
+    if w <= 0 or h <= 0:
+        return False
+    try:
+        cb = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
+        sw, sh = float(cb.size.width), float(cb.size.height)
+    except Exception:
+        sw, sh = 100000.0, 100000.0
+    if x >= sw or x + w <= 0 or y >= sh or y + h <= 0:
+        return False
+    return True
+
+
 def _collect_elements(pid):
-    """收集前台应用的元素索引列表（与 capture / click 用同一顺序）。"""
+    """收集目标应用（target_pid 或前台）的元素索引列表（与 capture / click 用同一顺序）。
+
+    每个元素带 element_id（role+title+frame 身份 hash，票 C 防漂移）+ interactive 标记；
+    过滤零尺寸/屏幕外元素（缺陷3，capture 不失明）。
+    """
     app = AS.AXUIElementCreateApplication(pid)
     items = []
     for (el, role, title, frame, depth) in _iter_elements(app):
         if frame is None:
             continue
+        if not _visible(frame):
+            continue
         items.append({
             "el": el, "role": role, "title": title,
             "frame": frame, "depth": depth,
+            "element_id": _element_id(role, title, frame),
             "interactive": role in _INTERACTIVE_ROLES,
         })
         if len(items) >= _MAX_ELEMENTS:
@@ -170,13 +232,13 @@ def _collect_elements(pid):
 
 
 def _el_index_text(items) -> str:
-    """capture 输出 AX 树元素索引（编号/role/name/坐标/可交互标记）。"""
-    lines = ["[AX 树元素索引]（capture 时点 element=N 或用坐标点击）"]
+    """capture 输出 AX 树元素索引（编号/role/name/坐标/element_id/可交互标记）。"""
+    lines = ["[AX 树元素索引]（capture 时点 element=N / element_id=身份 / 或用坐标点击）"]
     for i, it in enumerate(items, start=1):
         x, y, w, h = it["frame"]
         marker = "*" if it["interactive"] else " "
         nm = (it["title"] or "")[:30]
-        lines.append(f"{i:>3}{marker} {it['role']:<20} {nm:<28} ({x:.0f},{y:.0f} {w:.0f}x{h:.0f})")
+        lines.append(f"{i:>3}{marker} {it['role']:<20} {nm:<28} ({x:.0f},{y:.0f} {w:.0f}x{h:.0f}) id={it['element_id']}")
     return "\n".join(lines)
 
 
@@ -189,32 +251,57 @@ def _describe(image_path: str) -> str:
         return f"[视觉描述] 调用失败: {e}"
 
 
-def _capture_png() -> str:
-    """截屏到临时 PNG，返回路径。"""
+def _capture_png(pid=None) -> str:
+    """截屏到临时 PNG，返回路径。
+
+    pid 且能找到目标 AXWindow frame → 按窗口区域截（票 B：目标应用在后台也能截到，非前台可见）；
+    否则全屏；区域截失败回退全屏；全屏失败返回错误串。
+    """
     fd, path = tempfile.mkstemp(suffix=".png", prefix="cu_cap_")
     os.close(fd)
-    try:
-        subprocess.run(["screencapture", "-x", path], check=True, timeout=10)
-    except Exception as e:
-        return f"错误: 截屏失败: {e}"
+    region = None
+    if pid:
+        try:
+            for it in _collect_elements(pid):
+                if it["role"] == "AXWindow":
+                    x, y, w, h = it["frame"]
+                    if w > 0 and h > 0:
+                        region = f"{x:.0f} {y:.0f} {w:.0f} {h:.0f}"
+                        break
+        except Exception:
+            region = None
+    if region:
+        try:
+            subprocess.run(["screencapture", "-x", "-R", region, path], check=True, timeout=10)
+        except Exception:
+            region = None  # 区域截失败 → 回退全屏
+    if not region:
+        try:
+            subprocess.run(["screencapture", "-x", path], check=True, timeout=10)
+        except Exception as e:
+            return f"错误: 截屏失败: {e}"
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return f"错误: 截屏失败（大小异常）——请确认屏幕录制权限已授权"
     return path
 
 
 def action_capture(describe: bool = False) -> str:
-    """实时看屏幕：截屏 + AX 树元素索引（role/name/坐标）。
+    """实时看屏幕：截屏 + AX 树元素索引（role/name/坐标/element_id）。
 
+    用 _which_pid()：open_app 后遍历目标应用（后台并行，用户在别的前台也能截到目标）；未 open_app 回退前台。
     默认 describe=False（不调 vision，快——AX 树定位够用，秒级返回）。
     只有真正需要"看懂内容/视觉理解"才传 describe=True（代价：调 vision，慢）。
     """
-    pid = _front_pid()
+    pid = _which_pid()
     items = _collect_elements(pid)
-    path = _capture_png()
+    path = _capture_png(pid)
     if path.startswith("错误:"):
         return path
     parts = [f"[屏幕快照] {path}"]
-    parts.append(f"[前台应用] pid={pid} 共 {len(items)} 个元素")
+    if pid == _target_pid and _target_pid:
+        parts.append(f"[目标应用] pid={pid}（后台并行，非前台）共 {len(items)} 个元素")
+    else:
+        parts.append(f"[前台应用] pid={pid} 共 {len(items)} 个元素")
     if describe:
         parts.append(_describe(path))
     parts.append(_el_index_text(items))
@@ -230,10 +317,32 @@ def _click_at(x: float, y: float):
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
 
 
-def action_click(element=None, coordinate=None) -> str:
-    """按 element=N（AX 索引）或 coordinate=[x,y]（像素坐标）点击。"""
-    pid = _front_pid()
+def action_click(element=None, coordinate=None, element_id=None) -> str:
+    """点击。优先级：element_id（身份，防漂移）> coordinate（坐标，稳定）> element=N（位置号兜底）。
+
+    票 C（COST-3）：element_id 身份匹配——树重排后仍能找到同一元素并点其当前 frame 中心，不漂移。
+    用 _which_pid()（目标 pid 优先，后台并行）；未 open_app 回退前台。
+    """
+    pid = _which_pid()
     items = _collect_elements(pid)
+    # ① element_id 身份匹配优先（防漂移）
+    if element_id is not None:
+        for it in items:
+            if it["element_id"] == str(element_id):
+                x, y, w, h = it["frame"]
+                cx, cy = x + w / 2.0, y + h / 2.0
+                _click_at(cx, cy)
+                return f"已点击 元素{it['element_id']}（{it['role']} '{(it['title'] or '')[:20]}'） @ ({cx:.0f},{cy:.0f})"
+        return f"错误: 元素身份 {element_id} 不存在（树可能已重排），请重新 capture"
+    # ② coordinate 坐标（稳定，不漂移）
+    if coordinate is not None:
+        try:
+            cx, cy = float(coordinate[0]), float(coordinate[1])
+        except (TypeError, ValueError, IndexError):
+            return "错误: coordinate 需为 [x, y] 两个数字"
+        _click_at(cx, cy)
+        return f"已点击 坐标 ({cx:.0f},{cy:.0f})"
+    # ③ element=N 位置号兜底
     if element is not None:
         try:
             idx = int(element)
@@ -246,14 +355,7 @@ def action_click(element=None, coordinate=None) -> str:
         cx, cy = x + w / 2.0, y + h / 2.0
         _click_at(cx, cy)
         return f"已点击 元素#{idx}（{it['role']} '{(it['title'] or '')[:20]}'） @ ({cx:.0f},{cy:.0f})"
-    if coordinate is not None:
-        try:
-            cx, cy = float(coordinate[0]), float(coordinate[1])
-        except (TypeError, ValueError, IndexError):
-            return "错误: coordinate 需为 [x, y] 两个数字"
-        _click_at(cx, cy)
-        return f"已点击 坐标 ({cx:.0f},{cy:.0f})"
-    return "错误: 请提供 element=N 或 coordinate=[x,y]"
+    return "错误: 请提供 element_id=身份 / element=N / coordinate=[x,y] 之一"
 
 
 def _post_key_combo(keyname: str):
@@ -300,18 +402,24 @@ def _keycode(name: str):
 
 
 def action_key(key: str) -> str:
-    """组合键：'cmd+s' 等。"""
+    """组合键：'cmd+s' 等（发送前验证目标焦点，防静默丢失——缺陷4）。"""
     if not key:
         return "错误: 请提供 key（如 'cmd+s'）"
+    err = _ensure_target()
+    if err:
+        return err
     if _post_key_combo(key):
         return f"已发送组合键 {key}"
     return f"错误: 不认识 key: {key}（当前支持字母/数字及 cmd/ctrl/opt/shift）"
 
 
 def action_type(text: str) -> str:
-    """向当前应用输入文字（剪贴板 + cmd+v，安全应用使用，不碰密码框）。"""
+    """向当前应用输入文字（剪贴板 + cmd+v，安全应用使用，不碰密码框；发送前验证目标——缺陷4）。"""
     if text is None:
         return "错误: 请提供 text"
+    err = _ensure_target()
+    if err:
+        return err
     # 密码/凭据绝不进 LLM：这里只做文本输入，不接触任何凭据字段
     try:
         p = subprocess.run(["pbcopy"], input=text.encode("utf-8"), timeout=5)
@@ -323,24 +431,27 @@ def action_type(text: str) -> str:
 
 
 def action_open_app(app_name: str) -> str:
-    """打开指定应用（NSWorkspace.launchApplication / 'open -a' 兜底）。
+    """打开指定应用（NSWorkspace.launchApplication / 'open -a' 兜底），并记录 _target_pid（票 BACKGROUND）。
 
     ——补全原子操作：bobo 想"帮我在谷歌搜索/在 Pages 操作"时能直接 open_app，
-    不用写 applescript 造轮子（TICKET-COMPUTER-USE-ACTION）。
+    不用写 applescript 造轮子。open_app 后 capture/click 走目标 pid（用户在前台做别的也能后台并行操作）。
     """
+    global _target_pid
     if not app_name or not str(app_name).strip():
         return "错误: 请提供 app_name（如 'Safari'/'Pages'/'Finder'）"
     app = str(app_name).strip()
     try:
         ws = NSWorkspace.sharedWorkspace()
         if ws.launchApplication(app):
-            return f"已打开应用 {app}"
+            _target_pid = _find_pid(app)
+            return f"已打开应用 {app}（目标 pid={_target_pid}，后台并行）"
     except Exception:
         pass  # NSWorkspace 在新版 macOS 签名/反馈不稳定，走 open -a 兜底
     try:
         r = subprocess.run(["open", "-a", app], capture_output=True, timeout=8)
         if r.returncode == 0:
-            return f"已打开应用 {app}（open -a 兜底）"
+            _target_pid = _find_pid(app)
+            return f"已打开应用 {app}（open -a 兜底，目标 pid={_target_pid}，后台并行）"
         return f"错误: 打开应用 {app} 失败: {(r.stderr or b'').decode('utf-8', 'ignore').strip()}"
     except Exception as e:
         return f"错误: 打开应用 {app} 异常: {e}"
@@ -374,7 +485,8 @@ def action_scroll(direction: str = "down", amount: int = 3) -> str:
 
 
 def execute(action: str, element=None, coordinate=None, text=None, key=None,
-            describe: bool = False, app_name=None, direction=None, amount=None) -> str:
+            describe: bool = False, app_name=None, direction=None, amount=None,
+            element_id=None) -> str:
     """computer_use 工具入口。
 
     Args:
@@ -393,7 +505,7 @@ def execute(action: str, element=None, coordinate=None, text=None, key=None,
     if action == "capture":
         return action_capture(describe)
     elif action == "click":
-        return action_click(element=element, coordinate=coordinate)
+        return action_click(element=element, coordinate=coordinate, element_id=element_id)
     elif action == "type":
         return action_type(text)
     elif action == "key":
@@ -413,13 +525,14 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": TOOL_NAME,
-        "description": "AX 树驱动的电脑操作，覆盖整个 macOS（系统级通用，不限特定软件）：截屏看屏幕+AX 树元素索引（capture，默认不调 vision，快）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）、打开应用（open_app）、滚动页面（scroll）。这是原子操作集（直接做，不写脚本/applescript 造轮子）：open_app 直接打开目标 APP，scroll 滚动窗口。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导（不自动开权限，不碰凭据）。\\n【何时用我——通用判断准则】操作对象在【界面层】时用我，比代码工具更优：① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/窗口，任何 Apple 应用如 Finder/Pages/Word/Safari/Notes/系统设置）→ 用我点/输入/打开应用/滚动，界面元素用代码工具够不着。② 需要【看到】当前屏幕/系统状态 → 用我 capture。③ 其他工具受限（搜索 API 挂/VPN 不行/没 API）→ 用我直接操作真实浏览器/应用绕过。④ 操作对象是图形界面应用 → 用我，这是唯一能直接操作 GUI 的。⑤ 找文档/文件→我自己打开 Finder/文件夹，用 click+scroll 浏览定位（不只读文本层）。\\n【何时不用我】操作对象在代码/文本/文件层（查函数/读文件/改代码/批量处理）→ 用 read/grep/edit/terminal。\\n【快而精准——操作习惯】信任 AX 树定位（系统给坐标，准）：capture 拿到元素索引后，直接 click element=N 点它（或坐标），不要反复 capture 确认——一次定位就操作，又快又准。不要看到'开关/模式/功能'就想到改代码，界面上的按钮就点它。",
+        "description": "AX 树驱动的电脑操作，覆盖整个 macOS（系统级通用，不限特定软件）：截屏看屏幕+AX 树元素索引（capture，默认不调 vision，快）、按元素索引或坐标点击（click）、输入文字（type）、组合键（key）、打开应用（open_app）、滚动页面（scroll）。这是原子操作集（直接做，不写脚本/applescript 造轮子）：open_app 直接打开目标 APP，scroll 滚动窗口。首次使用需系统权限：屏幕录制+辅助功能，未授权会返回引导（不自动开权限，不碰凭据）。\\n【何时用我——通用判断准则】操作对象在【界面层】时用我，比代码工具更优：① 目标是界面元素（按钮/开关/菜单/输入框/文件图标/窗口，任何 Apple 应用如 Finder/Pages/Word/Safari/Notes/系统设置）→ 用我点/输入/打开应用/滚动，界面元素用代码工具够不着。② 需要【看到】当前屏幕/系统状态 → 用我 capture。③ 其他工具受限（搜索 API 挂/VPN 不行/没 API）→ 用我直接操作真实浏览器/应用绕过。④ 操作对象是图形界面应用 → 用我，这是唯一能直接操作 GUI 的。⑤ 找文档/文件→我自己打开 Finder/文件夹，用 click+scroll 浏览定位（不只读文本层）。\\n【何时不用我】操作对象在代码/文本/文件层（查函数/读文件/改代码/批量处理）→ 用 read/grep/edit/terminal。\\n【定位与操作——防漂移】用 element_id=身份（role+title+frame hash）点击最稳——树重排后仍找得到；或 coordinate=[x,y]（frame 中心）稳定；element=N 是位置号，Safari 启动重排/菜单栏挤占会漂移、点错。**AX 索引不稳定——点击后确认结果**，别一次定位就假设成功。界面按钮就点它，不要写脚本造轮子。",
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["capture", "click", "type", "key", "open_app", "scroll"],
                        "description": "操作类型"},
-            "element": {"type": "integer", "description": "click：AX 元素索引（capture 返回的 N）"},
+            "element": {"type": "integer", "description": "click：AX 元素索引（capture 返回的 N，位置号，树重排会漂移——优先用 element_id/coordinate）"},
+            "element_id": {"type": "string", "description": "click：元素身份（capture 输出的 id=xxx，role+title+frame hash，防漂移，树重排后仍找得到）"},
             "coordinate": {"type": "array", "items": {"type": "number"},
-                           "description": "click：像素坐标 [x, y]"},
+                           "description": "click：像素坐标 [x, y]（frame 中心，稳定）"},
             "text": {"type": "string", "description": "type：要输入的文字（不碰密码/凭据）"},
             "key": {"type": "string", "description": "key：组合键（如 'cmd+s'）"},
             "app_name": {"type": "string", "description": "open_app：要打开的应用名（如 'Safari'/'Pages'）"},
