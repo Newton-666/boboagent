@@ -13,6 +13,24 @@ import tiktoken
 logger = logging.getLogger(__name__)
 
 
+def _content_to_text(content):
+    """TICKET-VISION-CHAT-UPLOAD（COST-3 特批标记）：把消息 content 转成纯文本。
+
+    content 可能是 str（纯文本）或多模态 list（[{"type":"text",...},
+    {"type":"image_url",...}]）。若是 list，只取 text 项拼接；
+    str() 会把整个 list dump 成 Python 结构字符串（"[{'type': 'text'...}]"），
+    污染压缩摘要/上下文。返回 str。
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            str(x.get("text", "")) for x in content
+            if isinstance(x, dict) and x.get("text")
+        )
+    return str(content)
+
+
 # ── Token 估算（tiktoken cl100k_base，TICKET-024 彻底校准）─────────
 
 _ENCODER = None
@@ -148,7 +166,7 @@ def _build_local_fallback_summary(old_msgs: list) -> str:
     user_parts = []
     for m in old_msgs:
         if m.get("role") == "user":
-            content = str(m.get("content", "") or "")[:200]
+            content = _content_to_text(m.get("content", ""))[:200]
             if content.strip():
                 user_parts.append(f"- {content}")
     if user_parts:
@@ -161,7 +179,7 @@ def _build_local_fallback_summary(old_msgs: list) -> str:
     asst_text = ""
     for m in reversed(old_msgs):
         if m.get("role") == "assistant":
-            content = str(m.get("content", "") or "")
+            content = _content_to_text(m.get("content", ""))
             if content.strip() and "[RESULT:" not in content[:30]:
                 asst_text = content[:400]
                 break
@@ -172,7 +190,7 @@ def _build_local_fallback_summary(old_msgs: list) -> str:
     for m in old_msgs:
         if m.get("role") == "tool":
             name = m.get("name", m.get("tool_call_id", "?"))
-            content = str(m.get("content", "") or "")[:50].replace("\n", " ")
+            content = _content_to_text(m.get("content", ""))[:50].replace("\n", " ")
             if content.strip():
                 tool_parts.append(f"- {name}: {content}")
     if tool_parts:
@@ -479,7 +497,7 @@ class ContextMixin:
             prompt_parts.append("## 最早阶段（层2 · 极简摘要）\n")
             for m in l2_msgs:
                 role = m.get("role", "")
-                content = str(m.get("content", "") or "")
+                content = _content_to_text(m.get("content", ""))
                 if role in ("user", "assistant") and content.strip():
                     label = "用户" if role == "user" else "Bobo"
                     prompt_parts.append(f"{label}: {content[:300]}")
@@ -492,7 +510,7 @@ class ContextMixin:
             prompt_parts.append("## 中间阶段（层1 · 分段摘要，请自动划分时间段落）\n")
             for m in l1_msgs:
                 role = m.get("role", "")
-                content = str(m.get("content", "") or "")
+                content = _content_to_text(m.get("content", ""))
                 if role in ("user", "assistant") and content.strip():
                     label = "用户" if role == "user" else "Bobo"
                     prompt_parts.append(f"{label}: {content[:300]}")

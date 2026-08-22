@@ -69,7 +69,18 @@ class SkillLoader:
             if not _os.path.isdir(std_dir):
                 return []
             history = self._get_history()
-            user_msgs = [m.get("content", "") for m in history[-4:]
+            # TICKET-VISION-CHAT-UPLOAD（COST-3 特批标记）：user content 可能是
+            # 多模态 list（[{"type":"text",...},{"type":"image_url",...}]）——
+            # 取 text 部分，否则 " ".join 遇 list 元素报
+            # "sequence item 0: expected str"。
+            def _as_text(c):
+                if isinstance(c, str):
+                    return c
+                if isinstance(c, list):
+                    return " ".join(str(x.get("text", "")) for x in c
+                                    if isinstance(x, dict) and x.get("text"))
+                return str(c)
+            user_msgs = [_as_text(m.get("content", "")) for m in history[-4:]
                          if m.get("role") == "user" and m.get("content")]
             topic = " ".join(user_msgs[-1:]).lower() if user_msgs else ""
 

@@ -546,6 +546,14 @@ def test_tel_8_zero_interference():
             assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
                 f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
             continue
+        # 票 TICKET-VISION-CHAT-UPLOAD 特批：core/proactive.py + core/skill_loader.py
+        # （多模态 content 兼容：user content 从 str 变 list，_extract_topic/load_standards
+        # 的 " ".join 需取 text 部分，防 "sequence item 0: expected str, got list"），
+        # diff 必须含 COST-3 标记
+        if ln in ("core/proactive.py", "core/skill_loader.py"):
+            r_c3 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_c3.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
         assert not ln.startswith("core/"), f"零干涉铁律违反：core/ 被改动 {ln}"
         # 票 GUI-F16 特批：apps/desktop/dist/vendor/katex/（KaTeX 本地化资源，
         # 官方压缩产物，与 vendor/marked 等先例同性质，不承载项目逻辑）
@@ -653,6 +661,12 @@ def test_tel_8_zero_interference():
         if ln in ("core/profile_writer.py", "core/signal_detector.py", "core/skill_loader.py"):
             r_prof = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "COST-3" in r_prof.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-VISION-CHAT-UPLOAD 特批：core/proactive.py（多模态 content 兼容，
+        # 防 " ".join 遇 list 元素报 sequence item 0），diff 必须含 COST-3 标记
+        if ln == "core/proactive.py":
+            r_proa = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_proa.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：tools/execute_terminal.py 会话 project_root 非空时
         # 注入 cwd（终端命令落项目目录），diff 必须含 DESK-P1 标记

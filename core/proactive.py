@@ -35,7 +35,15 @@ class ProactiveManager:
 
     def _extract_topic(self, messages: list) -> str:
         """从最近几条用户消息中提取对话主题（用于搜索相关连接）。"""
-        user_msgs = [m.get("content", "") for m in messages[-6:]
+        # TICKET-VISION-CHAT-UPLOAD（COST-3 特批标记）：user content 可能是多模态 list，取 text 部分
+        def _as_text(c):
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                return " ".join(str(x.get("text", "")) for x in c
+                                if isinstance(x, dict) and x.get("text"))
+            return str(c)
+        user_msgs = [_as_text(m.get("content", "")) for m in messages[-6:]
                      if m.get("role") == "user" and m.get("content")]
         if not user_msgs:
             return ""
