@@ -57,6 +57,7 @@ class _FakeCtx:
         self.sessions = sessions
         self.sessions_lock = threading.Lock()
         self.auto_mode = {}
+        self.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补 FakeCtx 缺失属性
         self.office_state = {}
         self.current_engines = {}
         self.current_engines_lock = threading.Lock()

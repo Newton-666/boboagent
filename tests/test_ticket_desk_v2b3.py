@@ -70,6 +70,7 @@ def _make_ctx():
             self.sessions_lock = threading.Lock()
             self.sessions = {}
             self.auto_mode = {}
+            self.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补 FakeCtx 缺失属性
             self.office_state = {}
             self._current = None
 
@@ -179,7 +180,8 @@ def test_v2b3_5_catalog_desc_fields():
     # 结构不变：commands 仍是 {group: {cmd: usage}}（既有消费者零破坏）
     assert "commands" in body and "canon" in body["commands"]
     canon = body["commands"]["canon"]
-    assert "/scan" in canon and "/connect" in canon and "/duo" in canon
+    assert "/scan" in canon and "/connect" in canon
+    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（2026-08-23）：/duo 已随模式拆除，不再要求在命令目录 ──
     # 新增 descs：与 commands 命令集一致（只加不改）
     assert "descs" in body, "必须新增 descs 字段"
     descs = body["descs"]

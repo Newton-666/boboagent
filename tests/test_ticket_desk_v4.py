@@ -124,8 +124,20 @@ def test_v4_1_engine_gateway_tui_zero_diff():
     # 票 P0-1（2026-08-19）特批：bobo_tui_gateway/server.py + handlers/memory.py
     #（Memory 面板 RPC：memory.list/delete/update/verify_links），diff 必须含 P0-1 标记
     P0_1_ALLOWED = {"bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/memory.py", "bobo_tui_gateway/handlers/profile.py", "bobo_tui_gateway/handlers/skills.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED]
+    # 票 TICKET-DEMOLISH-OFFICE-DUO（2026-08-23，owner 终裁）特批：office/duo 模式拆除
+    #（engine 8 块 + injector O4 + command_safety 删函数 + duo_orchestrator/office_manager
+    # 整文件 + gateway 命令面），diff 必须含 TICKET-DEMOLISH-OFFICE-DUO 标记
+    DEMOLISH_ALLOWED = {"core/engine.py", "core/injector.py", "core/command_safety.py",
+                        "core/duo_orchestrator.py", "bobo_tui_gateway/server.py",
+                        "bobo_tui_gateway/handlers/prompts.py",
+                        "bobo_tui_gateway/handlers/sessions.py", "tools/office_manager.py"}
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED and f not in DEMOLISH_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
+    for f in sorted(DEMOLISH_ALLOWED & set(changed)):
+        r_dm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        if os.path.exists(f):  # 整文件删除：白名单登记即授权（同 entry.py 先例，diff 为空无法含标记）
+            assert "TICKET-DEMOLISH-OFFICE-DUO" in r_dm.stdout, \
+                f"{f} 的改动缺 TICKET-DEMOLISH-OFFICE-DUO 标记，未授权改动被拦截"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
