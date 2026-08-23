@@ -28,6 +28,9 @@ from core.verifier import Verifier
 from core.steps.base import StepContext, StepResult
 from core.steps.promise_gate import PromiseGateStage
 from core.steps.quality_gate import QualityGateStage
+from core.steps.backfill_gate import BackfillGateStage
+from core.steps.field_gate import FieldGateStage
+from core.steps.ledger_gate import LedgerGateStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -166,7 +169,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.injector = PromptInjector(self)
         # 阶段 3（feat/step-pipeline）：收尾闸流水线——先砌墙，承诺房间先住；
         # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
-        self._wrapup_stages = [PromiseGateStage(), QualityGateStage()]
+        self._wrapup_stages = [PromiseGateStage(), QualityGateStage(),
+                              BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1676,127 +1680,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 logger.debug("GATE %s re-injection", _stage.name)
                                 self._emit_state_change(self.STATE_THINKING, f"{_stage.name} re-injection")
                                 return
-                                        # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
-                    # 激活条件（票 O8-1）：auto on（会话级）。
-                    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office get_office_on 回退激活分支拆除
-                    # ——同时消除 core→gateway 反向 import（engine.py 不再 import server）
-                    _gate_active = (self._auto_mode_getter is not None and self._auto_mode_getter())
-                    _gate_label = "AUTO MODE"
-                    if _gate_active:
-                        # ── 票 O8-2：补账检测闸（先于字段闸：批量创建即全 done = 事后补登记）──
-                        # deny + history 追加指令（要求列出下一步真实待办）+ goal_gate.deny
-                        # 审计（reason=ledger_backfill）。resume 豁免由 _detect_ledger_backfill
-                        # 的 prev 非空判定保证（有历史轮次 → 不置嫌疑）。
-                        if self._ledger_backfill_suspect:
-                            rej_msg = (
-                                f"{_gate_label} 收工拒绝（补账检测）：台账 {len(self.task_ledger)} 项在本轮"
-                                "批量创建且全部/大部直接标 done，无中间施工轮次——视为事后补登记。"
-                                "请用 task_ledger update 将未完成项改为 pending 并列出下一步真实待办"
-                                "（verify/evidence 按字段闸要求补齐），然后继续。不要说明、不要道歉，直接做。"
-                            )
-                            self._append_to_history("user", rej_msg)
-                            self._pending_content = None
-                            self._pending_tool_calls = None
-                            self.current_depth += 1
-                            event_bus.write("goal_gate.deny", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "ledger_backfill",
-                                "items": len(self.task_ledger),
-                            })
-                            self._emit_state_change(self.STATE_THINKING, "ledger backfill deny")
-                            return
-                        field_issues = self._ledger_field_issues()
-                        if field_issues:
-                            # ── 票 L1：deny 降本 —— 缺字段不再强制全上下文重跑 ──
-                            # 精简补正指令本轮放行 + 执法记录照留（goal_gate.deny 审计 + 计数）。
-                            # 不 return、不 append history 重跑：补正指令随终稿带出，
-                            # 模型下轮自然补（省掉全上下文重跑一轮的 +15s 成本）。
-                            # 铁律保留：台账执法能力不删（缺字段仍被记录、仍被点名），
-                            # 只改同步与成本结构（票 L1 裁决）。
-                            self._ledger_field_deny_count += 1
-                            _parts = "; ".join(
-                                f'{i["id"]} 缺 {", ".join(i["missing"])}' for i in field_issues
-                            )
-                            event_bus.write("goal_gate.deny", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "ledger_field_missing",
-                                "field_issues": field_issues,
-                                "deny_count": self._ledger_field_deny_count,
-                                "mode": "pass_with_note",  # L1：本轮放行 + 执法记录照留
-                            })
-                            logger.debug("LEDGER field-gate note #%d (pass-with-note): %s",
-                                         self._ledger_field_deny_count, _parts)
-                            self._pending_content = (self._pending_content or "") + (
-                                f"\n\n⚠️ {_gate_label} 字段闸记录（第 {self._ledger_field_deny_count} 次，"
-                                f"本轮放行）：台账 {len(field_issues)} 项缺字段（{_parts}）。"
-                                "收工汇报需给出补正计划：补齐 verify（怎么算做完/怎么验证）与 done 项的 "
-                                "evidence（完成证据），或写明卡点转 pending 交接/上报调度员。"
-                            )
-                    # ── 票 K v2 收工闸：台账检查（引擎执法，不由模型嘴决定收工） ──
-                    pending_items = [e for e in self.task_ledger if e.get("status") != "done"]
-                    if pending_items:
-                        # 票 R3-d：熔断前开确认通道——检测到施工证据（写类工具/多次工具执行）
-                        # 直接放行，不逼模型"继续"（有真实施工痕迹就不是空口承诺）。
-                        if self._round_had_write_tool or self._round_tool_exec_count >= 3:
-                            pending_titles = ", ".join(
-                                f'"{e["title"][:30]}"' for e in pending_items
-                            )
-                            event_bus.write("goal_gate.released", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "construction_evidence",
-                                "tool_exec_count": self._round_tool_exec_count,
-                                "pending_items": len(pending_items),
-                            })
-                            warning = (
-                                f"\n\n⚠️ 施工证据已确认，引擎放行（台账 {len(pending_items)} 项未销账：{pending_titles}）"
-                            )
-                            self._pending_content = (self._pending_content or "") + warning
-                            logger.debug("GATE ledger construction-evidence release: %d pending",
-                                         len(pending_items))
-                        elif self._ledger_reinject_count < 2:
-                            # 回注次数 < 2 → 回注一条 user 消息，回到 THINKING
-                            self._ledger_reinject_count += 1
-                            titles = ", ".join(f'"{e["title"][:30]}"' for e in pending_items)
-                            rej_msg = (
-                                f"任务台账还有 {len(pending_items)} 项未完成：{titles}。"
-                                "请继续执行，不要说明、不要道歉，直接继续。"
-                            )
-                            self._append_to_history("user", rej_msg)
-                            self._pending_content = None
-                            self._pending_tool_calls = None
-                            self.current_depth += 1
-                            logger.debug("GATE ledger re-injection #%d: %d items pending",
-                                         self._ledger_reinject_count, len(pending_items))
-                            self._emit_state_change(self.STATE_THINKING, "ledger re-injection")
-                            return
-                        else:
-                            # 已达 2 次熔断上限 → 放行 done，终稿附加 ⚠️ 遗言 + 事件
-                            pending_titles = ", ".join(
-                                f'"{e["title"][:30]}"' for e in pending_items
-                            )
-                            warning = (
-                                f"\n\n⚠️ 台账 {len(pending_items)} 项未销账，引擎放行：{pending_titles}"
-                            )
-                            self._pending_content = (self._pending_content or "") + warning
-                            event_bus.write("goal_gate.released", {
-                                "session_id": getattr(self, "sid", ""),
-                                "reason": "ledger_exhausted",
-                                "reinject_count": self._ledger_reinject_count,
-                                "pending_items": len(pending_items),
-                            })
-                            logger.debug("GATE ledger force-release: %d items still pending",
-                                         len(pending_items))
-                    elif not self.task_ledger:
-                        # ── 票 R2a（v2 软限制版）：无账硬闸已拆除 ──
-                        # owner 终裁：让 LLM 自己理解复杂度，软限制不做硬限制。
-                        # 任何回合不再因为"没建账"被回注；纯读问答/简单任务直接收工。
-                        # 自愿建账后的字段闸/补账检测/批量销账检测全部保留（见上方分支）。
-                        event_bus.write("task.no_ledger", {
-                            "session_id": getattr(self, "sid", ""),
-                            "reason": "no ledger (soft limit, R2a)",
-                            "tool_round": self.current_tool_round,
-                        })
-                        logger.debug("GATE no ledger — soft limit (R2a), direct done")
+                                        # ── 阶段 3：台账闸系（补账/字段/未销账）已搬入墙内房间 ──
                     self._emit_state_change(self.STATE_RESPONDING, "responding")
         elif self.state == self.STATE_EXECUTING:
             # 冲突检测：检查多个编辑操作是否要改同一文件的同一段

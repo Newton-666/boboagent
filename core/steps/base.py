@@ -68,6 +68,29 @@ class StepContext:
         self._engine._reply_quality_reinject_count += 1
         return self._engine._reply_quality_reinject_count
 
+    # ── 台账闸系办事窗口（R4/R5/R6）──
+    def auto_active(self) -> bool:
+        getter = self._engine._auto_mode_getter
+        return getter is not None and bool(getter())
+
+    @property
+    def ledger_backfill_suspect(self) -> bool:
+        return bool(getattr(self._engine, "_ledger_backfill_suspect", False))
+
+    def ledger_field_issues(self):
+        return self._engine._ledger_field_issues()
+
+    def ledger_field_deny_count(self) -> int:
+        return self._engine._ledger_field_deny_count
+
+    def inc_ledger_field_deny_count(self) -> int:
+        self._engine._ledger_field_deny_count += 1
+        return self._engine._ledger_field_deny_count
+
+    @property
+    def current_tool_round(self) -> int:
+        return self._engine.current_tool_round
+
 
 class StepStage:
     """房间基类：只做判断，通过 ctx 回话。"""

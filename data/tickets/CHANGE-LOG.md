@@ -207,6 +207,18 @@
 - **客观验证**：行为基线 diff=0（6/6）；相关 50 测试过（goal_gate/core_r3/engine_core）。
 - **遗留影响**：收尾段墙内现有 2 房（承诺+质量），顺序保持原内联版。
 
+### B16 · 流水线圈房间③：补账检测闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/backfill_gate.py（票 O8-2）从内联迁出；auto 模式专用（office 已拆，gate_label 固定 AUTO MODE）；嫌疑 flag 由 EXECUTING 段经 ctx 只读。
+
+### B17 · 流水线圈房间④：台账字段闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/field_gate.py（票 C + L1 pass-with-note）迁出；自持 deny 计数经 ctx 窗口；放行附注随终稿带出（L1 降本语义保留）。
+
+### B18 · 流水线圈房间⑤：台账未销账闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/ledger_gate.py（票 K v2 + R3-d + 熔断 + R2a 无账软放行）迁出；无条件运行；共享 _ledger_reinject_count 经窗口保持与承诺房共用 2 次熔断预算（原语义不变）。
+
+- 客观验证（B16-B18 合并）：行为基线 diff=0（6/6）；台账/auto 系 220 测试过（goal_gate/core_r3/r2a/r2_p2/g2/ledger_1/auto_mode×2）。
+- 收尾段墙内现 5 房（承诺/质量/补账/字段/台账），顺序与原内联版一致；内联票C/票K 块已删。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
