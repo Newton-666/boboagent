@@ -326,6 +326,12 @@
 - **修正**：此前评估称"循环检测与 round_tracker 重复"——实查 round_tracker 无这些方法，是独立关注点长在 engine，本次搬为独立模块。
 - **验证（快速）**：行为基线 6/6；engine_core/e2e/bugfixes 102 测试过。
 
+### B35 · E4c 沉淀预筛闸搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（沉淀提取的纯判断部分）。
+- **改动**：_takeaway_worthy + 价值关键词/确认词常量搬入 core/takeaway_filter.py（纯函数）；Engine._takeaway_worthy 薄壳委托（test 仍经 Engine 调用，行为不变）。
+- **验证（快速）**：行为基线 6/6；takeaway_gate/e4a 17 测试过。
+- **说明**：_extract_takeaways（LLM 提取编排）仍留 engine（依赖 history/事件/LLM，属走廊编排），纯判断闸已独立可测。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

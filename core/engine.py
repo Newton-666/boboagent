@@ -34,6 +34,7 @@ from core.steps.ledger_gate import LedgerGateStage
 from core.steps.sediment_dispatch import SedimentDispatchStage
 import core.cu_policy as _cu_policy
 import core.loop_detect as _loop_detect
+import core.takeaway_filter as _takeaway_filter
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
 from core.steps.edit_conflict import EditConflictStage
@@ -48,14 +49,6 @@ from core.proactive import ProactiveManager
 from core.injector import PromptInjector
 
 # ── 票 S：takeaway 预筛正则 ──
-_TAKEAWAY_VALUE_KEYWORDS = re.compile(
-    r'决定|以后|记住|偏好|喜欢|习惯|以后都|改成|不要再用|规则|流程|'
-    r'选型|方案定|上线|部署|密码|密钥|配置'
-)
-_TAKEAWAY_CONFIRM_PATTERN = re.compile(
-    r'^(好的|好|嗯|行|ok|OK|谢谢|继续|收到|对|是的?|可以的?)[。！!~\s]*$'
-)
-
 # ── 票 H：运行时孤儿防线工具函数 ──
 
 def _is_tool_pairing_400(response: dict) -> bool:
@@ -841,37 +834,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
     @staticmethod
     def _takeaway_worthy(user_msg: str, asst_msg: str) -> bool:
-        """纯本地预筛：判断本轮对话是否值得调用 LLM 提取 takeaways。
-
-        优先级：放行信号 > 跳过条件。放行信号命中任一即放行，
-        跳过条件命中任一即跳过。
-
-        Returns:
-            True → 放行（值得调 LLM）；False → 跳过（零 API 成本）。
-        """
-        user_stripped = user_msg.strip()
-        asst_stripped = asst_msg.strip()
-
-        # ── 放行信号（命中任一即放行，宁可多打不可漏记） ──
-        # 1. 价值关键词命中
-        if _TAKEAWAY_VALUE_KEYWORDS.search(user_stripped + asst_stripped):
-            return True
-        # 2. 内容足够长
-        if len(user_stripped) > 100 or len(asst_stripped) > 300:
-            return True
-
-        # ── 跳过条件（命中任一即跳过） ──
-        # 1. 短闲聊：双方均 < 40 字，且无价值关键词（已检查过）
-        if len(user_stripped) < 40 and len(asst_stripped) < 40:
-            return False
-        # 2. 纯确认/过渡词
-        if _TAKEAWAY_CONFIRM_PATTERN.match(user_stripped):
-            return False
-        # 3. 纯问答无沉淀：asst < 60 字且双方均无价值关键词
-        if len(asst_stripped) < 60:
-            return False
-
-        return False
+        """E4c：委托 takeaway_filter.takeaway_worthy（零 API 成本预筛闸已搬出）。"""
+        return _takeaway_filter.takeaway_worthy(user_msg, asst_msg)
 
     def _extract_takeaways(self, fallback_content: str = "", history: list | None = None,
                            tool_round: int | None = None) -> list[str]:
