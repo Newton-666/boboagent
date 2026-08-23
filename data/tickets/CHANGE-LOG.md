@@ -151,6 +151,17 @@
 
 > 注：多轮出现 "RC=TIMEOUT" 假头——孤儿 pytest 进程占管道导致 wrapper 等待超时，摘要实际完整（详见各批记录）。已用 pkill 清理。
 
+### B10 · 宪法 v1.2（Principle 6 蓝图先行）+ 前端票治理升级 —— 提交（待填）· 2026-08-23
+
+- **之前问题**：前端 10 天漂移事故暴露——Hermes 直接改成品（dist）未同步图纸（src）与守卫，成品成为无图纸黑盒。
+- **owner 终裁**：先图后物——任何改动先看蓝图；图纸不对先改图纸，禁止直接缝补成品（微观先行 = 缝缝补补；蓝图先行 = 宏观框架）。
+- **改动内容**：
+  1. HARCHITECTURE.md v1.1→v1.2：新增 Principle 6（Blueprint before product）——改动必须始于蓝图；禁止改构建产物而不先更新源；成品漂移的修复路径 = 反推蓝图 → 重建 → 对齐守卫；立法史记录前端 10 天事故。
+  2. TICKET-FRONTEND-GREEN 升级：修复路径改为蓝图先行（反推 dist→src → vite 重建 → 守卫对齐）。
+- **范围**：docs/HARCHITECTURE.md + data/tickets/；零运行时代码改动。
+- **解决后**：宪法覆盖"宏观/微观"方法论（Principle 5 owner 保持地图层 + Principle 6 先图后物）；前端票有了正确的执行路径。
+- **遗留影响**：前端票实际施工（反推 src）尚待执行。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

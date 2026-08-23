@@ -1,6 +1,6 @@
 # Bobo Harness Constitution (HARCHITECTURE)
 
-> Version v1.1 (ratified) · 2026-08-23 · Drafted by Kimi, ratified by owner; Principle 5 added 2026-08-23 (owner + ZCode joint session, ratified by owner)
+> Version v1.2 (ratified) · 2026-08-23 · Principle 6 (Blueprint before product) added 2026-08-23, owner-ratified; Principle 5 added earlier same day
 > Status: CONSTITUTION layer — principles and prohibitions only. No inventory, no procedures.
 > Reading chain: this constitution → `data/Agent开发手册` (inventory: what exists) → `docs/GUIDANCE.md` (behavioral map: how to act) → `data/skill-standards/` (operational procedures).
 > Authority: every new feature, mode, or ticket MUST pass the §4 admission checklist before work begins. Where legacy behavior conflicts with this constitution, the constitution wins and a rectification ticket is filed.
@@ -22,6 +22,7 @@ This constitution was not designed; it grew out of these incidents:
 | Snapshots catch what slips through | O-1 review established by measurement: upfront path interception succeeds only ~60-70%; O-3 added snapshot backstop |
 | Never trust reports | Two fabrication incidents (false "saved to disk", false "43 passed") established: final review = re-run everything yourself |
 | Freeze & exemption | Relay frozen for one week after repair; O-3 RELAY_ORDER exemption scoped to exactly one file, zero scope creep |
+| Blueprint before product | 2026-08-23: ~10 days of frontend tickets (Hermes agent) modified the built artifact (dist/index.html) directly — source blueprint (src/) and guard tests were never updated, so the artifact became a blueprint-less black box. Owner's principle: any designer draws the blueprint first; fixing the product without the blueprint is patching, fixing the blueprint is structural |
 | Owner stays at the map level | 2026-08-23: owner's own diagnosis — after months of ticket-driven iteration with AI agents, he became estranged from his own agent's architecture; code evolved faster than his mental model. Root cause: reviews were vertical (feature correctness) while the architecture map had no refresh mechanism, and every ticket was opened in details |
 
 ---
@@ -66,6 +67,18 @@ Every owner–AI collaboration session (any AI: ZCode, Hermes, bobo itself, futu
 3. **Scope-creep alarm words.** The phrases "顺便" (by the way), "I found another place", "this might also need changing" are the standard entry points of getting lost. On any alarm: first ask "does this belong to this turn's committed scope?" — if yes, update the written scope explicitly; if no, record in backlog and keep it out of the current diff. Scope may grow, but only by explicit decision, never by sliding in.
 - Prohibition: starting construction (any ticket, any refactor, any "small change") before the session's spiral-turn scope is stated aloud or in writing. A session without a declared scope is itself a deviation.
 - Prohibition: an AI completion report without a horizontal report section is not acceptable for review.
+
+---
+
+### Principle 6 — Blueprint before product
+
+> Origin: a built artifact drifted for ~10 days with no blueprint or guard updates. The artifact became a black box.
+> The macro/micro law applied to code: the blueprint (source) is the macro frame; the finished product (built artifact) is the micro output. No product without a blueprint.
+
+- Every change MUST begin by consulting the blueprint of the thing being changed. If the blueprint is missing, stale, or inconsistent with the product — **fix the blueprint first**, then the product (rebuild from it). Never patch the product directly ("缝缝补补") as the first action.
+- Prohibition: modifying a built artifact (dist/, compiled output, generated files) without first updating the source that produces it is an incident-level defect — the same class as "switching UI without switching cognition" (Principle 1).
+- A ticket that touches a built artifact MUST satisfy all three in its acceptance: ① blueprint (source) updated to represent the change; ② product rebuildable from blueprint; ③ guard tests green.
+- Legacy exception: if the artifact already drifted (blueprint lost), the repair path is blueprint-first — reverse the features into the source, rebuild, then re-align guards. No guard-memory updates ("保安记错") without first reconciling the blueprint.
 
 ---
 
