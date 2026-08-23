@@ -33,6 +33,7 @@ from core.steps.field_gate import FieldGateStage
 from core.steps.ledger_gate import LedgerGateStage
 from core.steps.sediment_dispatch import SedimentDispatchStage
 from core.steps.auto_suggest import AutoSuggestStage
+from core.steps.workspace_recon import WorkspaceReconStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -174,6 +175,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
+        self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1840,15 +1842,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 self._reply_quality_reinject_count = 0  # 票 R2b：答复质量闸计数重置
                 # 注意：_round_had_write_tool 不在 RESPONDING 重置——它由 EXECUTING 每工具轮
                 # 重置重算，供本回合收尾轮判定"写类施工 vs 问答回合"（问答回合无工具轮 → 保留初始 False）。
-                # ── 票 L1：收工自动对账（堵汇报失实）──
-                # 有工具轮 → 引擎只读 git status/diff --stat 注入工作区实况。
-                # 票 LEDGER-1B：对账段改内部上下文 —— 只并入 history（供模型写汇报时
-                # 对账），不再拼进用户可见终稿；git 原文不上屏，可见回复只留模型
-                # 自己组织的自然语言对账说明。对账机制/汇报质量标准不动。
-                # 工作区干净 → _workspace_recon 返回 ""，零注入零开销。
+                # ── 阶段 3：RESPONDING 段观察房（工作区对账，core/steps/workspace_recon.py）──
+                # 对账文本经 ctx.recon_text 产出，走廊并入 history（LEDGER-1B：不上用户终稿）
                 _recon = ""
-                if self.current_tool_round > 0:
-                    _recon = self._workspace_recon()
+                if self._respond_stages:
+                    _ctx_r = StepContext(self)
+                    for _stage in self._respond_stages:
+                        _stage.run(_ctx_r)
+                    _recon = _ctx_r.recon_text
                 # ── 所有闸通过，内容落 history ──
                 _hist_content = self._pending_content
                 if _recon:

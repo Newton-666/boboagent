@@ -22,6 +22,7 @@ class StepContext:
         self.warnings: list[str] = []         # 附一句（放行但加提醒，走廊最后拼进回复）
         self.reinject_msg: str | None = None  # 拦下时带给模型的话
         self.tool_results: list = None        # EXECUTING 段走廊注入（销账建议房读取）
+        self.recon_text: str = ""            # RESPONDING 段观察房产出（对账文本，走廊并入 history）
 
     # ── 只读简报 ──
     @property
@@ -106,6 +107,10 @@ class StepContext:
         self._engine._dispatch_sedimentation(content)
 
     # ── 销账建议（E4）：改历史经办事窗口（COST-7/LEDGER-400：只扩最后一条 user 消息，不插 system）──
+    def fetch_workspace_recon(self) -> str:
+        """办事窗口：只读 git 对账（L1），房间不直接跑 shell。"""
+        return self._engine._workspace_recon()
+
     def append_suggestion_to_history(self, text: str) -> None:
         _appended = False
         for _m in reversed(self._engine.history):

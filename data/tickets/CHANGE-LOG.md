@@ -231,6 +231,13 @@
 - 客观验证：行为基线 diff=0（6/6）；LEDGER-400 系 4 测试过（另 ledger_1b/cost1b 4 过）。
 - 墙内 7 房（收尾 6 + 执行 1）。
 
+### B21 · 流水线圈房间⑧：工作区对账迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/workspace_recon.py（票 L1 + LEDGER-1B）迁出为 RESPONDING 段观察房；只读 git 对账经办事窗口 fetch_workspace_recon；产出经 ctx.recon_text 由走廊并入 history（不上用户终稿）。
+- 墙新增 RESPONDING 段走廊（_respond_stages）。
+- ledger_1b 静态断言更新（对账调用点迁至房间，语义保留）。
+- 客观验证：行为基线 diff=0（6/6）；ledger_1b/goal_gate/e2e/desk_v2a 58 测试过。
+- 墙内 8 房（收尾 6 + 执行 1 + 回复 1）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
