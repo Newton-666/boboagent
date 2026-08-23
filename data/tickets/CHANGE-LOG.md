@@ -191,6 +191,70 @@
 - **落盘**：DESIGN_STEP_PIPELINE §0a.1。
 - **遗留影响**：砌墙（骨架+接口）为下一步施工。
 
+### B14 · 流水线圈首批：砌墙 + 承诺房间试住 —— 提交（待填）· 2026-08-23（分支 feat/step-pipeline）
+
+- **内容**：
+  1. 墙（骨架）：core/steps/base.py——StepContext（只读简报 + 白名单办事窗口：append_warning / request_reinjection / 共享计数器经窗口读写）+ StepResult（PASS/REINJECT）+ StepStage 基类；
+  2. 第一间房：core/steps/promise_gate.py——承诺检测从 _step 内联迁出（票Z 缝2 + R3-d 施工证据放行 + 熔断），行为逐字节保持；
+  3. engine 收尾段改为流水线调用（递简报→听回答→按回答行动），其余闸仍内联。
+- **客观验证**：行为基线 diff=0（6/6 含承诺回注场景）；相关测试 117 过（goal_gate/engine_core/engine_e2e/auto）。
+- **范围**：core/steps/ 新包 3 文件 + engine.py（import/挂墙/替换承诺块）；engine 行数净变化小。
+- **遗留影响**：其余 13 间房待逐间搬入（顺序：第二批中 4 间 → 第三批高 4 间 → 另期 P2）；墙的接口按需演化（先保守后放宽）。
+
+### B15 · 流水线圈房间②：答复质量闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+
+- **内容**：core/steps/quality_gate.py（票 R2b + R3-b）从 _step 内联迁出；base 扩展办事窗口（last_reasoning 只读 + reply_quality 计数窗口）；承诺房名改回 "promise" 保持状态原因逐字节一致。
+- **客观验证**：行为基线 diff=0（6/6）；相关 50 测试过（goal_gate/core_r3/engine_core）。
+- **遗留影响**：收尾段墙内现有 2 房（承诺+质量），顺序保持原内联版。
+
+### B16 · 流水线圈房间③：补账检测闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/backfill_gate.py（票 O8-2）从内联迁出；auto 模式专用（office 已拆，gate_label 固定 AUTO MODE）；嫌疑 flag 由 EXECUTING 段经 ctx 只读。
+
+### B17 · 流水线圈房间④：台账字段闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/field_gate.py（票 C + L1 pass-with-note）迁出；自持 deny 计数经 ctx 窗口；放行附注随终稿带出（L1 降本语义保留）。
+
+### B18 · 流水线圈房间⑤：台账未销账闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/ledger_gate.py（票 K v2 + R3-d + 熔断 + R2a 无账软放行）迁出；无条件运行；共享 _ledger_reinject_count 经窗口保持与承诺房共用 2 次熔断预算（原语义不变）。
+
+- 客观验证（B16-B18 合并）：行为基线 diff=0（6/6）；台账/auto 系 220 测试过（goal_gate/core_r3/r2a/r2_p2/g2/ledger_1/auto_mode×2）。
+- 收尾段墙内现 5 房（承诺/质量/补账/字段/台账），顺序与原内联版一致；内联票C/票K 块已删。
+
+### B19 · 流水线圈房间⑥：沉淀派发迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/sediment_dispatch.py（票 PERF-1）迁出；fire-and-forget：只判"要不要沉淀"，起线程动作走走廊办事窗口 _dispatch_sedimentation（test_mode 同步 + 生产 daemon 线程 + 启动失败 notes.error，语义保留）。
+- perf_1 实现细节断言更新（源码字符串随重构迁移——其余行为断言全部保留并验证）。
+- 客观验证：行为基线 diff=0（6/6）；E4a/perf_1 15 测试过。
+- 墙内现 6 房：沉淀/承诺/质量/补账/字段/台账。
+
+### B20 · 流水线圈房间⑦：全绿销账建议迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/auto_suggest.py（票 L1 + COST-7/LEDGER-400）迁出为 EXECUTING 段观察房；改历史经办事窗口 append_suggestion_to_history（只扩最后 user 消息防 DeepSeek 400）；建议性可推翻、不改账（铁律保留）。
+- 墙新增 EXECUTING 段走廊（_exec_post_stages，工具落历史后跑）。
+- 客观验证：行为基线 diff=0（6/6）；LEDGER-400 系 4 测试过（另 ledger_1b/cost1b 4 过）。
+- 墙内 7 房（收尾 6 + 执行 1）。
+
+### B21 · 流水线圈房间⑧：工作区对账迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/workspace_recon.py（票 L1 + LEDGER-1B）迁出为 RESPONDING 段观察房；只读 git 对账经办事窗口 fetch_workspace_recon；产出经 ctx.recon_text 由走廊并入 history（不上用户终稿）。
+- 墙新增 RESPONDING 段走廊（_respond_stages）。
+- ledger_1b 静态断言更新（对账调用点迁至房间，语义保留）。
+- 客观验证：行为基线 diff=0（6/6）；ledger_1b/goal_gate/e2e/desk_v2a 58 测试过。
+- 墙内 8 房（收尾 6 + 执行 1 + 回复 1）。
+
+### B22 · 流水线圈房间⑨：编辑冲突检测迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/edit_conflict.py 迁出为 EXECUTING 前置房（工具环前）；纯本地解析零 LLM；拦下时回注 assistant 消息（走廊执行重走动作）。
+- 墙新增 EXECUTING 前置走廊（_exec_pre_stages）。
+- 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/bugfixes 102 测试过。
+- **第二批（中耦合）全部完成：9/14 房已搬**（收尾 6 + 沉淀 + 销账 + 对账 + 冲突）。
+
+### B23 · 流水线圈房间⑩⑪：台账基线快照 + 台账同步/补账嫌疑迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline-b3）
+- core/steps/ledger_snapshot.py（票 O9）+ ledger_sync.py（票 K v2/L + O8-2）迁出；E2 入前置房（工具环前快照，_prev_ledger 存走廊侧）、E3 入新增中段走廊（工具环后同步+嫌疑评估，先于落账/销账——时序铁律）。
+- 墙新增 EXECUTING 中段走廊（_exec_mid_stages）。
+- 客观验证：行为基线 diff=0（6/6）；台账/auto 系 94 测试过（core_r3/goal_gate/auto_mode/r2a/ledger_1）。
+- 墙内 11 房（收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1）。
+
+### B24 · 流水线圈房间⑫⑬：空响应重试 + 验证器迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline-b3）
+- core/steps/empty_retry.py + verifier_check.py 迁出为 THINKING 入口房；墙扩展两种新回话（RETRY：空响应重试/报错；VERIFY_REINJECT：验证器命中清态回走）；控制流房间只判结果，走廊执行重试/报错/清态动作。
+- 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/goal_gate/interrupt 系 88 测试过。
+- **13/14 房全部搬完**（P2 终稿组装为展示层债，另期 backlog）。墙形态：入口 2 + 收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

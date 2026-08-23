@@ -54,8 +54,12 @@ def test_1b_1_static_engine_callpoint():
     # 调用点：不再拼接进 _pending_content
     assert "_recon = \"\"" in src, \
         "LEDGER-1B: 对账段应走局部变量 _recon（默认空串，零残留）"
-    assert "_recon = self._workspace_recon()" in src, \
-        "LEDGER-1B: 有工具轮时取工作区实况"
+    # 阶段 3（feat/step-pipeline 房间⑧）：对账搬入 core/steps/workspace_recon.py，
+    # 走廊经 ctx.recon_text 取产出；"有工具轮才取"语义在房间内保留（ctx.current_tool_round > 0）
+    assert "_recon = _ctx_r.recon_text" in src, \
+        "LEDGER-1B: 对账段经走廊取房间产出（recon_text）"
+    assert (repo_root / "core" / "steps" / "workspace_recon.py").exists(), \
+        "LEDGER-1B: 对账房间（workspace_recon.py）必须存在"
     assert "_pending_content = (self._pending_content or \"\") + _recon" not in src, \
         "LEDGER-1B: 旧路径（拼进可见终稿）必须移除"
 
