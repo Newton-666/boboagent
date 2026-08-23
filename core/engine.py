@@ -25,6 +25,8 @@ from core.emoji_cleaner import remove_emojis
 from core.command_safety import (classify_command, is_high_risk_tool, is_auto_readonly_command,
                                  classify_side_effect, _has_real_git_command, is_blacklisted)
 from core.verifier import Verifier
+from core.steps.base import StepContext, StepResult
+from core.steps.promise_gate import PromiseGateStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -161,6 +163,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.skill_loader = SkillLoader(lambda: self.history)
         # Prompt 注入管道
         self.injector = PromptInjector(self)
+        # 阶段 3（feat/step-pipeline）：收尾闸流水线——先砌墙，承诺房间先住；
+        # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
+        self._wrapup_stages = [PromiseGateStage()]
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1654,51 +1659,23 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                     "stage": "ln_hook",
                                 })
                     # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 收工快照比对闸（S2）拆除 ──
-                    # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
-                    if self._pending_content:
-                        _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}
-                        if not any(w in self._pending_content for w in _COMPLETION_WORDS):
-                            _PROMISE_RE = re.compile(
-                                r'(我将|我会|让我|接下来|下一步|稍后|一会|待会).{0,10}(继续|执行|运行|跑|处理|完成|修复|修改|测试)'
-                                r'|(现在|马上|这就).{0,6}(跑|执行|运行|开始)'
-                            )
-                            if _PROMISE_RE.search(self._pending_content):
-                                _has_pending = any(e.get("status") != "done" for e in self.task_ledger)
-                                if _has_pending or not self.task_ledger:
-                                    event_bus.write("goal_gate.promise_detected", {
-                                        "session_id": getattr(self, "sid", ""),
-                                        "content_snippet": self._pending_content[:100],
-                                    })
-                                    # 票 R3-d：熔断前开确认通道——检测到施工证据（写类工具/多次工具执行）
-                                    # 直接放行，不逼模型"继续"（有真实施工痕迹就不是空口承诺）。
-                                    if self._round_had_write_tool or self._round_tool_exec_count >= 3:
-                                        event_bus.write("goal_gate.released", {
-                                            "session_id": getattr(self, "sid", ""),
-                                            "reason": "construction_evidence",
-                                            "tool_exec_count": self._round_tool_exec_count,
-                                        })
-                                        warning = "\n\n⚠️ 施工证据已确认，引擎放行"
-                                        self._pending_content = (self._pending_content or "") + warning
-                                    elif self._ledger_reinject_count < 2:
-                                        self._ledger_reinject_count += 1
-                                        rej_msg = "检测到未完成的承诺。请继续执行，不要说明、不要道歉，直接继续。"
-                                        self._append_to_history("user", rej_msg)
-                                        self._pending_content = None
-                                        self._pending_tool_calls = None
-                                        self.current_depth += 1
-                                        logger.debug("GATE promise re-injection #%d",
-                                                     self._ledger_reinject_count)
-                                        self._emit_state_change(self.STATE_THINKING, "promise re-injection")
-                                        return
-                                    else:
-                                        event_bus.write("goal_gate.released", {
-                                            "session_id": getattr(self, "sid", ""),
-                                            "reason": "promise_exhausted",
-                                            "reinject_count": self._ledger_reinject_count,
-                                        })
-                                        warning = "\n\n⚠️ 承诺检测达熔断上限，引擎放行"
-                                        self._pending_content = (self._pending_content or "") + warning
-                    # ── 票 R2b：答复质量闸（先答问题再交账；思考落纸） ──
+                    # ── 阶段 3（feat/step-pipeline）：收尾闸流水线——走廊递简报/听回答/行动 ──
+                    # 承诺检测已搬入房间（core/steps/promise_gate.py），行为与原内联版逐字节一致
+                    if self._wrapup_stages and self._pending_content:
+                        _ctx = StepContext(self)
+                        for _stage in self._wrapup_stages:
+                            _r = _stage.run(_ctx)
+                            if _ctx.warnings:
+                                self._pending_content = (self._pending_content or "") + "".join(_ctx.warnings)
+                            if _r == StepResult.REINJECT and _ctx.reinject_msg:
+                                self._append_to_history("user", _ctx.reinject_msg)
+                                self._pending_content = None
+                                self._pending_tool_calls = None
+                                self.current_depth += 1
+                                logger.debug("GATE %s re-injection", _stage.name)
+                                self._emit_state_change(self.STATE_THINKING, f"{_stage.name} re-injection")
+                                return
+                                        # ── 票 R2b：答复质量闸（先答问题再交账；思考落纸） ──
                     # 轻量启发式（不依赖语义理解）：
                     # 1) 台账/清单腔：回复开头即台账段/清单且总长过短（<120 字）→ 未直接回答问题
                     # 2) 思考落纸：thinking 有实质分析（≥60 字）但回复过短（<80 字）→ 分析没落到回复

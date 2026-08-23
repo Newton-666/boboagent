@@ -191,6 +191,16 @@
 - **落盘**：DESIGN_STEP_PIPELINE §0a.1。
 - **遗留影响**：砌墙（骨架+接口）为下一步施工。
 
+### B14 · 流水线圈首批：砌墙 + 承诺房间试住 —— 提交（待填）· 2026-08-23（分支 feat/step-pipeline）
+
+- **内容**：
+  1. 墙（骨架）：core/steps/base.py——StepContext（只读简报 + 白名单办事窗口：append_warning / request_reinjection / 共享计数器经窗口读写）+ StepResult（PASS/REINJECT）+ StepStage 基类；
+  2. 第一间房：core/steps/promise_gate.py——承诺检测从 _step 内联迁出（票Z 缝2 + R3-d 施工证据放行 + 熔断），行为逐字节保持；
+  3. engine 收尾段改为流水线调用（递简报→听回答→按回答行动），其余闸仍内联。
+- **客观验证**：行为基线 diff=0（6/6 含承诺回注场景）；相关测试 117 过（goal_gate/engine_core/engine_e2e/auto）。
+- **范围**：core/steps/ 新包 3 文件 + engine.py（import/挂墙/替换承诺块）；engine 行数净变化小。
+- **遗留影响**：其余 13 间房待逐间搬入（顺序：第二批中 4 间 → 第三批高 4 间 → 另期 P2）；墙的接口按需演化（先保守后放宽）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
