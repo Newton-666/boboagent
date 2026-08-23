@@ -148,6 +148,7 @@
 | 2026-08-23 | feat/test-layering（分层后） | 2845 过 / 10 败 / 7 deselected(live) / 1:50 | 分层生效：watchdog 5 进 CI，本地 110s；10 = 校准 4 + 前端 5 + tel_8 1 |
 | 2026-08-23 | 同（校准批 B9 后） | 待下一轮全量确认 | 预期 10→4（剩前端 5 + tel_8 1） |
 | 2026-08-23 | main（前端批 B11 后） | **2855 过 / 0 败 / 2 跳过 / 7 deselected(live) / 1:53** | 🎉 **首次全绿**（61→0）；live 7 按设计进 CI；本地 113s |
+| 2026-08-23 | main（流水线圈 13/14 房合后） | **2855 过 / 0 败 / 2 跳过 / 7 deselected(live) / 1:50** | 与搬房前完全一致——13 房搬移零行为差异，流水线圈收口 |
 
 > 注：多轮出现 "RC=TIMEOUT" 假头——孤儿 pytest 进程占管道导致 wrapper 等待超时，摘要实际完整（详见各批记录）。已用 pkill 清理。
 
@@ -254,6 +255,13 @@
 - core/steps/empty_retry.py + verifier_check.py 迁出为 THINKING 入口房；墙扩展两种新回话（RETRY：空响应重试/报错；VERIFY_REINJECT：验证器命中清态回走）；控制流房间只判结果，走廊执行重试/报错/清态动作。
 - 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/goal_gate/interrupt 系 88 测试过。
 - **13/14 房全部搬完**（P2 终稿组装为展示层债，另期 backlog）。墙形态：入口 2 + 收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1。
+
+### B25 · 流水线圈收口 —— 提交（待填）· 2026-08-23（已合 main：6985c7a1）
+
+- **内容**：13/14 房全量收口验证——合并后 main 全量 **2855 过 / 0 败 / 7 deselected(live) / 110s**，与搬房前（2855/0）完全一致：行为零差异。
+- **墙最终形态**：core/steps/ 包（入口 2 + 收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1）；StepContext 简报+办事窗口、StepResult 五种回话（PASS/REINJECT/RETRY/VERIFY_REINJECT + 附一句）。
+- **回溯链**：rollback/pre-pipeline-p1 → rollback/pre-pipeline-b3 → rollback/pre-pipeline-merge。
+- **遗留**：P2 终稿组装（展示层债，backlog）；"调用次数不升"度量基线（下一圈验收尺子）；构建管线迁移票；socket-gap 评估票。
 
 ## 待办追溯索引
 
