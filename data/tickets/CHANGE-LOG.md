@@ -285,6 +285,12 @@
 - **范围**：docs/HARCHITECTURE.md；零代码。
 - **遗留影响**：后续所有汇报（含本轮 E1-E5）按此执行。
 
+### B28 · 范式思考锚点：环路学习（RL 提议 parked）—— 提交（待填）· 2026-08-23
+- **owner 提议（暂不实现）**：当前 harness 不形成学习环路；memory ≠ 强化学习；提议失败点即时强化。
+- **中间形态候选**："失败点反射"（即时记录+注入下一次调用+可测复现率+自动过期）。
+- **落盘**：docs/PARADIGM-REINFORCEMENT-LOOP.md（含待议问题，观点可演化）。
+- **范围**：docs/ 1 文件；零代码。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
