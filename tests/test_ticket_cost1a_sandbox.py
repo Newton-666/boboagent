@@ -25,16 +25,17 @@ class TestConfigCounts:
 
     def test_four_tiers(self):
         # TICKET-COMPUTER-USE-CORE：新增 computer_use（在线 A 层 +1，全量 D 层 +1）
-        assert configs.validate() == {"A": 32, "B": 14, "C": 8, "D": 79}
+        # TICKET-MAIN-REGREEN 校准（D1 删 office_manager）：A 32→31，D 79→82
+        assert configs.validate() == {"A": 31, "B": 14, "C": 8, "D": 82}
 
     def test_a_is_park1_online(self):
         from tools import TOOLS_SCHEMA
         a = configs.config_a()
-        assert len(a) == len(TOOLS_SCHEMA) == 32
+        assert len(a) == len(TOOLS_SCHEMA) == 31  # TICKET-MAIN-REGREEN 校准：D1 删 office_manager
 
     def test_d_is_full_82(self):
         from tools import ALL_TOOLS_SCHEMA
-        assert len(configs.config_d()) == len(ALL_TOOLS_SCHEMA) == 79
+        assert len(configs.config_d()) == len(ALL_TOOLS_SCHEMA) == 82  # TICKET-MAIN-REGREEN 校准：全量 82（测试名原本就写 82）
 
     def test_c_is_core_8(self):
         names = {t["function"]["name"] for t in configs.config_c()}

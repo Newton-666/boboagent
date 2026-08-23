@@ -66,19 +66,19 @@
 
 ```
 阶段 0：D1 拆除 office/duo        ✅（engine 2,545→2,208）
-阶段 1：main 修绿（测试债）       ✅ 已收口（61→15，精确数已核实；15 = watchdog 5 + cost1a_sandbox 3 + tool_park_1 1 + 前端 4 + gui_f4 1 + tel_8 1）
-阶段 2：测试分层                 🔵 施工完成（live 标记 + addopts + CI 覆盖；分支 feat/test-layering，待验证后合 main）
-阶段 3：engine 流水线圈            ⬜ ← 目标
+阶段 1：main 修绿（测试债）       ✅ 已收口（61→15→10，分层后全量核实：10 = 校准 4 + 前端 5 + tel_8 1）
+阶段 2：测试分层                 ✅ 施工完成（B8 分层 + B9 校准）；本地全量 110s/10 败，live 进 CI；分支 feat/test-layering 待合 main
+阶段 3：engine 流水线圈            ⬜ ← 目标（校准批清完，剩前端票一道）
 ```
 
 **到 engine 还差几步**：
-1. 分层后全量复跑（预期本地 15→10，watchdog 5 进 CI）
-2. 阶段 2 合 main（owner 验收后）
-3. 前端票（4 个）+ socket-gap 票（并行）
-4. cost1a_sandbox 3 + tool_park_1 1（校准类，随阶段 2 后或前端票一起）
+1. 前端票（5 个：css×2/v2b3_1/busy_gate/gui_f4）——修绿 + 规整两步，并行工作流
+2. tel_8 复核（分支状态敏感，合 main 后重验）
+3. socket-gap 评估票（可并行）
+4. 阶段 2 合 main（owner 验收）→ 阶段 3 开工
 
-→ 阶段 2 收口后，阶段 3（engine 流水线圈）开工。
-本次记录批次：B0–B8。下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
+→ 前端票收口后即 engine 开工。本次记录批次：B0–B9。
+下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
 
 ---
 
@@ -126,6 +126,16 @@
 - **范围**：pyproject 配置 + CI workflow + 2 测试文件标记 + 2 新票；零运行时代码改动。
 - **解决后**：本地日常不再被 socket 件拖卡（收集验证 9/16，7 个 live 跳过）；live 覆盖保留在 CI。
 - **遗留影响**：分层后的精确全量数字待下轮全量复跑（预期本地 15→10：watchdog 5 跳过后剩 cost1a_sandbox 3 + tool_park_1 1 + 前端 4 + gui_f4 1 + tel_8 1（待复核））。
+
+### B9 · 校准批（C 类）—— 提交（待填）· 2026-08-23（分支 feat/test-layering）
+
+- **之前问题**：cost1a_sandbox 3 + tool_park_1 1 失败——校准值停留在 D1 前工具集（A=32/D=79/schema 税 3,997），实际已变（D1 删 office_manager + main 新增 computer_use/vision schema）。
+- **改动内容**：
+  1. cost1a_sandbox：validate 期望 A 32→31、D 79→82；config_a 断言 32→31；config_d 断言 79→82（测试名原本写 82，断言却是旧的 79）。
+  2. tool_park_1：schema 税目标 3,997→4,287（实际 4,286.75，超旧目标 7.2%——main 新工具 schema 推高，非 D1 所致）；"节省"测试（saved=4,327）本就在范围内，未动。
+- **范围**：tests/ 2 文件；零运行时代码改动。
+- **解决后**：校准类全绿（40 过）。分层后全量预期 10 → 4（剩前端 5 + tel_8 1）。
+- **遗留影响**：schema 税 4,287 是现实值——若后续继续加工具，注意重新校准；本批不改任何工具集本身。
 
 ## 待办追溯索引
 
