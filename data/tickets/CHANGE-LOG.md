@@ -302,6 +302,47 @@
 - **收益假设要点（诚实）**：内部收益确定（可重排/可测/可拆）；表象上 engine 缩小、准确度不变、速度持平；token **短期持平、中期下降**（解耦不省 token，省 token 是拆补偿约束的中期收益）。
 - **执行顺序**：①安全 → ②工具执行 → ③上下文 → ④小屋 → ⑤出口；每步先白话设计过目再动手。
 
+### B31 · E1 安全手册合一（骨干通信第 1 步）—— 提交 `f0ddc39b` · 2026-08-23（分支 feat/harness-backbone-e1）
+- **改动**：execute_terminal 删除本地 DANGEROUS_PATTERNS 拷贝（12 条，已与主表漂移），引用 command_safety 权威表（20 条）为单一事实源；is_dangerous 循环适配 (pattern, reason) 元组。
+- **安全政策（owner 定调 A：安全从严）**：终端最后防线由 12 条扩到 20 条——新增拦截 git push --force / killall/pkill / /etc 写 / shutdown / mkfs / 反引号 等；heredoc/引号骨架剥离逻辑保留（字面内容不误伤，auto-g2 用例验证）。
+- **验证（快速，未跑全量）**：行为基线 6/6 diff=0；安全系 234 测试过（p0_fixes/auto_g2/command_safety）+ engine/auto 76 过。
+- **收益假设对账（B30 假设①）**：连接方式 4→1 的第一步落地（终端不再持私有手册）；表象：安全更强、行为不变。
+
+### B32 · E2 工具执行环：fallback 字典数据化 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：走廊的动手段。
+- **改动**：_TOOL_FALLBACKS（55 行内联字典，每调用重建）提为模块级常量；清理重复键 file_operation（dict 后者生效，前者死行，行为不变）。
+- **验证（快速）**：行为基线 6/6；工具系 107 测试过；全量回归后台跑。
+- **收益对账（B30 假设②）**：工具执行环向"工具执行部"迈第一步——失败建议从"方法内数据"变"模块级数据"（可独立测试/替换）。
+
+### B33 · E4a computer use 政策搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（政策房）。
+- **改动**：engine 6 个 _cu_* 方法（约 90 行）搬入 core/cu_policy.py（纯函数+参数化，不持有 engine 引用）；engine 保留薄壳委托（行为逐字节一致）；_CU_COOPERATION_TOOLS 随迁。
+- **验证（快速）**：行为基线 6/6；computer use 系 37 测试过（core/awareness + e2e）。
+- **收益对账（B30 假设④）**：政策房搬入独立模块——cu 政策可独立测试/替换，engine 瘦身。
+
+### B34 · E4b 循环检测搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（观察房）。
+- **改动**：engine 4 个循环检测方法（_round_sig/_last_n_tool_rounds/_has_progress_signal/_judge_loop_verdict，约 65 行）搬入 core/loop_detect.py（纯函数 + history 参数化）；engine 薄壳委托（行为不变）。
+- **修正**：此前评估称"循环检测与 round_tracker 重复"——实查 round_tracker 无这些方法，是独立关注点长在 engine，本次搬为独立模块。
+- **验证（快速）**：行为基线 6/6；engine_core/e2e/bugfixes 102 测试过。
+
+### B35 · E4c 沉淀预筛闸搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（沉淀提取的纯判断部分）。
+- **改动**：_takeaway_worthy + 价值关键词/确认词常量搬入 core/takeaway_filter.py（纯函数）；Engine._takeaway_worthy 薄壳委托（test 仍经 Engine 调用，行为不变）。
+- **验证（快速）**：行为基线 6/6；takeaway_gate/e4a 17 测试过。
+- **说明**：_extract_takeaways（LLM 提取编排）仍留 engine（依赖 history/事件/LLM，属走廊编排），纯判断闸已独立可测。
+
+### B36 · E5 出口组装房（P2 终稿组装）—— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：走廊的出口。
+- **改动**：台账尾注/交接清单/format/思考块展示搬入 _assemble_final_output（走廊办事窗口）；FinalAssemblyStage 进回复段走廊；行为逐字节一致。
+- **验证（快速）**：行为基线 6/6；goal_gate/e2e/ledger_1b/auto 97 测试过。
+- **收益对账（B30 假设⑤）**：出口组装成为可独立测试的部门；E5 完成后 **E1-E5 全部落地**（安全单一源/fallback 数据化/cu 政策/循环检测/沉淀预筛/出口组装）。
+
+### B37 · E1-E5 整批全量回归 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **结果**：2854 过 / 1 败 / 110s——唯一失败为 test_tel_8_zero_interference（**已知分支状态假象**：治理测试对分支新文件报未授权，合 main 自动转绿，此前两次合并已验证）。
+- **结论**：E1-E5 整批行为零真实回归（每块基线 6/6 + 针对性测试全绿）。
+- **收益对账（B30 假设，全部第一步落地）**：安全单一源 / fallback 数据化 / cu 政策模块 / 循环检测模块 / 沉淀预筛模块 / 出口组装房——"统一窗口"模式在 6 个点落地，engine 瘦身（6 个方法搬出 + 字典数据化 + 组装外移）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

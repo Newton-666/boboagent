@@ -7,6 +7,7 @@ import re
 import os
 import threading
 import time
+from core.command_safety import DANGEROUS_PATTERNS as _SAFETY_DANGEROUS_PATTERNS  # 单一事实源（E1 骨干通信）
 from core.file_safety import sanitize_env
 
 # ── 票 AUTO-E2：ESC 随时硬中断 ──────────────────────────────
@@ -17,24 +18,10 @@ _KILL_GRACE = 2.0
 
 TOOL_NAME = "execute_terminal"
 
-# 真正危险的命令模式（与 engine.py DANGEROUS_PATTERNS 保持一致，
-# 作为最后一道防线——engine 已通过 _classify_command + 用户确认做了一级防护）
-DANGEROUS_PATTERNS = [
-    r'rm\s+(-[rRf]|--recursive|--force)',      # rm -rf /path（对齐 engine.py:772）
-    r'sudo\s+',                          # sudo 命令
-    r'chmod\s+777\s+',                   # chmod 777
-    r'chown\s+',                         # chown
-    r'dd\s+of=',                         # dd 写入
-    r'>\s*/dev/(sd[a-z]+|disk\d+|nvme\d+n\d+|mmcblk\d+)',  # 写入磁盘设备（排除 /dev/null /dev/urandom 等）
-    r':\s*\(\s*\)\s*:\s*',               # fork bomb
-    r'\|\s*sh\s*',                       # pipe to sh
-    r'\|\s*bash\s*',                     # pipe to bash
-    r'\$\(',                             # 命令替换 $(...)
-    r'curl.*\$\(',                       # curl + 命令替换
-    r'wget.*\$\(',                       # wget + 命令替换
-]
-
-# 命令长度限制（防止超长命令注入）
+# ── E1（骨干通信）：危险模式表单一事实源化——不再本地持有拷贝（原 12 条与
+# command_safety 的 20 条已漂移，拷贝必漂移）。is_dangerous 引用 command_safety
+# 的权威表（含 git push --force / killall / /etc 写 / 反引号 等更严拦截）——
+# 终端最后防线按 owner 定调采用权威表（安全从严）。# 命令长度限制（防止超长命令注入）
 MAX_COMMAND_LENGTH = 10000
 
 # 高危字符（反引号命令替换）
@@ -53,9 +40,9 @@ def is_dangerous(command: str) -> bool:
     from core.command_safety import strip_literal_text
     _skeleton = strip_literal_text(command)
 
-    # 危险模式匹配
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, _skeleton):
+    # 危险模式匹配（E1 单一事实源：command_safety 权威表，(pattern, reason) 元组）
+    for _pat, _reason in _SAFETY_DANGEROUS_PATTERNS:
+        if re.search(_pat, _skeleton):
             return True
     
     # 禁止字符检查（反引号执行、变量注入）

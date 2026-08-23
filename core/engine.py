@@ -32,8 +32,12 @@ from core.steps.backfill_gate import BackfillGateStage
 from core.steps.field_gate import FieldGateStage
 from core.steps.ledger_gate import LedgerGateStage
 from core.steps.sediment_dispatch import SedimentDispatchStage
+import core.cu_policy as _cu_policy
+import core.loop_detect as _loop_detect
+import core.takeaway_filter as _takeaway_filter
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
+from core.steps.final_assembly import FinalAssemblyStage
 from core.steps.edit_conflict import EditConflictStage
 from core.steps.ledger_snapshot import LedgerSnapshotStage
 from core.steps.ledger_sync import LedgerSyncStage
@@ -46,14 +50,6 @@ from core.proactive import ProactiveManager
 from core.injector import PromptInjector
 
 # ── 票 S：takeaway 预筛正则 ──
-_TAKEAWAY_VALUE_KEYWORDS = re.compile(
-    r'决定|以后|记住|偏好|喜欢|习惯|以后都|改成|不要再用|规则|流程|'
-    r'选型|方案定|上线|部署|密码|密钥|配置'
-)
-_TAKEAWAY_CONFIRM_PATTERN = re.compile(
-    r'^(好的|好|嗯|行|ok|OK|谢谢|继续|收到|对|是的?|可以的?)[。！!~\s]*$'
-)
-
 # ── 票 H：运行时孤儿防线工具函数 ──
 
 def _is_tool_pairing_400(response: dict) -> bool:
@@ -180,7 +176,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
-        self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
+        self._respond_stages = [WorkspaceReconStage(), FinalAssemblyStage()]  # 观察房 + 出口组装房
         self._exec_pre_stages = [EditConflictStage(), LedgerSnapshotStage()]  # 前置房：冲突 + 台账基线快照
         self._exec_mid_stages = [LedgerSyncStage()]  # 中段房：工具环后台账同步（先于落账/销账）
         self._entry_stages = [EmptyRetryStage(), VerifierCheckStage()]  # THINKING 入口房（空响应/验证器）
@@ -216,6 +212,26 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     "error": str(_sed_err),
                     "stage": "ln_hook",
                 })
+
+    def _assemble_final_output(self) -> str:
+        """E5：终稿组装（台账尾注 + 交接清单 + format + 思考块）——出口组装部核心。"""
+        # 台账摘要尾注（K v2 §4：仅写类施工回合）
+        if self.task_ledger and self._round_had_write_tool:
+            done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
+            total = len(self.task_ledger)
+            self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
+        # 交接清单（AUTO-D D-2：auto 拒绝记录）
+        _handoff = self._build_handoff_list()
+        if _handoff:
+            self._pending_content = (self._pending_content or "") + _handoff
+        content = self._format_final_output(self._pending_content)
+        # reasoning 思考块（票 P：仅展示层）
+        if self._last_reasoning:
+            _r = self._last_reasoning
+            _r_show = _r if len(_r) <= 2000 else _r[:2000] + f"\n…（思考全文 {len(_r)} 字，已截断展示）"
+            content += f"\n\n── 💭 思考过程 ──\n{_r_show}\n── 思考结束 ──"
+            self._last_reasoning = ""  # 消费即清，防串回合
+        return content
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -532,110 +548,33 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
     # ── TICKET-COMPUTER-USE-ROUTE（COST-3 特批标记）：computer use 路由模式 helper 集 ──
     def _cu_active(self) -> bool:
-        """computer use 模式是否开（只读 getter）。"""
-        return bool(self._computer_use_mode_getter is not None
-                    and self._computer_use_mode_getter())
-
-    # 票 AWARENESS（COST-3）：computer use 模式下，现有"读/查/写/代码"工具是"辅助/配合"，
-    # 不屏蔽、不作降级拦截——bobo 依意图判断哪个更优就配合用。仅真正绕过 computer_use
-    # 主操作的 shell/网络原语（execute_terminal/bash/curl 等）才走降级排查。
-    _CU_COOPERATION_TOOLS = {
-        "web_search", "web_fetch", "writefiles", "write_obsidian", "append_obsidian",
-        "file_operation", "file_writer", "code_execution", "read_local_file",
-        "grep_code", "list_directory", "read_obsidian", "search_obsidian",
-        "cross_search", "run_tests", "load_result",
-    }
+        """computer use 模式是否开（E4：委托 cu_policy，不持有逻辑）。"""
+        return _cu_policy.cu_active(self._computer_use_mode_getter)
 
     def _degrade_decide(self, tool_name: str, tool_args: dict, reason: str) -> str:
-        """computer use 降级判定（不"试一下不行就降级"）。
-
-        返回 'allow'/'deny'/'ask'：
-        - deny：还没用 computer_use 就想绕过硬操作 / computer_use 工具自身 bug → 拦。
-                工具 bug 说清"这是工具问题"，不靠降级糊弄。
-        - allow：computer_use 正常（灵活配合，34节：bash/writefiles 是辅助可配合）。
-                或网络/环境问题 + auto 模式（自动降级）。
-        - ask：网络/环境问题 + normal 模式 → 降级前先问用户（confirm_callback 弹窗）。
-        修正（票 AWARENESS）：现有"读/查/写/代码"工具是辅助/配合，非降级——computer use 模式
-        不屏蔽、不拦，bobo 判断哪个更优就配合用；仅绕过 computer_use 主操作的 shell/网络原语才排查。
-        """
-        if not self._cu_active() or tool_name == "computer_use":
-            return "allow"
-        # 票 AWARENESS（COST-3）：配合工具（web_search/writefiles/code 等）在 computer use
-        # 模式下放行（配合，bobo 依意图判断更优），不作为"降级"拦截。
-        if tool_name in self._CU_COOPERATION_TOOLS:
-            return "allow"
-        last = getattr(self, "_last_cu_result", None)
-        if last is None:
-            return "deny"  # 未试 computer_use 就换工具 → 拦，让 bobo 先试 computer_use
-        if not self._cu_error(last):
-            return "allow"  # computer_use 成功 → 换其他工具是"灵活配合"（34节），放行
-        if self._cu_error_is_tool_bug(last):
-            return "deny"  # 工具 bug，说清不糊弄
-        # 网络/环境问题 → 可降级
-        if self._auto_mode_getter is not None and self._auto_mode_getter():
-            return "allow"  # auto 自动降级
-        return "ask"  # normal 降级 → 问用户
-
-    def _cu_error(self, raw: str) -> bool:
-        """computer_use 返回是否含错误信号。"""
-        if not raw:
-            return False
-        r = str(raw)
-        return r.startswith("错误") or r.startswith("⛔") or "失败" in r
-
-    def _cu_error_is_tool_bug(self, raw: str) -> bool:
-        """排查：computer_use 报错是"工具 bug"还是"网络/环境"。
-
-        工具 bug（权限未授权/AX 不支持/元素越界/截屏失败/打开失败）→ True（不降级糊弄）；
-        网络/环境（连接失败/超时/不可达）→ False（可降级）；未知错误保守视为工具 bug。
-        """
-        if not raw:
-            return False
-        r = str(raw)
-        # 工具 bug 特征
-        if any(k in r for k in ("权限", "未授权", "不支持", "越界", "未识别",
-                                "请先授权", "Accessibility", "Screen Recording",
-                                "截屏失败", "打开应用", "驱动", "元素")):
-            return True
-        # 网络/环境特征
-        if any(k in r for k in ("网络", "连接失败", "超时", "无法连接", "timed out",
-                                "connection", "unreachable", "SSE", "服务不可用")):
-            return False
-        # 未知错误 → 保守视为工具 bug
-        if r.startswith("错误") or r.startswith("⛔"):
-            return True
-        return False
-
-    def _cu_system_prompt(self, sys_prompt: str) -> str:
-        """computer use 模式 → 注入"自我认知锚点"（非一句弱提示，完整模式自述，票 AWARENESS，COST-3）。
-
-        owner 洞察：Agent 决策正确性的上游 = 对自己有足够了解。若 bobo 不知道自己处于
-        computer use 模式、不知道有 computer_use 能力、不知应优先用它，就会习惯性走
-        web_search/code 等熟工具（根因不是"工具没屏蔽"，是缺自我认知）。文字约束不住
-        （owner 已验证），必须工程化注入——每次决策上下文都能看到这个模式自述。
-        """
-        if not self._cu_active():
-            return sys_prompt
-        return sys_prompt + (
-            "\n\n### 自我认知锚点（本会话模式自述，任何决策前必读）\n"
-            "1. 你当前**处于 computer use 模式**——本会话被指定为在真实电脑上操作。\n"
-            "2. 你有 **computer_use 工具**：capture（看屏+AX树索引）/ click（点击）/ type（输入）/ "
-            "key（组合键）/ open_app（打开应用）/ scroll（滚动）——你能直接操作电脑的**任何界面**"
-            "（Safari/Pages/Finder/系统设置等）。\n"
-            "3. 做界面/搜索/操作类任务，**应优先用 computer_use**（打字/滑动/点击/打开应用都走它），"
-            "一次定位就操作，快而精准；不要一上来就写脚本/applescript 造轮子。\n"
-            "4. 现有其他工具（web_search/writefiles/code 等）**降为辅助/配合**——不屏蔽、可用，"
-            "但由你判断：若某工具配合比纯 computer_use 更高效，就选它配合；**computer_use 始终是主操作**。\n"
-            "5. **落点铁律**：无论用 computer_use 还是配合工具，操作都发生在**目标系统"
-            "（用户指定的那个系统/APP）上**（34节），不要跳出到文件/文本抽象层。\n"
-            "6. 意图（goal）是决策的根：所有手段围绕 GOAL 展开，换手段不漂移目标。"
+        """E4：委托 cu_policy.degrade_decide（逻辑已搬出，行为不变）。"""
+        return _cu_policy.degrade_decide(
+            cu_on=self._cu_active(),
+            tool_name=tool_name,
+            last_result=getattr(self, "_last_cu_result", None),
+            auto_active=(self._auto_mode_getter is not None and bool(self._auto_mode_getter())),
         )
 
+    def _cu_error(self, raw: str) -> bool:
+        """E4：委托 cu_policy.cu_error。"""
+        return _cu_policy.cu_error(raw)
+
+    def _cu_error_is_tool_bug(self, raw: str) -> bool:
+        """E4：委托 cu_policy.cu_error_is_tool_bug。"""
+        return _cu_policy.cu_error_is_tool_bug(raw)
+
+    def _cu_system_prompt(self, sys_prompt: str) -> str:
+        """E4：委托 cu_policy.cu_system_prompt（自我认知锚点已搬出）。"""
+        return _cu_policy.cu_system_prompt(sys_prompt, self._cu_active())
+
     def _cu_llm_kw(self, llm_has_tool_calls: bool) -> dict:
-        """computer use 模式 + 工具轮 → thinking_disabled=True（快速直接操作，不深度推理）。"""
-        if self._cu_active() and llm_has_tool_calls:
-            return {"thinking_disabled": True}
-        return {}
+        """E4：委托 cu_policy.cu_llm_kw。"""
+        return _cu_policy.cu_llm_kw(llm_has_tool_calls, self._cu_active())
 
     def _build_system_prompt(self) -> str:
         return """你是 Bobo，一个专业的个人智能助手。
@@ -841,87 +780,20 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return v if v > 0 else 150
 
     def _round_sig(self, tool_calls: list) -> str:
-        """规范化一轮工具调用的签名（同名同参 → 相同签名）。
-
-        arguments 做 json 规范化（键序无关），排序后连接——顺序不同但
-        工具集相同视为同模式（pattern 签名）。
-        """
-        _parts = []
-        for _tc in tool_calls:
-            _fn = _tc.get("function", {})
-            _name = _fn.get("name", "")
-            _args = _fn.get("arguments", "{}")
-            try:
-                _args = json.dumps(json.loads(_args), sort_keys=True, ensure_ascii=False)
-            except Exception:
-                pass
-            _parts.append(f"{_name}|{_args}")
-        return "::".join(sorted(_parts))
+        """E4b：委托 loop_detect.round_sig。"""
+        return _loop_detect.round_sig(tool_calls)
 
     def _last_n_tool_rounds(self, n: int = 5) -> list:
-        """从 history 取最近 n 轮（带 tool_calls 的 assistant 消息）的签名与工具名。"""
-        _rounds = []
-        for _m in reversed(self.history):
-            if _m.get("role") == "assistant" and _m.get("tool_calls"):
-                _names = [_tc.get("function", {}).get("name", "")
-                          for _tc in _m["tool_calls"]
-                          if _tc.get("function", {}).get("name")]
-                _rounds.append({
-                    "sig": self._round_sig(_m["tool_calls"]),
-                    "names": _names,
-                })
-                if len(_rounds) >= n:
-                    break
-        return _rounds
+        """E4b：委托 loop_detect.last_n_tool_rounds。"""
+        return _loop_detect.last_n_tool_rounds(self.history, n)
 
     def _has_progress_signal(self, recent: list) -> tuple[bool, str]:
-        """最近 n 轮是否有推进信号：文件写入/diff、台账变更、新工具种类。
-
-        轮级判定全部从 history 最近 n 轮取（recent 参数）——tracker._change_log
-        是会话累计列表，不能直接判"本轮有写入"（累计非空 ≠ 最近 n 轮有推进）。
-        保守方向：宁可判 progressing（软提醒）也不误掐正在推进的回合。
-        """
-        # 1) 文件写入/diff / 台账变更：最近 n 轮内出现写类工具调用
-        #    （file_operation 可能 action=read，保守算推进——误判 progressing 比误掐安全）
-        _WRITE_TOOLS = {"edit_file", "file_operation", "file_writer", "task_ledger"}
-        for _r in recent:
-            for _name in _r["names"]:
-                if _name in _WRITE_TOOLS:
-                    return True, f"写类工具调用: {_name}"
-        # 2) 新工具种类：最近 n 轮用过的工具名集合 ⊄ 更早轮次集合
-        _recent_names = {n for r in recent for n in r["names"]}
-        _earlier = set()
-        _count = 0
-        for _m in reversed(self.history):
-            if _m.get("role") == "assistant" and _m.get("tool_calls"):
-                if _count >= len(recent):
-                    for _tc in _m["tool_calls"]:
-                        _nm = _tc.get("function", {}).get("name", "")
-                        if _nm:
-                            _earlier.add(_nm)
-                _count += 1
-        _new = _recent_names - _earlier
-        # 更早轮次为空（会话刚开始即撞线，无从对比）→ 不判"新工具种类"推进
-        if _earlier and _new:
-            return True, f"新工具种类: {sorted(_new)[:3]}"
-        return False, ""
+        """E4b：委托 loop_detect.has_progress_signal。"""
+        return _loop_detect.has_progress_signal(self.history, recent)
 
     def _judge_loop_verdict(self) -> tuple[str, str]:
-        """死循环判定：连续 5 轮同模式 或 无推进信号 → stuck，否则 progressing。"""
-        _recent = self._last_n_tool_rounds(5)
-        _reasons: list[str] = []
-        _same = False
-        if len(_recent) >= 5:
-            _sigs = [r["sig"] for r in _recent]
-            _same = all(s == _sigs[0] for s in _sigs)
-            if _same:
-                _reasons.append(f"连续{len(_recent)}轮同模式({_sigs[0][:60]})")
-        _progress, _p_reason = self._has_progress_signal(_recent)
-        if not _progress:
-            _reasons.append("最近5轮无推进信号（无文件写入/台账变更/新工具种类）")
-        if _same or not _progress:
-            return ("stuck", "；".join(_reasons) or "连续同模式/无推进")
-        return ("progressing", f"仍在推进（{_p_reason}）")
+        """E4b：委托 loop_detect.judge_loop_verdict。"""
+        return _loop_detect.judge_loop_verdict(self.history)
 
     # ── 阶段管理与上下文交接 ──────────────────────────────────────────
 
@@ -983,37 +855,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
     @staticmethod
     def _takeaway_worthy(user_msg: str, asst_msg: str) -> bool:
-        """纯本地预筛：判断本轮对话是否值得调用 LLM 提取 takeaways。
-
-        优先级：放行信号 > 跳过条件。放行信号命中任一即放行，
-        跳过条件命中任一即跳过。
-
-        Returns:
-            True → 放行（值得调 LLM）；False → 跳过（零 API 成本）。
-        """
-        user_stripped = user_msg.strip()
-        asst_stripped = asst_msg.strip()
-
-        # ── 放行信号（命中任一即放行，宁可多打不可漏记） ──
-        # 1. 价值关键词命中
-        if _TAKEAWAY_VALUE_KEYWORDS.search(user_stripped + asst_stripped):
-            return True
-        # 2. 内容足够长
-        if len(user_stripped) > 100 or len(asst_stripped) > 300:
-            return True
-
-        # ── 跳过条件（命中任一即跳过） ──
-        # 1. 短闲聊：双方均 < 40 字，且无价值关键词（已检查过）
-        if len(user_stripped) < 40 and len(asst_stripped) < 40:
-            return False
-        # 2. 纯确认/过渡词
-        if _TAKEAWAY_CONFIRM_PATTERN.match(user_stripped):
-            return False
-        # 3. 纯问答无沉淀：asst < 60 字且双方均无价值关键词
-        if len(asst_stripped) < 60:
-            return False
-
-        return False
+        """E4c：委托 takeaway_filter.takeaway_worthy（零 API 成本预筛闸已搬出）。"""
+        return _takeaway_filter.takeaway_worthy(user_msg, asst_msg)
 
     def _extract_takeaways(self, fallback_content: str = "", history: list | None = None,
                            tool_round: int | None = None) -> list[str]:
@@ -1825,24 +1668,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 if getattr(self.proactive, '_last_memory_ids', None):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
                     self.proactive._last_memory_ids = []
-                # ── 票 K v2 §4 降级方案：终稿尾部附台账摘要行（面板替代） ──
-                # 票 R2b：仅写类施工回合注入；纯问答回合（无写类工具）不交账——没账可交时不交账。
-                if self.task_ledger and self._round_had_write_tool:
-                    done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
-                    total = len(self.task_ledger)
-                    self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
-                # ── 票 AUTO-D D-2：收工交接清单（auto 拒绝记录，从 events 现查） ──
-                # 仅 auto 模式有 auto.decide deny 事件；清单空则零影响（正常模式天然空）。
-                _handoff = self._build_handoff_list()
-                if _handoff:
-                    self._pending_content = (self._pending_content or "") + _handoff
-                content = self._format_final_output(self._pending_content)
-                # ── 票 P 降级展示：reasoning 思考块（仅展示层，历史在上方已落账，零污染） ──
-                if self._last_reasoning:
-                    _r = self._last_reasoning
-                    _r_show = _r if len(_r) <= 2000 else _r[:2000] + f"\n…（思考全文 {len(_r)} 字，已截断展示）"
-                    content += f"\n\n── 💭 思考过程 ──\n{_r_show}\n── 思考结束 ──"
-                    self._last_reasoning = ""  # 消费即清，防串回合
+                # ── 阶段 3：出口组装房（final_assembly，E5）——台账尾注/交接/format/思考块 ──
+                # 组装逻辑已搬入 _assemble_final_output（走廊办事窗口），行为逐字节一致
+                if self._respond_stages:
+                    for _stage in self._respond_stages:
+                        if getattr(_stage, "name", "") == "final-assembly":
+                            _ctx_r.final_content = _ctx_r.assemble_final_output()
+                content = _ctx_r.final_content
                 logger.debug("RESPONDING emit complete start: len=%d", len(content))
                 self._notify("complete", {"content": content, "usage": self._last_usage})
                 logger.debug("RESPONDING emit complete done")
