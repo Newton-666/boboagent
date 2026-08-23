@@ -238,6 +238,12 @@
 - 客观验证：行为基线 diff=0（6/6）；ledger_1b/goal_gate/e2e/desk_v2a 58 测试过。
 - 墙内 8 房（收尾 6 + 执行 1 + 回复 1）。
 
+### B22 · 流水线圈房间⑨：编辑冲突检测迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/edit_conflict.py 迁出为 EXECUTING 前置房（工具环前）；纯本地解析零 LLM；拦下时回注 assistant 消息（走廊执行重走动作）。
+- 墙新增 EXECUTING 前置走廊（_exec_pre_stages）。
+- 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/bugfixes 102 测试过。
+- **第二批（中耦合）全部完成：9/14 房已搬**（收尾 6 + 沉淀 + 销账 + 对账 + 冲突）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

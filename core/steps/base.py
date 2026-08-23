@@ -30,6 +30,10 @@ class StepContext:
         return self._engine._pending_content
 
     @property
+    def pending_tool_calls(self):
+        return self._engine._pending_tool_calls
+
+    @property
     def task_ledger(self):
         return self._engine.task_ledger
 

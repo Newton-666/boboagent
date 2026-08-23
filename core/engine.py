@@ -34,6 +34,7 @@ from core.steps.ledger_gate import LedgerGateStage
 from core.steps.sediment_dispatch import SedimentDispatchStage
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
+from core.steps.edit_conflict import EditConflictStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -176,6 +177,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
         self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
+        self._exec_pre_stages = [EditConflictStage()]  # EXECUTING 段前置房（工具环前）
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1684,34 +1686,18 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                         # ── 阶段 3：台账闸系（补账/字段/未销账）已搬入墙内房间 ──
                     self._emit_state_change(self.STATE_RESPONDING, "responding")
         elif self.state == self.STATE_EXECUTING:
-            # 冲突检测：检查多个编辑操作是否要改同一文件的同一段
-            if self._pending_tool_calls and len(self._pending_tool_calls) > 1:
-                edit_tools = {"edit_file", "file_operation"}
-                edits_by_file = {}
-                conflicts = []
-                for tc in self._pending_tool_calls:
-                    fn = tc.get("function", {})
-                    name = fn.get("name", "")
-                    if name in edit_tools:
-                        try:
-                            import json as _je
-                            args = _je.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments", ""), str) else fn.get("arguments", {})
-                            path = args.get("file_path", "") or args.get("path", "")
-                            old_start = args.get("old_string", "")[:50] if name == "edit_file" else ""
-                            if path:
-                                if path in edits_by_file and edits_by_file[path]:
-                                    conflicts.append(f"{path}（被多个编辑操作命中）")
-                                edits_by_file[path] = edits_by_file.get(path, 0) + 1
-                        except Exception:
-                            pass
-                if conflicts:
-                    msg = f"检测到编辑冲突: {'; '.join(conflicts)}。请调整计划，先改一个文件，结果返回后再改另一个。"
-                    self._append_to_history("assistant", msg)
-                    self._pending_content = None
-                    self._pending_tool_calls = None
-                    self.current_depth += 1
-                    self._emit_state_change(self.STATE_THINKING, "retry after verification")
-                    return
+            # ── 阶段 3：EXECUTING 前置房（编辑冲突，core/steps/edit_conflict.py）──
+            if self._exec_pre_stages and self._pending_tool_calls:
+                _ctx_p = StepContext(self)
+                for _stage in self._exec_pre_stages:
+                    _r = _stage.run(_ctx_p)
+                    if _r == StepResult.REINJECT and _ctx_p.reinject_msg:
+                        self._append_to_history("assistant", _ctx_p.reinject_msg)
+                        self._pending_content = None
+                        self._pending_tool_calls = None
+                        self.current_depth += 1
+                        self._emit_state_change(self.STATE_THINKING, "retry after verification")
+                        return
 
             # ── 票 O9：台账基线快照必须在工具执行前 ──
             # O8-2 判定内核前提是"create 前台账为空（无历史轮次 = 非 resume）"。
