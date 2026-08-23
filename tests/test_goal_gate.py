@@ -29,6 +29,9 @@ class TestGoalGate:
         """10:50 案：FakeLLM 第一轮说"现在跑测试"（无工具调用，无台账）
         → 承诺检测闸命中 → 回注 → 第二轮真跑 → 才 DONE"""
         fake_llm = FakeLLMCaller([
+            # TICKET-COMPUTER-USE-INTENT（COST-3）：输入命中意图闸（"帮我"），
+            # run() 开头 parse_intent 消费一条响应——占位（非 JSON → 静默 None）
+            ("", None),
             # 第 1 轮：说"现在跑测试"但不调工具（10:50 早退模式）
             ("现在跑测试", None),
             # 第 2 轮：回注后真跑
@@ -67,7 +70,7 @@ class TestGoalGate:
         )
         # 验证承诺检测触发 → 回注（第 1 轮被拦截，所以 LLM 被多调用一次）
         # 正常流程 2 轮，回注后变 3 轮
-        assert fake_llm.call_count == 3
+        assert fake_llm.call_count == 4  # 3 轮 + 1 意图解析
 
         # 验证回注消息在 history 中
         user_msgs = [m for m in engine.history if m.get("role") == "user"]
