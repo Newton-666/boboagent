@@ -320,6 +320,12 @@
 - **验证（快速）**：行为基线 6/6；computer use 系 37 测试过（core/awareness + e2e）。
 - **收益对账（B30 假设④）**：政策房搬入独立模块——cu 政策可独立测试/替换，engine 瘦身。
 
+### B34 · E4b 循环检测搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（观察房）。
+- **改动**：engine 4 个循环检测方法（_round_sig/_last_n_tool_rounds/_has_progress_signal/_judge_loop_verdict，约 65 行）搬入 core/loop_detect.py（纯函数 + history 参数化）；engine 薄壳委托（行为不变）。
+- **修正**：此前评估称"循环检测与 round_tracker 重复"——实查 round_tracker 无这些方法，是独立关注点长在 engine，本次搬为独立模块。
+- **验证（快速）**：行为基线 6/6；engine_core/e2e/bugfixes 102 测试过。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
