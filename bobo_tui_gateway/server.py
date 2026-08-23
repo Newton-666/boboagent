@@ -31,7 +31,7 @@ _pending_confirm_result: dict[str, bool] = {}
 _confirm_lock = threading.Lock()
 _auto_mode: dict[str, bool] = {}  # 票 A：会话级 AUTO MODE 开关（/auto 翻转）
 _computer_use_mode: dict[str, bool] = {}  # TICKET-COMPUTER-USE-ROUTE（P0-1 授权标记）：会话级 computer use 模式开关（复用 _auto_mode 模式）
-_office_state: dict[str, dict] = {}  # TICKET-O2：会话级 OFFICE 状态（/office 翻转，存 {on, session}）
+# ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：_office_state / get_office_on 拆除
 _session_usage: dict[str, dict] = {}
 _session_usage_lock = threading.Lock()
 _current_engines: dict[str, threading.Event] = {}
@@ -67,7 +67,6 @@ class _ServerContext:
         self.pending_confirm_result = _pending_confirm_result
         self.auto_mode = _auto_mode
         self.computer_use_mode = _computer_use_mode  # TICKET-COMPUTER-USE-ROUTE
-        self.office_state = _office_state  # TICKET-O2：/office 会话级状态（仿 _auto_mode）
         self.current_engines = _current_engines
         self.current_engines_lock = _current_engines_lock
         self.session_usage = _session_usage
@@ -88,18 +87,6 @@ class _ServerContext:
 
 
 _ctx = _ServerContext()
-
-
-def get_office_on(sid: str) -> bool:
-    """票 O4-1：office 会话状态读取器——供 core/injector 延迟 import 查询。
-
-    唯一事实源 = _office_state（/office 翻转与 resume/activate 共用同一 dict），
-    普通模式（无记录）返回 False → injector 零注入（对照组铁律）。
-    """
-    try:
-        return bool(_office_state.get(sid, {}).get("on", False))
-    except Exception:
-        return False
 
 
 # ── 公开 API（供 entry.py 引用）──

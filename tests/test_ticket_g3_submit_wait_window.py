@@ -12,7 +12,6 @@ E-1 中断保进度让引擎退出从"立即 return"变为"先落盘再退出"�
 import threading
 import time
 
-import core.duo_orchestrator as duo_orch
 import core.engine_adapter as engine_adapter
 from bobo_tui_gateway.handlers import prompts as prompts_mod
 
@@ -138,35 +137,4 @@ class TestSubmitWaitWindow:
         assert 0.3 <= elapsed < 2.5, f"应随引擎消失立即放行，而非死等 3s（实际 {elapsed:.2f}s）"
 
 
-class TestSlashDuoWaitWindow:
-    def test_duo_slow_exit_submits_ok(self, monkeypatch):
-        """验收 4：/duo 商讨路径——引擎退出耗时 1.5s → 无报错，商讨照常启动。"""
-        state = _patch_engine_state(monkeypatch, running_sids={"s1"}, exit_delay=1.5)
-        duo_calls = []
-
-        def fake_run_deliberation(question, emit, sid):
-            duo_calls.append((question, sid))
-
-        monkeypatch.setattr(duo_orch, "run_deliberation", fake_run_deliberation)
-        ctx = _FakeCtx()
-
-        result = prompts_mod.handle_slash_exec(
-            {"command": "duo 商讨：如何提升测试覆盖率", "session_id": "s1"}, "rid-4", ctx
-        )
-
-        assert state["cancel_called"] == ["s1"]
-        assert "双员商讨已启动" in result["result"]["output"]
-        assert len(duo_calls) == 1
-        assert "无法取消" not in str(result)
-
-    def test_duo_never_exit_hits_error(self, monkeypatch):
-        """验收 4 兜底：/duo 商讨路径引擎永不退出 → 3 秒后报原错误。"""
-        state = _patch_engine_state(monkeypatch, running_sids={"s1"}, never_exit=True)
-        ctx = _FakeCtx()
-
-        result = prompts_mod.handle_slash_exec(
-            {"command": "duo 商讨：如何提升测试覆盖率", "session_id": "s1"}, "rid-5", ctx
-        )
-
-        assert state["cancel_called"] == ["s1"]
-        assert result.get("error", {}).get("message") == "无法取消上一个请求，请稍后重试"
+# ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：TestSlashDuoWaitWindow 拆除

@@ -23,9 +23,7 @@ from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
 from core.command_safety import (classify_command, is_high_risk_tool, is_auto_readonly_command,
-                                 classify_side_effect, _has_real_git_command, is_blacklisted,
-                                 _find_git_subcommand, is_protected, load_protected_paths,
-                                 is_git_readonly_subcommand)
+                                 classify_side_effect, _has_real_git_command, is_blacklisted)
 from core.verifier import Verifier
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
@@ -98,21 +96,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 会话标识：gateway 在 open_session 中设 self.sid；无会话时走时间戳兜底
         _now = time.time()
         self.sid = f"boot-{int(_now)}-{os.urandom(2).hex()}"
-        # ── 票 O-1：OFFICE MODE 角色读取——唯一身份来源是搭建器注入的
-        # BOBO_ROLE 环境变量（无任何 session 名嗅探/环境检测兜底，v0.3.1 裁决）。
-        # staff/dispatcher 之外的任何值（含未设置）→ 普通模式，零限制。
-        _raw_role = os.environ.get("BOBO_ROLE", "").strip().lower()
-        self.office_role = _raw_role if _raw_role in ("staff", "dispatcher") else None
-        if _raw_role and self.office_role is None:
-            self._write_office_audit("role", f"BOBO_ROLE={_raw_role!r} 非法（仅 staff/dispatcher），按无角色普通模式处理")
-        elif self.office_role is not None:
-            self._write_office_audit("role", f"BOBO_ROLE={self.office_role} 注入生效")
-        # ── 票 O-1：当前会话票据 = BOBO_TICKET（启动注入，同 BOBO_ROLE 一并由
-        # 搭建器注入）。豁免只看这一张票；未设置 → 无豁免。
-        _raw_ticket = os.environ.get("BOBO_TICKET", "").strip()
-        self.office_ticket = _raw_ticket or None
-        if self.office_ticket is not None:
-            self._write_office_audit("ticket", f"BOBO_TICKET={self.office_ticket} 注入生效")
+        # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：OFFICE MODE 角色读取（票 O-1
+        # BOBO_ROLE/BOBO_TICKET）整体拆除——模式已由 owner 于 2026-08-23 终裁移除。
         self.system_prompt = self._build_system_prompt()
 
         self.teaching_mode = False
@@ -219,13 +204,6 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     return bool(result)
                 return False
             # _dg == "allow"：auto 自动降级 / computer_use 成功后的正常配合 → 走原决策链
-        # ── 票 O-1：OFFICE MODE 执法层——BOBO_ROLE 存在即激活（普通模式零变化）。
-        # 必须排在 auto 决策树之前：auto 是背景技术，不豁免员工限制
-        # （v0.3.1：员工限制由注入的角色携带，与 auto 开关正交）。
-        if self.office_role is not None:
-            _office_verdict, _office_reason = self._office_decide(tool_name, tool_args, reason)
-            if _office_verdict != "allow":
-                return False
         # 票 A：AUTO MODE 决策树——必须排在 _all_confirmed 之前（火 A-2：
         # 否则用户点过 always 后灰名单会绕过 auto 风险评估直接放行）
         if self._auto_mode_getter is not None and self._auto_mode_getter():
@@ -241,11 +219,6 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 _allow = result
         else:
             _allow = False
-        # ── 票 O3-1：写类工具通过决策链后 → 受保护路径 md5 快照（office 角色会话）。
-        # 只挂 office 角色 + 写工具；普通模式/非写工具零开销零行为变化（对照组铁律）。
-        # 快照是抓漏不是执法：失败静默降级，绝不阻塞工具链。
-        if _allow and self.office_role is not None and tool_name in self._OFFICE_WRITE_TOOLS:
-            self._snapshot_protected_paths()
         return _allow
 
     def _auto_decide(self, tool_name: str, tool_args: dict, reason: str) -> bool:
@@ -364,270 +337,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
             event["rollback_path"] = snapshot.get("rollback", "")
         event_bus.write("auto.decide", event)
 
-    # ── 票 O-1：OFFICE MODE 员工能力矩阵（staff/dispatcher 分档硬拦） ────────
-
-    _OFFICE_WRITE_TOOLS = frozenset({
-        "edit_file", "file_writer", "delete_file", "file_operation",
-    })
-    _TICKETS_DIR = os.path.join("data", "tickets")
-
-    # ── 票 O3-1：受保护路径快照（guardsnap，抓漏不执法） ──────────────────
-    _GUARDSNAP_DIR = "data"
-    _GUARDSNAP_PREFIX = "guardsnap_"
-    _GUARDSNAP_RETENTION_DAYS = 7
-
-    def _guardsnap_path(self) -> str:
-        """票 O3-1：当前会话快照文件路径（sid 维度）。"""
-        return os.path.join(self._GUARDSNAP_DIR, f"{self._GUARDSNAP_PREFIX}{self.sid}.json")
-
-    def _snapshot_protected_paths(self) -> dict | None:
-        """票 O3-1：写类工具通过决策链后，对受保护路径做 md5 快照（sid 维度滚动，7 天）。
-
-        - 展开 data/protected_paths.json 的 globs → 实际文件 → md5 摘要；
-        - 写 data/guardsnap_<sid>.json（含前后缀、时间戳、文件→md5 映射）；
-        - 顺带清理过期快照（> 7 天，sid 维度滚动保留）；
-        - 任何异常静默降级（快照是抓漏，不是执法，绝不阻塞工具链）。
-        """
-        try:
-            import glob as _glob
-            import hashlib as _hash
-            globs = load_protected_paths()
-            if not globs:
-                return None
-            files: set[str] = set()
-            for g in globs:
-                for p in _glob.glob(g, recursive=True):
-                    if os.path.isfile(p):
-                        files.add(p)
-            snap = {}
-            for f in sorted(files):
-                try:
-                    with open(f, "rb") as _fh:
-                        snap[f] = _hash.md5(_fh.read()).hexdigest()
-                except OSError:
-                    continue
-            path = self._guardsnap_path()
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as _fh:
-                json.dump({
-                    "sid": self.sid,
-                    "ts": int(time.time()),
-                    "files": snap,
-                }, _fh, ensure_ascii=False, indent=2)
-            self._prune_guardsnap()
-            return snap
-        except Exception:
-            return None
-
-    def _prune_guardsnap(self) -> None:
-        """票 O3-1：清理超过 7 天的 guardsnap_*.json（sid 维度滚动保留）。"""
-        try:
-            cutoff = time.time() - self._GUARDSNAP_RETENTION_DAYS * 86400
-            for name in os.listdir(self._GUARDSNAP_DIR):
-                if not name.startswith(self._GUARDSNAP_PREFIX) or not name.endswith(".json"):
-                    continue
-                p = os.path.join(self._GUARDSNAP_DIR, name)
-                try:
-                    if os.path.getmtime(p) < cutoff:
-                        os.remove(p)
-                except OSError:
-                    continue
-        except OSError:
-            pass
-
-    def _verify_snapshot(self) -> list[dict]:
-        """票 O3-1：收工时比对快照与当前 md5；不一致 → office.snap 审计（不阻断）。
-
-        返回差异列表 [{"path", "before", "after"}]；无快照/读失败 → 空列表。
-        抓漏不是执法：只写审计 + 由调用方决定告警展示，绝不 deny 收工。
-        """
-        path = self._guardsnap_path()
-        if not os.path.exists(path):
-            return []
-        try:
-            import hashlib as _hash
-            with open(path, "r", encoding="utf-8") as _fh:
-                snap = json.load(_fh)
-            diffs = []
-            for f, old_md5 in (snap.get("files") or {}).items():
-                cur = None
-                if os.path.exists(f):
-                    with open(f, "rb") as _fh:
-                        cur = _hash.md5(_fh.read()).hexdigest()
-                if cur != old_md5:
-                    diffs.append({"path": f, "before": old_md5, "after": cur})
-            for d in diffs:
-                self._write_office_audit(
-                    "snap",
-                    f"受保护路径变更: {d['path']} md5 {d['before']}→{d['after']}",
-                )
-            return diffs
-        except Exception:
-            return []
-
-    def _office_decide(self, tool_name: str, tool_args: dict, reason: str) -> tuple:
-        """票 O-1：OFFICE MODE 员工能力矩阵硬拦。
-
-        返回 (verdict, reason)，verdict ∈ {"allow", "deny"}；deny 时已写
-        office.guard 审计。矩阵（v0.3.1 终版，普通模式零变化）：
-        - git 写操作（不在只读集合的子命令）→ staff/dispatcher 全禁；
-        - 文件写（编辑/新建/删除/批量）→ dispatcher 全禁；staff 仅票据
-          authorized_paths 豁免路径可写（受保护路径/票据外路径同规则）；
-        - shell 命令显式写路径（> >> tee cp mv rm mkdir touch sed -i）→
-          同文件写规则；
-        - 其余（读、搜索、记忆、汇报等）→ 放行。
-        """
-        # 1) execute_terminal：git 写子命令全禁 + shell 显式写路径执法
-        if tool_name == "execute_terminal":
-            command = tool_args.get("command", "") or ""
-            sub = _find_git_subcommand(command)
-            if sub is not None and not is_git_readonly_subcommand(sub):
-                detail = f"git 写操作全禁（git {sub}）"
-                self._write_office_audit("guard", detail)
-                return ("deny", f"OFFICE MODE（{self.office_role}）：{detail}")
-            for p in self._extract_shell_write_paths(command):
-                v, r = self._office_path_write_rule(p)
-                if v != "allow":
-                    self._write_office_audit("guard", r)
-                    return ("deny", f"OFFICE MODE（{self.office_role}）：{r}")
-            return ("allow", "")
-        # 2) 文件写工具：目标路径逐一执法
-        if tool_name in self._OFFICE_WRITE_TOOLS:
-            for p in self._extract_file_write_paths(tool_name, tool_args):
-                v, r = self._office_path_write_rule(p)
-                if v != "allow":
-                    self._write_office_audit("guard", r)
-                    return ("deny", f"OFFICE MODE（{self.office_role}）：{r}")
-            return ("allow", "")
-        # 3) 其余工具：放行
-        return ("allow", "")
-
-    def _extract_shell_write_paths(self, command: str) -> list[str]:
-        """从 shell 命令提取显式写目标路径（尽力而为，防绕过）。
-
-        覆盖：> / >> / 2> 重定向、tee/mkdir/touch（全部参数）、
-        cp/mv（目标=最后一个非选项参数）、sed -i（目标=最后一个非选项参数）。
-        排除 /dev/*（重定向到 /dev/null 是常态，不拦）与选项 token。
-        提取不到 → 空列表（执法聚焦显式路径写，包管理类写留给票据/人工）。
-        """
-        paths = []
-        try:
-            import shlex as _shlex_mod
-            tokens = _shlex_mod.split(command)
-        except Exception:
-            tokens = command.split()
-        # 重定向目标
-        for m in re.finditer(r'(?:\d?>|>)\s*([^\s;&|<>]+)', command):
-            if not m.group(1).startswith(("-", "$")):
-                paths.append(m.group(1))
-        # 命令族
-        for i, tok in enumerate(tokens):
-            if tok in ("tee", "mkdir", "touch"):
-                for t in tokens[i + 1:]:
-                    if not t.startswith("-"):
-                        paths.append(t)
-            elif tok in ("cp", "mv"):
-                args = [t for t in tokens[i + 1:] if not t.startswith("-")]
-                if args:
-                    paths.append(args[-1])
-        # sed -i：目标=最后一个非选项参数
-        if "sed" in tokens and any(t == "-i" or t.startswith("-i") for t in tokens):
-            args = [t for t in tokens[tokens.index("sed") + 1:] if not t.startswith("-")]
-            if args:
-                paths.append(args[-1])
-        return [p for p in paths if p and not p.startswith("/dev/")]
-
-    def _extract_file_write_paths(self, tool_name: str, tool_args: dict) -> list[str]:
-        """文件写工具的目标路径提取（edit_file/file_writer/delete_file/file_operation）。"""
-        paths = []
-        if tool_name == "edit_file":
-            p = tool_args.get("file_path") or tool_args.get("path")
-            if p:
-                paths.append(str(p))
-        elif tool_name == "file_writer":
-            p = tool_args.get("path")
-            if p:
-                paths.append(str(p))
-        elif tool_name == "delete_file":
-            p = tool_args.get("path")
-            if p:
-                paths.append(str(p))
-        elif tool_name == "file_operation":
-            action = tool_args.get("action", "")
-            if action in ("write", "batch_write", "delete"):
-                p = tool_args.get("path") or tool_args.get("file_path")
-                if p:
-                    paths.append(str(p))
-                for f in tool_args.get("files") or []:
-                    if isinstance(f, dict) and f.get("path"):
-                        paths.append(str(f["path"]))
-        return paths
-
-    def _office_path_write_rule(self, path: str) -> tuple:
-        """票 O-1：单路径写规则——staff 票据豁免 / dispatcher 全禁。"""
-        if self.office_role == "dispatcher":
-            return ("deny", f"dispatcher 只读：禁止写 {path}")
-        # staff：票据 authorized_paths 为唯一豁免通道（受保护路径豁免同此链）
-        if self._office_ticket_allows(path):
-            return ("allow", f"票据 authorized_paths 豁免写 {path}")
-        return ("deny", f"staff 无授权：禁止写 {path}（票据 authorized_paths 为唯一豁免通道）")
-
-    def _office_ticket_allows(self, path: str) -> bool:
-        """票 O-1：票据授权书——只看 BOBO_TICKET 指定的当前会话票据。
-
-        当前会话票据 = 环境变量 BOBO_TICKET（启动注入）。豁免判定：
-        路径命中 该票据 frontmatter authorized_paths → staff 放行
-        （dispatcher 无此通道，见 _office_path_write_rule）。
-        未设置 BOBO_TICKET / 票据不存在 / 路径未列出 → 一律无豁免。
-        绝不扫描全部 data/tickets/*.md（否则任何一张常驻票据都会变成
-        永久豁免后门——TICKET-O1 自身 authorized_paths 含 core/engine.py，
-        扫全目录等于让 staff 永远能写核心文件）。
-        """
-        ticket_id = getattr(self, "office_ticket", None)
-        if not ticket_id:
-            return False
-        p = path.strip().lstrip("./")
-        if p.startswith("/"):
-            try:
-                p = os.path.relpath(p, os.getcwd())
-            except Exception:
-                pass
-        try:
-            import glob as _glob
-            import fnmatch as _fnmatch
-            for fp in _glob.glob(os.path.join(self._TICKETS_DIR, "*.md")):
-                try:
-                    with open(fp, "r", encoding="utf-8") as _f:
-                        text = _f.read()
-                except Exception:
-                    continue
-                # 只认 frontmatter ticket 字段 == BOBO_TICKET 的那一张
-                if self._parse_frontmatter_value(text, "ticket") != ticket_id:
-                    continue
-                for a in self._parse_frontmatter_list(text, "authorized_paths"):
-                    a = a.strip().lstrip("./")
-                    if not a:
-                        continue
-                    if (a in ("*", "**") or
-                            p == a or p.startswith(a.rstrip("/") + "/") or
-                            _fnmatch.fnmatch(p, a)):
-                        return True
-        except Exception:
-            return False
-        return False
-
-    @staticmethod
-    def _parse_frontmatter_value(text: str, key: str) -> str:
-        """极简 frontmatter 标量字段解析（`key: value`），损坏/缺失 → ""。"""
-        if not text.startswith("---"):
-            return ""
-        end = text.find("\n---", 3)
-        block = text[3:end] if end > 0 else text[3:]
-        for line in block.splitlines():
-            line = line.strip()
-            if line.startswith(key + ":"):
-                return line.split(":", 1)[1].strip().strip('"').strip("'")
-        return ""
+    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 能力矩阵/快照/票据豁免整块拆除
+    # （原 342-606 行：_OFFICE_WRITE_TOOLS/_guardsnap*/_office_decide/_extract_*_write_paths/
+    #  _office_path_write_rule/_office_ticket_allows/_parse_frontmatter_value）
 
     def _workspace_recon(self) -> str:
         """票 L1：收工自动对账 —— 只读 git 工作区实况注入。
@@ -709,35 +421,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
         return done_cnt >= max(1, int(len(self.task_ledger) * 0.8))
 
-    @staticmethod
-    def _parse_frontmatter_list(text: str, key: str) -> list[str]:
-        """极简 frontmatter 列表解析（不依赖 pyyaml）：--- 块内 `key:` 下的
-        `- item` 行。损坏/缺失 → 空列表。"""
-        if not text.startswith("---"):
-            return []
-        end = text.find("\n---", 3)
-        block = text[3:end] if end > 0 else text[3:]
-        in_key = False
-        out = []
-        for line in block.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if ":" in line and not line.startswith("-"):
-                in_key = (line.split(":", 1)[0].strip() == key)
-                continue
-            if in_key and line.startswith("- "):
-                out.append(line[2:].strip().strip('"').strip("'"))
-        return out
-
-    def _write_office_audit(self, event_type: str, detail: str) -> None:
-        """票 O-1：office.* 审计事件（office.role / office.guard）统一出口。"""
-        event = {
-            "sid": getattr(self, "sid", ""),
-            "role": getattr(self, "office_role", None),
-            "detail": detail,
-        }
-        event_bus.write(f"office.{event_type}", event)
+    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：_parse_frontmatter_list 与
+    # _write_office_audit 拆除（office 票据豁免/审计专属，无外部使用者）
 
     def _build_handoff_list(self) -> str:
         """票 AUTO-D D-2 + 票 AUTO-G2：收工交接清单——从 events.jsonl 现查本会话 auto 拒绝记录。
@@ -1968,22 +1653,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                     "error": str(_sed_err),
                                     "stage": "ln_hook",
                                 })
-                    # ── 票 O3-1：收工闸快照比对（抓漏不执法：只审计+告警，不阻断收工）──
-                    # office 角色会话：回合内写类工具通过决策链后已生成 guardsnap，
-                    # 收工比对当前 md5——不一致 → office.snap 审计 + 回复明示告警。
-                    # 普通模式（office_role is None）整段跳过，零开销零行为变化。
-                    if self.office_role is not None and self._pending_content:
-                        _snap_diffs = self._verify_snapshot()
-                        if _snap_diffs:
-                            _snap_paths = "; ".join(
-                                d["path"] for d in _snap_diffs[:3]
-                            ) + ("…" if len(_snap_diffs) > 3 else "")
-                            _snap_warn = (
-                                "\n\n⚠️ OFFICE MODE 快照告警：受保护路径在回合内被改写"
-                                f"（{len(_snap_diffs)} 项：{_snap_paths}）——已写 office.snap"
-                                "审计，属事后抓漏，不阻断收工。"
-                            )
-                            self._pending_content = (self._pending_content or "") + _snap_warn
+                    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 收工快照比对闸（S2）拆除 ──
                     # ── 票Z 缝2：承诺检测闸（未来时模式识别，共享 _ledger_reinject_count） ──
                     if self._pending_content:
                         _COMPLETION_WORDS = {"已完成", "全部完成", "测试通过", "已交付", "已全部完成"}
@@ -2072,18 +1742,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
                             self._emit_state_change(self.STATE_THINKING, "reply-quality re-injection")
                             return
                     # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
-                    # 激活条件（票 O8-1）：auto on 或 office on（会话级 get_office_on）。
-                    # 普通模式（两者皆无）→ 整段物理跳过，连判定都不经过（零影响铁律）。
+                    # 激活条件（票 O8-1）：auto on（会话级）。
+                    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office get_office_on 回退激活分支拆除
+                    # ——同时消除 core→gateway 反向 import（engine.py 不再 import server）
                     _gate_active = (self._auto_mode_getter is not None and self._auto_mode_getter())
                     _gate_label = "AUTO MODE"
-                    if not _gate_active:
-                        try:
-                            from bobo_tui_gateway.server import get_office_on as _get_office_on
-                            _gate_active = bool(_get_office_on(getattr(self, "sid", "")))
-                            if _gate_active:
-                                _gate_label = "OFFICE MODE"
-                        except Exception:
-                            _gate_active = False
                     if _gate_active:
                         # ── 票 O8-2：补账检测闸（先于字段闸：批量创建即全 done = 事后补登记）──
                         # deny + history 追加指令（要求列出下一步真实待办）+ goal_gate.deny
