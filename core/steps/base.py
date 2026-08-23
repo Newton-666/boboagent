@@ -91,6 +91,19 @@ class StepContext:
     def current_tool_round(self) -> int:
         return self._engine.current_tool_round
 
+    # ── 沉淀派发（R1）──
+    @property
+    def proactive_off(self) -> bool:
+        return getattr(self._engine.proactive, "mode", "off") == "off"
+
+    @property
+    def test_mode(self) -> bool:
+        return bool(getattr(self._engine, "test_mode", False))
+
+    def dispatch_sedimentation(self, content: str) -> None:
+        """办事窗口：起沉淀线程属走廊组织动作，房间只申请。"""
+        self._engine._dispatch_sedimentation(content)
+
 
 class StepStage:
     """房间基类：只做判断，通过 ctx 回话。"""

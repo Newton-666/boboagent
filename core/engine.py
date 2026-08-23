@@ -31,6 +31,7 @@ from core.steps.quality_gate import QualityGateStage
 from core.steps.backfill_gate import BackfillGateStage
 from core.steps.field_gate import FieldGateStage
 from core.steps.ledger_gate import LedgerGateStage
+from core.steps.sediment_dispatch import SedimentDispatchStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -169,7 +170,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.injector = PromptInjector(self)
         # 阶段 3（feat/step-pipeline）：收尾闸流水线——先砌墙，承诺房间先住；
         # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
-        self._wrapup_stages = [PromiseGateStage(), QualityGateStage(),
+        self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
@@ -179,6 +180,30 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 print(warning, file=sys.stderr)
                 logger.warning(warning)
             Engine._tool_load_warning_shown = True
+
+    def _dispatch_sedimentation(self, content: str) -> None:
+        """办事窗口：沉淀派发（PERF-1）。测试模式同步（E4a 断言时序），生产起 daemon 线程；
+        线程启动失败只留 notes.error 事件，不影响回合。"""
+        if self.test_mode:
+            self._run_sedimentation(content)
+        else:
+            try:
+                import threading as _threading
+                _sed_thread = _threading.Thread(
+                    target=self._run_sedimentation,
+                    args=(content,),
+                    daemon=True,
+                    name=f"sediment-{getattr(self, 'sid', '')}",
+                )
+                _sed_thread.start()
+            except Exception as _sed_err:
+                logger.warning("sedimentation thread start failed (sid=%s): %s",
+                               getattr(self, "sid", ""), _sed_err)
+                event_bus.write("notes.error", {
+                    "session_id": getattr(self, "sid", ""),
+                    "error": str(_sed_err),
+                    "stage": "ln_hook",
+                })
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -1635,34 +1660,6 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     # LLM 响应预算（E4a 回归：提取被饿死 → takeaway.extracted 丢失）。
                     # 故提取+笔记块整体前移到此（闸之前）：事件链 takeaway.extracted → notes.written
                     # 与旧语义一致，闸只决定"回注不发回复"，不干扰提取。
-                    if self._pending_content and self.proactive.mode != "off":
-                        # ── 票 PERF-1 事故 1（要求 b）：沉淀后台化 ──
-                        # takeaway 提取 + 草稿记忆镜像 + living_notes 成文整体移出
-                        # 回合关键路径：主线程发完回复先退场（message.complete 不被
-                        # LLM 调用阻塞），沉淀在 daemon 线程跑；失败只留事件不影响回合。
-                        # 事件链 takeaway.extracted → notes.written 语义保留（延迟到后台）。
-                        if self.test_mode:
-                            # 测试模式：同步执行——E4a 等测试断言 run 返回后事件已发，
-                            # 时序确定性优先；生产（gateway）走后台线程。
-                            self._run_sedimentation(self._pending_content)
-                        else:
-                            try:
-                                import threading as _threading
-                                _sed_thread = _threading.Thread(
-                                    target=self._run_sedimentation,
-                                    args=(self._pending_content,),
-                                    daemon=True,
-                                    name=f"sediment-{getattr(self, 'sid', '')}",
-                                )
-                                _sed_thread.start()
-                            except Exception as _sed_err:
-                                logger.warning("sedimentation thread start failed (sid=%s): %s",
-                                               getattr(self, "sid", ""), _sed_err)
-                                event_bus.write("notes.error", {
-                                    "session_id": getattr(self, "sid", ""),
-                                    "error": str(_sed_err),
-                                    "stage": "ln_hook",
-                                })
                     # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 收工快照比对闸（S2）拆除 ──
                     # ── 阶段 3（feat/step-pipeline）：收尾闸流水线——走廊递简报/听回答/行动 ──
                     # 承诺检测已搬入房间（core/steps/promise_gate.py），行为与原内联版逐字节一致

@@ -127,7 +127,9 @@ class TestPerf1BackgroundSedimentation:
         assert "daemon=True" in src
         assert "target=self._run_sedimentation" in src
         assert "if self.test_mode:" in src, "test_mode 同步分支必须存在（E4a 时序确定性）"
-        assert "self._run_sedimentation(self._pending_content)" in src
+        # 阶段 3（feat/step-pipeline 房间⑥）：沉淀派发逻辑搬入走廊办事窗口
+        # _dispatch_sedimentation（行为保留：test_mode 同步 + 生产 daemon 线程）
+        assert "self._run_sedimentation(content)" in src
 
     def test_run_sedimentation_thread_returns_immediately(self, monkeypatch):
         """生产路径（test_mode=False）：沉淀线程 start 即返，<0.5s 不被挂死 LLM 阻塞"""

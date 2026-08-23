@@ -219,6 +219,12 @@
 - 客观验证（B16-B18 合并）：行为基线 diff=0（6/6）；台账/auto 系 220 测试过（goal_gate/core_r3/r2a/r2_p2/g2/ledger_1/auto_mode×2）。
 - 收尾段墙内现 5 房（承诺/质量/补账/字段/台账），顺序与原内联版一致；内联票C/票K 块已删。
 
+### B19 · 流水线圈房间⑥：沉淀派发迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/sediment_dispatch.py（票 PERF-1）迁出；fire-and-forget：只判"要不要沉淀"，起线程动作走走廊办事窗口 _dispatch_sedimentation（test_mode 同步 + 生产 daemon 线程 + 启动失败 notes.error，语义保留）。
+- perf_1 实现细节断言更新（源码字符串随重构迁移——其余行为断言全部保留并验证）。
+- 客观验证：行为基线 diff=0（6/6）；E4a/perf_1 15 测试过。
+- 墙内现 6 房：沉淀/承诺/质量/补账/字段/台账。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
