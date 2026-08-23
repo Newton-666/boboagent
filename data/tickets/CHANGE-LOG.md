@@ -105,6 +105,15 @@
 - **解决后**：阶段 1 全部 owner 可决项清零——61 个原始失败全部修复或明确归类（剩 watchdog 5 = D 类进阶段 2；前端 4 = 前端票）。
 - **遗留影响**：无新增。
 
+### B7 · 工作区清零 + 宪法入库 —— 提交（待填）· 2026-08-23
+
+- **之前问题**：工作区有未提交残留——① duo_orchestrator.py 删除被 stash 操作反复弹回索引（D1 已提交过，属索引反复回退）；② docs/HARCHITECTURE.md 宪法修订（Principle 5 协作协议 + v1.1）长期滞留工作区。
+- **owner 定调**（2026-08-23）：**GitHub 必须对齐，不能有未提交的东西；一切改动（哪怕一行代码、一个测试）必须入 CHANGE-LOG**——追溯源头 + backup 余地。
+- **改动内容**：① duo_orchestrator.py 删除重新 stage 并入库；② HARCHITECTURE.md（宪法 Principle 5 + v1.1 修订）正式入库——内容 owner 已于当日批准。
+- **范围**：git 索引修复 + 1 文档文件；无运行时代码改动。
+- **解决后**：工作区代码侧清零（仅剩会话前既存的 dist/index.html 脏构建产物与 untracked 杂项，非本次产生）。
+- **遗留影响**：dist/index.html 为会话前既有脏文件，未动；98 个 untracked 为会话前既有杂项。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
