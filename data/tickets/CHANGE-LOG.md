@@ -201,6 +201,12 @@
 - **范围**：core/steps/ 新包 3 文件 + engine.py（import/挂墙/替换承诺块）；engine 行数净变化小。
 - **遗留影响**：其余 13 间房待逐间搬入（顺序：第二批中 4 间 → 第三批高 4 间 → 另期 P2）；墙的接口按需演化（先保守后放宽）。
 
+### B15 · 流水线圈房间②：答复质量闸迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+
+- **内容**：core/steps/quality_gate.py（票 R2b + R3-b）从 _step 内联迁出；base 扩展办事窗口（last_reasoning 只读 + reply_quality 计数窗口）；承诺房名改回 "promise" 保持状态原因逐字节一致。
+- **客观验证**：行为基线 diff=0（6/6）；相关 50 测试过（goal_gate/core_r3/engine_core）。
+- **遗留影响**：收尾段墙内现有 2 房（承诺+质量），顺序保持原内联版。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

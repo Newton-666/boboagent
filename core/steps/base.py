@@ -43,6 +43,10 @@ class StepContext:
     def sid(self):
         return getattr(self._engine, "sid", "")
 
+    @property
+    def last_reasoning(self):
+        return getattr(self._engine, "_last_reasoning", "") or ""
+
     # ── 白名单办事窗口（房间不能直接碰走廊的抽屉）──
     def append_warning(self, text: str) -> None:
         self.warnings.append(text)
@@ -56,6 +60,13 @@ class StepContext:
     def inc_ledger_reinject_count(self) -> int:
         self._engine._ledger_reinject_count += 1
         return self._engine._ledger_reinject_count
+
+    def reply_quality_reinject_count(self) -> int:
+        return self._engine._reply_quality_reinject_count
+
+    def inc_reply_quality_reinject_count(self) -> int:
+        self._engine._reply_quality_reinject_count += 1
+        return self._engine._reply_quality_reinject_count
 
 
 class StepStage:

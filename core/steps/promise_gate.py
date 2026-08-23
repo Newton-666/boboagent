@@ -19,7 +19,7 @@ _REINJECT_MSG = "检测到未完成的承诺。请继续执行，不要说明、
 
 
 class PromiseGateStage(StepStage):
-    name = "promise_gate"
+    name = "promise"  # 保持原内联版状态原因 "promise re-injection" 逐字节一致
 
     def run(self, ctx: StepContext) -> StepResult:
         content = ctx.pending_content

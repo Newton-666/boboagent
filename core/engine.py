@@ -27,6 +27,7 @@ from core.command_safety import (classify_command, is_high_risk_tool, is_auto_re
 from core.verifier import Verifier
 from core.steps.base import StepContext, StepResult
 from core.steps.promise_gate import PromiseGateStage
+from core.steps.quality_gate import QualityGateStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -165,7 +166,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.injector = PromptInjector(self)
         # 阶段 3（feat/step-pipeline）：收尾闸流水线——先砌墙，承诺房间先住；
         # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
-        self._wrapup_stages = [PromiseGateStage()]
+        self._wrapup_stages = [PromiseGateStage(), QualityGateStage()]
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1675,50 +1676,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                 logger.debug("GATE %s re-injection", _stage.name)
                                 self._emit_state_change(self.STATE_THINKING, f"{_stage.name} re-injection")
                                 return
-                                        # ── 票 R2b：答复质量闸（先答问题再交账；思考落纸） ──
-                    # 轻量启发式（不依赖语义理解）：
-                    # 1) 台账/清单腔：回复开头即台账段/清单且总长过短（<120 字）→ 未直接回答问题
-                    # 2) 思考落纸：thinking 有实质分析（≥60 字）但回复过短（<80 字）→ 分析没落到回复
-                    # 打回每回合至多一次（_reply_quality_reinject_count，防死循环）；
-                    # 写类施工回合豁免（施工收尾以交账为主，不误伤）。
-                    # 票 R3-b：豁免面扩大——本轮 tool.exec ≥3 次即豁免（读/查施工同样有实质干活，
-                    # 不再只认写类工具；有实际执行就不算空口台账腔）。
-                    if (self._pending_content and not self._reply_quality_reinject_count
-                            and not self._round_had_write_tool
-                            and self._round_tool_exec_count < 3):
-                        _content = self._pending_content
-                        _len = len(_content)
-                        _stripped = _content.strip()
-                        _quality_hit = False
-                        # 台账/清单腔：开头即台账段/清单/纯清单腔
-                        _ledgerish_head = (
-                            _stripped.startswith("📋")
-                            or _stripped.startswith("任务台账")
-                            or _stripped.startswith("待人工执行清单")
-                            or _stripped.startswith("台账")
-                            or _stripped.startswith("完成项")
-                        )
-                        if _ledgerish_head and _len < 120:
-                            _quality_hit = True
-                        # 思考落纸：thinking 分析 ≥60 字但回复 <80 字
-                        _r = (self._last_reasoning or "").strip()
-                        if not _quality_hit and len(_r) >= 60 and _len < 80:
-                            _quality_hit = True
-                        if _quality_hit:
-                            self._reply_quality_reinject_count += 1
-                            _rej = (
-                                "你的最终回复没有直接回答用户的问题：台账/清单腔过重，或思考里的分析结论"
-                                "没落到回复上。请先直接回答用户当前问题、把分析结论的实质内容写到回复里，"
-                                "台账状态只能作为附属段落跟在答复之后，然后收工。"
-                            )
-                            self._append_to_history("user", _rej)
-                            self._pending_content = None
-                            self._pending_tool_calls = None
-                            self.current_depth += 1
-                            logger.debug("GATE reply-quality re-injection #1")
-                            self._emit_state_change(self.STATE_THINKING, "reply-quality re-injection")
-                            return
-                    # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
+                                        # ── 票 C 收工闸 auto/office 硬拦：台账字段质量闸（先于 pending 回注/熔断判定） ──
                     # 激活条件（票 O8-1）：auto on（会话级）。
                     # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office get_office_on 回退激活分支拆除
                     # ——同时消除 core→gateway 反向 import（engine.py 不再 import server）
