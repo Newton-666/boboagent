@@ -66,20 +66,19 @@
 
 ```
 阶段 0：D1 拆除 office/duo        ✅（engine 2,545→2,208）
-阶段 1：main 修绿（测试债）       🔵 ~97%（61 个原始失败：59 已修；剩 skill_audit 1 待 owner 裁决 + watchdog 5 D 类 + 前端 4 前端票）
-阶段 2：D 类隔离 + 前端票          ⬜（watchdog 标记隔离 + 前端票）
+阶段 1：main 修绿（测试债）       ✅ 已收口（61 原始失败全修复或明确归类：watchdog 5 进阶段 2、前端 4 归前端票；待全量复跑确认精确数）
+阶段 2：D 类隔离 + 前端票          ⬜ 下一步（watchdog 标记隔离 + 前端票）
 阶段 3：engine 流水线圈            ⬜ ← 目标
 ```
 
 **到 engine 还差几步**：
-1. skill_audit 裁决（owner：research 是否故意禁用）——唯一卡在 owner 的项
-2. 全量复跑（约 3 分钟）拿精确剩余数，替换估算
-3. D 类标记隔离（watchdog → `-m live`，本地跳过 CI 跑）
-4. 前端票（busy_gate/css×2/v2b3_1，可与 3 并行）
-5. 候选真 bug 票：llm_caller socket 关闭语义 gap（中断不关 socket，另票评估）
+1. 全量复跑（约 3 分钟）拿精确剩余数，替换估算
+2. D 类标记隔离（watchdog → `-m live`，本地跳过 CI 跑）
+3. 前端票（busy_gate/css×2/v2b3_1，可与 2 并行）
+4. 候选真 bug 票：llm_caller socket 关闭语义 gap（中断不关 socket，另票评估）
 
-→ 阶段 1 收口 + 阶段 2 完成后，阶段 3（engine 流水线圈）开工。
-本次记录批次：B0–B5。下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
+→ 阶段 2 完成后，阶段 3（engine 流水线圈）开工。
+本次记录批次：B0–B6。下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
 
 ---
 
@@ -94,6 +93,17 @@
 - **范围**：tests/ 8 文件 + core/llm_caller.py 1 行；其余为测试侧改动。
 - **解决后**：eng1/scan 系/g3/computer_use_core/core_int2 全绿；真 bug 修复（中断路径不再崩溃）。
 - **遗留影响**：skill_audit 1 个待裁决；watchdog 5（D 类暂缓）；前端 4（归前端票）；另记 socket 关闭语义 gap（主线程读不到 worker 线程 sock，中断时不关 socket 只抛异常——候选真 bug，另票评估）。
+
+### B6 · main 修绿收口 —— 提交（待填）· 2026-08-23
+
+- **之前问题**：skill_audit 断言 research 应注入，但 `data/skills/enabled.json` 为 research=false——配置与测试冲突，待 owner 裁决。
+- **owner 裁决**（2026-08-23）：**所有禁用技能均为 owner 手动操作**——research 禁用是故意的，测试断言过时。
+- **改动内容**：
+  1. skill_audit 行为测试隔离运行时 enabled 配置（夹具 all_skills_enabled 置全开）——匹配/excludes 逻辑测试不再依赖治理状态，且修掉三个排除测试在禁用下的"空转通过"。
+  2. 新增 `test_behavior_research_disabled_by_governance`——锁定"research 禁用时不注入"的治理行为（防误启）。
+- **范围**：tests/ 1 文件；无运行时代码改动。
+- **解决后**：阶段 1 全部 owner 可决项清零——61 个原始失败全部修复或明确归类（剩 watchdog 5 = D 类进阶段 2；前端 4 = 前端票）。
+- **遗留影响**：无新增。
 
 ## 待办追溯索引
 

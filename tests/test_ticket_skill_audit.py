@@ -14,6 +14,9 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
+from core import skill_loader as sl_mod
 from core.skill_loader import SkillLoader
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,15 +141,25 @@ def test_all_required_excludes_present():
 
 
 # ── 行为：skill_loader 真实加载 ─────────────────────────────────────
+# TICKET-MAIN-REGREEN：行为测试隔离运行时 enabled 配置（owner 手动禁用 skill
+# 属治理状态，不应干扰匹配逻辑测试）——夹具置全开，测触发/excludes 本身。
 
-def test_behavior_research_injected_on_query():
+
+@pytest.fixture
+def all_skills_enabled(monkeypatch):
+    dirs = [d for d in os.listdir(STD_DIR)
+            if os.path.isdir(STD_DIR / d)]
+    monkeypatch.setattr(sl_mod, "_load_enabled", lambda: {d: True for d in dirs})
+
+
+def test_behavior_research_injected_on_query(all_skills_enabled):
     """调研话题（帮我查一下 X）→ research 注入（触发词保留生效）。"""
     history = [{"role": "user", "content": "帮我查一下上海和北京的房价对比"}]
     injected = SkillLoader(get_history=lambda: history).load_standards()
     assert any("多源交叉验证" in s for s in injected), "research 应注入"
 
 
-def test_behavior_research_excluded_by_person_word():
+def test_behavior_research_excluded_by_person_word(all_skills_enabled):
     """"帮我查一下有没有人报名" → 含 excludes 词"有没有人" → research 不注入。"""
     history = [{"role": "user", "content": "帮我查一下有没有人报名这个活动"}]
     injected = SkillLoader(get_history=lambda: history).load_standards()
@@ -154,14 +167,24 @@ def test_behavior_research_excluded_by_person_word():
         "excludes 命中（有没有人）→ research 不得注入"
 
 
-def test_behavior_research_not_injected_on_casual():
+def test_behavior_research_not_injected_on_casual(all_skills_enabled):
     """日常口语（"有没有人知道怎么处理"）→ 无 research 触发词 → 不注入。"""
     history = [{"role": "user", "content": "有没有人知道这个文件怎么处理"}]
     injected = SkillLoader(get_history=lambda: history).load_standards()
     assert not any("多源交叉验证" in s for s in injected), "日常口语不得触发 research"
 
 
-def test_behavior_web_design_excluded_on_cooking():
+def test_behavior_research_disabled_by_governance(monkeypatch):
+    """owner 2026-08-23 确认：research 为手动禁用（data/skills/enabled.json
+    research=false）——调研话题不得注入（锁定治理意图，防误启）。"""
+    monkeypatch.setattr(sl_mod, "_load_enabled", lambda: {"research": False})
+    history = [{"role": "user", "content": "帮我查一下上海和北京的房价对比"}]
+    injected = SkillLoader(get_history=lambda: history).load_standards()
+    assert not any("多源交叉验证" in s for s in injected), \
+        "治理禁用时 research 不得注入"
+
+
+def test_behavior_web_design_excluded_on_cooking(all_skills_enabled):
     """"做个饭" → excludes（做饭）→ web-design 不注入。"""
     history = [{"role": "user", "content": "帮我做个饭吧"}]
     injected = SkillLoader(get_history=lambda: history).load_standards()
