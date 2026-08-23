@@ -332,6 +332,12 @@
 - **验证（快速）**：行为基线 6/6；takeaway_gate/e4a 17 测试过。
 - **说明**：_extract_takeaways（LLM 提取编排）仍留 engine（依赖 history/事件/LLM，属走廊编排），纯判断闸已独立可测。
 
+### B36 · E5 出口组装房（P2 终稿组装）—— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：走廊的出口。
+- **改动**：台账尾注/交接清单/format/思考块展示搬入 _assemble_final_output（走廊办事窗口）；FinalAssemblyStage 进回复段走廊；行为逐字节一致。
+- **验证（快速）**：行为基线 6/6；goal_gate/e2e/ledger_1b/auto 97 测试过。
+- **收益对账（B30 假设⑤）**：出口组装成为可独立测试的部门；E5 完成后 **E1-E5 全部落地**（安全单一源/fallback 数据化/cu 政策/循环检测/沉淀预筛/出口组装）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

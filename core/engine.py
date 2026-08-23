@@ -37,6 +37,7 @@ import core.loop_detect as _loop_detect
 import core.takeaway_filter as _takeaway_filter
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
+from core.steps.final_assembly import FinalAssemblyStage
 from core.steps.edit_conflict import EditConflictStage
 from core.steps.ledger_snapshot import LedgerSnapshotStage
 from core.steps.ledger_sync import LedgerSyncStage
@@ -175,7 +176,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
-        self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
+        self._respond_stages = [WorkspaceReconStage(), FinalAssemblyStage()]  # 观察房 + 出口组装房
         self._exec_pre_stages = [EditConflictStage(), LedgerSnapshotStage()]  # 前置房：冲突 + 台账基线快照
         self._exec_mid_stages = [LedgerSyncStage()]  # 中段房：工具环后台账同步（先于落账/销账）
         self._entry_stages = [EmptyRetryStage(), VerifierCheckStage()]  # THINKING 入口房（空响应/验证器）
@@ -211,6 +212,26 @@ class Engine(ContextMixin, ToolRunnerMixin):
                     "error": str(_sed_err),
                     "stage": "ln_hook",
                 })
+
+    def _assemble_final_output(self) -> str:
+        """E5：终稿组装（台账尾注 + 交接清单 + format + 思考块）——出口组装部核心。"""
+        # 台账摘要尾注（K v2 §4：仅写类施工回合）
+        if self.task_ledger and self._round_had_write_tool:
+            done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
+            total = len(self.task_ledger)
+            self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
+        # 交接清单（AUTO-D D-2：auto 拒绝记录）
+        _handoff = self._build_handoff_list()
+        if _handoff:
+            self._pending_content = (self._pending_content or "") + _handoff
+        content = self._format_final_output(self._pending_content)
+        # reasoning 思考块（票 P：仅展示层）
+        if self._last_reasoning:
+            _r = self._last_reasoning
+            _r_show = _r if len(_r) <= 2000 else _r[:2000] + f"\n…（思考全文 {len(_r)} 字，已截断展示）"
+            content += f"\n\n── 💭 思考过程 ──\n{_r_show}\n── 思考结束 ──"
+            self._last_reasoning = ""  # 消费即清，防串回合
+        return content
 
     def _notify(self, event_type: str, data: dict):
         if self.callback:
@@ -1647,24 +1668,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 if getattr(self.proactive, '_last_memory_ids', None):
                     self.proactive.track_citation(self._pending_content, self.proactive._last_memory_ids)
                     self.proactive._last_memory_ids = []
-                # ── 票 K v2 §4 降级方案：终稿尾部附台账摘要行（面板替代） ──
-                # 票 R2b：仅写类施工回合注入；纯问答回合（无写类工具）不交账——没账可交时不交账。
-                if self.task_ledger and self._round_had_write_tool:
-                    done_cnt = sum(1 for e in self.task_ledger if e.get("status") == "done")
-                    total = len(self.task_ledger)
-                    self._pending_content = (self._pending_content or "") + f"\n\n📋 台账: {done_cnt}/{total} done"
-                # ── 票 AUTO-D D-2：收工交接清单（auto 拒绝记录，从 events 现查） ──
-                # 仅 auto 模式有 auto.decide deny 事件；清单空则零影响（正常模式天然空）。
-                _handoff = self._build_handoff_list()
-                if _handoff:
-                    self._pending_content = (self._pending_content or "") + _handoff
-                content = self._format_final_output(self._pending_content)
-                # ── 票 P 降级展示：reasoning 思考块（仅展示层，历史在上方已落账，零污染） ──
-                if self._last_reasoning:
-                    _r = self._last_reasoning
-                    _r_show = _r if len(_r) <= 2000 else _r[:2000] + f"\n…（思考全文 {len(_r)} 字，已截断展示）"
-                    content += f"\n\n── 💭 思考过程 ──\n{_r_show}\n── 思考结束 ──"
-                    self._last_reasoning = ""  # 消费即清，防串回合
+                # ── 阶段 3：出口组装房（final_assembly，E5）——台账尾注/交接/format/思考块 ──
+                # 组装逻辑已搬入 _assemble_final_output（走廊办事窗口），行为逐字节一致
+                if self._respond_stages:
+                    for _stage in self._respond_stages:
+                        if getattr(_stage, "name", "") == "final-assembly":
+                            _ctx_r.final_content = _ctx_r.assemble_final_output()
+                content = _ctx_r.final_content
                 logger.debug("RESPONDING emit complete start: len=%d", len(content))
                 self._notify("complete", {"content": content, "usage": self._last_usage})
                 logger.debug("RESPONDING emit complete done")

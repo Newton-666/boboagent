@@ -26,6 +26,7 @@ class StepContext:
         self.tool_results: list = None        # EXECUTING 段走廊注入（销账建议房读取）
         self.recon_text: str = ""            # RESPONDING 段观察房产出（对账文本，走廊并入 history）
         self.error_message: str | None = None  # 入口房：空响应耗尽时走廊用作回复内容
+        self.final_content: str = ""            # 出口房：终稿组装产出（走廊 notify 用）
 
     # ── 只读简报 ──
     @property
@@ -141,6 +142,10 @@ class StepContext:
             self._engine._ledger_backfill_suspect = self._engine._detect_ledger_backfill(
                 self._engine._prev_ledger, tc_names
             )
+
+    def assemble_final_output(self) -> str:
+        """办事窗口：终稿组装（E5）——台账尾注/交接/format/思考块在走廊侧执行。"""
+        return self._engine._assemble_final_output()
 
     def fetch_workspace_recon(self) -> str:
         """办事窗口：只读 git 对账（L1），房间不直接跑 shell。"""
