@@ -14,6 +14,52 @@ from core.event_bus import event_bus
 logger = logging.getLogger(__name__)
 
 
+# ── E2（骨干通信）：工具失败替代建议——模块级数据（原方法内联 55 行，每调用重建）──
+_TOOL_FALLBACKS = {
+    # Web 类
+    "web_search": "网络搜索失败 → 尝试 web_fetch(url) 直接抓取已知网页，或 open_url(url) 打开浏览器",
+    "web_fetch": "网页抓取失败 → 尝试 web_search(query) 搜索相同内容，或 web_extract(url) 提取纯文本",
+    "web_extract": "提取失败 → 尝试 web_fetch(url) 重新抓取，或直接用浏览器 open_url(url)",
+    "open_url": "打开失败 → 尝试 web_fetch(url) 获取页面内容",
+    # 文件/代码类
+    "read_local_file": "读取失败 → 检查路径，用 list_directory(path) 查看目录，或用 execute_terminal 的 cat 命令",
+    "list_directory": "列目录失败 → 用 execute_terminal('ls -la /path') 查看，或 read_local_file 逐个读取",
+    "search_code": "代码搜索失败 → 用 grep_code(pattern) 正则搜索，或用 execute_terminal('grep -r pattern path')",
+    "execute_terminal": "终端命令失败 → 检查命令语法，用 code_execution 执行脚本，或拆分为多个简单命令",
+    "file_operation": "文件写入失败 → 用 execute_terminal('cat > file') 写入，或检查目录权限",
+    "edit_file": "编辑失败 → old_string 与文件内容不完全一致（含缩进/空格），用 read_local_file 重新读取确认",
+    "grep_code": "搜索无结果 → 放宽正则表达式，或改用 file_types 不过滤先看全部文件，或用 list_directory 确定文件位置",
+    "run_tests": "测试失败 → 查看失败详情，用 grep_code 定位问题代码，用 edit_file 修复后重新 run_tests",
+    # Obsidian 类
+    "search_obsidian": "搜索无结果 → 用 grep_code 搜索本地文件，或用 list_directory 浏览 vault",
+    "read_obsidian": "读取失败 → 用 read_local_file(path) 直接读取文件",
+    "write_obsidian": "写入失败 → 用 file_operation(action='write', path=...) 或 execute_terminal('cat > file') 写入",
+    "append_obsidian": "追加失败 → 用 read_obsidian 读取原内容，合并后用 write_obsidian 回写",
+    "classify_note": "分类失败 → 手动用 batch_move_notes 移动到目标文件夹",
+    # Notion 类
+    "notion_search": "Notion 搜索失败 → 检查 Notion API Key 是否已配置，或用 notion_read_page(page_id) 直接读取",
+    "notion_read_page": "Notion 读取失败 → 检查 page_id 是否正确，或用 notion_search(query) 重新搜索",
+    "notion_create_page": "Notion 创建失败 → 用 write_obsidian(path) 保存到本地，或检查 Notion 权限",
+    "notion_append": "Notion 追加失败 → 用 notion_read_page 读取后用 notion_create_page 重建",
+    # Email 类
+    "search_emails": "邮件搜索失败 → 检查 {BOBO_DATA_DIR}/mail.json 是否配置，或用 read_email_content(id) 直接读取",
+    "read_email_content": "邮件读取失败 → 用 search_emails 重新搜索，或检查邮箱配置",
+    # GitHub 类
+    "git_status": "Git 状态失败 → 用 execute_terminal('git status') 查看",
+    "github_create_repo": "创建仓库失败 → 用 execute_terminal('gh repo create') 替代，或检查 GitHub token",
+    "github_create_pr": "创建 PR 失败 → 用 execute_terminal('gh pr create') 替代",
+    # macOS 类
+    "send_notification": "通知失败 → 用 execute_terminal('osascript -e display notification') 替代",
+    "set_reminder": "提醒失败 → 用 create_calendar_event 或 execute_terminal 创建",
+    # API 类
+    "api_call": "API 调用失败 → 检查 api_register 的配置是否正确，端点路径和认证方式是否匹配",
+    "api_register": "API 注册失败 → 确认 base_url 可访问，auth_key 有效，endpoints JSON 格式正确",
+    # 通用
+    "code_execution": "代码执行失败 → 查看错误详情修复代码，或用 execute_terminal 逐行调试",
+    "save_memory": "保存失败 → 内容可能已达上限（100K 字符），用 search_memory 查看已有的，delete_entry 删除旧的",
+}
+
+
 def _trunc_str(text: str, max_chars: int) -> str:
     """截断文本到 max_chars，末尾加 …。"""
     if len(text) <= max_chars:
@@ -136,52 +182,6 @@ class ToolRunnerMixin:
         if _execute_tool is None:
             from core.tool_executor import execute_tool as _execute_tool
         from tools import TOOLS_SCHEMA
-
-        # 工具失败时的替代建议：告诉 LLM 具体下一步做什么
-        _TOOL_FALLBACKS = {
-            # Web 类
-            "web_search": "网络搜索失败 → 尝试 web_fetch(url) 直接抓取已知网页，或 open_url(url) 打开浏览器",
-            "web_fetch": "网页抓取失败 → 尝试 web_search(query) 搜索相同内容，或 web_extract(url) 提取纯文本",
-            "web_extract": "提取失败 → 尝试 web_fetch(url) 重新抓取，或直接用浏览器 open_url(url)",
-            "open_url": "打开失败 → 尝试 web_fetch(url) 获取页面内容",
-            # 文件/代码类
-            "read_local_file": "读取失败 → 检查路径，用 list_directory(path) 查看目录，或用 execute_terminal 的 cat 命令",
-            "list_directory": "列目录失败 → 用 execute_terminal('ls -la /path') 查看，或 read_local_file 逐个读取",
-            "file_operation": "文件操作失败 → 用 execute_terminal 的 cp/mv/rm 命令替代",
-            "search_code": "代码搜索失败 → 用 grep_code(pattern) 正则搜索，或用 execute_terminal('grep -r pattern path')",
-            "execute_terminal": "终端命令失败 → 检查命令语法，用 code_execution 执行脚本，或拆分为多个简单命令",
-            "file_operation": "文件写入失败 → 用 execute_terminal('cat > file') 写入，或检查目录权限",
-            "edit_file": "编辑失败 → old_string 与文件内容不完全一致（含缩进/空格），用 read_local_file 重新读取确认",
-            "grep_code": "搜索无结果 → 放宽正则表达式，或改用 file_types 不过滤先看全部文件，或用 list_directory 确定文件位置",
-            "run_tests": "测试失败 → 查看失败详情，用 grep_code 定位问题代码，用 edit_file 修复后重新 run_tests",
-            # Obsidian 类
-            "search_obsidian": "搜索无结果 → 用 grep_code 搜索本地文件，或用 list_directory 浏览 vault",
-            "read_obsidian": "读取失败 → 用 read_local_file(path) 直接读取文件",
-            "write_obsidian": "写入失败 → 用 file_operation(action='write', path=...) 或 execute_terminal('cat > file') 写入",
-            "append_obsidian": "追加失败 → 用 read_obsidian 读取原内容，合并后用 write_obsidian 回写",
-            "classify_note": "分类失败 → 手动用 batch_move_notes 移动到目标文件夹",
-            # Notion 类
-            "notion_search": "Notion 搜索失败 → 检查 Notion API Key 是否已配置，或用 notion_read_page(page_id) 直接读取",
-            "notion_read_page": "Notion 读取失败 → 检查 page_id 是否正确，或用 notion_search(query) 重新搜索",
-            "notion_create_page": "Notion 创建失败 → 用 write_obsidian(path) 保存到本地，或检查 Notion 权限",
-            "notion_append": "Notion 追加失败 → 用 notion_read_page 读取后用 notion_create_page 重建",
-            # Email 类
-            "search_emails": "邮件搜索失败 → 检查 {BOBO_DATA_DIR}/mail.json 是否配置，或用 read_email_content(id) 直接读取",
-            "read_email_content": "邮件读取失败 → 用 search_emails 重新搜索，或检查邮箱配置",
-            # GitHub 类
-            "git_status": "Git 状态失败 → 用 execute_terminal('git status') 查看",
-            "github_create_repo": "创建仓库失败 → 用 execute_terminal('gh repo create') 替代，或检查 GitHub token",
-            "github_create_pr": "创建 PR 失败 → 用 execute_terminal('gh pr create') 替代",
-            # macOS 类
-            "send_notification": "通知失败 → 用 execute_terminal('osascript -e display notification') 替代",
-            "set_reminder": "提醒失败 → 用 create_calendar_event 或 execute_terminal 创建",
-            # API 类
-            "api_call": "API 调用失败 → 检查 api_register 的配置是否正确，端点路径和认证方式是否匹配",
-            "api_register": "API 注册失败 → 确认 base_url 可访问，auth_key 有效，endpoints JSON 格式正确",
-            # 通用
-            "code_execution": "代码执行失败 → 查看错误详情修复代码，或用 execute_terminal 逐行调试",
-            "save_memory": "保存失败 → 内容可能已达上限（100K 字符），用 search_memory 查看已有的，delete_entry 删除旧的",
-        }
 
         # Build a quick lookup: tool_name -> description + params
         _schema_map = {}
