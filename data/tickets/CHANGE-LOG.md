@@ -185,6 +185,12 @@
 - **范围**：docs/DESIGN_STEP_PIPELINE.md；零代码。
 - **遗留影响**：数房间清单 + 砌墙设计为下一批实际施工内容。
 
+### B13 · 数房间清单 —— 提交（待填）· 2026-08-23
+
+- **内容**：_step 现状 16 个评估对象按耦合度分档——入口控制流 2（高）、THINKING 收尾 7、EXECUTING 5、RESPONDING 2；搬移顺序：第一批低耦合 6 间（承诺/质量/补账/字段/台账/tracker）→ 第二批中 4 间 → 第三批高 4 间；P2 终稿组装另期。
+- **落盘**：DESIGN_STEP_PIPELINE §0a.1。
+- **遗留影响**：砌墙（骨架+接口）为下一步施工。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
