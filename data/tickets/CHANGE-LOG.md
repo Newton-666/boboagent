@@ -314,6 +314,12 @@
 - **验证（快速）**：行为基线 6/6；工具系 107 测试过；全量回归后台跑。
 - **收益对账（B30 假设②）**：工具执行环向"工具执行部"迈第一步——失败建议从"方法内数据"变"模块级数据"（可独立测试/替换）。
 
+### B33 · E4a computer use 政策搬出 —— 提交（待填）· 2026-08-23（feat/harness-backbone-e1）
+- **坐标**：屋子（政策房）。
+- **改动**：engine 6 个 _cu_* 方法（约 90 行）搬入 core/cu_policy.py（纯函数+参数化，不持有 engine 引用）；engine 保留薄壳委托（行为逐字节一致）；_CU_COOPERATION_TOOLS 随迁。
+- **验证（快速）**：行为基线 6/6；computer use 系 37 测试过（core/awareness + e2e）。
+- **收益对账（B30 假设④）**：政策房搬入独立模块——cu 政策可独立测试/替换，engine 瘦身。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
