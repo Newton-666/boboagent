@@ -66,19 +66,19 @@
 
 ```
 阶段 0：D1 拆除 office/duo        ✅（engine 2,545→2,208）
-阶段 1：main 修绿（测试债）       ✅ 已收口（61 原始失败全修复或明确归类：watchdog 5 进阶段 2、前端 4 归前端票；待全量复跑确认精确数）
-阶段 2：D 类隔离 + 前端票          ⬜ 下一步（watchdog 标记隔离 + 前端票）
+阶段 1：main 修绿（测试债）       ✅ 已收口（61→15，精确数已核实；15 = watchdog 5 + cost1a_sandbox 3 + tool_park_1 1 + 前端 4 + gui_f4 1 + tel_8 1）
+阶段 2：测试分层                 🔵 施工完成（live 标记 + addopts + CI 覆盖；分支 feat/test-layering，待验证后合 main）
 阶段 3：engine 流水线圈            ⬜ ← 目标
 ```
 
 **到 engine 还差几步**：
-1. 全量复跑（约 3 分钟）拿精确剩余数，替换估算
-2. D 类标记隔离（watchdog → `-m live`，本地跳过 CI 跑）
-3. 前端票（busy_gate/css×2/v2b3_1，可与 2 并行）
-4. 候选真 bug 票：llm_caller socket 关闭语义 gap（中断不关 socket，另票评估）
+1. 分层后全量复跑（预期本地 15→10，watchdog 5 进 CI）
+2. 阶段 2 合 main（owner 验收后）
+3. 前端票（4 个）+ socket-gap 票（并行）
+4. cost1a_sandbox 3 + tool_park_1 1（校准类，随阶段 2 后或前端票一起）
 
-→ 阶段 2 完成后，阶段 3（engine 流水线圈）开工。
-本次记录批次：B0–B6。下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
+→ 阶段 2 收口后，阶段 3（engine 流水线圈）开工。
+本次记录批次：B0–B8。下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
 
 ---
 
@@ -113,6 +113,19 @@
 - **范围**：git 索引修复 + 1 文档文件；无运行时代码改动。
 - **解决后**：工作区代码侧清零（仅剩会话前既存的 dist/index.html 脏构建产物与 untracked 杂项，非本次产生）。
 - **遗留影响**：dist/index.html 为会话前既有脏文件，未动；98 个 untracked 为会话前既有杂项。
+
+### B8 · 阶段 2 分层施工 —— 提交（待填）· 2026-08-23（分支 feat/test-layering）
+
+- **之前问题**：测试"一锅粥"——快件/慢件/socket 时序件全混一层，watchdog 本地时好时坏/卡死，污染日常信号。
+- **owner 定调**：测试分层 = 把"模块纯粹性"原则用到测试体系自身（每层有目的、有跑道）；**先走分支，测好再合并 main**。
+- **改动内容**：
+  1. pyproject.toml：新增 `live` 标记声明 + addopts 加 `-m "not live"`（本地默认跳过 live 层）。
+  2. .github/workflows/test.yml：CI 显式 `-m "live or not live"` 覆盖 addopts（**CI 全量含 live**——覆盖保留，只是换跑道）。
+  3. tests/test_headers_watchdog_live.py：模块级 `pytestmark = pytest.mark.live`（整个文件皆真 socket）；tests/test_headers_watchdog.py 两个 stall 测试打 `@pytest.mark.live`（ok_server/env 单测保留快件层）。
+  4. 新开两票：TICKET-FRONTEND-GREEN（前端存量 4）、TICKET-LLM-CALLER-SOCKET-GAP（候选真 bug）。
+- **范围**：pyproject 配置 + CI workflow + 2 测试文件标记 + 2 新票；零运行时代码改动。
+- **解决后**：本地日常不再被 socket 件拖卡（收集验证 9/16，7 个 live 跳过）；live 覆盖保留在 CI。
+- **遗留影响**：分层后的精确全量数字待下轮全量复跑（预期本地 15→10：watchdog 5 跳过后剩 cost1a_sandbox 3 + tool_park_1 1 + 前端 4 + gui_f4 1 + tel_8 1（待复核））。
 
 ## 待办追溯索引
 

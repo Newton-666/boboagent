@@ -26,7 +26,7 @@ jobs:
           uv sync --no-dev
           uv pip install pytest pytest-cov
       - name: Run tests
-        run: uv run pytest -v --tb=short
+        run: uv run pytest -v --tb=short -m "live or not live"  # 覆盖 pyproject addopts 的 not live，CI 全量含 live
         env:
           DEEPSEEK_API_KEY: "sk-test-placeholder"
           OBSIDIAN_VAULT: "/tmp"
