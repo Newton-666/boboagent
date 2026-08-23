@@ -80,3 +80,14 @@
 - **auto 行为基线 diff=0 是贯穿 D1/D2 的硬门槛**（测试防已知路径，基线防未断言的隐含行为被顺带删走）；
 - `grep -rli "office" core/ tools/ bobo_tui_gateway/ ui-tui/src apps/desktop/src` 结果 = §1 的 C 类清单，无超出；
 - 拆除后 `engine.py` 行数与 `ARCHITECTURE-MAP.md` 载重表同步更新（预计 2,545 → ~2,200）。
+
+---
+
+## 8. 待办记录（2026-08-23，D1 合入后）
+
+- **前端残留（owner 已知悉，暂不改，记录在案）**：TUI 状态栏 OFFICE 徽章、`officeOn` 状态链
+  （uiStore/interfaces/createGatewayEventHandler/appLayout/appChrome 等）、branding 的
+  BOBO_ROLE 显示仍在——表现层非本次调整范围（owner：整体调整以后端为准，前端显示问题
+  不算本质性问题，何时改另行决定）。对应票内 D2 批，状态：**暂缓**。
+- **D2 批内容不变**：前端状态链 + branding；**D3 批**：数据工件 4 个（office_audit.jsonl 等）、
+  技能标准 2 份、文档 7+4 份、宪法修订史记条。
