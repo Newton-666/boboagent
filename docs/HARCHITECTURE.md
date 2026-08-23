@@ -78,7 +78,7 @@ Every owner–AI collaboration session (any AI: ZCode, Hermes, bobo itself, futu
 - Every change MUST begin by consulting the blueprint of the thing being changed. If the blueprint is missing, stale, or inconsistent with the product — **fix the blueprint first**, then the product (rebuild from it). Never patch the product directly ("缝缝补补") as the first action.
 - Prohibition: modifying a built artifact (dist/, compiled output, generated files) without first updating the source that produces it is an incident-level defect — the same class as "switching UI without switching cognition" (Principle 1).
 - A ticket that touches a built artifact MUST satisfy all three in its acceptance: ① blueprint (source) updated to represent the change; ② product rebuildable from blueprint; ③ guard tests green.
-- Legacy exception: if the artifact already drifted (blueprint lost), the repair path is blueprint-first — reverse the features into the source, rebuild, then re-align guards. No guard-memory updates ("保安记错") without first reconciling the blueprint.
+- Legacy exception (drifted artifact, blueprint lost) — **the product is the source of truth, not the old blueprint**: ① reverse-engineer the current product's features INTO the source (blueprint catches up to product — never revert the product to the old blueprint, that erases real work); ② re-align guard memory to the new consistent state; ③ the product itself is NOT touched or regenerated in this repair phase — product refactoring/adjustment is a separate future task. Guard-memory updates are only allowed AFTER the blueprint reconciles with the product.
 
 ---
 
