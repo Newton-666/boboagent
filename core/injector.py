@@ -210,7 +210,7 @@ def _build_now_anchor() -> str:
     格式：`[NOW] 2026-08-16 18时 周六 (Asia/Shanghai)`。
     每轮组装时调用（build_messages 内），取当前时间；优先 Asia/Shanghai 时区，
     系统无 tzdata 时回退本地时间（ZoneInfo 不可用不炸）。超长截断为无星期几格式。
-    全模式（普通/auto/office）无差别注入——日期时间是无模式的基础信息。
+    全模式（普通/auto）无差别注入——日期时间是无模式的基础信息。
 
     票 COST-2（前缀缓存稳定化）：精度从分钟级降为小时级——分钟级锚点每分钟变一次，
     锚点之后的全部 prompt tokens 缓存作废（实测命中率仅 3.4%）；小时级对
@@ -521,7 +521,7 @@ class PromptInjector:
             "skills": {"chars": 0, "truncated": False},
             "note_pointers": {"chars": 0, "count": 0, "topics": []},
             "guidance": {"chars": 0},
-            "office": {"chars": 0},
+            # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 预算键拆除
             "selfmap": {"chars": 0},
             "now": {"chars": 0},
             "selfmap_chapters": {"chars": 0, "chapters": []},
@@ -616,31 +616,8 @@ class PromptInjector:
                 "chapters": _selfmap_chapters,
             }
 
-        # ── 票 O4-2：OFFICE MODE 上下文告示（office_on 才注入；普通模式零注入）──
-        # 对照组铁律：office off / 普通模式连字段都不读（不 import 读取器）——因此
-        # 先只查 engine.sid 是否存在，延迟 import 读取器仅在 office 会话尝试。
-        # 读取失败静默降级（office_on=False → 零注入），绝不影响工具链。
-        _office_on = False
-        _office_sid = session_id or getattr(engine, "sid", "")
-        if _office_sid:
-            try:
-                from bobo_tui_gateway.server import get_office_on as _get_office_on
-                _office_on = bool(_get_office_on(_office_sid))
-            except Exception:
-                _office_on = False
-        if _office_on:
-            _office_notice = (
-                "【OFFICE MODE】当前处于 OFFICE 模式（会话级，owner 用 /office 显式开启）。"
-                "你是老板（owner 的直接对话方），不是员工。职责：听懂 owner 的编制需求"
-                "（几人/什么角色）→ 用 office_manager 搭建办公室（launch/status/teardown）→ "
-                "relay 派工 → 收五查汇报 → 呈交 owner 终审。"
-                "边界：普通对话/笔记考古不是本模式职责；owner 未给任务时先问清需求，不自行翻旧账。"
-            )
-            messages.insert(1, {
-                "role": "system",
-                "content": _office_notice,
-            })
-            budget_stats["office"] = {"chars": len(_office_notice)}
+        # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：O4-2 office 告示注入拆除
+        # （同时消除 injector→gateway 反向 import get_office_on）
 
         # ── 1. pending diff（票 COST-2：一次性段 → 后移尾部动态区）──
         # 注入后清空（原语义：diff 只在首轮出现一次）；若留在头部 insert(1)，

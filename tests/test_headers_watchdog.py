@@ -129,6 +129,7 @@ class _EventRecorder:
 class TestHeadersWatchdog:
     """headers 阶段看门狗真实服务器集成测试。"""
 
+    @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
     def test_headers_stall_on_hang_server(self, hang_server, monkeypatch):
         """永远不回响应头的服务器应在总预算内触发 headers_stall 并重试 1 次。"""
         from core.llm_caller import (
@@ -166,6 +167,7 @@ class TestHeadersWatchdog:
             assert data["session_id"] == "test-hang"
             assert data["elapsed_ms"] >= _WATCHDOG_TIMEOUT * 1000
 
+    @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
     def test_headers_stall_on_leaky_server(self, leaky_server, monkeypatch):
         """滴漏服务器（每 0.3s 1 字节）不应骗过 headers 总预算。"""
         from core.llm_caller import (

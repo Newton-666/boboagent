@@ -1,0 +1,99 @@
+{
+ "spec": {
+  "name": "N3_normal_write_denied",
+  "auto": false,
+  "input": "帮我提交代码"
+ },
+ "events": [
+  {
+   "type": "state.change",
+   "from": "idle",
+   "to": "idle",
+   "reason": "session start"
+  },
+  {
+   "type": "state.change",
+   "from": "idle",
+   "to": "thinking",
+   "reason": "user input"
+  },
+  {
+   "type": "prompt.budget"
+  },
+  {
+   "type": "prompt.budget.decision"
+  },
+  {
+   "type": "llm.call"
+  },
+  {
+   "type": "state.change",
+   "from": "thinking",
+   "to": "thinking",
+   "reason": "retry"
+  },
+  {
+   "type": "skill.activate"
+  },
+  {
+   "type": "prompt.budget"
+  },
+  {
+   "type": "prompt.budget.decision"
+  },
+  {
+   "type": "llm.call"
+  },
+  {
+   "type": "state.change",
+   "from": "thinking",
+   "to": "thinking",
+   "reason": "retry"
+  },
+  {
+   "type": "skill.activate"
+  },
+  {
+   "type": "prompt.budget"
+  },
+  {
+   "type": "prompt.budget.decision"
+  },
+  {
+   "type": "llm.call"
+  },
+  {
+   "type": "state.change",
+   "from": "thinking",
+   "to": "responding",
+   "reason": "response error"
+  },
+  {
+   "type": "state.change",
+   "from": "responding",
+   "to": "done",
+   "reason": "done"
+  }
+ ],
+ "history": [
+  {
+   "role": "user",
+   "content": "帮我提交代码"
+  },
+  {
+   "role": "system",
+   "content": "注意：这个任务涉及多个步骤或文件。\n选项 A：用 spawn_worker 拆分成独立子任务（推荐，可并行，各模块上下文隔离、质量更好）\n选项 B：全部自己执行（请简要说明理由）\n请在下一步回复中做出选择。"
+  },
+  {
+   "role": "assistant",
+   "content": "模型返回了空响应。可能原因：\n  - reasoning 模型的思考过程耗尽了 max_tokens（可调高 BOBO_MAX_TOKENS 环境变量）\n  - temperature 设置与模型要求不匹配（reasoning 模型通常需要 temperature=1.0，可设置 BOBO_TEMPERATURE）\n  - API 暂时异常"
+  }
+ ],
+ "finals": [
+  {
+   "event": "complete",
+   "content": "模型返回了空响应。可能原因：\n  - reasoning 模型的思考过程耗尽了 max_tokens（可调高 BOBO_MAX_TOKENS 环境变量）\n  - temperature 设置与模型要求不匹配（reasoning 模型通常需要 temperature=1.0，可设置 BOBO_TEMPERATURE）\n  - API 暂时异常"
+  }
+ ],
+ "final_state": "done"
+}

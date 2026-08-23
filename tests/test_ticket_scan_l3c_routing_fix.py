@@ -31,6 +31,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def make_ctx():
     ctx = types.SimpleNamespace()
+    ctx.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补会话级 computer use 开关
     ctx.scan_candidates = {}
     ctx.relay_links = {}
     ctx.auto_mode = {}

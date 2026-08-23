@@ -351,7 +351,7 @@ def handle_session_resume(params: dict, rid: str, ctx) -> dict:
         # TICKET-COMPUTER-USE-ROUTE（VSC-2B 授权标记）：resume 时带回 computer use 状态（前端 toggle 指示跟随会话）
         "computer_use_state": bool(ctx.computer_use_mode.get(sid, False)),
         # TICKET-O2：resume 时带回 office 状态（底栏 OFFICE 指示跟随会话）
-        "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
+        # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office_state 字段拆除
         # TICKET-GUI-F6（缺陷 2c）：带回压缩摘要（有则 GUI 渲染分隔摘要行；
         # 无则空串，前端零变化）
         "summary": session_data.get("summary") or "",
@@ -471,7 +471,7 @@ def handle_session_activate(params: dict, rid: str, ctx) -> dict:
         # TICKET-COMPUTER-USE-ROUTE：切换会话时带回 computer use 状态（toggle 指示跟随该会话）
         "computer_use_state": bool(ctx.computer_use_mode.get(sid, False)),
         # TICKET-O2：切换会话时带回 office 状态（底栏 OFFICE 指示跟随该会话）
-        "office_state": bool(ctx.office_state.get(sid, {}).get("on", False)),
+        # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office_state 字段拆除
         # 票 VSC-2B：切换会话时带回写审批开关状态（扩展侧审批卡渲染跟随该会话）
         "write_approval": bool(session.get("write_approval", False)),
         # 票 GUI-F24：切换会话时带回会话级 request（roles/rules；无则 None）

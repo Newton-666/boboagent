@@ -30,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def make_ctx():
     ctx = types.SimpleNamespace()
+    ctx.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补会话级 computer use 开关
     ctx.scan_candidates = {}
     ctx.relay_links = {}
     ctx.auto_mode = {}
@@ -351,7 +352,7 @@ class TestEngineCompleteHook:
                     register_engine_thread=lambda t, a, l: None,
                     pending_confirm={}, pending_confirm_result={},
                     confirm_lock=mock.MagicMock(),
-                    auto_mode={}, current_engines={},
+                    auto_mode={}, computer_use_mode={}, current_engines={},
                     current_engines_lock=mock.MagicMock(),
                     session_usage={}, session_usage_lock=mock.MagicMock(),
                     save_session_to_disk=lambda *a, **kw: None,

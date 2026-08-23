@@ -1,0 +1,96 @@
+{
+ "spec": {
+  "name": "N2_normal_tool_round",
+  "auto": false,
+  "input": "现在几点了"
+ },
+ "events": [
+  {
+   "type": "state.change",
+   "from": "idle",
+   "to": "idle",
+   "reason": "session start"
+  },
+  {
+   "type": "state.change",
+   "from": "idle",
+   "to": "thinking",
+   "reason": "user input"
+  },
+  {
+   "type": "prompt.budget"
+  },
+  {
+   "type": "prompt.budget.decision"
+  },
+  {
+   "type": "llm.call"
+  },
+  {
+   "type": "state.change",
+   "from": "thinking",
+   "to": "executing",
+   "reason": "executing tools"
+  },
+  {
+   "type": "tool.exec",
+   "name": "get_current_time"
+  },
+  {
+   "type": "state.change",
+   "from": "executing",
+   "to": "thinking",
+   "reason": "next tool round"
+  },
+  {
+   "type": "llm.call"
+  },
+  {
+   "type": "task.no_ledger",
+   "reason": "no ledger (soft limit, R2a)"
+  },
+  {
+   "type": "state.change",
+   "from": "thinking",
+   "to": "responding",
+   "reason": "responding"
+  },
+  {
+   "type": "state.change",
+   "from": "responding",
+   "to": "done",
+   "reason": "done"
+  }
+ ],
+ "history": [
+  {
+   "role": "user",
+   "content": "现在几点了"
+  },
+  {
+   "role": "system",
+   "content": "注意：这个任务涉及多个步骤或文件。\n选项 A：用 spawn_worker 拆分成独立子任务（推荐，可并行，各模块上下文隔离、质量更好）\n选项 B：全部自己执行（请简要说明理由）\n请在下一步回复中做出选择。"
+  },
+  {
+   "role": "assistant",
+   "tool_calls": [
+    "get_current_time"
+   ]
+  },
+  {
+   "role": "tool",
+   "content": "<DATETIME>（耗时: <N>s）"
+  },
+  {
+   "role": "assistant",
+   "content": "现在是下午3点。\n\n<RECON>"
+  }
+ ],
+ "finals": [
+  {
+   "event": "complete",
+   "content": "现在是下午3点。"
+  }
+ ],
+ "final_state": "done"
+}

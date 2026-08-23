@@ -20,8 +20,8 @@ from core.verifier import Verifier
 
 
 def _make_engine(fake_llm, fake_tools, monkeypatch, ledger=None, auto=False,
-                 office_on=False, keep_verifier=False):
-    """构造 engine：设台账 + auto/office 会话级开关。
+                 keep_verifier=False):
+    """构造 engine：设台账 + auto 会话级开关。
 
     keep_verifier=True 时恢复真实 verifier.check_and_inject（测刀 c）。
     """
@@ -31,7 +31,7 @@ def _make_engine(fake_llm, fake_tools, monkeypatch, ledger=None, auto=False,
     # 让假执行器里的 task_ledger 走真实 execute（写 engine.task_ledger）
     fake_tools.ledger_engine = engine
     engine._auto_mode_getter = (lambda: True) if auto else (lambda: False)
-    monkeypatch.setattr("bobo_tui_gateway.server.get_office_on", lambda sid: office_on)
+    # ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：office 开关拆除（仅 auto）
     if keep_verifier:
         engine.verifier = Verifier()
     return engine
@@ -196,6 +196,7 @@ class TestR2bExemptExpanded:
     def test_read_round_three_tools_exempt(self, monkeypatch):
         """3 次读/查工具（echo）→ 台账腔回复豁免，不被打回"""
         fake_llm = FakeLLMCaller([
+            ("", None),  # TICKET-MAIN-REGREEN：意图闸占位（输入含"查"，run() 开头 parse_intent 消费一条）
             (None, [_make_tool_call("c1", "echo", {"msg": "a"})]),
             (None, [_make_tool_call("c2", "echo", {"msg": "b"})]),
             (None, [_make_tool_call("c3", "echo", {"msg": "c"})]),

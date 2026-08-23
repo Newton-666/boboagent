@@ -1,6 +1,6 @@
 # Bobo Harness Constitution (HARCHITECTURE)
 
-> Version v1.0 (ratified) · 2026-08-11 · Drafted by Kimi, ratified by owner
+> Version v1.1 (ratified) · 2026-08-23 · Drafted by Kimi, ratified by owner; Principle 5 added 2026-08-23 (owner + ZCode joint session, ratified by owner)
 > Status: CONSTITUTION layer — principles and prohibitions only. No inventory, no procedures.
 > Reading chain: this constitution → `data/Agent开发手册` (inventory: what exists) → `docs/GUIDANCE.md` (behavioral map: how to act) → `data/skill-standards/` (operational procedures).
 > Authority: every new feature, mode, or ticket MUST pass the §4 admission checklist before work begins. Where legacy behavior conflicts with this constitution, the constitution wins and a rectification ticket is filed.
@@ -22,6 +22,7 @@ This constitution was not designed; it grew out of these incidents:
 | Snapshots catch what slips through | O-1 review established by measurement: upfront path interception succeeds only ~60-70%; O-3 added snapshot backstop |
 | Never trust reports | Two fabrication incidents (false "saved to disk", false "43 passed") established: final review = re-run everything yourself |
 | Freeze & exemption | Relay frozen for one week after repair; O-3 RELAY_ORDER exemption scoped to exactly one file, zero scope creep |
+| Owner stays at the map level | 2026-08-23: owner's own diagnosis — after months of ticket-driven iteration with AI agents, he became estranged from his own agent's architecture; code evolved faster than his mental model. Root cause: reviews were vertical (feature correctness) while the architecture map had no refresh mechanism, and every ticket was opened in details |
 
 ---
 
@@ -53,6 +54,18 @@ This constitution was not designed; it grew out of these incidents:
 - Design upfront interception for ~60-70% success; a **second layer** is mandatory: md5 snapshots of the protected list (snapshot after decision, compare at wrap-up, `office.snap` audit).
 - Snapshot semantics: catch, don't enforce (alert + audit, no blocking). Enforcement belongs to the O-1 layer.
 - All critical state (tickets, manuals, relay files, library) MUST be traceable: committed to git (force-add anything blocked by .gitignore) + `rollback/pre-*` tags before every merge.
+
+### Principle 5 — Owner–AI collaboration keeps the owner at the map level
+
+> Origin: if the starting point of a work session deviates even slightly, the work and the architecture diverge like two non-parallel lines — they never converge. This principle exists so the deviation is caught at the start, not discovered at the end.
+
+Every owner–AI collaboration session (any AI: ZCode, Hermes, bobo itself, future models) MUST follow three rules:
+
+1. **Role division with the map as adjudicator.** The AI works in details; the owner holds direction — but the AI MUST also participate in macro-level discussion as a dialogue partner carrying detail intelligence (one person's blind spots are fixed; two perspectives are not). Verification of AI work is NOT line-by-line diff review: the AI's completion report MUST include a horizontal report — which cells of `docs/ARCHITECTURE-MAP.md` were touched, which load numbers changed, whether any red line was approached. The owner accepts against the map change, not the code detail.
+2. **Fixed ascent cadence, not feeling-triggered.** After each milestone merge (not each message), a ten-minute ascent: is the map still accurate? Is the next spiral turn feature or repayment? Ascent is scheduled; it must never depend on "feeling lost enough".
+3. **Scope-creep alarm words.** The phrases "顺便" (by the way), "I found another place", "this might also need changing" are the standard entry points of getting lost. On any alarm: first ask "does this belong to this turn's committed scope?" — if yes, update the written scope explicitly; if no, record in backlog and keep it out of the current diff. Scope may grow, but only by explicit decision, never by sliding in.
+- Prohibition: starting construction (any ticket, any refactor, any "small change") before the session's spiral-turn scope is stated aloud or in writing. A session without a declared scope is itself a deviation.
+- Prohibition: an AI completion report without a horizontal report section is not acceptable for review.
 
 ---
 

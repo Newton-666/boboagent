@@ -87,7 +87,7 @@ class TestPerf1Timeout:
         _enable_proactive(engine)
 
         t0 = time.time()
-        engine.run(user_input="帮我选一下数据库方案")
+        engine.run(user_input="请选择数据库方案")  # TICKET-MAIN-REGREEN：措辞避开意图闸（"帮我"触发 COST-3 意图调用，会提前吞掉 HangOnFourthCall 的第 1 次挂死）
         elapsed = time.time() - t0
 
         assert engine.state == engine.STATE_DONE, "回合必须正常退场，不被成文挂死钉死"

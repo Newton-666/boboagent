@@ -17,6 +17,7 @@ node 实跑：真实函数 + F13 同款桩 DOM（makeEl）。
 
 import json
 import re
+import os
 import subprocess
 from pathlib import Path
 
@@ -490,6 +491,19 @@ console.log('NODE_TEL7C_OK');
 def test_tel_8_zero_interference():
     r = subprocess.run(["git", "diff", "--name-only", "main"], capture_output=True, text=True, cwd=ROOT)
     changed = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    # 票 TICKET-DEMOLISH-OFFICE-DUO（2026-08-23）特批（顶层分支，先于一切硬断言）：
+    # office/duo 拆除——core/duo_orchestrator.py 整文件删除 + 其余删块/命令面改动，
+    # 现存文件须含 TICKET-DEMOLISH-OFFICE-DUO 标记；已删除文件白名单登记即授权
+    for ln in list(changed):
+        if ln in ("core/duo_orchestrator.py", "tools/office_manager.py"):
+            changed.remove(ln)
+        elif ln in ("core/engine.py", "core/injector.py", "core/command_safety.py",
+                    "bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/prompts.py",
+                    "bobo_tui_gateway/handlers/sessions.py"):
+            r_dm0 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-DEMOLISH-OFFICE-DUO" in r_dm0.stdout, \
+                f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO 标记，未授权改动被拦截"
+            changed.remove(ln)
     # COST-1B（2026-08-16）授权：消耗度量双观测注入点，白名单文件 diff 必须含 COST-1b 标记
     COST1B_ALLOWED = {
         "bobo_tui_gateway/handlers/misc.py",
@@ -522,7 +536,8 @@ def test_tel_8_zero_interference():
         # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
         if ln == "core/command_safety.py":
             r5 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "SAFETY-1" in r5.stdout, f"{ln} 缺 SAFETY-1 特批标记，未授权改动被拦截"
+            assert ("SAFETY-1" in r5.stdout or "TICKET-DEMOLISH-OFFICE-DUO" in r5.stdout), \
+                f"{ln} 缺 SAFETY-1/TICKET-DEMOLISH-OFFICE-DUO 特批标记，未授权改动被拦截"
             continue
         # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
         # 会话内全量稳定），diff 必须含 COST-3 标记；DESK-P1 复用 engine.py 追加
@@ -573,8 +588,8 @@ def test_tel_8_zero_interference():
             continue
         if ln in COST1B_ALLOWED or ln.endswith("metrics.py"):
             r3 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
-                f"{ln} 缺 COST-1b/COST-1c/DESK-P1 授权标记，未授权改动被拦截"
+            assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout or "TICKET-DEMOLISH-OFFICE-DUO" in r3.stdout), \
+                f"{ln} 缺 COST-1b/COST-1c/DESK-P1/TICKET-DEMOLISH-OFFICE-DUO 授权标记，未授权改动被拦截"
             continue
         # 票 TICKET-GW-SOCK / TICKET-GW-MULTI 特批：bobo_tui_gateway/entry.py
         # （GW-SOCK：socket 双实例防护；GW-MULTI：多客户端化，每连接一线程 +
@@ -657,6 +672,10 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
+        if ln.startswith("data/tickets/"):
+            continue  # 治理票据（TICKET-*.md 非代码；与 docs/ 同性质）
+        if ln == "scripts/step_baseline.py":
+            continue  # 票 TICKET-DEMOLISH-OFFICE-DUO 配套：行为基线录制/比对工具（非运行时代码）
         if ln.startswith("data/eval/"):
             continue  # 探针运行产物目录（截图/评估输出，非代码；.gitignore 强制跟踪）
         if ln.startswith("data/skill-standards/"):
@@ -732,6 +751,14 @@ def test_tel_8_zero_interference():
         if ln == "tools/computer_use.py":
             r_cu = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "COST-3" in r_cu.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-DEMOLISH-OFFICE-DUO（2026-08-23）特批：office/duo 拆除——duo_orchestrator
+        # /office_manager 整文件删除 + engine/injector/command_safety 删块 + gateway 命令面，
+        # diff 必须含 TICKET-DEMOLISH-OFFICE-DUO 标记
+        if ln in ("core/duo_orchestrator.py", "tools/office_manager.py"):
+            r_dm = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            if os.path.exists(ln):  # 整文件删除：白名单登记即授权
+                assert "TICKET-DEMOLISH-OFFICE-DUO" in r_dm.stdout, f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO 特批标记，未授权改动被拦截"
             continue
         assert False, f"意外改动文件: {ln}"
 

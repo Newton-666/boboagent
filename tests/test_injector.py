@@ -256,7 +256,7 @@ class TestNowAnchor:
         assert sections["now"]["chars"] == len(anchor)
 
     def test_anchor_in_all_modes(self, injector):
-        """全模式一致：普通/auto/office 无差别注入锚点（office 仅多一段告示）。"""
-        for mode in ("normal", "auto", "office"):
+        """全模式一致：普通/auto 无差别注入锚点。（office 已拆除）"""
+        for mode in ("normal", "auto"):
             msgs = self._build(injector, session_id=f"{mode}-s1")
             assert self._find_anchor(msgs) is not None, f"模式 {mode} 缺锚点"

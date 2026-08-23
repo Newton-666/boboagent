@@ -73,7 +73,7 @@ class TestC6BareExcept:
         _enable_proactive(engine)
 
         with caplog.at_level("WARNING", logger="core.engine"):
-            engine.run(user_input="帮我执行一个命令")
+            engine.run(user_input="请执行一个命令")  # TICKET-MAIN-REGREEN：措辞避开意图闸（"帮我"触发 COST-3 意图调用导致 mock 错位）
 
         assert engine.state == engine.STATE_DONE, "引擎不应被笔记失败炸掉"
         types = [t for t, _ in event_recorder]
@@ -150,7 +150,7 @@ class TestC7GateRegression:
         engine = _make_test_engine(fake_llm, fake_tools, monkeypatch)
         _enable_proactive(engine)
 
-        engine.run(user_input="帮我执行一个命令")
+        engine.run(user_input="请执行一个命令")  # TICKET-MAIN-REGREEN：措辞避开意图闸（"帮我"触发 COST-3 意图调用导致 mock 错位）
 
         assert engine.state == engine.STATE_DONE
         types = [t for t, _ in event_recorder]

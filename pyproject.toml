@@ -47,10 +47,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 python_classes = ["Test*"]
-addopts = ["-v", "--tb=short", "--strict-markers"]
+addopts = ["-v", "--tb=short", "--strict-markers", "-m", "not live"]  # 分层（TICKET-MAIN-REGREEN 阶段 2）：本地默认跳过 live，CI 显式覆盖为全量
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: unit tests for individual functions",
     "integration: integration tests that cross module boundaries",
     "security: security-related tests",
+    "live: socket/时序敏感测试（真开 socket，环境抖动会误报）——本地跳过、CI 全量跑（分层阶段 2）",
 ]

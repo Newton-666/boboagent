@@ -69,6 +69,7 @@ def _make_ctx():
             self.sessions_lock = threading.Lock()
             self.sessions = {}
             self.auto_mode = {}
+            self.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补 FakeCtx 缺失属性
             self.office_state = {}
             self._current = None
 

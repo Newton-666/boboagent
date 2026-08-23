@@ -1,4 +1,6 @@
-"""tests/test_headers_watchdog_live.py — 票 X：headers 看门狗真撞闸复核
+"""
+
+pytestmark = pytest.mark.live  # TICKET-MAIN-REGREEN 分层tests/test_headers_watchdog_live.py — 票 X：headers 看门狗真撞闸复核
 
 验收铁规：
 - 起真 TCP 服务器（accept 后装死 / 发 200 头再断气），禁止 mock requests
@@ -152,6 +154,7 @@ def _make_caller(port: int):
 # 复核项 1：真撞闸 — accept 后装死
 # ═══════════════════════════════════════════════════════════════
 
+@pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
 def test_headers_stall_triggers_within_timeout(stall_server):
     """【咬合验证】headers_timeout 内准时引爆 HeadersStallError。
 
@@ -196,6 +199,7 @@ def test_headers_stall_triggers_within_timeout(stall_server):
             os.environ.pop("BOBO_HEADERS_TIMEOUT", None)
 
 
+@pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
 def test_headers_stall_retry_happens(stall_server):
     """【咬合验证】HeadersStallError 前有 1 次内部重试。
 
@@ -237,6 +241,7 @@ def test_headers_stall_retry_happens(stall_server):
             os.environ.pop("BOBO_HEADERS_TIMEOUT", None)
 
 
+@pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
 def test_headers_stall_event_bus_fires(stall_server, monkeypatch):
     """【咬合验证】llm.headers_stall 事件写入总线。
 
@@ -298,6 +303,7 @@ def test_headers_stall_event_bus_fires(stall_server, monkeypatch):
 # 复核项 2：僵尸线程审计 — worker 线程归宿
 # ═══════════════════════════════════════════════════════════════
 
+@pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
 def test_worker_thread_cleaned_after_timeout(stall_server):
     """【咬合验证】headers stall 后 worker 线程被 shutdown 打断并退出。
 
@@ -351,6 +357,7 @@ def test_worker_thread_cleaned_after_timeout(stall_server):
 # 复核项 3：双看门狗咬合 — 发 200 头再断气 → 归 read 看门狗
 # ═══════════════════════════════════════════════════════════════
 
+@pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
 def test_dual_watchdog_200_then_stall(respond_200_then_stall):
     """【咬合验证】发 200 响应头后断气 → 归 read 看门狗，不误触 headers 路径。
 

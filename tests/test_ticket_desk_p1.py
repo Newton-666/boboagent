@@ -192,6 +192,7 @@ class TestGatewayPersist:
         ctx.pending_confirm_result = {}
         ctx.confirm_lock = threading.Lock()
         ctx.auto_mode = {}
+        ctx.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补 _Ctx 缺失属性
         ctx.current_engines = {}
         ctx.current_engines_lock = threading.Lock()
         ctx.session_usage = {}
