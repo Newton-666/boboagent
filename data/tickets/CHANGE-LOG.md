@@ -244,6 +244,12 @@
 - 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/bugfixes 102 测试过。
 - **第二批（中耦合）全部完成：9/14 房已搬**（收尾 6 + 沉淀 + 销账 + 对账 + 冲突）。
 
+### B23 · 流水线圈房间⑩⑪：台账基线快照 + 台账同步/补账嫌疑迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline-b3）
+- core/steps/ledger_snapshot.py（票 O9）+ ledger_sync.py（票 K v2/L + O8-2）迁出；E2 入前置房（工具环前快照，_prev_ledger 存走廊侧）、E3 入新增中段走廊（工具环后同步+嫌疑评估，先于落账/销账——时序铁律）。
+- 墙新增 EXECUTING 中段走廊（_exec_mid_stages）。
+- 客观验证：行为基线 diff=0（6/6）；台账/auto 系 94 测试过（core_r3/goal_gate/auto_mode/r2a/ledger_1）。
+- 墙内 11 房（收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

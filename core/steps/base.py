@@ -111,6 +111,23 @@ class StepContext:
         self._engine._dispatch_sedimentation(content)
 
     # ── 销账建议（E4）：改历史经办事窗口（COST-7/LEDGER-400：只扩最后一条 user 消息，不插 system）──
+    def snapshot_ledger(self) -> None:
+        """办事窗口：E2 工具环前快照台账基线（O9，_prev_ledger 存走廊侧）。"""
+        self._engine._prev_ledger = list(self._engine.task_ledger)
+
+    def sync_ledger_and_eval_suspect(self, tc_names: list) -> None:
+        """办事窗口：E3 工具环后同步台账 + 评估补账嫌疑（O8-2）。"""
+        try:
+            from tools.task_ledger import current_engine_var, _current_ledger
+            if current_engine_var.get() is not None:
+                self._engine.task_ledger = list(_current_ledger())
+        except Exception:
+            pass
+        if "task_ledger" in tc_names:
+            self._engine._ledger_backfill_suspect = self._engine._detect_ledger_backfill(
+                self._engine._prev_ledger, tc_names
+            )
+
     def fetch_workspace_recon(self) -> str:
         """办事窗口：只读 git 对账（L1），房间不直接跑 shell。"""
         return self._engine._workspace_recon()

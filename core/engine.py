@@ -35,6 +35,8 @@ from core.steps.sediment_dispatch import SedimentDispatchStage
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
 from core.steps.edit_conflict import EditConflictStage
+from core.steps.ledger_snapshot import LedgerSnapshotStage
+from core.steps.ledger_sync import LedgerSyncStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -177,7 +179,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
         self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
-        self._exec_pre_stages = [EditConflictStage()]  # EXECUTING 段前置房（工具环前）
+        self._exec_pre_stages = [EditConflictStage(), LedgerSnapshotStage()]  # 前置房：冲突 + 台账基线快照
+        self._exec_mid_stages = [LedgerSyncStage()]  # 中段房：工具环后台账同步（先于落账/销账）
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1699,38 +1702,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
                         self._emit_state_change(self.STATE_THINKING, "retry after verification")
                         return
 
-            # ── 票 O9：台账基线快照必须在工具执行前 ──
-            # O8-2 判定内核前提是"create 前台账为空（无历史轮次 = 非 resume）"。
-            # 原实现把 _prev_ledger 放在 _execute_tool_loop 之后快照——task_ledger
-            # 工具执行后 engine.task_ledger 已被替换为新账（同轮批量建账全 done），
-            # prev 非空 → 误判为 resume 豁免 → 补账闸永不触发（A2 FAIL 根因，TICKET-O9）。
-            _prev_ledger = list(self.task_ledger)
+            # ── 阶段 3：台账基线快照已搬入前置房（ledger_snapshot，O9）──
             tool_results = self._execute_tool_loop(self._pending_tool_calls)
-            # ── 票 K v2 + L：工具执行后同步台账 ──
-            # task_ledger 工具在 ToolRunnerMixin 提供的 Engine 上下文中
-            # 已经直接修改了 self.task_ledger；若当前线程仍存在上下文（旧测试/直接调用），
-            # 则回退同步模块级变量。
-            try:
-                from tools.task_ledger import current_engine_var, _current_ledger
-                if current_engine_var.get() is not None:
-                    self.task_ledger = list(_current_ledger())
-            except Exception:
-                pass
-            # ── 票 O8-2：事后补账检测（紧跟同步，先于一切收工判定）──
-            # 工具轮含 task_ledger → 重新评估补账嫌疑：create 前台账为空（无历史轮次，
-            # 非 resume）+ 新账 >=2 项且 done 占比 >=80%（全部/大部直接标 done）→ 嫌疑。
-            # resume 恢复既有台账（create 前已有非空台账 = 有历史轮次）→ 豁免。
-            # agent 修正（update 出 pending 项 / create 含 pending）→ 自动清除嫌疑。
-            # 不含 task_ledger 的工具轮 → 嫌疑保持不变（防绕过：不动账直接收工仍被 deny）。
-            if self._pending_tool_calls:
-                _tc_names = [
-                    tc.get("function", {}).get("name", "")
-                    for tc in self._pending_tool_calls
-                ]
-                if "task_ledger" in _tc_names:
-                    self._ledger_backfill_suspect = self._detect_ledger_backfill(
-                        _prev_ledger, _tc_names
-                    )
+            # ── 阶段 3：台账同步+补账嫌疑已搬入中段房（ledger_sync，K v2/L + O8-2）──
+            if self._exec_mid_stages:
+                _ctx_m = StepContext(self)
+                for _stage in self._exec_mid_stages:
+                    _stage.run(_ctx_m)
             self._append_to_history("assistant", self._pending_content,
                                     tool_calls=self._pending_tool_calls,
                                     thinking=self._last_reasoning or None)
