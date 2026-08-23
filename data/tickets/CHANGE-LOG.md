@@ -302,6 +302,12 @@
 - **收益假设要点（诚实）**：内部收益确定（可重排/可测/可拆）；表象上 engine 缩小、准确度不变、速度持平；token **短期持平、中期下降**（解耦不省 token，省 token 是拆补偿约束的中期收益）。
 - **执行顺序**：①安全 → ②工具执行 → ③上下文 → ④小屋 → ⑤出口；每步先白话设计过目再动手。
 
+### B31 · E1 安全手册合一（骨干通信第 1 步）—— 提交（待填）· 2026-08-23（分支 feat/harness-backbone-e1）
+- **改动**：execute_terminal 删除本地 DANGEROUS_PATTERNS 拷贝（12 条，已与主表漂移），引用 command_safety 权威表（20 条）为单一事实源；is_dangerous 循环适配 (pattern, reason) 元组。
+- **安全政策（owner 定调 A：安全从严）**：终端最后防线由 12 条扩到 20 条——新增拦截 git push --force / killall/pkill / /etc 写 / shutdown / mkfs / 反引号 等；heredoc/引号骨架剥离逻辑保留（字面内容不误伤，auto-g2 用例验证）。
+- **验证（快速，未跑全量）**：行为基线 6/6 diff=0；安全系 234 测试过（p0_fixes/auto_g2/command_safety）+ engine/auto 76 过。
+- **收益假设对账（B30 假设①）**：连接方式 4→1 的第一步落地（终端不再持私有手册）；表象：安全更强、行为不变。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
