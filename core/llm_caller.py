@@ -187,7 +187,10 @@ def _post_with_headers_watchdog(
             if not _t.is_alive():
                 break
             if _interrupt_event is not None and _interrupt_event.is_set():
-                _sock = _sock_holder.get("sock")
+                # TICKET-MAIN-REGREEN 修绿判研（core_int2）：threading.local 无 .get
+                # ——中断路径会崩 AttributeError 而非抛 LLMInterrupted。getattr 兜底：
+                # 主线程读不到 worker 线程的 sock 时返回 None（跳过关闭，仍抛中断）。
+                _sock = getattr(_sock_holder, "sock", None)
                 if _sock is not None:
                     _close_socket(_sock)
                 raise LLMInterrupted("user interrupt during headers (silent)")

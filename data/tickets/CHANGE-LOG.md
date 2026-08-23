@@ -82,6 +82,18 @@
 
 ---
 
+### B5 · main 修绿 B 批追加二 —— 提交（待填）· 2026-08-23
+
+- **之前问题**：待查 7 文件——eng1(5)+scan(6) 为接口迁移类（run_engine 签名新增 computer_use_mode，测试调用没跟上）；g3(2) 为 D1 的 /duo 帮助文本残留；computer_use_core 为测试桩过时（lambda 签名 + element_id 键）；core_int2 为 **llm_caller 真 bug**。
+- **改动内容**：
+  1. eng1/scan_l3b/scan_l3c/scan_l3_connect/g3：run_engine 调用补 `computer_use_mode={}`、SimpleNamespace/_FakeCtx 补属性、/duo 断言更新为现存命令。
+  2. computer_use_core：`_capture_png` lambda 补 pid 参数 + `_collect_elements` 桩补 `element_id` 键。
+  3. **core/llm_caller.py 真 bug 修复（判研产出）**：中断路径 `_sock_holder.get("sock")` → `getattr(_sock_holder, "sock", None)`——threading.local 无 .get，原代码中断时崩 AttributeError 而非抛 LLMInterrupted。**本批唯一运行时代码改动，范围 1 行**。
+  4. **遗留裁决点**：skill_audit 断言 research 应注入，但 `data/skills/enabled.json` 里 `research: false`（运行时治理配置）——配置与测试冲突，**待 owner 裁决**（research 是否故意禁用）。
+- **范围**：tests/ 8 文件 + core/llm_caller.py 1 行；其余为测试侧改动。
+- **解决后**：eng1/scan 系/g3/computer_use_core/core_int2 全绿；真 bug 修复（中断路径不再崩溃）。
+- **遗留影响**：skill_audit 1 个待裁决；watchdog 5（D 类暂缓）；前端 4（归前端票）；另记 socket 关闭语义 gap（主线程读不到 worker 线程 sock，中断时不关 socket 只抛异常——候选真 bug，另票评估）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

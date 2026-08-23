@@ -230,7 +230,8 @@ class TestRegression:
         resp = prompts.handle_slash_exec({"command": "help", "session_id": "s1"}, "r1", ctx)
         assert "/scan" in resp["result"]["output"]
         assert "/connect" in resp["result"]["output"]
-        assert "/duo" in resp["result"]["output"]
+        # TICKET-DEMOLISH-OFFICE-DUO：/duo 已随模式拆除，改查现存命令
+        assert "/scan" in resp["result"]["output"]
 
     def test_commands_catalog_includes_new(self):
         resp = prompts.handle_commands_catalog({}, "r1")
@@ -238,7 +239,7 @@ class TestRegression:
         assert "/scan" in canon
         assert "/connect" in canon
         assert "/disconnect" in canon
-        assert "/duo" in canon  # 旧命令仍在
+        assert "/scan" in canon  # TICKET-DEMOLISH-OFFICE-DUO：/duo 已拆，/scan 为现存命令
 
     def test_unknown_command_still_handled(self):
         ctx = make_ctx()

@@ -20,6 +20,7 @@ class _FakeCtx:
     """handle_prompt_submit / handle_slash_exec 所需 ctx 的最小替身。"""
 
     def __init__(self):
+        self.computer_use_mode = {}  # TICKET-MAIN-REGREEN：补 _FakeCtx 缺失属性
         self.sessions_lock = threading.Lock()
         self.sessions = {"s1": {"messages": []}}
         self.active_engine_threads = []

@@ -37,10 +37,11 @@ def test_capture_returns_screen_and_ax_tree(monkeypatch):
     """已授权 capture：返回屏幕 + AX 树索引（role/name/坐标）+（可选）视觉描述。"""
     _authorize_on(monkeypatch)
     monkeypatch.setattr(cu, "_front_pid", lambda: 42)
-    monkeypatch.setattr(cu, "_capture_png", lambda: "/tmp/cu_test.png")
+    monkeypatch.setattr(cu, "_capture_png", lambda pid: "/tmp/cu_test.png")  # TICKET-MAIN-REGREEN：_capture_png(pid) 带参
     monkeypatch.setattr(cu, "_describe", lambda p: "[视觉描述] 这是测试屏")
     monkeypatch.setattr(cu, "_collect_elements", lambda pid: [
-        {"el": "el1", "role": "AXButton", "title": "确定", "frame": (10, 20, 80, 30),
+        {"el": "el1", "element_id": "ax-btn-1",  # TICKET-MAIN-REGREEN：main 的 AX 身份防漂移工作加了 element_id
+         "role": "AXButton", "title": "确定", "frame": (10, 20, 80, 30),
          "depth": 2, "interactive": True},
     ])
     r = cu.execute("capture", describe=False)
