@@ -49,6 +49,15 @@
 
 ---
 
+### B4 · main 修绿 B 批追加 —— 提交（待填，随本批）· 2026-08-23
+
+- **之前问题**：perf_1（成文挂死超时测试）与 core_r3（R2b ≥3 次工具豁免测试）失败——同为意图闸错位根因（B2 发现的 COST-3 意图调用吞 mock 首响应）。
+- **改动内容**：
+  1. perf_1：输入措辞"帮我选一下数据库方案"→"请选择数据库方案"避开意图闸（保住 HangOnFourthCall 第 4 次挂死定位）。
+  2. core_r3：mock 队列前补意图占位（"查"为场景语义不可改措辞）。
+- **范围**：tests/ 2 文件；无运行时代码改动。
+- **解决后**：两文件全绿（累计 61 → 剩余 ~11：skill_audit 1、core_int2 1、computer_use_core 1、eng1 5、scan 6、g3 2、前端 4、watchdog 5——watchdog 与前端按既定策略不在本地批）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

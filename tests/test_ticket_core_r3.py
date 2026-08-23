@@ -196,6 +196,7 @@ class TestR2bExemptExpanded:
     def test_read_round_three_tools_exempt(self, monkeypatch):
         """3 次读/查工具（echo）→ 台账腔回复豁免，不被打回"""
         fake_llm = FakeLLMCaller([
+            ("", None),  # TICKET-MAIN-REGREEN：意图闸占位（输入含"查"，run() 开头 parse_intent 消费一条）
             (None, [_make_tool_call("c1", "echo", {"msg": "a"})]),
             (None, [_make_tool_call("c2", "echo", {"msg": "b"})]),
             (None, [_make_tool_call("c3", "echo", {"msg": "c"})]),
