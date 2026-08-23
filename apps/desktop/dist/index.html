@@ -171,8 +171,8 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 /* TICKET-GUI-F2 (F2-2) + F4-4: 输入框旁 AUTO 模式开关 —— 与 #stop-btn（right:64px）水平错开，
    原 right:64px bottom:37px 与 stop-btn（right:64px bottom:36px）1px 撞车（截图实锤），
    左移至 right:104px 与停止钮同排，右→左：AUTO开关 / 停止钮 / 发送钮 互不重叠 */
-#auto-toggle { padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
-#auto-toggle:hover { background:var(--hover); }
+#auto-toggle, #computer-use-toggle { padding:5px 14px; border-radius:999px; font-size:13px; font-weight:500; color:var(--text-muted); background:var(--bg3); border:1px solid var(--border); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+#auto-toggle:hover, #computer-use-toggle:hover { background:var(--hover); }
 /* TICKET-VISION-CHAT-UPLOAD：图片预览缩略图 + 聊天图（图上文下） */
 /* #img-btn：视觉三要素（owner 强调——同一水平线/间距一致/不重叠）。
  * 走 input-actions 的 flex 流（inherit align-items:center + gap:8px，
@@ -184,7 +184,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .img-preview img { max-width:240px; max-height:180px; border-radius:8px; border:1px solid var(--border); display:block; }
 .img-preview button { position:absolute; top:4px; right:4px; width:22px; height:22px; line-height:18px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; border:none; cursor:pointer; font-size:14px; }
 .chat-img { max-width:240px; max-height:180px; border-radius:8px; border:1px solid var(--border); display:block; margin:4px 0 6px; }
-#auto-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
+#auto-toggle.on, #computer-use-toggle.on { background:rgba(232,145,58,0.15); color:#e8913a; border-color:rgba(232,145,58,0.4); font-weight:600; }
 /* === DESK-P1 project pill ===
  * TICKET-DESK-P1（样式票，独立回溯）：Work with a project pill + 下拉菜单。
  * 本段为外科式摘除单元：删除本段即完整回滚 DESK-P1 的输入区样式。
@@ -326,7 +326,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .ovl-warn-icon { font-size:30px; line-height:1; }
 
 /* ── V2A-3 控件 hover/focus（只补交互态，不动默认外观；focus ring 用现有强调色 #e8913a 1px 外发光）── */
-#new-chat:focus-visible, #send:focus-visible:not(:disabled), #auto-toggle:focus-visible, #session-search:focus-visible,
+#new-chat:focus-visible, #send:focus-visible:not(:disabled), #auto-toggle:focus-visible, #computer-use-toggle:focus-visible, #session-search:focus-visible,
 .copy-btn:focus-visible, .settings-tab:focus-visible, .ovl-btn:focus-visible, .v2a-btn:focus-visible { outline:none; box-shadow:0 0 0 1px rgba(232,145,58,0.6); }
 #send:hover:not(:disabled) { opacity:0.85; }
 #session-search:hover { background:var(--bg2); }
@@ -799,6 +799,7 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
         <button id="img-btn" title="Attach image (vision)" onclick="imgPick()">＋</button>
         <input type="file" id="img-file" accept="image/*" style="display:none" />
         <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
+        <button id="computer-use-toggle" title="Computer Use mode toggle (click to switch; quick direct operations)" disabled>COMPUTER</button>
         <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
         <button id="send" disabled>↑</button>
       </div>
@@ -1453,6 +1454,7 @@ function setConnected(c) {
 function applyConnected(c) {
   connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
   var at = document.getElementById('auto-toggle'); if (at) at.disabled = !c;
+  var cut = document.getElementById('computer-use-toggle'); if (cut) cut.disabled = !c;
   inputEl.placeholder = c ? 'Type a message (↵ send, Shift+↵ newline)' : 'Connecting...';
   if (statusDot) statusDot.className = 'dot ' + (c ? 'green' : 'red');
   if (statusText) statusText.textContent = c ? 'Ready' : 'Offline';
@@ -3056,6 +3058,8 @@ async function loadSession(sid) {
   }
   // F2-2: 会话恢复时同步 AUTO 开关状态（session.resume 返回 auto_state，真实后端状态）
   setMode(result.auto_state ? 'auto' : '');
+  // TICKET-COMPUTER-USE-ROUTE：会话恢复时同步 COMPUTER use 开关状态（resume 返回 computer_use_state）
+  (function(){ var cut = document.getElementById('computer-use-toggle'); if (cut) { cut.classList.toggle('on', !!result.computer_use_state); cut.textContent = result.computer_use_state ? 'COMPUTER ✓' : 'COMPUTER'; } })();
   call('session.activate', { session_id: sid });
   // TICKET-GUI-F10：切回即清"后台活动中"标记（resume 全量已拉取，圆点无意义）
   clearBgActive(sid);
@@ -4008,6 +4012,8 @@ on('skill.activate', function(data) {
 // TICKET-D1d ④: 模式徽标 —— AUTO / OFFICE 实时指示（对齐 TUI 底部状态栏）
 on('session.auto_state', function(data) { if (isForeignSession(data)) return; setMode(data && data.on ? 'auto' : ''); });
 on('session.office_state', function(data) { if (isForeignSession(data)) return; setMode(data && data.on ? 'office' : ''); });
+// TICKET-COMPUTER-USE-ROUTE：COMPUTER use 开关状态实时同步（toggle on/off，不联动状态徽标）
+on('session.computer_use_state', function(data) { if (isForeignSession(data)) return; var cut = document.getElementById('computer-use-toggle'); if (cut) { cut.classList.toggle('on', !!(data && data.on)); cut.textContent = (data && data.on) ? 'COMPUTER ✓' : 'COMPUTER'; } });
 // TICKET-GUI-F1 (F1-3): 引擎内部诊断类状态不进消息区 —— thinking 阶段（tool_filter/calling_llm/
 // executing_tools/executing/continuing/compressing/cross_search）由 engine_adapter 转发为
 // status.update，TUI 侧只在思考区/状态栏快闪；GUI 若 addStatus 会每轮永久堆积成状态轰炸。
@@ -4366,6 +4372,14 @@ sendEl.addEventListener('click', function() {
 document.getElementById('auto-toggle').addEventListener('click', function() {
   if (!connected || !currentSessionId) return;
   call('slash.exec', { command: 'auto', session_id: currentSessionId }).then(function(r) {
+    if (r && r.output) addStatus(r.output);
+  });
+});
+// TICKET-COMPUTER-USE-ROUTE：COMPUTER use 开关 —— 复用后端 slash.exec /computer-use 通道
+// （翻转会话级 computer use 模式：界面/搜索/操作类任务优先 computer_use 快速直接）
+document.getElementById('computer-use-toggle').addEventListener('click', function() {
+  if (!connected || !currentSessionId) return;
+  call('slash.exec', { command: 'computer-use', session_id: currentSessionId }).then(function(r) {
     if (r && r.output) addStatus(r.output);
   });
 });
