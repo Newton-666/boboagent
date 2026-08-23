@@ -32,6 +32,7 @@ from core.steps.backfill_gate import BackfillGateStage
 from core.steps.field_gate import FieldGateStage
 from core.steps.ledger_gate import LedgerGateStage
 from core.steps.sediment_dispatch import SedimentDispatchStage
+from core.steps.auto_suggest import AutoSuggestStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -172,6 +173,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
         self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
+        self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1751,59 +1753,13 @@ class Engine(ContextMixin, ToolRunnerMixin):
             # 落 history 后立即消费即清（下一条 assistant 无新 reasoning 则不落）。
             self._last_reasoning = ""
             self._append_to_history("tool", tool_results=tool_results)
-            # ── 票 L1：自动销账辅助（建议性，模型可推翻）──
-            # 检测强完成信号：run_tests 全绿（N passed 且无 failed）→ 注入建议，
-            # 提示模型用 task_ledger update 标 done（带 evidence）。
-            # 只建议不改账（引擎不替模型记账：台账由模型执笔，铁律保留）。
-            if tool_results and self.task_ledger:
-                _pending_cnt = sum(1 for e in self.task_ledger if e.get("status") != "done")
-                if _pending_cnt:
-                    for _tr in tool_results:
-                        if not isinstance(_tr, dict):
-                            continue
-                        _c = _tr.get("content") or ""
-                        if isinstance(_c, list):
-                            _c = " ".join(
-                                str(x.get("text", "")) for x in _c if isinstance(x, dict)
-                            )
-                        _c = str(_c)
-                        # 全绿信号：N passed 且无 [1-9] failed（0 failed 不算失败）
-                        if re.search(r"\d+\s+passed", _c) and not re.search(r"[1-9]\d*\s+failed", _c):
-                            # 票 LEDGER-400 = COST-7（2026-08-19 开票，owner 定调最后信任票）
-                            # F2/F3 分支落地：原实现 history.append {"role":"system"} 会把
-                            # system 消息硬插在工具轮链中间（assistant(tool_calls)→tool→
-                            # system→assistant），DeepSeek thinking 模式要求该结构中间
-                            # assistant 带 reasoning_content，而 history 里没有 → HTTP 400
-                            # （bobo 施工时反复触发）。修复：改为 COST-6 动态块模式——
-                            # 追加到最后一个 user 消息 content（用户消息 content 扩展不
-                            # 破坏结构，模型仍可见建议）。
-                            _suggest_text = (
-                                "💡 检测到测试全绿强完成信号（run_tests）。"
-                                f"台账仍有 {_pending_cnt} 项 pending：若对应工作已由测试"
-                                "验证完成，请用 task_ledger update 标 done（带 evidence："
-                                "测试数字/文件路径）；否则忽略本条建议（模型可推翻）。"
-                            )
-                            _appended = False
-                            for _m in reversed(self.history):
-                                if _m.get("role") == "user":
-                                    _m["content"] = (
-                                        (_m.get("content") or "") + "\n\n" + _suggest_text
-                                    )
-                                    _appended = True
-                                    break
-                            if not _appended:
-                                # 理论不可达（每轮必有 user 输入）；兜底用独立 system 消息
-                                self.history.append({
-                                    "role": "system",
-                                    "content": _suggest_text,
-                                })
-                            event_bus.write("ledger.auto_suggest", {
-                                "session_id": getattr(self, "sid", ""),
-                                "pending_count": _pending_cnt,
-                            })
-                            logger.debug("LEDGER auto-suggest: %d pending after all-green tests",
-                                         _pending_cnt)
-                            break
+            # ── 阶段 3：EXECUTING 段观察房（销账建议）──
+            if self._exec_post_stages:
+                _ctx_e = StepContext(self)
+                _ctx_e.tool_results = tool_results
+                for _stage in self._exec_post_stages:
+                    _stage.run(_ctx_e)
+            # ── 阶段 3：销账建议房（core/steps/auto_suggest.py）在走廊执行后调用 ──
             # 检测阶段完成信号
             if self._pending_content and self._is_phase_complete(self._pending_content):
                 self._phase_pending_cleanup = True

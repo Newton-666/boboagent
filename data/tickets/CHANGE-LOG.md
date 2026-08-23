@@ -225,6 +225,12 @@
 - 客观验证：行为基线 diff=0（6/6）；E4a/perf_1 15 测试过。
 - 墙内现 6 房：沉淀/承诺/质量/补账/字段/台账。
 
+### B20 · 流水线圈房间⑦：全绿销账建议迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline）
+- core/steps/auto_suggest.py（票 L1 + COST-7/LEDGER-400）迁出为 EXECUTING 段观察房；改历史经办事窗口 append_suggestion_to_history（只扩最后 user 消息防 DeepSeek 400）；建议性可推翻、不改账（铁律保留）。
+- 墙新增 EXECUTING 段走廊（_exec_post_stages，工具落历史后跑）。
+- 客观验证：行为基线 diff=0（6/6）；LEDGER-400 系 4 测试过（另 ledger_1b/cost1b 4 过）。
+- 墙内 7 房（收尾 6 + 执行 1）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

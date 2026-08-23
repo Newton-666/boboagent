@@ -21,6 +21,7 @@ class StepContext:
         self._engine = engine
         self.warnings: list[str] = []         # 附一句（放行但加提醒，走廊最后拼进回复）
         self.reinject_msg: str | None = None  # 拦下时带给模型的话
+        self.tool_results: list = None        # EXECUTING 段走廊注入（销账建议房读取）
 
     # ── 只读简报 ──
     @property
@@ -103,6 +104,17 @@ class StepContext:
     def dispatch_sedimentation(self, content: str) -> None:
         """办事窗口：起沉淀线程属走廊组织动作，房间只申请。"""
         self._engine._dispatch_sedimentation(content)
+
+    # ── 销账建议（E4）：改历史经办事窗口（COST-7/LEDGER-400：只扩最后一条 user 消息，不插 system）──
+    def append_suggestion_to_history(self, text: str) -> None:
+        _appended = False
+        for _m in reversed(self._engine.history):
+            if _m.get("role") == "user":
+                _m["content"] = (_m.get("content") or "") + "\n\n" + text
+                _appended = True
+                break
+        if not _appended:
+            self._engine.history.append({"role": "system", "content": text})
 
 
 class StepStage:
