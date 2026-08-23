@@ -250,6 +250,11 @@
 - 客观验证：行为基线 diff=0（6/6）；台账/auto 系 94 测试过（core_r3/goal_gate/auto_mode/r2a/ledger_1）。
 - 墙内 11 房（收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1）。
 
+### B24 · 流水线圈房间⑫⑬：空响应重试 + 验证器迁出 —— 提交（待填）· 2026-08-23（feat/step-pipeline-b3）
+- core/steps/empty_retry.py + verifier_check.py 迁出为 THINKING 入口房；墙扩展两种新回话（RETRY：空响应重试/报错；VERIFY_REINJECT：验证器命中清态回走）；控制流房间只判结果，走廊执行重试/报错/清态动作。
+- 客观验证：行为基线 diff=0（6/6）；engine_core/e2e/goal_gate/interrupt 系 88 测试过。
+- **13/14 房全部搬完**（P2 终稿组装为展示层债，另期 backlog）。墙形态：入口 2 + 收尾 6 + 执行前 2 + 执行中 1 + 执行后 1 + 回复 1。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

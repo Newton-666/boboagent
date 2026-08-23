@@ -37,6 +37,8 @@ from core.steps.workspace_recon import WorkspaceReconStage
 from core.steps.edit_conflict import EditConflictStage
 from core.steps.ledger_snapshot import LedgerSnapshotStage
 from core.steps.ledger_sync import LedgerSyncStage
+from core.steps.empty_retry import EmptyRetryStage
+from core.steps.verifier_check import VerifierCheckStage
 from core.checkpoint import CheckpointManager
 from core.skill_loader import SkillLoader
 from core.llm_caller import LLMInterrupted  # 票 INT-1：流式可中断——捕获走 interrupted 路径
@@ -181,6 +183,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self._respond_stages = [WorkspaceReconStage()]  # RESPONDING 段观察房
         self._exec_pre_stages = [EditConflictStage(), LedgerSnapshotStage()]  # 前置房：冲突 + 台账基线快照
         self._exec_mid_stages = [LedgerSyncStage()]  # 中段房：工具环后台账同步（先于落账/销账）
+        self._entry_stages = [EmptyRetryStage(), VerifierCheckStage()]  # THINKING 入口房（空响应/验证器）
 
         # 启动时报告工具加载失败（每进程只打印一次，不注入 system prompt）
         if not Engine._tool_load_warning_shown:
@@ -1634,32 +1637,29 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 # 填充之后保存，确保首个修改轮次的文件也能回退（审计 #17）
                 self._emit_state_change(self.STATE_EXECUTING, "executing tools")
             else:
-                # 空响应处理：flash model / reasoning 模型 token 耗尽 → 重试一次
-                if not content and not self._pending_tool_calls:
-                    if self.current_depth < 2:
-                        self._pending_content = None
-                        self._pending_tool_calls = None
-                        self.current_depth += 1
-                        self._emit_state_change(self.STATE_THINKING, "retry")
-                    else:
-                        # 重试后仍然空 → 明确报错，不静默结束
-                        err_msg = (
-                            "模型返回了空响应。可能原因：\n"
-                            "  - reasoning 模型的思考过程耗尽了 max_tokens（可调高 BOBO_MAX_TOKENS 环境变量）\n"
-                            "  - temperature 设置与模型要求不匹配（reasoning 模型通常需要 temperature=1.0，可设置 BOBO_TEMPERATURE）\n"
-                            "  - API 暂时异常"
-                        )
-                        self._pending_content = err_msg
-                        self._emit_state_change(self.STATE_RESPONDING, "response error")
-                # 检查是否需要验证：LLM 声称完成但没有使用任何工具
-                # 票 R3-c：仅当声称完成且本回合零 tool.exec 才触发（干完活正常收尾不误伤）
-                elif self.verifier.check_and_inject(self.history, content,
-                                                    tool_exec_count=self._round_tool_exec_count):
-                    self._pending_content = None
-                    self._pending_tool_calls = None
-                    self.current_depth += 1
-                    self._emit_state_change(self.STATE_THINKING, "tool calls pending")
-                else:
+                # ── 阶段 3：THINKING 入口房（空响应重试 + 验证器，core/steps/empty_retry.py 等）──
+                # 控制流房间：只判结果（RETRY/VERIFY_REINJECT），走廊执行重试/报错/清态回走
+                if self._entry_stages:
+                    _ctx_ent = StepContext(self)
+                    for _stage in self._entry_stages:
+                        _r = _stage.run(_ctx_ent)
+                        if _r == StepResult.RETRY:
+                            if _ctx_ent.error_message:
+                                self._pending_content = _ctx_ent.error_message
+                                self._emit_state_change(self.STATE_RESPONDING, "response error")
+                            else:
+                                self._pending_content = None
+                                self._pending_tool_calls = None
+                                self.current_depth += 1
+                                self._emit_state_change(self.STATE_THINKING, "retry")
+                            return
+                        if _r == StepResult.VERIFY_REINJECT:
+                            self._pending_content = None
+                            self._pending_tool_calls = None
+                            self.current_depth += 1
+                            self._emit_state_change(self.STATE_THINKING, "tool calls pending")
+                            return
+                # ── 收尾闸墙（原 else 主体）──
                     # ── 票 G2-1：收工闸前移（先账后复）──
                     # 四个闸在进入 RESPONDING 前执行；账不平 → 回注 THINKING（用户只看到 Working）。
                     # 闸全过才进 RESPONDING（放行路径）。纯聊天快速通道语义保留（tool_round==0 直放）。

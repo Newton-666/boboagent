@@ -10,8 +10,10 @@ import enum
 
 
 class StepResult(enum.Enum):
-    PASS = 0      # 放行，叫下一间
-    REINJECT = 1  # 拦下：走廊回入口重走一轮（ctx.reinject_msg 带给模型）
+    PASS = 0             # 放行，叫下一间
+    REINJECT = 1         # 拦下：走廊回入口重走一轮（ctx.reinject_msg 带给模型）
+    RETRY = 2            # 入口房：空响应重试（depth<2 重试；ctx.error_message 非空则报错收尾）
+    VERIFY_REINJECT = 3  # 入口房：验证器命中（history 已注入，走廊仅清态回走）
 
 
 class StepContext:
@@ -23,6 +25,7 @@ class StepContext:
         self.reinject_msg: str | None = None  # 拦下时带给模型的话
         self.tool_results: list = None        # EXECUTING 段走廊注入（销账建议房读取）
         self.recon_text: str = ""            # RESPONDING 段观察房产出（对账文本，走廊并入 history）
+        self.error_message: str | None = None  # 入口房：空响应耗尽时走廊用作回复内容
 
     # ── 只读简报 ──
     @property
@@ -111,6 +114,17 @@ class StepContext:
         self._engine._dispatch_sedimentation(content)
 
     # ── 销账建议（E4）：改历史经办事窗口（COST-7/LEDGER-400：只扩最后一条 user 消息，不插 system）──
+    @property
+    def current_depth(self) -> int:
+        return self._engine.current_depth
+
+    def verifier_check(self, content: str) -> bool:
+        """办事窗口：验证器（R3-c）——claims-completion-without-tools 注入。"""
+        return self._engine.verifier.check_and_inject(
+            self._engine.history, content,
+            tool_exec_count=self._engine._round_tool_exec_count,
+        )
+
     def snapshot_ledger(self) -> None:
         """办事窗口：E2 工具环前快照台账基线（O9，_prev_ledger 存走廊侧）。"""
         self._engine._prev_ledger = list(self._engine.task_ledger)
