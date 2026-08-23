@@ -291,6 +291,11 @@
 - **落盘**：docs/PARADIGM-REINFORCEMENT-LOOP.md（含待议问题，观点可演化）。
 - **范围**：docs/ 1 文件；零代码。
 
+### B29 · 范式修正：RL 对象 = harness（Agent 要有灵魂）—— 提交（待填）· 2026-08-23
+- **owner 修正**：RL 不作用于模型（无能力也不需要），作用于 **harness 层**——模型不变，harness 在使用中学习用户。
+- **核心理念**：Agent 要有灵魂 = 越用越契合用户、形成默契；实体 = harness 上随使用累积的用户适配层（记忆召回/工具选择/注入选择/闸参数/上下文组成，各一张按用户权重表，bandit 式在线更新），模型换代不丢。
+- **落盘**：docs/PARADIGM-REINFORCEMENT-LOOP.md 更新（移除"与模型换代冲突"表述，新增可学习点+奖励信号表）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
