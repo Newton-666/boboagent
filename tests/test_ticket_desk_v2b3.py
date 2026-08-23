@@ -96,8 +96,8 @@ def test_v2b3_1_slash_route_static():
     assert "addStatus(r.output)" in es, "结果应显示为系统消息"
     assert "addMsg('user'" not in es, "命令结果不得以用户消息形式进 LLM 流"
     # sendPrompt 只被非 "/" 分支调用（在 click 处理器中位于 "/" 分支之后）
-    assert send_handler.index("execSlash") < send_handler.index("sendPrompt(text)"), \
-        "sendPrompt 必须位于斜杠路由之后（仅非 / 输入可达）"
+    assert send_handler.index("execSlash") < send_handler.index("sendPrompt(text, img)"), \
+        "sendPrompt 必须位于斜杠路由之后（仅非 / 输入可达）"  # TICKET-FRONTEND-GREEN：对齐成品（选图参数）
 
 
 # ── V2B3-2：命令面板 DOM + 样式闸 ───────────────────────────────────────

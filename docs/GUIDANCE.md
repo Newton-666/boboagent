@@ -6,6 +6,12 @@
 
 ---
 
+[FRONTEND CONTRACT] Desktop UI work = blueprint-first (constitution Principle 6).
+- Where: docs/FRONTEND-BLUEPRINT.md (the ONLY blueprint; apps/desktop/src/ is dead archive — do not edit or cite it as source)
+- How: read docs/FRONTEND-BLUEPRINT.md before ANY change to apps/desktop/dist/index.html
+- When: any ticket touching dist/, the desktop UI, or frontend guards
+- Rule: product (dist/) is the source of truth — never revert it; blueprint MD must be updated in the same ticket; frontend guard tests must pass.
+
 [CAPABILITY MAP] If unsure, check first. Answering from vague memory is a violation.
 
 ## Notes (work records you wrote in past sessions; trust them)

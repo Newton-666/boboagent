@@ -66,18 +66,17 @@
 
 ```
 阶段 0：D1 拆除 office/duo        ✅（engine 2,545→2,208）
-阶段 1：main 修绿（测试债）       ✅ 已收口（61→15→10，分层后全量核实：10 = 校准 4 + 前端 5 + tel_8 1）
-阶段 2：测试分层                 ✅ 施工完成（B8 分层 + B9 校准）；本地全量 110s/10 败，live 进 CI；分支 feat/test-layering 待合 main
-阶段 3：engine 流水线圈            ⬜ ← 目标（校准批清完，剩前端票一道）
+阶段 1：main 修绿（测试债）       ✅ 已收口
+阶段 2：测试分层 + 前端票          ✅ 全部收口（B8 分层 + B9 校准 + B10 宪法蓝图先行 + B11 前端守卫对齐）——本地全量预期全绿
+阶段 3：engine 流水线圈            ⬜ ← 目标（仅剩验收合 main 与 tel_8 复核）
 ```
 
 **到 engine 还差几步**：
-1. 前端票（5 个：css×2/v2b3_1/busy_gate/gui_f4）——修绿 + 规整两步，并行工作流
-2. tel_8 复核（分支状态敏感，合 main 后重验）
-3. socket-gap 评估票（可并行）
-4. 阶段 2 合 main（owner 验收）→ 阶段 3 开工
+1. 全量复跑确认本地全绿（预期 4→0）
+2. 阶段 2 合 main（owner 验收）——已合过一次（48e5ebd9），本次前端批单独合
+3. socket-gap 评估票 + 构建管线迁移票（长期，可并行）
 
-→ 前端票收口后即 engine 开工。本次记录批次：B0–B9。
+→ 全绿确认后即 engine 开工。本次记录批次：B0–B11。
 下次批次合入时：先写微观条目，再刷新本快照（强制，无需提醒）。
 
 ---
@@ -161,6 +160,20 @@
 - **范围**：docs/HARCHITECTURE.md + data/tickets/；零运行时代码改动。
 - **解决后**：宪法覆盖"宏观/微观"方法论（Principle 5 owner 保持地图层 + Principle 6 先图后物）；前端票有了正确的执行路径。
 - **遗留影响**：前端票实际施工（反推 src）尚待执行。
+
+### B11 · 前端票修绿（守卫对齐，成品不动）—— 提交（待填）· 2026-08-23
+
+- **之前问题**：前端 5 守卫失败——成品（dist）被前端票改动，守卫记忆过时（busy_gate/v2b3_1/gui_f4/css×2）。
+- **调查发现**：dist 是手写维护的生产构件（Electron 直接加载），`src/` 是废弃存档（git 记录证实）——"蓝图"实为 dist 内 43 票注释 + 守卫。
+- **owner 裁决**：成品不动（10 天工作是事实源）；蓝图 = MD 设计文档（docs/FRONTEND-BLUEPRINT.md）；守卫对齐。
+- **改动内容**：
+  1. **docs/FRONTEND-BLUEPRINT.md 新建**（蓝图 v1）：产品现状/接口契约（29 RPC + 20 事件 + DOM + localStorage）/维护纪律（动成品三步）/版本记录。
+  2. **docs/GUIDANCE.md 挂入 FRONTEND CONTRACT**（契约层）：任何 agent 做前端改动必读蓝图——未来任何 agent 按仓库规范工作即发现。
+  3. 守卫对齐（成品不动）：busy_gate 期望串更新（&& !img 选图参数）；v2b3_1 sendPrompt(text, img)；gui_f4 选择器正则（#auto-toggle, #computer-use-toggle）；css ×2 归一化豁免（computer-use 选择器扩展 + vision 图片规则两笔授权变更登记比对）。
+  4. dist 现状提交为新冻结基线 tag rollback/pre-frontend-align（成品不动 = 捕获事实非编辑）。
+- **范围**：docs 2 文件 + tests 4 文件 + dist 提交 + 1 tag；成品本身零编辑。
+- **解决后**：前端 5 守卫全绿（前端守卫组 87 过）；本地全量预期 10→4（剩 tel_8 复核已过 + 校准已清）。
+- **遗留影响**：构建管线迁移（另期长期票）；socket-gap 评估票。
 
 ## 待办追溯索引
 

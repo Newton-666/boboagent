@@ -432,7 +432,7 @@ def test_v4b0_2_busy_gate_static():
     assert "renderBusyUI();   // V4B⓪：切会话立即按新会话忙碌态刷新" in g, "loadSession 切会话必须刷新忙碌态"
     assert "renderBusyUI();   // V4B⓪：resume 完成后按新会话忙碌态最终刷新一次" in g, "resume 完成必须兜底刷新"
     # 发送闸门依赖 messaging，messaging 只在 renderBusyUI 赋值（全局副作用收敛单一出口）
-    assert "if (!text || !connected || messaging) return;" in g, "发送闸门必须保留 messaging 判断"
+    assert "if ((!text && !img) || !connected || messaging) return;" in g, "发送闸门必须保留 messaging 判断（选图上传票加 && !img，messaging 判断未删）"  # TICKET-FRONTEND-GREEN：对齐成品现状
     m = re.findall(r"(?<!var )messaging = ", g)
     assert len(m) == 1, f"messaging 赋值必须唯一（只在 renderBusyUI）: {len(m)} 处"
     # F10 后台活动圆点保持现状（需求③：不动）

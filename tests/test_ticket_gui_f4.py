@@ -175,7 +175,7 @@ class TestF44ButtonLayout:
         toggle_i = src.index('<button id="auto-toggle"')
         stop_i = src.index('<button id="stop-btn"')
         assert toggle_i < stop_i, "auto-toggle 应在 stop-btn 左侧（DOM 顺序）"
-        toggle_css = re.search(r"#auto-toggle \{[^}]*\}", src).group(0)
+        toggle_css = re.search(r"#auto-toggle[^{]*\{[^}]*\}", src).group(0)  # TICKET-FRONTEND-GREEN：computer-use 票把选择器扩展为 #auto-toggle, #computer-use-toggle
         assert "position:absolute" not in toggle_css, "F26 后 auto-toggle 不再 absolute 定位"
 
     def test_no_overlap_geometry(self):

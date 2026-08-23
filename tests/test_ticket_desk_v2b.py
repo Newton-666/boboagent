@@ -306,7 +306,7 @@ def test_v2b_css_zero_change_on_existing():
     head = subprocess.run(["git", "show", f"{base_ref}:apps/desktop/dist/index.html"],
                           capture_output=True, text=True, cwd=str(ROOT))
     if head.returncode != 0 or "票 P0-1：Memory 面板" in head.stdout:
-        base_ref = "rollback/pre-p0-1"
+        base_ref = "rollback/pre-p0-1"  # 基线不变（P0-1 前全量）；授权变更由下方归一化豁免处理（TICKET-FRONTEND-GREEN）
         head = subprocess.run(["git", "show", f"{base_ref}:apps/desktop/dist/index.html"],
                               capture_output=True, text=True, cwd=str(ROOT))
         assert head.returncode == 0, f"git show {base_ref} 失败"
@@ -316,6 +316,18 @@ def test_v2b_css_zero_change_on_existing():
     p01_pos = new_style.find("/* 票 P0-1：Memory 面板")
     assert p01_pos > 0, "P0-1 注释块应在 style 块内"
     new_pre = new_style[:p01_pos]
+    # ── TICKET-FRONTEND-GREEN：守卫对齐（成品不动，守卫认账）──
+    # pre-P0-1 区域两笔授权变更在比对前归一化（已登记入 docs/FRONTEND-BLUEPRINT）：
+    # ① TICKET-COMPUTER-USE-ROUTE：#auto-toggle 选择器扩展（去 #computer-use-toggle 及其伪类）
+    # ② TICKET-VISION-CHAT-UPLOAD：图片预览规则（#img-btn/.img-preview/.chat-img + 注释块）插入 pre-P0-1 区
+    new_pre = re.sub(r", #computer-use-toggle(?:(?:\.[\w-]+)|(?:\:[\w-]+))?", "", new_pre)
+    new_pre = re.sub(r"/\* TICKET-VISION-CHAT-UPLOAD[\s\S]*?\*/\s*", "", new_pre)
+    new_pre = re.sub(r"/\* #img-btn：视觉三要素[\s\S]*?\*/", "", new_pre)
+    for _pat in (r"#img-btn[^{]*\{[^}]*\}", r"\.img-preview[^{]*\{[^}]*\}", r"\.chat-img[^{]*\{[^}]*\}"):
+        new_pre = re.sub(_pat, "", new_pre)
+    new_pre = re.sub(r"\n{2,}", "\n", new_pre)
+    old_style = re.sub(r"\n{2,}", "\n", old_style)  # 两侧统一折叠空行（对齐归一化）
+
     assert new_pre == old_style, f"P0-1 之前的所有既有 CSS 必须与基线（{base_ref}）逐字节一致"
 
 
