@@ -538,6 +538,12 @@
 - **改动**：回调工具调用改发 `tool.start`（name=tool_name → TOOL_ICONS svg 卡；context 标注 [Worker 角色] + 参数预览）；保留状态阶段（status.update）+ 思考（thinking）事件。
 - **验证**：role 5 测试绿（含 tool.start 断言）；基线 6/6；前端构建 dist 一致。
 
+### B73 · 压缩必保层 + spawn_worker 合 main —— 提交（待填）· 2026-08-24
+- **合并**：feat/compression-protect → main（427ab2a）；rollback/pre-compression-worker 就位。
+- **验证（便宜栈）**：fact_protect/acceptance/spawn_worker/engine/goal/tel_8 51 测试绿；基线 6/6；冒烟 5/5。
+- **内容**：压缩必保层（压6次后X可答）+ spawn_worker 可用化（角色预设/标准工具卡/过程可见）。
+- **准备**：让 bobo 施工试用（owner 指示）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
