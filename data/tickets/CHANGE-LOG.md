@@ -467,6 +467,11 @@
 - **含义**：全默认关（BOBO_ROUTER/LEARN/ADAPT=0）下，改造零行为干扰——所有新组件是增量，主线行为不变。
 - **对比**：测试从 2855 增至 2867（+12 新组件测试）。
 
+### B61 · harness 工程化合 main —— 提交（待填）· 2026-08-24
+- **合并**：feat/harness-b-router（含链式 a1-memory/ab-test）→ main（e2fe3d5）；rollback/pre-harness-engineer 就位。
+- **补录**：pyproject --ignore=experiments（防沙盒同名测试模块冲突，遗留改动）。
+- **合后全量**：后台跑（预期 tel_8 转绿全绿）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
