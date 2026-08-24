@@ -419,6 +419,15 @@
 - **影响面**：proactive/memory_mirror/injector 无行为变化（读接口不变纪律兑现）。
 - **红线**：分支未合 main；rollback/pre-a1 就位。
 
+### B53 · B 路由（MoE 规则版 v1）—— 提交（待填）· 2026-08-24（分支 feat/harness-b-router，未合 main）
+- **改动**：core/router.py（统一路由器）——接口 route(task, profile, recent)→{tools/skills/memories}；规则版：常驻工具集 + 任务关键词→domain 映射 + 技能候选 + 记忆类型候选；BOBO_ROUTER=1 启用，默认关。
+- **接线**：engine._call_llm 按路由过滤 tools_override；skill_loader 按路由技能候选过滤（description 语义激活保留）。
+- **验证**：
+  - 默认关：行为基线 6/6 diff=0 + 116 测试绿（行为不变纪律）；
+  - 开（BOBO_ROUTER=1）：真路由器 10 任务实测 **tokens=43,883（-63.6% vs 全量 120,413）、calls=19（-54%）**——优于模拟版（-20.3%），MoE 主张强支持；
+  - 冒烟：code_fix 激活 code-fix 技能 + 13 工具广告，run done。
+- **待续（B 内）**：B4 记忆召回路由（route.memory_types 未接 injector——下一步）；规则表按实测校准。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
