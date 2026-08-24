@@ -480,6 +480,11 @@
 - **验证**：lifecycle 5 单测绿；基线 6/6；skill/engine/injector 51 过；D 端到端（自主沉淀→登记 active→loader 路由命中）通过。
 - **§3b 落地对照**：触发=agent 自主 ✅ · 生命周期=使用驱动状态机 ✅ · 保护=pinned+锚定 ✅ · 纯确定性 ✅ · provenance ✅。
 
+### B63 · D 沉淀机制合 main —— 提交（待填）· 2026-08-24
+- **合并**：feat/harness-d-sediment → main（d1247e6）；rollback/pre-d-merge 就位。
+- **验证（便宜栈）**：lifecycle/observer/learner/adapt + tel_8 19 测试绿；基线 6/6；冒烟 5/5。
+- **沉淀机制正式入主线**：agent 自主触发 + 使用驱动生命周期 + provenance + 修不可路由根因。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
