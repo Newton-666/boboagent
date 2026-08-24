@@ -1713,7 +1713,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         if user_input and not str(user_input).strip().startswith("/"):
             from core.intent import parse_intent
             try:
-                self._current_intent = parse_intent(str(user_input), self.llm_caller)
+                self._current_intent = parse_intent(str(user_input), self.llm_caller,
+                                          base_system_prompt=self.system_prompt)
             except Exception:
                 self._current_intent = None
         self.current_depth = depth
