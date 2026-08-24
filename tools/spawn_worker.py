@@ -20,15 +20,47 @@ _MODIFY_KEYWORDS = ["修改", "重构", "编辑", "改写", "重写", "添加功
                      "implement", "refactor", "modify", "edit", "rewrite"]
 
 
+# ── 角色预设（职责拆分：exploring / coding 等）──
+_ROLE_PRESETS = {
+    "explorer": (
+        "## 你的职责（探索/调研）\n"
+        "- **只探索、不修改**：读代码/搜资料/分析，产出发现和结论，不改任何文件。\n"
+        "- 目标：给主 Agent 提供决策所需的完整信息（现状/约束/可行方案）。\n"
+        "- 输出：发现清单（找到了什么、在哪里、意味着什么）+ 建议下一步。\n"
+    ),
+    "coder": (
+        "## 你的职责（编码/修复）\n"
+        "- **动手实现**：改代码/写测试/跑验证，把任务做完。\n"
+        "- 目标：交付可工作的修改，不是分析报告。\n"
+        "- 输出：做了什么修改、验证结果、遗留风险。\n"
+    ),
+    "researcher": _ROLE_PRESETS.get("explorer", "") if False else (
+        "## 你的职责（研究/资料调研）\n- 多源查证、标注来源、给出结论与依据。\n"
+    ),
+}
+
+
+def _detect_role(name: str) -> str:
+    """从 name 检测角色（explorer/coder/researcher），未命中 → 通用。"""
+    n = str(name or "").lower()
+    if any(k in n for k in ("explor", "调研", "探索", "研究", "分析", "researcher", "research")):
+        return "explorer"
+    if any(k in n for k in ("cod", "修复", "实现", "开发", "编码", "测试员", "fix")):
+        return "coder"
+    return ""
+
+
 def _build_worker_prompt(instruction: str, name: str) -> str:
-    """构建 Worker 的 system prompt。"""
+    """构建 Worker 的 system prompt（角色感知：explorer/coder 职责拆分）。"""
     role_line = f"你的 role：{name}" if name else "你的 role：由主 Engine 的指令指定"
+    role_preset = _ROLE_PRESETS.get(_detect_role(name), "")
     return (
         f"你是 Bobo 派出的 Worker Agent。\n\n"
         f"## 身份\n"
         f"{role_line}\n\n"
         f"## 任务\n"
         f"完成主 Engine 交给你的指令。完成之前不要停。\n"
+        f"{role_preset}\n"
         f"完成之后返回结果摘要。主 Engine 只看你的摘要来做出下一步判断。\n\n"
         f"## 你必须遵守\n"
         f"- **禁止嵌套**：不要 spawn 子 Worker。你做的所有事自己完成。\n"
@@ -72,24 +104,39 @@ def set_worker_event_emitter(emitter, sid: str = None):
 
 
 def _make_worker_callback(name: str):
-    """Worker 的回调：每调一个工具就发 thinking 事件到 TUI。"""
+    """Worker 的回调：工具调用 + 阶段/状态事件 → TUI（探索过程可见，非黑箱）。"""
+    _phase_map = {"IDLE": "启动", "THINKING": "思考", "EXECUTING": "执行工具",
+                  "RESPONDING": "整理结果", "DONE": "完成", "ERROR": "出错"}
     def _cb(event_type: str, data: dict):
-        if event_type != "tool_call":
-            return
-        tool = data.get("tool_name", "")
-        args = data.get("tool_args", {})
-        # 生成简短的工具调用描述
-        desc = tool
-        if isinstance(args, dict):
-            for key, preview_key in [("query", "query"), ("command", "command"), ("filepath", "filepath"),
-                                       ("url", "url"), ("instruction", "instruction")]:
-                val = args.get(key, "")
-                if val:
-                    desc = f'{tool}("{str(val)[:40]}")'
-                    break
         emitter = _worker_event_emitter
-        if emitter:
-            emitter("thinking", _worker_sid or "", {"message": f"[Worker {name}] {desc}"})
+        if not emitter:
+            return
+        sid = _worker_sid or ""
+        if event_type == "tool_call":
+            # Worker 的调用渲染成标准工具卡（svg+名字，与其他工具一致）：
+            # 发 tool.start → 前端 addTool(name) 出卡；context 标注 Worker 角色
+            tool = data.get("tool_name", "")
+            args = data.get("tool_args", {})
+            preview = ""
+            if isinstance(args, dict):
+                for key in ("query", "command", "filepath", "url", "instruction"):
+                    val = args.get(key, "")
+                    if val:
+                        preview = str(val)[:40]
+                        break
+            ctx = f"[Worker {name}]" + (f" {tool}({preview})" if preview else "")
+            emitter("tool.start", sid, {"name": tool, "context": ctx,
+                                        "tool_id": f"w-{name}-{tool}"})
+        elif event_type == "state.change":
+            # 阶段可见：状态转换发事件（探索/编码过程可被用户看到走到哪了）
+            to = data.get("to", "")
+            phase = _phase_map.get(to, to)
+            emitter("status.update", sid, {"status": f"[Worker {name}] {phase}", "message": f"Worker {name} {phase}"})
+        elif event_type == "thinking":
+            # Worker 的思考（推理过程）可见——不再黑箱
+            msg = str(data.get("message", ""))[:80] if isinstance(data, dict) else str(data)[:80]
+            if msg:
+                emitter("thinking", sid, {"message": f"[Worker {name}] 💭 {msg}"})
     return _cb
 
 

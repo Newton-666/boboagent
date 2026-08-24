@@ -384,6 +384,15 @@ class ContextMixin:
             layer_0_msgs.insert(0, m)
             layer_0_tokens += mt
         split_idx = total_msg_count - len(layer_0_msgs)
+        # ── 必保层（B67：压缩替换历史前，先捞关键事实沉淀——保存层守卫）──
+        # 只保护"将摘要掉的段"（layer0 逐字保留不用保护），防压缩吃掉用户提及事实
+        try:
+            from core.fact_protect import protect_from_messages
+            _archivable = self.history[:split_idx] if split_idx > 0 else []
+            if _archivable:
+                protect_from_messages(_archivable)
+        except Exception:
+            pass
         archivable_ratio = 1.0 - (len(layer_0_msgs) / max(total_msg_count, 1))
         if archivable_ratio < 0.15 and total_tokens <= token_budget * 1.2 and total_msg_count <= msg_budget:
             # 可归档太少且未严重超预算 → 不压

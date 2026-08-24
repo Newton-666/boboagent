@@ -517,6 +517,27 @@
 - **验证（便宜栈）**：engine/goal/cu/tel_8 53 测试绿；基线 6/6；工作树干净。
 - **修复**：parse_intent 共享主 system 前缀——意图调用命中率 ~36%→97.6%（实测 B68）。
 
+### B70 · 压缩必保层实现 —— 提交（待填）· 2026-08-24（feat/compression-protect，未合 main）
+- **改动**：core/fact_protect.py（必保层：显式信号关键词 + 硬事实规则 URL/路径/数字/决策/凭据，零 LLM 成本）；接入 _compress_history——压缩前保护"将摘要掉的段"（layer0 保留段不压）。
+- **验收（B67 两层）**：压 6 次后 8080 仍在记忆（保存层 durable）+ 召回含 8080（注入层 routing）——测试通过。
+- **验证**：基线 6/6；fact_protect 4 + acceptance 1 + memory/engine/ticket023 46 测试绿。
+- **设计衔接**：注入层（MoE 召回）已有——本实现只做保存层守卫；LLM 语义兜底（漏斗③）预留（成本纪律下不默认启用）。
+
+### B71 · spawn_worker 修复（可用化）—— 提交（待填）· 2026-08-24（feat/compression-protect）
+- **修正（owner 红线）**：worker 调用渲染为**标准工具卡（svg+名字）**——回调发 tool.start（name/context/tool_id），前端 addTool 出卡；context 标注 [Worker 角色]。不另造样式。
+- 角色预设（explorer/coder/researcher）+ 阶段/思考事件可见（同上条）。
+- **owner 定**：spawn_worker 探索过程黑箱 + 无职责拆分（exploring/coding）；自定义（角色/prompt/模型/数量/超时）后做，先修到可用。
+- **改动**：
+  1. 角色预设（_ROLE_PRESETS + _detect_role）：explorer（只探索不修改）/ coder（动手实现）/ researcher；name 自动检测角色，prompt 职责化；
+  2. 回调增强（非黑箱）：工具调用 + 状态转换阶段 + 思考推理，全部发事件到 TUI——探索过程可见。
+- **验证**：role 5 测试绿；基线 6/6。
+- **自定义（前端方向，后做）**：角色/prompt/模型/数量/超时 → FRONTEND-DESIGN 方向三。
+
+### B72 · spawn_worker 工具卡样式对齐 —— 提交（待填）· 2026-08-24
+- **owner 要求**：worker 调用分支形式/样式与其他工具卡一致（svg+名字），不乱来。
+- **改动**：回调工具调用改发 `tool.start`（name=tool_name → TOOL_ICONS svg 卡；context 标注 [Worker 角色] + 参数预览）；保留状态阶段（status.update）+ 思考（thinking）事件。
+- **验证**：role 5 测试绿（含 tool.start 断言）；基线 6/6；前端构建 dist 一致。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
