@@ -71,23 +71,28 @@ def _parse_json(content: str) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
-def parse_intent(user_input: str, llm_caller) -> dict | None:
+def parse_intent(user_input: str, llm_caller, base_system_prompt: str = None) -> dict | None:
     """用户请求 → {goal, target, means, need_clarify} 三要素。
 
     LLM 判断（thinking_disabled 冷调用）+ 约束框架（INTENT_PROMPT 缰绳）。
     GOAL 为空/不可复述/解析失败 → 返回 None（无有效意图锚点，调用方不注入）。
     失败静默丢弃（绝不影响主流程）——与 signal_detector._llm_judge 同语义。
+
+    缓存修复（2026-08-24）：base_system_prompt 传入主 system 作为第 1 段，
+    意图指令降为第 2 段 system——意图调用与主调用共享前缀缓存
+    （原来第 1 段是独立"意图解析器"system，前缀在位置 1 就断，命中率仅 ~36%）。
     """
     if not user_input or not str(user_input).strip():
         return None
     if not _intent_gate(str(user_input)):
         return None  # 零成本冷门卫：非目标操作类请求，不调 LLM，不消耗调用序列
     try:
-        resp = llm_caller(
-            [
-                {"role": "system", "content": _INTENT_PROMPT},
-                {"role": "user", "content": f"用户请求：{user_input}"},
-            ],
+        msgs = []
+        if base_system_prompt:
+            msgs.append({"role": "system", "content": base_system_prompt})
+        msgs.append({"role": "system", "content": _INTENT_PROMPT})
+        msgs.append({"role": "user", "content": f"用户请求：{user_input}"})
+        resp = llm_caller(msgs,
             use_tools=False,
             max_tokens=_INTENT_MAX_TOKENS,
             thinking_disabled=True,  # 【COST-3】冷调用关 thinking（与 signal_detector 同例）
