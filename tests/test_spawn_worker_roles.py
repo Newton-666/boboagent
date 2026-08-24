@@ -76,6 +76,31 @@ def test_callback_thinking_carries_worker():
     assert thinks[0]["message"] == "正在思考..."
 
 
+def test_callback_writes_event_bus_diag():
+    """诊断落账：每次发事件都写 worker.event 到事件总线（排障"前端看不到 worker 调用"用）。"""
+    import core.event_bus as eb
+    emitted = []
+    sw._worker_event_emitter = lambda etype, sid, data: emitted.append((etype, data))
+    written = []
+    orig = eb.event_bus
+
+    class _FakeBus:
+        def write(self, etype, data):
+            written.append((etype, data))
+
+    eb.event_bus = _FakeBus()
+    try:
+        cb = sw._make_worker_callback("explorer-1")
+        cb("tool_call", {"name": "grep_code", "args": {"query": "x"}, "status": "start"})
+        cb("thinking", {"phase": "calling_llm", "message": "正在思考..."})
+    finally:
+        eb.event_bus = orig
+    starts = [d for e, d in written if e == "worker.event" and d.get("etype") == "tool.start"]
+    assert starts, "tool_call 应落 worker.event 诊断账"
+    assert starts[0]["worker"] == "explorer-1" and starts[0]["name"] == "grep_code"
+    assert any(d.get("etype") == "thinking" for e, d in written), "thinking 也应落账"
+
+
 def test_resolve_worker_card_meta():
     """主卡附加字段：worker 键与回调标识一致 + 检测角色（与回调输入同一字符串）。"""
     assert sw.resolve_worker_card_meta({"name": "explorer-1"}) == {

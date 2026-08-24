@@ -118,6 +118,20 @@ def _make_worker_callback(name: str):
         if not emitter:
             return
         sid = _worker_sid or ""
+
+        def _emit(etype: str, payload: dict):
+            emitter(etype, sid, payload)
+            # TICKET-DESK-WORKER-VISIBLE 诊断：worker 事件落事件总线（审计
+            # worker 事件是否真的发出、什么形状——排障"前端看不到 worker 调用"用）
+            try:
+                from core.event_bus import event_bus as _ebus
+                _ebus.write("worker.event", {
+                    "session_id": sid, "etype": etype,
+                    "worker": name, "role": role, "name": payload.get("name", ""),
+                })
+            except Exception:
+                pass
+
         if event_type == "tool_call":
             tool = data.get("name", "") if isinstance(data, dict) else ""
             args = data.get("args", {}) if isinstance(data, dict) else {}
@@ -128,7 +142,7 @@ def _make_worker_callback(name: str):
                     if val:
                         preview = str(val)[:40]
                         break
-            emitter("tool.start", sid, {
+            _emit("tool.start", {
                 "name": tool,
                 "worker": name,
                 "role": role,
@@ -139,7 +153,7 @@ def _make_worker_callback(name: str):
         elif event_type == "tool_result":
             # 单步收工可见：worker 卡内工具行由 dot 转 done/fail（不再永远转圈）
             tool = data.get("name", "") if isinstance(data, dict) else ""
-            emitter("tool.complete", sid, {
+            _emit("tool.complete", {
                 "name": tool,
                 "worker": name,
                 "role": role,
@@ -152,7 +166,7 @@ def _make_worker_callback(name: str):
             # 阶段可见：calling_llm/executing/continuing 等消息 → worker 卡头部实时阶段
             msg = str(data.get("message", ""))[:80] if isinstance(data, dict) else ""
             if msg:
-                emitter("thinking", sid, {
+                _emit("thinking", {
                     "worker": name,
                     "role": role,
                     "message": msg,
