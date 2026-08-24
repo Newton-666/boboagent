@@ -491,6 +491,10 @@
 - **owner 亲自启动验收通过**（运行=原样，渲染零变化硬保证）。
 - **技术要点**：占位符 split/join 防 `$$` 被 String.replace 破坏；模块按序拼接保字节一致。
 
+### B65 · 前端设计文档（方向定稿）—— 提交（待填）· 2026-08-24
+- **落盘**：docs/FRONTEND-DESIGN.md——① 未映射/黑箱节点清单（5 个黑箱：路由/学习/适配/生命周期/沉淀）；② 借鉴原则（页面即节点 + schema 驱动长叶，不搬代码）；③ 三方向（Capabilities 侧栏四子区含 Learning B+C / RL 显示 / spawn worker 增强）；④ 共同地基（schema 驱动）与待定项。
+- **owner 定**：Learning 用 B+C 方案、放 capabilities 面板。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
