@@ -1697,6 +1697,14 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 阶段 B：路由器（BOBO_ROUTER=1 启用；默认关 → 行为不变，基线 diff=0）
         self._route_plan = _router_route(str(user_input or "")) if _router_enabled() else None
         if self._route_plan is not None:
+            # 阶段 E：适配层（BOBO_ADAPT=1）——画像偏好提升路由权重（只加不删）
+            try:
+                from core.adapt import adapt, adapt_enabled as _adapt_on
+                if _adapt_on():
+                    from tools.v5_memory import get_user_profile
+                    adapt(self._route_plan, get_user_profile())
+            except Exception:
+                pass
             self.skill_loader._router_skill_filter = set(self._route_plan.skill_names)
         # ── 票 TICKET-COMPUTER-USE-INTENT（COST-3 特批标记）：意图判断 → GOAL 常驻锚点 ──
         # 拿到用户请求 → 先 parse_intent 解析 {goal,target,means}，注入上下文，

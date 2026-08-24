@@ -446,6 +446,12 @@
 - **验证**：observer 5 测试 + learner 4 测试全绿；基线 6/6 diff=0；engine/记忆 48 过；全链冒烟（edit_file regex×3→触发→写 LESSON）通过——正是范式讨论的正则例子。
 - **护栏兑现**：信号可测（确定性单测）、观察与落笔分轨、先归档后驱逐、只写不碰前馈。
 
+### B57 · E 适配层（灵魂第一实体）—— 提交（待填）· 2026-08-24（feat/harness-b-router 续）
+- **改动**：core/adapt.py——画像（USER_PREF）→ 路由权重提升（偏好 domain 工具追加广告集，只加不删，不碰判据/description——Pi 边界）；engine 路由时读画像（BOBO_ADAPT=1 启用默认关）。
+- **闭环**：用户反馈 → learner 写 USER_PREF → adapt 读画像 → 路由权重 → 下一轮更贴合 → 奖励回流。
+- **验证**：基线 6/6；adapt 4 测试绿；闭环冒烟（画像"用 Python"→ 路由工具提升）通过。
+- **工程化施工完成**：A/B + A1 + B + C + E 全部落地（D 沉淀挂起 / prompt 专题待议）——进入完整 harness 测试。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
