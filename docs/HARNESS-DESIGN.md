@@ -67,6 +67,20 @@
 
 **边界**：安全/收尾在学习环外（只观察不奖励）；信号不进前馈；description 不动；LLM 不负责学习。
 
+## §3b 沉淀机制参考（Hermes 复盘，2026-08-24 owner 认可方向）
+
+### Hermes 的沉淀逻辑（对照我们设计）
+1. **触发 = agent 自主创建**（skill_manage create），非次数——回应"count-based 从未成功"；
+2. **生命周期 = 使用驱动**（last_activity_at）：active→stale→archived；stale_after_days 未用→stale；archive_after_days→归档（可逆）；用后 reactivate；
+3. **保护**：pinned 永不触碰；时间锚定（首见锚定 now、未用过锚 created_at）防新技能误杀；
+4. **纯函数无 LLM**（curator apply_automatic_transitions）——符合"学习=后端监督"；
+5. **provenance**：只有 agent-created 技能进管理；hub/builtin 不自动管（除非 prune_builtins）。
+
+### 对照结论
+- 触发：我们 count-based 失败 → 采纳"agent 自主判断"方向（待细化触发判定）；
+- 生命周期：我们 C3 有剪枝归档，缺 stale 中间态 / pinned 保护 / 时间锚定——补齐；
+- 判据：last_used（A1 已补字段）即"使用驱动"地基，与 Hermes 一致。
+
 ## §4 沉淀机制（现状与重构）
 
 - **事实（owner）**：现有沉淀按"同模式 ≥3 次"触发，**从未成功过一次**——count-based 在实践中不成立（用户很少短期机械重复同一模式）；
