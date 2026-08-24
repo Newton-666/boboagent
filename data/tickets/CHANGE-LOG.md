@@ -495,6 +495,12 @@
 - **落盘**：docs/FRONTEND-DESIGN.md——① 未映射/黑箱节点清单（5 个黑箱：路由/学习/适配/生命周期/沉淀）；② 借鉴原则（页面即节点 + schema 驱动长叶，不搬代码）；③ 三方向（Capabilities 侧栏四子区含 Learning B+C / RL 显示 / spawn worker 增强）；④ 共同地基（schema 驱动）与待定项。
 - **owner 定**：Learning 用 B+C 方案、放 capabilities 面板。
 
+### B66 · 缓存命中率探测 —— 提交（待填）· 2026-08-24
+- **工具**：scripts/cache_hit_probe.py（最小形态）+ cache_hit_probe2.py（真实形态，复用 engine 上下文组装，硬预算 60k）。
+- **发现（deepseek-v4-flash）**：① 缓存能命中（最高 97.8%）；② 同轮内振荡（21-98%）；③ **低命中调用 = 前缀漂移@34 字符**（结构层面在调用间变化，非尾部动态段）；④ 排除"注入器尾段"假设，指向"调用间 prompt 结构不一致"。
+- **成本**：66k token（略超预算，但一次出结论，可控）。
+- **下一步**：定位 34 字符处差异（哪段/哪种格式在调用间变化）——修缓存真靶子。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
