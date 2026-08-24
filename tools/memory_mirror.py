@@ -233,21 +233,9 @@ def _apply_changes(data: dict, changes: list) -> int:
 
 
 def _write_json(data: dict):
-    """原子写 JSON（导入专用，不调 v5_memory._save，避免嵌套 sync_mirror）。"""
-    dirname = os.path.dirname(_memory_db())
-    if dirname:
-        os.makedirs(dirname, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=dirname or ".", suffix=".tmp", prefix=".mir_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        shutil.move(tmp_path, _memory_db())
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-        raise
+    """A1：反向导入写回——经 v5_memory._save（按类分文件），与读接口一致。"""
+    from tools.v5_memory import _save as _v5_save
+    _v5_save(data)
 
 
 def _align_mtime():
@@ -282,10 +270,12 @@ def sync_mirror() -> bool:
     返回 True=写入成功或内容未变；False=降级失败。
     """
     try:
-        if not os.path.exists(_memory_db()):
-            return True
-        with open(_memory_db(), "r", encoding="utf-8") as f:
-            data = json.load(f)
+        from tools.v5_memory import _load as _v5_load
+        data = _v5_load()
+        if not data.get("entries") and not data.get("folders"):
+            if not os.path.exists(_memory_db()) and not os.path.isdir(
+                    os.path.join(os.path.dirname(_memory_db()), "knowledge_base")):
+                return True
         content = _render_md(data)
         LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
         if _mirror_path().exists():
@@ -316,21 +306,19 @@ def import_from_md() -> int:
     """
     with _IMPORT_LOCK:
         try:
+            from tools.v5_memory import _load as _v5_load
             if not _mirror_path().exists():
                 return 0
             md_mtime = _mirror_path().stat().st_mtime
-            if os.path.exists(_memory_db()):
-                json_mtime = os.stat(_memory_db()).st_mtime
+            # A1：JSON 最后写入时间以 _meta 文件 mtime 为代理（每次 _save 都写 _meta）
+            json_ref = os.path.join(os.path.dirname(_memory_db()), "knowledge_base", "_meta.json")
+            if os.path.exists(_memory_db()) and not os.path.exists(json_ref):
+                json_ref = _memory_db()  # 旧版单文件兼容
+            if os.path.exists(json_ref):
+                json_mtime = os.stat(json_ref).st_mtime
                 if md_mtime <= json_mtime:
                     return 0  # md 不比 JSON 新 → 无用户手改
-            # 导入前自动备份（保留最近一次）
-            if os.path.exists(_memory_db()):
-                try:
-                    shutil.copy2(_memory_db(), _memory_backup())
-                except Exception:
-                    pass
-            with open(_memory_db(), "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = _v5_load()
             try:
                 with open(_mirror_path(), "r", encoding="utf-8") as f:
                     changes = _parse_md(f.read())

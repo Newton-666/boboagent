@@ -411,6 +411,62 @@
 - **本轮定稿点入档**：① 三挂包按时间维度分（工具/记忆：常驻+可选/可变；技能全可变沉淀池）；② 类别=池管理（上限/剪枝/预筛定位），非路由判据；③ 沉淀=休眠池+激活封顶+池上限（MoE）；④ 技能=description+流程语言（**无工具声明**），工具路由=广告范围+LLM 语义配对，依赖顺序 任务→技能→LLM配工具→记忆横切；⑤ 沉淀 count-based 从未成功（事实）+ token 成本约束（能沉淀也能遗忘/封顶）；⑥ 现有资产盘点（decay/replace/容量在运行，缺 last_used/合并/剪枝/验证）。
 - **落盘**：HARNESS-DESIGN.md v2（§1-§7 完整，含执行顺序与开放问题）。
 
+### B52 · A1 记忆物理模块化 —— 提交（待填）· 2026-08-24（分支 feat/harness-a1-memory，未合 main）
+- **改动**：v5_memory 单 JSON 存储 → **按类分文件**（knowledge_base/<TYPE>.json ×6 + _meta.json 存 folders/order/额外顶层键）；旧单文件自动迁移；逐类原子写 + .bak；读接口（_load 返回结构）不变 → injector 零改动。
+- **配套**：memory_mirror 改用 v5 读接口（sync_mirror/import_from_md/_write_json 不依赖存储布局）；补 `last_used` 字段（LRU 生命周期地基）+ `mark_used()` 函数（显式触碰，不接读路径）。
+- **测试适配（实现细节断言）**：mirror 测试的 _read_entries 改读接口；_touch_newer 基准改真源（_meta）；.bak 断言改按类文件。
+- **验证**：记忆系 60 测试全绿；行为基线 6/6 diff=0；injector/engine 53 过；启动冒烟 5/5。
+- **影响面**：proactive/memory_mirror/injector 无行为变化（读接口不变纪律兑现）。
+- **红线**：分支未合 main；rollback/pre-a1 就位。
+
+### B53 · B 路由（MoE 规则版 v1）—— 提交（待填）· 2026-08-24（分支 feat/harness-b-router，未合 main）
+- **改动**：core/router.py（统一路由器）——接口 route(task, profile, recent)→{tools/skills/memories}；规则版：常驻工具集 + 任务关键词→domain 映射 + 技能候选 + 记忆类型候选；BOBO_ROUTER=1 启用，默认关。
+- **接线**：engine._call_llm 按路由过滤 tools_override；skill_loader 按路由技能候选过滤（description 语义激活保留）。
+- **验证**：
+  - 默认关：行为基线 6/6 diff=0 + 116 测试绿（行为不变纪律）；
+  - 开（BOBO_ROUTER=1）：真路由器 10 任务实测 **tokens=43,883（-63.6% vs 全量 120,413）、calls=19（-54%）**——优于模拟版（-20.3%），MoE 主张强支持；
+  - 冒烟：code_fix 激活 code-fix 技能 + 13 工具广告，run done。
+- **待续（B 内）**：B4 记忆召回路由（route.memory_types 未接 injector——下一步）；规则表按实测校准。
+
+### B54 · B4 记忆召回路由 —— 提交（待填）· 2026-08-24（feat/harness-b-router）
+- **改动**：format_memory_by_signal 加可选 entry_types 参数（B4 记忆类型过滤，默认 None=全类型行为不变）；injector 路由开时按 route.memory_types 过滤记忆召回。
+- **验证**：基线 6/6 diff=0；记忆/技能/injector 44 测试绿。
+- **B 阶段收官**：路由器（工具/技能/记忆三路全接，BOBO_ROUTER 开关，默认关行为不变；开实测 token -63.6%/calls -54%——B 完整）。
+
+### B55 · 路由器准确性评估 + 规则修正 —— 提交（待填）· 2026-08-24（feat/harness-b-router）
+- **补测（owner 质疑：路由准确性没测过——承认，补上）**：scripts/router_accuracy.py 黄金集 10 任务 → 期望工具/技能/记忆，测精确率/召回率。
+- **结果**：工具**召回率 100%**（0 个必带被漏——能力不受损）；工具多余 28 个（粗粒度 domain 映射，多广告=token 略多，LLM 按 description 选，不影响能力）；**技能 10/10**（修 "pytest" 关键词漏洞后）；**记忆 10/10**。
+- **修正**：code-fix 触发词补 pytest/运行测试/测试情况。
+- **诚实记录**：先前 -63.6% token 的 A/B 未含路由准确性测量——本票补上；结论：召回无损 + 技能/记忆 100%，精确率（多余广告）作为 B 内后续优化项（domain 表细化）。
+
+### B56 · C 学习环（观察总线→落笔→生命周期）—— 提交（待填）· 2026-08-24（feat/harness-b-router 续）
+- **C1 观察总线**（core/observer.py）：挂现有 event_bus，读 events.jsonl；信号 schema=决策点×结果；tool.exec 成败→信号（错误分类：正则/路径/权限/网络）；累积阈值 ≥3；BOBO_LEARN=1 启用，默认关。
+- **C2 落笔**（core/learner.py）：过阈值→写 LESSON 记忆（确定性模板，后端监督，不调 LLM）。
+- **C3 生命周期**（learner.prune_memory）：超容量→归档最低价值（先归档可逆护栏；活跃条目≤容量）。
+- **验证**：observer 5 测试 + learner 4 测试全绿；基线 6/6 diff=0；engine/记忆 48 过；全链冒烟（edit_file regex×3→触发→写 LESSON）通过——正是范式讨论的正则例子。
+- **护栏兑现**：信号可测（确定性单测）、观察与落笔分轨、先归档后驱逐、只写不碰前馈。
+
+### B57 · E 适配层（灵魂第一实体）—— 提交（待填）· 2026-08-24（feat/harness-b-router 续）
+- **改动**：core/adapt.py——画像（USER_PREF）→ 路由权重提升（偏好 domain 工具追加广告集，只加不删，不碰判据/description——Pi 边界）；engine 路由时读画像（BOBO_ADAPT=1 启用默认关）。
+- **闭环**：用户反馈 → learner 写 USER_PREF → adapt 读画像 → 路由权重 → 下一轮更贴合 → 奖励回流。
+- **验证**：基线 6/6；adapt 4 测试绿；闭环冒烟（画像"用 Python"→ 路由工具提升）通过。
+- **工程化施工完成**：A/B + A1 + B + C + E 全部落地（D 沉淀挂起 / prompt 专题待议）——进入完整 harness 测试。
+
+### B58 · 沉淀机制设计方向定稿 —— 提交（待填）· 2026-08-24
+- **owner 边界**：不采用外部代码、不引用外部项目（复盘仅作方向参考，实现为原创）。
+- **定稿方向**：① 触发=agent 自主判断（替代从未成功的 count-based）；② 生命周期=使用驱动状态机 active→stale→archived（可逆/再用 reactivate）；③ 保护=pinned+时间锚定；④ 纯确定性实现（无 LLM）；⑤ provenance 只管理自主沉淀技能。
+- **落盘**：HARNESS-DESIGN.md §3b（原创表述，无外部引用）。
+
+### B59 · 测试成本纪律入档 —— 提交（待填）· 2026-08-24
+- **事故**：真 LLM 多步 A/B 烧 ~4M token、日志截断致数据缺失——成本失控教训。
+- **规则（落 HARNESS-TECHNICAL.md）**：① 验证优先便宜栈；② 真 LLM 测试预设硬 token 预算超预算即停；③ 最少样本；④ 后台测试必落盘完整输出；⑤ 先算账再跑。
+- **B 全开真多步结果（部分）**：6/6 真实多步骤工作流完成（成本高但功能验证通过）；A 变体数据缺失（默认关行为已被基线+全量覆盖）。
+
+### B60 · 完整 harness 测试（便宜栈，默认关）—— 提交（待填）· 2026-08-24
+- **结果**：全量 pytest **2867 过 / 1 败**（唯一失败=test_tel_8 分支状态假象，合 main 自动转绿，第三次验证）；组件单测 13 过（observer/learner/adapt）；记忆系 32+ 过；基线 6/6 diff=0；准确性（工具召回 100%/技能 10-10/记忆 10-10）；启动冒烟 5/5。
+- **含义**：全默认关（BOBO_ROUTER/LEARN/ADAPT=0）下，改造零行为干扰——所有新组件是增量，主线行为不变。
+- **对比**：测试从 2855 增至 2867（+12 新组件测试）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4

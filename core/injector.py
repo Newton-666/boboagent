@@ -674,8 +674,12 @@ class PromptInjector:
                 pool = get_prompt_pool()
                 mem_floor = pool.floor("memory")
                 mem_ceiling = pool.ceiling("memory")
+                # B4：路由开时按路由记忆类型过滤（默认 None=全类型，行为不变）
+                _mem_types = getattr(engine, "_route_plan", None)
+                _mem_types = _mem_types.memory_types if _mem_types is not None else None
                 mem_text, mem_stats = format_memory_by_signal(
-                    max_chars=mem_ceiling, min_chars=min(mem_floor, mem_ceiling))
+                    max_chars=mem_ceiling, min_chars=min(mem_floor, mem_ceiling),
+                    entry_types=_mem_types or None)
                 if mem_text:
                     _tail_blocks.append(("memory", mem_text))
                     budget_stats["memory"] = {

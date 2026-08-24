@@ -35,6 +35,7 @@ from core.steps.sediment_dispatch import SedimentDispatchStage
 import core.cu_policy as _cu_policy
 import core.loop_detect as _loop_detect
 import core.takeaway_filter as _takeaway_filter
+from core.router import route as _router_route, router_enabled as _router_enabled
 from core.steps.auto_suggest import AutoSuggestStage
 from core.steps.workspace_recon import WorkspaceReconStage
 from core.steps.final_assembly import FinalAssemblyStage
@@ -173,6 +174,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         self.injector = PromptInjector(self)
         # 阶段 3（feat/step-pipeline）：收尾闸流水线——先砌墙，承诺房间先住；
         # 其余闸仍内联（行为基线 diff=0 验收后逐间搬入）
+        self._route_plan = None  # 阶段 B：路由器产出（BOBO_ROUTER=1 时启用）
         self._wrapup_stages = [SedimentDispatchStage(), PromiseGateStage(), QualityGateStage(),
                               BackfillGateStage(), FieldGateStage(), LedgerGateStage()]
         self._exec_post_stages = [AutoSuggestStage()]  # EXECUTING 段观察房（执行后跑）
@@ -1262,6 +1264,12 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 不缩水（owner 红线）。describe_tool 取件的 _extra_tools 走执行器注册，
         # 不依赖 prompt schema，不受影响。
         filtered_tools = TOOLS_SCHEMA
+        if self._route_plan is not None and self._route_plan.tool_names:
+            _names = set(self._route_plan.tool_names)
+            _sub = [t for t in TOOLS_SCHEMA
+                    if t.get("function", t).get("name") in _names]
+            if _sub:
+                filtered_tools = _sub
         if filtered_tools is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered_tools]
             self._notify("thinking", {"phase": "tool_filter", "message": f"加载 {len(filtered_tools)} 个工具 ({', '.join(names)})"})
@@ -1686,6 +1694,18 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def run(self, user_input: str = None, stream: bool = True, depth: int = 0, tool_round: int = 0):
         self._emit_state_change(self.STATE_IDLE, "session start")
         self.current_user_input = user_input
+        # 阶段 B：路由器（BOBO_ROUTER=1 启用；默认关 → 行为不变，基线 diff=0）
+        self._route_plan = _router_route(str(user_input or "")) if _router_enabled() else None
+        if self._route_plan is not None:
+            # 阶段 E：适配层（BOBO_ADAPT=1）——画像偏好提升路由权重（只加不删）
+            try:
+                from core.adapt import adapt, adapt_enabled as _adapt_on
+                if _adapt_on():
+                    from tools.v5_memory import get_user_profile
+                    adapt(self._route_plan, get_user_profile())
+            except Exception:
+                pass
+            self.skill_loader._router_skill_filter = set(self._route_plan.skill_names)
         # ── 票 TICKET-COMPUTER-USE-INTENT（COST-3 特批标记）：意图判断 → GOAL 常驻锚点 ──
         # 拿到用户请求 → 先 parse_intent 解析 {goal,target,means}，注入上下文，
         # 每次工具轮可见 GOAL；行动/换手段回到 GOAL 判断（防手段漂移丢目的）。

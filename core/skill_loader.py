@@ -45,6 +45,7 @@ class SkillLoader:
     """扫描技能标准目录，匹配触发词后注入标准到 system prompt。两遍评分 + 依赖链解析。"""
 
     def __init__(self, get_history, llm_caller=None):
+        self._router_skill_filter = None  # 阶段 B：路由器技能候选（None=不过滤）
         """初始化技能加载器。
 
         Args:
@@ -106,6 +107,9 @@ class SkillLoader:
             # requires 依赖链（连带加载依赖 skill，跳过 excludes 检查）
             hits = self._resolve_requires(hits, entries, enabled)
 
+            # 阶段 B：路由器技能过滤（BOBO_ROUTER=1 时只激活候选技能）
+            if self._router_skill_filter is not None:
+                hits = [h for h in hits if h in self._router_skill_filter] or hits
             return [entries[name]["content"] for name in hits]
         except Exception:
             return []

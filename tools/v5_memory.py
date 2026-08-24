@@ -16,12 +16,31 @@ _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _memory_db() -> str:
-    """记忆库 JSON 路径：调用时从 BOBO_DATA_DIR 动态解析（TICKET-D2）。
+    """记忆库 JSON 路径（旧版单文件，迁移用）：从 BOBO_DATA_DIR 动态解析。
 
     废除 import 时快照常量 MEMORY_DB——快照在测试 patch 目录后与
     实际读写裂脑（读 tmp、写真实 knowledge_base.json）。
+    A1（物理模块化）：新存储 = 按类分文件（见 _memory_dir），此路径仅迁移用。
     """
     return str(BOBO_DATA_DIR / "knowledge_base.json")
+
+
+def _memory_dir() -> str:
+    """A1：记忆库按类分文件目录（每个 MEMORY_TYPE 一个 JSON + _meta.json）。
+
+    从 _memory_db() 派生（测试 patch _memory_db 时目录同步到 tmp，保持一致）。"""
+    return os.path.join(os.path.dirname(_memory_db()), "knowledge_base")
+
+
+def _type_file(entry_type: str) -> str:
+    """A1：某类记忆的独立文件路径（normalize 后）。"""
+    t = normalize_type(entry_type)
+    return os.path.join(_memory_dir(), f"{t}.json")
+
+
+def _meta_file() -> str:
+    """A1：元数据文件（folders + 全局顺序，保证读接口输出顺序不变）。"""
+    return os.path.join(_memory_dir(), "_meta.json")
 
 
 def _memory_backup() -> str:
@@ -106,7 +125,24 @@ def _atomic_save(data):
 
 
 def _load():
-    """加载知识库。JSON 损坏时不静默返回空结构，避免下次 _save 覆写清空（审计 #14）。"""
+    """加载知识库（A1：按类分文件，读接口返回结构不变）。
+
+    顺序：按类文件（新）→ 旧单文件（迁移）→ 空。损坏时不静默返回空结构，
+    避免下次 _save 覆写清空（审计 #14）——逐类文件各自 .bak 恢复。
+    """
+    # A1：新存储（按类分文件）
+    if os.path.isdir(_memory_dir()) and os.listdir(_memory_dir()):
+        return _load_split()
+    # 旧版单文件：加载 + 迁移到按类分文件
+    if os.path.exists(_memory_db()):
+        data = _load_legacy()
+        _save_split(data)
+        return data
+    return {'entries': [], 'folders': []}
+
+
+def _load_legacy():
+    """旧版单文件加载（含损坏恢复，审计 #14）。"""
     if not os.path.exists(_memory_db()):
         return {'entries': [], 'folders': []}
     try:
@@ -116,7 +152,6 @@ def _load():
                 data = {'entries': [], 'folders': []}
             return data
     except Exception:
-        # 损坏了 → 移到 .broken，尝试从 .bak 恢复
         broken_path = _memory_db() + ".broken." + datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
             shutil.move(_memory_db(), broken_path)
@@ -139,6 +174,65 @@ def _load():
         return {'entries': [], 'folders': []}
 
 
+def _load_split():
+    """A1：按类分文件加载（逐类读，_meta 保存全局顺序保证输出顺序不变）。"""
+    entries = []
+    for t in MEMORY_TYPES:
+        fp = _type_file(t)
+        if not os.path.exists(fp):
+            continue
+        try:
+            with open(fp, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                entries.extend(data)
+        except Exception:
+            # 单类损坏 → 从该类 .bak 恢复（不影响其他类）
+            bak = fp + ".bak"
+            if os.path.exists(bak):
+                try:
+                    with open(bak, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        entries.extend(data)
+                        shutil.copy2(bak, fp)
+                except Exception:
+                    pass
+    folders = []
+    order = []
+    extra = {}
+    if os.path.exists(_meta_file()):
+        try:
+            with open(_meta_file(), 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            folders = meta.get("folders", [])
+            order = meta.get("order", [])
+            extra = meta.get("extra", {})
+        except Exception:
+            pass
+    # 按全局顺序重排（保读接口输出顺序）；不在 order 的按原类型顺序追加
+    if order:
+        by_id = {e.get("id"): e for e in entries}
+        ordered = [by_id[i] for i in order if i in by_id]
+        rest = [e for e in entries if e.get("id") not in set(order)]
+        entries = ordered + rest
+    result = {'entries': entries, 'folders': folders}
+    result.update(extra)  # 保留顶层额外键（profile 等），防迁移丢失
+    return result
+
+
+def mark_used(entry_id):
+    """A1：触碰条目 last_used（LRU 生命周期地基）。生命周期阶段 C 调用；
+    不接读路径（避免读时写副作用）。返回是否成功。"""
+    data = _load()
+    for e in data.get("entries", []):
+        if e.get("id") == entry_id:
+            e["last_used"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _save(data)
+            return True
+    return False
+
+
 def _get_total_chars(entries):
     """计算所有记忆的总字符数"""
     total = 0
@@ -148,7 +242,56 @@ def _get_total_chars(entries):
 
 
 def _save(data):
-    _atomic_save(data)
+    """A1：按类分文件保存（读接口结构不变，存储拆分）。"""
+    _save_split(data)
+
+
+def _save_split(data):
+    """A1：按类分文件原子写（逐类 .bak + tmp + move；_meta 存 folders+order）。"""
+    entries = data.get("entries", [])
+    folders = data.get("folders", [])
+    dirname = _memory_dir()
+    os.makedirs(dirname, exist_ok=True)
+    # 逐类写
+    by_type = {}
+    for e in entries:
+        t = normalize_type(e.get("type"))
+        by_type.setdefault(t, []).append(e)
+    for t in MEMORY_TYPES:
+        _atomic_write_json(_type_file(t), by_type.get(t, []))
+    # 元数据（folders + 全局顺序 + 额外顶层键）
+    order = [e.get("id") for e in entries]
+    extra = {k: v for k, v in data.items() if k not in ("entries", "folders")}
+    _atomic_write_json(_meta_file(), {"folders": folders, "order": order, "extra": extra})
+    # 票 LN-1：镜像（行为保留）
+    try:
+        from tools.memory_mirror import sync_mirror
+        sync_mirror()
+    except Exception:
+        pass
+
+
+def _atomic_write_json(path: str, payload):
+    """单文件原子写（.bak + tmp + move；失败不静默清空，审计 #14）。"""
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
+    if os.path.exists(path):
+        try:
+            shutil.copy2(path, path + ".bak")
+        except Exception:
+            pass
+    fd, tmp_path = tempfile.mkstemp(dir=dirname or '.', suffix='.tmp', prefix='.mem_')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        shutil.move(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
 
 
 def _entry_age_days(entry):
@@ -296,6 +439,7 @@ def add_entry(text, entry_type="general", tags=None, folder=""):
         "signal_score": 100,  # 信号分：初始 100，引用 +10，忽略 -5，< 20 不再注入
         "last_matched": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "last_time_decay": "",  # 上次时间衰减日期（YYYY-MM-DD），幂等控制
+        "last_used": datetime.now().strftime("%Y-%m-%d %H:%M"),  # A1：最后使用时间（LRU 生命周期地基，Pi 评审点）
         "archived": False,      # 归档后不再注入（不删除，可回溯）
         "is_draft": False,      # 草稿条目，满足条件时自动归档
     }
@@ -521,7 +665,8 @@ def format_all_memory(max_chars: int = 5000) -> str:
     return header + "\n" + "\n".join(lines)
 
 
-def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000) -> tuple[str, dict]:
+def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000,
+                             entry_types: list | None = None) -> tuple[str, dict]:
     """票 LN-4：按信号分降序注入记忆（分段保底 + 信号淘汰）。
 
     与 format_all_memory 的区别：
@@ -531,17 +676,19 @@ def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000) -> tup
           {"entries": 注入条数, "total_entries": 总条数, "evicted": 信号合格但超预算被淘汰数}
       - max_chars 上限（天花板 2500）；min_chars 保底语义：记忆充足时至少注入
         min_chars 字符（由独立段落 + 上限控制自然满足，参数保留供调用方文档化）
+      - B4（阶段 B）：entry_types 可选——路由记忆类型过滤（None=全类型，默认行为不变）
     """
     data = _load()
     entries = data.get("entries", [])
     if not entries:
         return "", {"entries": 0, "total_entries": 0, "evicted": 0}
     total_all = len(entries)
-    # 过滤：归档 + 低信号永不注入
+    # 过滤：归档 + 低信号永不注入；B4：entry_types 过滤（路由记忆类型）
     eligible = [
         e for e in entries
         if not e.get("archived", False)
         and e.get("signal_score", 100) >= 20
+        and (entry_types is None or (e.get("type") or "") in entry_types)
         and (e.get("text") or "").strip()
     ]
     if not eligible:
