@@ -2,7 +2,7 @@
 // Spawns Python backend, bridges JSON-RPC between renderer and backend.
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, execSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -109,13 +109,30 @@ async function startBackend() {
   // TICKET-GW-SOCK：spawn 前先探测——若已有活跃后端（旧桌面端残留 / 用户手动
   // 起过 gateway）直接复用其 socket，不重复 spawn，杜绝双 gateway 抢同一 sock
   // （EADDRINUSE 根治法：复用而非再起）。
+  //
+  // TICKET-GW-SOCK（开发体验扩展）：默认 **fresh 启动**——探测到活跃后端时先
+  // 杀掉旧进程再重新 spawn，保证改完后端代码重启桌面端即生效（旧逻辑会复用
+  // 旧代码进程，改代码后必须手动 kill 才生效）。`BOBO_DESKTOP_REUSE=1` 恢复
+  // 复用模式（多客户端共享同一后端时用）。
+  const reuseOld = process.env.BOBO_DESKTOP_REUSE === '1'
   const reused = await probeSocket(GW_SOCK_PATH, 1000)
-  if (reused) {
+  if (reused && reuseOld) {
     console.log(`[bobo-desktop] 探测到活跃后端 ${GW_SOCK_PATH}，复用（不重新 spawn）`)
     backendProcess = null
     ensureGatewayClient()
     gwClient.connect()
     return
+  }
+  if (reused) {
+    // fresh：杀掉占用 socket 的旧后端进程，等其释放后重新 spawn（加载新代码）
+    console.log(`[bobo-desktop] 探测到旧后端 ${GW_SOCK_PATH}，fresh 启动：杀掉并重新 spawn（BOBO_DESKTOP_REUSE=1 可恢复复用）`)
+    _pkillBackend('')
+    const released = await _waitSocketReleased(5000)
+    if (!released) {
+      console.log('[bobo-desktop] 旧后端未响应 SIGTERM，SIGKILL 兜底')
+      _pkillBackend('-9')
+      await _waitSocketReleased(2000)
+    }
   }
 
   // 无活跃后端：清理陈旧 sock 文件（残留文件会导致新后端 bind 报地址占用）后 spawn
@@ -252,6 +269,29 @@ function stopBackend() {
       }
     }, 2000)
   }
+}
+
+// TICKET-GW-SOCK（fresh 启动）：按进程命令行精确匹配后端（python -m
+// bobo_tui_gateway.entry），SIGTERM/SIGKILL 由调用方选；无匹配进程时 pkill
+// 退出码 1，静默忽略——不误伤 Electron/其他进程。
+function _pkillBackend(flag) {
+  try {
+    execSync(`pkill ${flag} -f "bobo_tui_gateway.entry"`, { stdio: 'ignore' })
+  } catch (_) {}
+}
+
+// TICKET-GW-SOCK（fresh 启动）：轮询 socket 直到旧后端释放（probeSocket 不再
+// 活跃）；超时返回 false，由调用方决定兜底（SIGKILL）。
+function _waitSocketReleased(timeoutMs) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs
+    const poll = async () => {
+      if (!(await probeSocket(GW_SOCK_PATH, 300))) return resolve(true)
+      if (Date.now() >= deadline) return resolve(false)
+      setTimeout(poll, 200)
+    }
+    poll()
+  })
 }
 
 // ── Window management ──────────────────────────────────────────────────
