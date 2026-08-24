@@ -69,6 +69,10 @@ class SkillLoader:
                 _os.path.abspath(__file__))), "data", "skill-standards")
             if not _os.path.isdir(std_dir):
                 return []
+            # 阶段 D：沉淀技能目录（agent 自主沉淀，可路由）并入扫描
+            _custom = _os.path.join(std_dir, "custom")
+            if _os.path.isdir(_custom):
+                std_dir = _os.path.join(std_dir, "custom")
             history = self._get_history()
             # TICKET-VISION-CHAT-UPLOAD（COST-3 特批标记）：user content 可能是
             # 多模态 list（[{"type":"text",...},{"type":"image_url",...}]）——
