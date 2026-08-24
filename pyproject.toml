@@ -47,7 +47,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 python_classes = ["Test*"]
-addopts = ["-v", "--tb=short", "--strict-markers", "-m", "not live"]  # 分层（TICKET-MAIN-REGREEN 阶段 2）：本地默认跳过 live，CI 显式覆盖为全量
+addopts = ["-v", "--tb=short", "--strict-markers", "-m", "not live", "--ignore=experiments"]  # 分层（TICKET-MAIN-REGREEN 阶段 2）：本地默认跳过 live，CI 显式覆盖为全量；--ignore=experiments 防止 cost1a 沙盒同名 test_*.py 模块冲突污染收集
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: unit tests for individual functions",
