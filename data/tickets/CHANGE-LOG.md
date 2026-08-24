@@ -485,6 +485,12 @@
 - **验证（便宜栈）**：lifecycle/observer/learner/adapt + tel_8 19 测试绿；基线 6/6；冒烟 5/5。
 - **沉淀机制正式入主线**：agent 自主触发 + 使用驱动生命周期 + provenance + 修不可路由根因。
 
+### B64 · 前端模块化合 main —— 提交（待填）· 2026-08-24
+- **合并**：feat/frontend-modularize → main（d79aa6a）；rollback/pre-frontend-mod 就位（分支创建时指向分家前 main）。
+- **内容**：砌墙（webapp/ 源码 + build.cjs 构建管线 → dist 逐字节一致）+ 分家（app.js 4,298 行拆 7 模块：init/render_core/panels/sessions/input_mode(模式)/settings/telescope_render）。
+- **owner 亲自启动验收通过**（运行=原样，渲染零变化硬保证）。
+- **技术要点**：占位符 split/join 防 `$$` 被 String.replace 破坏；模块按序拼接保字节一致。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
