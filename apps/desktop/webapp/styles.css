@@ -120,6 +120,27 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .tool-agg-body { border-top:1px solid var(--border); padding:4px 0; }
 .tool-agg-body .tool { margin:2px 10px; }
 .tool-agg-body .tool-result { max-height:200px; }
+/* ── Worker 折叠卡（TICKET-DESK-WORKER-VISIBLE）──
+   spawn_worker 主卡显角色名；worker 内部活动在独立折叠卡（运行时可展开）；
+   收工后收纳进主卡 .worker-slot（默认折叠，点击主卡展开）。视觉沿用 .tool-agg 系。 */
+.worker-card { margin:2px 0 6px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
+.worker-head { display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:12px; color:var(--text2); cursor:pointer; user-select:none; }
+.worker-head:hover { background:var(--hover); }
+.worker-role { font-weight:600; flex-shrink:0; }
+.worker-name { color:var(--text-muted); font-size:11px; flex-shrink:0; }
+.worker-phase { color:var(--text-muted); font-size:11px; margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.worker-toggle { color:var(--text-muted); font-size:10px; flex-shrink:0; }
+.worker-body { border-top:1px solid var(--border); padding:4px 8px; display:block; }
+.worker-row { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); padding:3px 4px; }
+.worker-row .dot { color:var(--text-muted); font-size:10px; flex-shrink:0; animation:dotPulse 3s infinite; }
+.worker-row .dot.done { animation:none; color:#50a14f; }
+.worker-row .dot.fail { animation:none; color:#f48771; }
+.worker-row-name { flex-shrink:0; }
+.worker-row-preview { color:var(--text-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.worker-row-time { font-size:10px; color:var(--text-muted); margin-left:auto; flex-shrink:0; }
+.worker-slot { display:none; margin:2px 0 0 24px; border-top:1px dashed var(--border); padding-top:4px; }
+.worker-slot.open { display:block; }
+.worker-slot .worker-card { border:none; background:transparent; margin:0; }
 @keyframes dotPulse { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
 /* Thinking */
 .think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:var(--bg2); border:1px solid var(--border); }

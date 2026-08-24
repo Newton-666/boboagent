@@ -555,11 +555,13 @@ def test_tel_8_zero_interference():
             continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
-        # 票 VSC-2B：engine_adapter.py 复用（写审批闸门），diff 标记兼容
+        # 票 VSC-2B：engine_adapter.py 复用（写审批闸门），diff 标记兼容；
+        # 票 TICKET-DESK-WORKER-VISIBLE：engine_adapter.py 复用（spawn_worker 主卡
+        # 附加 worker/worker_role 键，前端 worker 折叠卡配对），diff 标记兼容
         if ln in ("core/engine_adapter.py", "core/tool_runner.py"):
             r8 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
-                f"{ln} 缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
+            assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout), \
+                f"{ln} 缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-COMPUTER-USE-CURSOR 特批：core/cursor.py（虚拟光标 NSPanel
         # 悬浮窗——透明性钥匙，docs 37 节），diff 必须含 COST-3 标记
@@ -738,6 +740,15 @@ def test_tel_8_zero_interference():
         if ln in ("tools/signal_logger.py", "tools/signal_library_stats.py"):
             r_p02 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert "P0-2" in r_p02.stdout, f"{ln} 缺 P0-2 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-DESK-WORKER-VISIBLE 特批：tools/spawn_worker.py + apps/desktop/webapp/
+        # （worker 折叠卡：主卡显角色名 + 独立折叠卡可展开 + 收工收纳进主卡；回调事件
+        # 修键名/带 worker+role 标识/tool_result 完成态），diff 必须含
+        # TICKET-DESK-WORKER-VISIBLE 标记
+        if ln == "tools/spawn_worker.py" or ln.startswith("apps/desktop/webapp/"):
+            r_wv = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-DESK-WORKER-VISIBLE" in r_wv.stdout, \
+                f"{ln} 缺 TICKET-DESK-WORKER-VISIBLE 特批标记，未授权改动被拦截"
             continue
         # 票 OBSIDIAN-SEARCH-C 特批：tools/obsidian_tools.py（search_obsidian 三路
         # 匹配 + 语义兜底：映射表 → LLM 辅助 → 自学习写回），diff 必须含

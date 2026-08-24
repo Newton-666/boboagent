@@ -124,6 +124,27 @@ body.sidebar-collapsed #sidebar-expand-btn { display:block; }
 .tool-agg-body { border-top:1px solid var(--border); padding:4px 0; }
 .tool-agg-body .tool { margin:2px 10px; }
 .tool-agg-body .tool-result { max-height:200px; }
+/* ── Worker 折叠卡（TICKET-DESK-WORKER-VISIBLE）──
+   spawn_worker 主卡显角色名；worker 内部活动在独立折叠卡（运行时可展开）；
+   收工后收纳进主卡 .worker-slot（默认折叠，点击主卡展开）。视觉沿用 .tool-agg 系。 */
+.worker-card { margin:2px 0 6px 0; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
+.worker-head { display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:12px; color:var(--text2); cursor:pointer; user-select:none; }
+.worker-head:hover { background:var(--hover); }
+.worker-role { font-weight:600; flex-shrink:0; }
+.worker-name { color:var(--text-muted); font-size:11px; flex-shrink:0; }
+.worker-phase { color:var(--text-muted); font-size:11px; margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.worker-toggle { color:var(--text-muted); font-size:10px; flex-shrink:0; }
+.worker-body { border-top:1px solid var(--border); padding:4px 8px; display:block; }
+.worker-row { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); padding:3px 4px; }
+.worker-row .dot { color:var(--text-muted); font-size:10px; flex-shrink:0; animation:dotPulse 3s infinite; }
+.worker-row .dot.done { animation:none; color:#50a14f; }
+.worker-row .dot.fail { animation:none; color:#f48771; }
+.worker-row-name { flex-shrink:0; }
+.worker-row-preview { color:var(--text-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.worker-row-time { font-size:10px; color:var(--text-muted); margin-left:auto; flex-shrink:0; }
+.worker-slot { display:none; margin:2px 0 0 24px; border-top:1px dashed var(--border); padding-top:4px; }
+.worker-slot.open { display:block; }
+.worker-slot .worker-card { border:none; background:transparent; margin:0; }
 @keyframes dotPulse { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
 /* Thinking */
 .think-box { padding:10px 14px; margin:8px 0; border-radius:8px; font-size:13px; color:var(--text2); display:none; background:var(--bg2); border:1px solid var(--border); }
@@ -1866,6 +1887,9 @@ var TOOL_FRIENDLY = {
   'profile_update': 'Edit profile',
   // TICKET-SKILL-ACTIVE-2：skill 激活（后端 skill.activate 事件，非工具调用）
   'skill_activate': 'Skill',
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 主卡标题由角色覆盖（explorer/coder），
+  // 此映射只作无角色时的兜底名
+  'spawn_worker': 'Worker',
 };
 
 // TICKET-DESK-V2D25：细线 SVG 图标映射（D2.5-1）——14px / 1.25px 描边 / fill:none /
@@ -1885,6 +1909,8 @@ var TOOL_ICONS = {
   'profile_update': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.4" cy="4.3" r="1.55"/><path d="M2.5 10.6 c0-1.4 1.3-2.3 3-2.3 c1.7 0 3 .9 3 2.3"/><path d="M8.7 8.5 L9.05 6.9 L11.7 4.25 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L10.55 8.25 l-1.6 .45 z"/><path d="M8.4 9.1 h3.5"/></svg>',
   // TICKET-SKILL-ACTIVE-2：skill 激活卡图标 —— 打开的书 + 中缝（14px / 1.25px 描边，同款细线）
   'skill_activate': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 3.1 c1.4-0.2 2.9 0.1 4.4 1.1 c1.5-1 3-1.3 4.4-1.1 v7.6 c-1.4-0.2 -2.9 0.1 -4.4 1.1 c-1.5-1 -3-1.3 -4.4-1.1 Z"/><path d="M7 4.2 v7.6"/></svg>',
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 图标 —— 机器人头（天线+双眼+耳，同款细线）
+  'spawn_worker': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.25" width="8" height="5.75" rx="1.5"/><path d="M7 4.25 V2.75"/><circle cx="5.6" cy="7.4" r="0.6"/><circle cx="8.4" cy="7.4" r="0.6"/><path d="M3 6.6 H1.9 M11 6.6 H12.1"/></svg>',
   '_default': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.25"/></svg>'
 };
 // 图标取映射，未知工具回退 _default（不许空白）；reduced-motion 下运行卡不加 shimmer class
@@ -1894,7 +1920,9 @@ function prefersReducedMotion() {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-function addTool(name, context, toolId) {
+// TICKET-DESK-WORKER-VISIBLE：第 4 参 displayName —— 覆盖卡片标题（spawn_worker 主卡显角色名），
+// 图标/工具标识仍按 name 映射，其他调用方不传则行为完全不变。
+function addTool(name, context, toolId, displayName) {
   welcomeEl.style.display = 'none';
   if (thinkBoxEl) {
     thinkBoxEl.querySelector('.think-label').innerHTML = 'thinking';
@@ -1902,7 +1930,7 @@ function addTool(name, context, toolId) {
   }
 
   // Friendly names
-  var friendly = TOOL_FRIENDLY[name] || name;
+  var friendly = displayName || TOOL_FRIENDLY[name] || name;
 
   toolIdCounter++;
   var uniqueId = toolId + '-' + toolIdCounter;
@@ -1923,7 +1951,9 @@ function addTool(name, context, toolId) {
   div.onclick = function(e) {
     // Don't toggle when clicking result text — allows text selection
     if (e.target.closest('.tool-result')) return;
-    var r = div.querySelector('.tool-result');
+    if (e.target.closest('.worker-slot')) return;   // worker 收纳区点内部不关主卡
+    // TICKET-DESK-WORKER-VISIBLE：spawn_worker 主卡展开目标优先 worker 收纳位
+    var r = div.querySelector('.worker-slot') || div.querySelector('.tool-result');
     if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); if (t) { t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; } }
   };
   // F4-1: 聚合卡持续吞并 —— 任何时刻屏幕只有两块：聚合卡（吞并所有中间步骤）+ 最新一步摊开
@@ -1977,6 +2007,7 @@ function addTool(name, context, toolId) {
   }
   roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
   chatEl.scrollTop = chatEl.scrollHeight;
+  return div;   // TICKET-DESK-WORKER-VISIBLE：返回卡片供调用方挂 worker 收纳位
 }
 
 // TICKET-GUI-F6D：写/改类工具名单 —— 配对思考不吞并（编辑流思考→编辑卡+diff 全程摊开）
@@ -3794,6 +3825,102 @@ function stopThinking() {
   addStatus('Stopped');
 }
 
+// ── Worker 折叠卡（TICKET-DESK-WORKER-VISIBLE）──
+// spawn_worker 主卡标题直接写角色名（explorer/coder）；worker 内部活动
+// （工具调用/单步收工/阶段思考）渲染进该 worker 独立的折叠卡，运行时可展开看；
+// worker 收工（spawn_worker 的 tool.complete）后收纳进主卡 .worker-slot，点击主卡展开考古。
+// 配对键 = 后端 resolve_worker_card_meta 的 worker 字段（与 Worker 回调标识一致）。
+var workerMainCards = {};   // worker 键 → 主卡 div
+var workerCards = {};       // worker 键 → 独立折叠卡 div
+// worker 内部事件判别：带 worker 标识且不是 spawn_worker 主卡本身
+function isWorkerEvent(d) { return !!(d && d.worker && d.name !== 'spawn_worker'); }
+// 主卡挂收纳位（.worker-slot），并登记配对
+function setupWorkerMainCard(card, key) {
+  if (!card || !key) return;
+  card.setAttribute('data-worker', key);
+  var slot = document.createElement('div');
+  slot.className = 'worker-slot';
+  card.appendChild(slot);
+  workerMainCards[key] = card;
+}
+// 取/建 worker 独立折叠卡（默认展开，头部点击折叠）
+function ensureWorkerCard(key, role) {
+  if (workerCards[key]) return workerCards[key];
+  var card = document.createElement('div');
+  card.className = 'worker-card';
+  card.setAttribute('data-worker', key);
+  var head = document.createElement('div');
+  head.className = 'worker-head';
+  head.innerHTML = '<span class="worker-role">' + esc(role || 'Worker') + '</span>' +
+    (key && key !== 'worker' ? '<span class="worker-name">' + esc(key) + '</span>' : '') +
+    '<span class="worker-phase"></span>' +
+    '<span class="worker-toggle">▾</span>';
+  var body = document.createElement('div');
+  body.className = 'worker-body';
+  card.appendChild(head);
+  card.appendChild(body);
+  card.onclick = function(e) {
+    if (e.target.closest('.worker-body')) return;   // 行内点选/滚动不折叠
+    var open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    var tg = head.querySelector('.worker-toggle');
+    if (tg) tg.textContent = open ? '▾' : '▸';
+  };
+  chatEl.appendChild(card);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  workerCards[key] = card;
+  return card;
+}
+// worker 工具调用行
+function renderWorkerToolStart(data) {
+  var card = ensureWorkerCard(data.worker, data.role);
+  var body = card.querySelector('.worker-body');
+  var row = document.createElement('div');
+  row.className = 'worker-row';
+  row.setAttribute('data-wrow', data.tool_id || '');
+  row.innerHTML = toolIcon(data.name) +
+    '<span class="worker-row-name">' + esc(TOOL_FRIENDLY[data.name] || data.name) + '</span>' +
+    (data.context ? '<span class="worker-row-preview">' + esc(data.context) + '</span>' : '') +
+    '<span class="worker-row-time"></span>' +
+    '<span class="dot ring"></span>';
+  body.appendChild(row);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+// worker 单步收工：行内 dot 转 done/fail + 耗时
+function renderWorkerToolComplete(data) {
+  var card = workerCards[data.worker];
+  if (!card) return;
+  var rows = card.querySelectorAll('.worker-row[data-wrow="' + data.tool_id + '"]');
+  if (!rows.length) return;
+  var row = rows[rows.length - 1];
+  var dot = row.querySelector('.dot');
+  if (dot) dot.className = 'dot ' + (data.success === false ? 'fail' : 'done');
+  var dur = Number(data.duration || 0);
+  var tm = row.querySelector('.worker-row-time');
+  if (tm && dur > 0) tm.textContent = dur.toFixed(1) + 's';
+}
+// worker 阶段/思考：头部实时阶段提示（正在思考…/并行执行 N 个工具/工具执行完成）
+function renderWorkerPhase(data) {
+  var card = ensureWorkerCard(data.worker, data.role);
+  var ph = card.querySelector('.worker-phase');
+  var msg = data.message || '';
+  if (ph && msg) ph.textContent = '· ' + msg.slice(0, 30);
+}
+// worker 收工 → 独立折叠卡收纳进主卡 .worker-slot（默认折叠，点击主卡展开）
+function foldWorkerIntoMain(key) {
+  var main = workerMainCards[key];
+  var wc = workerCards[key];
+  workerMainCards[key] = null;
+  workerCards[key] = null;
+  if (!main || !wc) return;
+  var slot = main.querySelector('.worker-slot');
+  if (slot) {
+    slot.appendChild(wc);
+    slot.classList.remove('open');
+  }
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
 on('message.start', function(data) {
   if (isForeignSession(data)) return;
   if (sendTimeoutId) { clearTimeout(sendTimeoutId); sendTimeoutId = null; }
@@ -3932,8 +4059,19 @@ on('message.complete', function(data) {
   // TICKET-GUI-F13：回合结束把最终展开姿势落盘（重启回放按姿势还原现场原样）
   if (currentSessionId) recordPose(currentSessionId);
 });
+// TICKET-DESK-WORKER-VISIBLE：worker 阶段/思考 → 独立折叠卡头部实时阶段
+// （主引擎 thinking 由 engine_adapter 转 status.update 走原通道，这里只处理带 worker
+// 标识的事件，非 worker 的 thinking 维持现状不渲染，不改变现有行为）
+on('thinking', function(data) {
+  if (isForeignSession(data)) return;
+  if (isWorkerEvent(data)) renderWorkerPhase(data);
+});
 on('tool.start', function(data) {
   if (isForeignSession(data)) return;
+  // TICKET-DESK-WORKER-VISIBLE：worker 内部事件 → 独立折叠卡（不进普通工具卡/聚合卡）
+  if (isWorkerEvent(data)) { renderWorkerToolStart(data); return; }
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 主卡 —— 标题直接写角色名，预留收纳位
+  var isSpawn = !!(data && data.name === 'spawn_worker');
   // TICKET-GUI-F6（缺陷 1）：工具卡是天然分段点 —— 到达时把当前思考框收束为
   // 折叠摘要段（复用 collapseThinkBox，视觉样式不动），后续 thinking.delta
   // 另开新框，思考段与工具卡交错排列，对齐 TUI/Hermes 节奏
@@ -3948,14 +4086,20 @@ on('tool.start', function(data) {
   toolsCalledThisRound = true;
   // TICKET-DESK-V2D5：本轮工具调用计数（认知状态条数据源）
   roundToolCount++;
-  addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
-          data ? data.context || '' : '',
-          data ? data.tool_id || 't'+Date.now() : 't'+Date.now());
+  var card = addTool(data ? data.name || data.tool_id || 'Tool' : 'Tool',
+                     isSpawn ? (data.worker || data.context || '') : (data ? data.context || '' : ''),
+                     data ? data.tool_id || 't'+Date.now() : 't'+Date.now(),
+                     isSpawn ? (data.worker_role || data.worker || '') : '');
+  if (isSpawn && data.worker) setupWorkerMainCard(card, data.worker);
 });
 on('tool.complete', function(data) {
   if (isForeignSession(data)) return;
+  // TICKET-DESK-WORKER-VISIBLE：worker 内部事件 → 折叠卡内单步收工（dot 转 done/fail）
+  if (isWorkerEvent(data)) { renderWorkerToolComplete(data); return; }
   var tid = data ? data.tool_id || '' : '';
   if (tid) updateToolResult(tid, data);
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 收工 → 把该 worker 的折叠卡收纳进主卡
+  if (data && data.name === 'spawn_worker' && data.worker) foldWorkerIntoMain(data.worker);
   // TICKET-DESK-V2B4 ②：回合中每次 tool.complete 后轻量刷新上下文药丸
   // （context.stats 只读毫秒级估算，无轮询；配合后端活引擎取数，药丸随回合实时涨）
   refreshCtxStats();

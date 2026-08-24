@@ -144,13 +144,23 @@ def run_engine(
             elif event_type == "tool_call":
                 _tool_calls[0] += 1
                 _unique_tools.add(data.get("name", ""))
-                emit("tool.start", sid, {
+                _start_data = {
                     "tool_id": data.get("name", ""),
                     "name": data.get("name", ""),
                     "arguments": data.get("args", {}),
                     "context": data.get("context", ""),
                     "session_id": sid,
-                })
+                }
+                # Worker 可见性（TICKET-DESK-WORKER-VISIBLE）：spawn_worker 主卡附加
+                # worker 键 + 检测出的角色，前端据此把卡片标题写成角色名（explorer/coder），
+                # 并按 worker 键收纳折叠卡
+                if data.get("name") == "spawn_worker":
+                    try:
+                        from tools.spawn_worker import resolve_worker_card_meta
+                        _start_data.update(resolve_worker_card_meta(data.get("args", {})))
+                    except Exception:
+                        pass
+                emit("tool.start", sid, _start_data)
             elif event_type == "tool_result":
                 tool_output = data.get("result", "")
                 # 提取 inline diff（edit_file 附加在结果末尾的分隔块）
@@ -160,7 +170,7 @@ def run_engine(
                     inline_diff, _, _ = tail.partition("<<<END_INLINE_DIFF>>>")
                     tool_output = tool_output.rstrip()
                     inline_diff = inline_diff.strip()
-                emit("tool.complete", sid, {
+                _done_data = {
                     "tool_id": data.get("name", ""),
                     "name": data.get("name", ""),
                     "arguments": data.get("args", {}),
@@ -171,7 +181,16 @@ def run_engine(
                         tool_output[:200] if tool_output else "工具执行失败"
                     ),
                     "session_id": sid,
-                })
+                }
+                # Worker 可见性（TICKET-DESK-WORKER-VISIBLE）：spawn_worker 收工事件
+                # 同样带 worker 键，前端据此把该 worker 的折叠卡收纳进对应的主卡（配对键一致）
+                if data.get("name") == "spawn_worker":
+                    try:
+                        from tools.spawn_worker import resolve_worker_card_meta
+                        _done_data.update(resolve_worker_card_meta(data.get("args", {})))
+                    except Exception:
+                        pass
+                emit("tool.complete", sid, _done_data)
             elif event_type == "complete":
                 result_text[0] = data.get("content", "")
                 # TICKET-SCAN-L3b：API 直采 —— relay 在等 bobo 回复时，直取完整输出

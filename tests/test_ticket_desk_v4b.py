@@ -273,9 +273,11 @@ def test_v4b_5_engine_gateway_zero_diff():
             f"{f} 的改动缺 COST-3/DESK-P1/P0-1 特批标记，未授权改动被拦截"
     for f in sorted(DESK_P1_ALLOWED & set(changed)):
         r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        # 票 VSC-2B：engine_adapter.py 复用该文件（写审批闸门），diff 标记兼容
-        assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout), \
-            f"{f} 的改动缺 DESK-P1/VSC-2B 特批标记，未授权改动被拦截"
+        # 票 VSC-2B：engine_adapter.py 复用该文件（写审批闸门），diff 标记兼容；
+        # 票 TICKET-DESK-WORKER-VISIBLE：engine_adapter.py 复用（spawn_worker 主卡
+        # 附加 worker/worker_role 键，前端 worker 折叠卡配对），diff 标记兼容
+        assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout), \
+            f"{f} 的改动缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE 特批标记，未授权改动被拦截"
     for f in sorted(GWMULTI_ALLOWED & set(changed)):
         r_gm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "TICKET-GW-MULTI" in r_gm.stdout, f"{f} 的改动缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"

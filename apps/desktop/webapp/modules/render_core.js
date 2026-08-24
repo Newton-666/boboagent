@@ -81,6 +81,9 @@ var TOOL_FRIENDLY = {
   'profile_update': 'Edit profile',
   // TICKET-SKILL-ACTIVE-2：skill 激活（后端 skill.activate 事件，非工具调用）
   'skill_activate': 'Skill',
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 主卡标题由角色覆盖（explorer/coder），
+  // 此映射只作无角色时的兜底名
+  'spawn_worker': 'Worker',
 };
 
 // TICKET-DESK-V2D25：细线 SVG 图标映射（D2.5-1）——14px / 1.25px 描边 / fill:none /
@@ -100,6 +103,8 @@ var TOOL_ICONS = {
   'profile_update': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4.4" cy="4.3" r="1.55"/><path d="M2.5 10.6 c0-1.4 1.3-2.3 3-2.3 c1.7 0 3 .9 3 2.3"/><path d="M8.7 8.5 L9.05 6.9 L11.7 4.25 c.35-.35 .92-.35 1.27 0 l.18.18 c.35.35 .35.92 0 1.27 L10.55 8.25 l-1.6 .45 z"/><path d="M8.4 9.1 h3.5"/></svg>',
   // TICKET-SKILL-ACTIVE-2：skill 激活卡图标 —— 打开的书 + 中缝（14px / 1.25px 描边，同款细线）
   'skill_activate': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 3.1 c1.4-0.2 2.9 0.1 4.4 1.1 c1.5-1 3-1.3 4.4-1.1 v7.6 c-1.4-0.2 -2.9 0.1 -4.4 1.1 c-1.5-1 -3-1.3 -4.4-1.1 Z"/><path d="M7 4.2 v7.6"/></svg>',
+  // TICKET-DESK-WORKER-VISIBLE：spawn_worker 图标 —— 机器人头（天线+双眼+耳，同款细线）
+  'spawn_worker': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.25" width="8" height="5.75" rx="1.5"/><path d="M7 4.25 V2.75"/><circle cx="5.6" cy="7.4" r="0.6"/><circle cx="8.4" cy="7.4" r="0.6"/><path d="M3 6.6 H1.9 M11 6.6 H12.1"/></svg>',
   '_default': '<svg class="tool-ic" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.25"/></svg>'
 };
 // 图标取映射，未知工具回退 _default（不许空白）；reduced-motion 下运行卡不加 shimmer class
@@ -109,7 +114,9 @@ function prefersReducedMotion() {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-function addTool(name, context, toolId) {
+// TICKET-DESK-WORKER-VISIBLE：第 4 参 displayName —— 覆盖卡片标题（spawn_worker 主卡显角色名），
+// 图标/工具标识仍按 name 映射，其他调用方不传则行为完全不变。
+function addTool(name, context, toolId, displayName) {
   welcomeEl.style.display = 'none';
   if (thinkBoxEl) {
     thinkBoxEl.querySelector('.think-label').innerHTML = 'thinking';
@@ -117,7 +124,7 @@ function addTool(name, context, toolId) {
   }
 
   // Friendly names
-  var friendly = TOOL_FRIENDLY[name] || name;
+  var friendly = displayName || TOOL_FRIENDLY[name] || name;
 
   toolIdCounter++;
   var uniqueId = toolId + '-' + toolIdCounter;
@@ -138,7 +145,9 @@ function addTool(name, context, toolId) {
   div.onclick = function(e) {
     // Don't toggle when clicking result text — allows text selection
     if (e.target.closest('.tool-result')) return;
-    var r = div.querySelector('.tool-result');
+    if (e.target.closest('.worker-slot')) return;   // worker 收纳区点内部不关主卡
+    // TICKET-DESK-WORKER-VISIBLE：spawn_worker 主卡展开目标优先 worker 收纳位
+    var r = div.querySelector('.worker-slot') || div.querySelector('.tool-result');
     if (r) { r.classList.toggle('open'); var t = div.querySelector('.tool-toggle'); if (t) { t.textContent = r.classList.contains('open') ? '▾' : '▸'; t.style.display = 'inline'; } }
   };
   // F4-1: 聚合卡持续吞并 —— 任何时刻屏幕只有两块：聚合卡（吞并所有中间步骤）+ 最新一步摊开
@@ -192,6 +201,7 @@ function addTool(name, context, toolId) {
   }
   roundToolEls.push(div); // 最新一步保留在消息流，保持摊开可见
   chatEl.scrollTop = chatEl.scrollHeight;
+  return div;   // TICKET-DESK-WORKER-VISIBLE：返回卡片供调用方挂 worker 收纳位
 }
 
 // TICKET-GUI-F6D：写/改类工具名单 —— 配对思考不吞并（编辑流思考→编辑卡+diff 全程摊开）

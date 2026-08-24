@@ -548,3 +548,14 @@
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
 - D1 遗留（D2/D3）：`data/tickets/TICKET-DEMOLISH-OFFICE-DUO.md` §8
+
+### B74 · worker 可见性（主卡显角色 + 独立折叠卡 + 收工收纳）—— 提交（待填）· 2026-08-24
+- **owner 施工实测反馈**：卡片仍写 "spawn worker"、worker 过程仍黑箱；"别着急修复，怕深入细节" → 先定叶子形状再动手。
+- **叶子定稿（owner）**：①主卡直接写角色名（explorer/coder）；②每个 worker 有独立折叠卡可展开看；③worker 收工后才收纳进主折叠卡。
+- **断点诊断（实测链路三处）**：回调读键名与引擎发射不一致（tool_name vs name）→ 工具名全空；state.change 不走回调通道（只进事件总线）→ 阶段永不到前端；GUI 无 thinking 处理器 → 思考不可见。
+- **改动**：
+  1. 后端 tools/spawn_worker.py：回调修键名（name/args）；事件带 worker+role 标识；补 tool_result → tool.complete（行内 dot 转 done/fail）；_detect_role 补"调查"；新增 resolve_worker_card_meta（主卡附加 worker/worker_role，与回调标识一致）。
+  2. 后端 core/engine_adapter.py：spawn_worker 主卡 tool.start/tool.complete 附加 worker/worker_role 键（TICKET-DESK-WORKER-VISIBLE 登记，守卫三测试同步）。
+  3. 前端：spawn 主卡标题=角色名 + 机器人图标；worker 内部事件路由进独立折叠卡（工具行/单步完成态/阶段思考）；收工收纳进主卡 .worker-slot（点击主卡展开考古）；thinking 处理器仅响应 worker 事件，不影响现有行为。
+- **验证（便宜栈）**：spawn_worker 8 测试（真实键名断言）+ worker-card-render 5 DOM 测试（事件判别/建卡/单步完成/收纳）+ 守卫登记（v4/v4b/tel 24+20）+ GUI 结构 53 + engine_core 24 —— 全绿；构建 dist 逐字节一致。
+- **待 owner 施工实测**：让 bobo spawn worker（如"调查 X"）→ 看主卡写 explorer、独立折叠卡实时展开、收工后收纳进主卡。

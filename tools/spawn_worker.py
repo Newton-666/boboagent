@@ -43,7 +43,7 @@ _ROLE_PRESETS = {
 def _detect_role(name: str) -> str:
     """从 name 检测角色（explorer/coder/researcher），未命中 → 通用。"""
     n = str(name or "").lower()
-    if any(k in n for k in ("explor", "调研", "探索", "研究", "分析", "researcher", "research")):
+    if any(k in n for k in ("explor", "调研", "调查", "探索", "研究", "分析", "researcher", "research")):
         return "explorer"
     if any(k in n for k in ("cod", "修复", "实现", "开发", "编码", "测试员", "fix")):
         return "coder"
@@ -104,40 +104,78 @@ def set_worker_event_emitter(emitter, sid: str = None):
 
 
 def _make_worker_callback(name: str):
-    """Worker 的回调：工具调用 + 阶段/状态事件 → TUI（探索过程可见，非黑箱）。"""
-    _phase_map = {"IDLE": "启动", "THINKING": "思考", "EXECUTING": "执行工具",
-                  "RESPONDING": "整理结果", "DONE": "完成", "ERROR": "出错"}
+    """Worker 的回调：工具调用/结果 + 阶段/思考事件 → TUI/GUI（过程可见，非黑箱）。
+
+    TICKET-DESK-WORKER-VISIBLE：
+    键名对齐引擎实际发射的字段（tool_runner 发 name/args，不发 tool_name/tool_args）。
+    每个事件都带 worker 标识（name + 检测出的 role），前端据此把该 worker 的活动
+    渲染进它独立的折叠卡；主卡（spawn_worker）用 resolve_worker_card_meta 配对同一标识。
+    """
+    role = _detect_role(name)
+
     def _cb(event_type: str, data: dict):
         emitter = _worker_event_emitter
         if not emitter:
             return
         sid = _worker_sid or ""
         if event_type == "tool_call":
-            # Worker 的调用渲染成标准工具卡（svg+名字，与其他工具一致）：
-            # 发 tool.start → 前端 addTool(name) 出卡；context 标注 Worker 角色
-            tool = data.get("tool_name", "")
-            args = data.get("tool_args", {})
+            tool = data.get("name", "") if isinstance(data, dict) else ""
+            args = data.get("args", {}) if isinstance(data, dict) else {}
             preview = ""
             if isinstance(args, dict):
-                for key in ("query", "command", "filepath", "url", "instruction"):
+                for key in ("query", "command", "filepath", "url", "instruction", "path", "keyword"):
                     val = args.get(key, "")
                     if val:
                         preview = str(val)[:40]
                         break
-            ctx = f"[Worker {name}]" + (f" {tool}({preview})" if preview else "")
-            emitter("tool.start", sid, {"name": tool, "context": ctx,
-                                        "tool_id": f"w-{name}-{tool}"})
-        elif event_type == "state.change":
-            # 阶段可见：状态转换发事件（探索/编码过程可被用户看到走到哪了）
-            to = data.get("to", "")
-            phase = _phase_map.get(to, to)
-            emitter("status.update", sid, {"status": f"[Worker {name}] {phase}", "message": f"Worker {name} {phase}"})
+            emitter("tool.start", sid, {
+                "name": tool,
+                "worker": name,
+                "role": role,
+                "context": preview,
+                "tool_id": f"w-{name}-{tool}",
+                "session_id": sid,
+            })
+        elif event_type == "tool_result":
+            # 单步收工可见：worker 卡内工具行由 dot 转 done/fail（不再永远转圈）
+            tool = data.get("name", "") if isinstance(data, dict) else ""
+            emitter("tool.complete", sid, {
+                "name": tool,
+                "worker": name,
+                "role": role,
+                "tool_id": f"w-{name}-{tool}",
+                "duration": data.get("duration", 0) if isinstance(data, dict) else 0,
+                "success": bool(data.get("success", True)) if isinstance(data, dict) else True,
+                "session_id": sid,
+            })
         elif event_type == "thinking":
-            # Worker 的思考（推理过程）可见——不再黑箱
-            msg = str(data.get("message", ""))[:80] if isinstance(data, dict) else str(data)[:80]
+            # 阶段可见：calling_llm/executing/continuing 等消息 → worker 卡头部实时阶段
+            msg = str(data.get("message", ""))[:80] if isinstance(data, dict) else ""
             if msg:
-                emitter("thinking", sid, {"message": f"[Worker {name}] 💭 {msg}"})
+                emitter("thinking", sid, {
+                    "worker": name,
+                    "role": role,
+                    "message": msg,
+                    "session_id": sid,
+                })
     return _cb
+
+
+def resolve_worker_card_meta(args: dict) -> dict:
+    """主 Agent 调用 spawn_worker 时，给主卡事件附加的字段：worker 键 + 角色。
+
+    worker 键与 Worker 回调里的标识保持一致（name 优先，缺省用 instruction 前缀，
+    再缺省 "worker"），前端据此把该 worker 的独立折叠卡与主卡配对、收纳。
+    """
+    args = args or {}
+    name_arg = str(args.get("name", "") or "")
+    wname = name_arg or str(args.get("instruction", "") or "")[:20] or "worker"
+    # 角色检测基于解析后的 worker 键（与 Worker 回调 _make_worker_callback 的输入一致），
+    # 保证主卡标题角色与折叠卡头部角色永远相同（含无名 worker 走 instruction 前缀的场景）
+    return {
+        "worker": wname,
+        "worker_role": _detect_role(wname),
+    }
 
 
 def _get_llm_caller():
@@ -302,7 +340,7 @@ def execute(instruction: str = "", name: str = "", context: str = "",
             llm_caller=llm_caller,
             tool_executor=_active_executor,
             test_mode=False,
-            callback=_make_worker_callback(name or instruction[:20]),
+            callback=_make_worker_callback(name or instruction[:20] or "worker"),
         )
         worker.system_prompt = worker_prompt
 
