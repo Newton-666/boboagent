@@ -1263,13 +1263,11 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 全价 + 前缀断裂拖累 messages 命中 → 全量稳定更优，且工具可用性 100%
         # 不缩水（owner 红线）。describe_tool 取件的 _extra_tools 走执行器注册，
         # 不依赖 prompt schema，不受影响。
+        # TICKET-HARNESS-LIGHTS 修正：路由（阶段 B）只管辖 skills 激活 + 记忆
+        # 召回，**不管工具注入**——工具是 description 驱动的"包"，全量注入、
+        # LLM 自己按描述选择（COST-3 定案：可用性 100% 不缩水）。route_plan 的
+        # tool_names 仅作"该轮建议关注哪些工具"的元信息，不再用于裁剪注入。
         filtered_tools = TOOLS_SCHEMA
-        if self._route_plan is not None and self._route_plan.tool_names:
-            _names = set(self._route_plan.tool_names)
-            _sub = [t for t in TOOLS_SCHEMA
-                    if t.get("function", t).get("name") in _names]
-            if _sub:
-                filtered_tools = _sub
         if filtered_tools is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered_tools]
             self._notify("thinking", {"phase": "tool_filter", "message": f"加载 {len(filtered_tools)} 个工具 ({', '.join(names)})"})

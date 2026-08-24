@@ -104,15 +104,22 @@ def classify_task(task: str) -> list:
 
 
 def route(task: str, user_profile: dict = None, recent_rounds: list = None) -> RoutePlan:
-    """统一路由（规则版 v1）：任务 → 工具/技能/记忆子集。
+    """统一路由（规则版 v1）：任务 → 技能候选 / 记忆类型（+ 工具关注元信息）。
 
-    无命中 → 返回常驻工具 + 空技能/记忆（对应"无技能命中按 domain 兜底"的设计；
-    本版无命中时工具仅常驻集，兜底域在启用后观察再补）。
+    TICKET-HARNESS-LIGHTS 修正（职责边界）：
+    - 本模块**只管辖 skills 激活 + 记忆召回**——这两者是有容错空间的选择。
+    - **不管工具注入**：工具是 description 驱动的"包"，全量注入、LLM 自己按
+      描述选（COST-3 定案：按分类过滤工具 → 能力抖动/前缀断裂/可用性缩水，
+      可用性 100% 不缩水是 owner 红线）。tool_names 仅作"该轮建议关注哪些
+      工具"的元信息，engine 不用于裁剪注入。
+
+    无命中 → 返回常驻工具（元信息）+ 空技能/记忆（对应"无技能命中按 domain
+    兜底"的设计；本版无命中时工具仅常驻集，兜底域在启用后观察再补）。
     """
     plan = RoutePlan(tool_names=list(RESIDENT_TOOLS))
     t = (task or "").lower()
 
-    # 工具：domain 命中 → 追加 domain 工具
+    # 工具关注（元信息，不裁剪注入）：domain 命中 → 追加 domain 工具
     for keywords, tags in _TASK_RULES:
         if any(k.lower() in t for k in keywords):
             for tag in tags:
