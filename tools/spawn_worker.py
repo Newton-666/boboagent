@@ -113,16 +113,20 @@ def _make_worker_callback(name: str):
             return
         sid = _worker_sid or ""
         if event_type == "tool_call":
+            # Worker 的调用渲染成标准工具卡（svg+名字，与其他工具一致）：
+            # 发 tool.start → 前端 addTool(name) 出卡；context 标注 Worker 角色
             tool = data.get("tool_name", "")
             args = data.get("tool_args", {})
-            desc = tool
+            preview = ""
             if isinstance(args, dict):
                 for key in ("query", "command", "filepath", "url", "instruction"):
                     val = args.get(key, "")
                     if val:
-                        desc = f'{tool}("{str(val)[:40]}")'
+                        preview = str(val)[:40]
                         break
-            emitter("thinking", sid, {"message": f"[Worker {name}] 🔧 {desc}"})
+            ctx = f"[Worker {name}]" + (f" {tool}({preview})" if preview else "")
+            emitter("tool.start", sid, {"name": tool, "context": ctx,
+                                        "tool_id": f"w-{name}-{tool}"})
         elif event_type == "state.change":
             # 阶段可见：状态转换发事件（探索/编码过程可被用户看到走到哪了）
             to = data.get("to", "")

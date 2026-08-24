@@ -29,13 +29,15 @@ def test_generic_prompt_no_role_preset():
 
 
 def test_callback_emits_phase_and_tool():
-    """回调：工具调用 + 状态转换都发事件（探索过程可见）。"""
+    """回调：工具调用发 tool.start（标准工具卡 svg+名字）+ 状态/思考可见。"""
     emitted = []
-    sw._worker_event_emitter = lambda etype, sid, data: emitted.append((etype, data.get("message", "")))
+    sw._worker_event_emitter = lambda etype, sid, data: emitted.append((etype, data))
     cb = sw._make_worker_callback("w1")
     cb("tool_call", {"tool_name": "grep_code", "tool_args": {"query": "config"}})
     cb("state.change", {"to": "EXECUTING"})
     cb("thinking", {"message": "我在看配置"})
-    assert any("🔧" in m for _, m in emitted), "工具调用应可见"
-    assert any("执行工具" in m for _, m in emitted), "阶段应可见"
-    assert any("💭" in m for _, m in emitted), "思考应可见"
+    starts = [d for e, d in emitted if e == "tool.start"]
+    assert starts and starts[0]["name"] == "grep_code", "工具调用应发 tool.start（svg+名字卡）"
+    assert "Worker w1" in starts[0]["context"], "context 应标注 Worker 角色"
+    assert any(e == "status.update" for e, _ in emitted), "阶段应可见"
+    assert any(e == "thinking" for e, _ in emitted), "思考应可见"
