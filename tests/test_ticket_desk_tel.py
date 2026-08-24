@@ -501,8 +501,8 @@ def test_tel_8_zero_interference():
                     "bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/prompts.py",
                     "bobo_tui_gateway/handlers/sessions.py"):
             r_dm0 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert "TICKET-DEMOLISH-OFFICE-DUO" in r_dm0.stdout, \
-                f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO 标记，未授权改动被拦截"
+            assert ("TICKET-DEMOLISH-OFFICE-DUO" in r_dm0.stdout or "TICKET-HARNESS-LIGHTS" in r_dm0.stdout), \
+                f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO/TICKET-HARNESS-LIGHTS 标记，未授权改动被拦截"
             changed.remove(ln)
     # COST-1B（2026-08-16）授权：消耗度量双观测注入点，白名单文件 diff 必须含 COST-1b 标记
     COST1B_ALLOWED = {
@@ -550,8 +550,16 @@ def test_tel_8_zero_interference():
                   "core/provider.py"):  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
-                    or "P0-2" in r7.stdout), \
-                f"{ln} 缺 COST-3/DESK-P1/P0-1/P0-2 特批标记，未授权改动被拦截"
+                    or "P0-2" in r7.stdout or "TICKET-HARNESS-LIGHTS" in r7.stdout), \
+                f"{ln} 缺 COST-3/DESK-P1/P0-1/P0-2/TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
+            continue
+        # 票 TICKET-HARNESS-LIGHTS（2026-08-24）特批：core/router.py + core/adapt.py +
+        # core/observer.py（点亮 harness 灯：BOBO_ROUTER/BOBO_ADAPT/BOBO_LEARN 默认
+        # 改为开启，BOBO_*=0 可关回滚），diff 必须含 TICKET-HARNESS-LIGHTS 标记
+        if ln in ("core/router.py", "core/adapt.py", "core/observer.py"):
+            r_hl = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "TICKET-HARNESS-LIGHTS" in r_hl.stdout, \
+                f"{ln} 缺 TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
             continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
@@ -686,7 +694,7 @@ def test_tel_8_zero_interference():
         if ln == "data/obsidian_alias_map.json":
             continue  # Obsidian 语义搜索映射表（TICKET-OBSIDIAN-SEARCH-C：中文 query
             # → 英文文件夹名对照，自学习写回；数据文件非代码）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py" or ln == "core/router.py" or ln == "core/adapt.py" or ln == "core/observer.py":
             continue
         # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
         # + core/skill_loader.py（USER.md 引擎写入闸门 + 行为信号两级检测 + skill

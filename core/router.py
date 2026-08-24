@@ -3,7 +3,9 @@
 接口（写死）：route(task, user_profile, recent_rounds) -> RoutePlan
   RoutePlan = {tool_names, skill_names, memory_types}  — 该轮上下文应带什么。
 
-默认关闭（BOBO_ROUTER=0）：engine 行为不变（基线 diff=0）。
+默认开启（BOBO_ROUTER=0 可关，可回滚）：engine 每轮按路由结果执行工具广告/
+技能激活/记忆召回。点亮后行为变化：工具子集/技能/记忆按任务分类路由
+（此前默认关闭，行为不变——TICKET-HARNESS-LIGHTS：owner 决定点亮 harness 灯）。
 开启后：工具广告/技能激活/记忆召回按路由结果执行。
 
 规则版 v1（从 tool_park + skill_loader 起步，适配层是第二阶段）：
@@ -83,8 +85,8 @@ class RoutePlan:
 
 
 def router_enabled() -> bool:
-    """BOBO_ROUTER=1 开启路由（默认关：行为不变，基线 diff=0）。"""
-    return os.environ.get("BOBO_ROUTER", "0") == "1"
+    """BOBO_ROUTER=1 开启路由（默认开；BOBO_ROUTER=0 显式关闭，可回滚）。"""
+    return os.environ.get("BOBO_ROUTER", "1") == "1"
 
 
 def classify_task(task: str) -> list:

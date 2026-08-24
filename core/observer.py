@@ -7,7 +7,9 @@
 护栏（技术层）：
 - 信号可测（分类/累积是确定性代码，可单测）；
 - 观察只喂"落笔"，不进前馈路径（前馈仍 description+规则驱动）；
-- BOBO_LEARN=1 启用，默认关（行为不变，基线 diff=0）。
+- BOBO_LEARN=0 可关（默认开——TICKET-HARNESS-LIGHTS：owner 点亮 harness 灯）。
+  注意：本模块的运行时驱动点（观察循环接进引擎/后台）尚未接线，只有测试在调；
+  点亮观察循环属于 harness 接线工作，见 docs/HARNESS-DESIGN.md 学习环。
 
 范式条款落点：学习 = 后端背景监督（本模块是观察者，LLM 是被监督的演员）。
 """
@@ -34,8 +36,8 @@ class Signal:
 
 
 def observer_enabled() -> bool:
-    """BOBO_LEARN=1 启用观察（默认关：行为不变）。"""
-    return os.environ.get("BOBO_LEARN", "0") == "1"
+    """BOBO_LEARN=1 启用观察（默认开；BOBO_LEARN=0 可关）。"""
+    return os.environ.get("BOBO_LEARN", "1") == "1"
 
 
 def _classify_error(error_text: str) -> str:

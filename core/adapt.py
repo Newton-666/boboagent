@@ -6,7 +6,8 @@
 闭环：用户反馈 → learner 写 USER_PREF 记忆 → adapt 读画像 → 调整路由权重
      → 下一轮 LLM 看到更贴合的工具 → 用户更顺 → （奖励信号回流）
 
-护栏：只作用于"因人而异"的路由决策；安全/收尾永不碰；BOBO_ADAPT=1 启用默认关。
+护栏：只作用于"因人而异"的路由决策；安全/收尾永不碰；BOBO_ADAPT=0 可关（默认开，
+随 ROUTER 一起生效——此前默认关，TICKET-HARNESS-LIGHTS：owner 点亮 harness 灯）。
 """
 import logging
 import os
@@ -25,7 +26,7 @@ _PREFERENCE_DOMAINS = [
 
 
 def adapt_enabled() -> bool:
-    return os.environ.get("BOBO_ADAPT", "0") == "1"
+    return os.environ.get("BOBO_ADAPT", "1") == "1"
 
 
 def profile_text(profile: dict) -> str:

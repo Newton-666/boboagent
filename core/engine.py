@@ -1694,10 +1694,10 @@ class Engine(ContextMixin, ToolRunnerMixin):
     def run(self, user_input: str = None, stream: bool = True, depth: int = 0, tool_round: int = 0):
         self._emit_state_change(self.STATE_IDLE, "session start")
         self.current_user_input = user_input
-        # 阶段 B：路由器（BOBO_ROUTER=1 启用；默认关 → 行为不变，基线 diff=0）
+        # 阶段 B：路由器（默认开；BOBO_ROUTER=0 显式关闭，可回滚——TICKET-HARNESS-LIGHTS 点亮）
         self._route_plan = _router_route(str(user_input or "")) if _router_enabled() else None
         if self._route_plan is not None:
-            # 阶段 E：适配层（BOBO_ADAPT=1）——画像偏好提升路由权重（只加不删）
+            # 阶段 E：适配层（BOBO_ADAPT=1，默认开）——画像偏好提升路由权重（只加不删）
             try:
                 from core.adapt import adapt, adapt_enabled as _adapt_on
                 if _adapt_on():
