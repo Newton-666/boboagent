@@ -54,14 +54,22 @@ def mirror_env(tmp_path, monkeypatch):
     return {"db": db, "bak": bak, "mirror": mirror}
 
 
+def _json_store_ref(db_path):
+    """A1：JSON 真源最后写入时间参考（knowledge_base/_meta.json，退化用单文件）。"""
+    meta = db_path.parent / "knowledge_base" / "_meta.json"
+    return meta if meta.exists() else db_path
+
+
 def _touch_newer(path, ref_path):
-    """把 path 的 mtime 拉到 ref_path 之后，模拟"刚被手改"。"""
-    t = os.stat(ref_path).st_mtime + 10
+    """把 path 的 mtime 拉到真源之后，模拟"刚被手改"。"""
+    t = os.stat(_json_store_ref(ref_path)).st_mtime + 10
     os.utime(path, (t, t))
 
 
 def _read_entries(db_path):
-    return json.loads(db_path.read_text(encoding="utf-8"))["entries"]
+    # A1：存储改按类分文件——读接口 v5_memory._load()，不依赖单文件布局
+    import tools.v5_memory as vm
+    return vm._load()["entries"]
 
 
 # ── 验收 1：新增条目 → 镜像同步 ──────────────────────
@@ -114,8 +122,10 @@ def test_manual_edit_imports_to_json(mirror_env):
     e1 = [e for e in entries if e["id"] == 1][0]
     assert e1["text"] == "用户手改的记忆"
     assert e1.get("human_edited") is True
-    # .bak 备份存在
-    assert mirror_env["bak"].exists()
+    # A1：备份按类文件（knowledge_base/*.json.bak），非旧单文件 .bak
+    split_dir = mirror_env["db"].parent / "knowledge_base"
+    baks = list(split_dir.glob("*.json.bak")) if split_dir.exists() else []
+    assert baks, "A1 按类备份应存在（*.json.bak）"
     # 导入后 mtime 对齐：再次导入不重复触发
     assert mm.import_from_md() == 0
 

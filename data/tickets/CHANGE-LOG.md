@@ -411,6 +411,14 @@
 - **本轮定稿点入档**：① 三挂包按时间维度分（工具/记忆：常驻+可选/可变；技能全可变沉淀池）；② 类别=池管理（上限/剪枝/预筛定位），非路由判据；③ 沉淀=休眠池+激活封顶+池上限（MoE）；④ 技能=description+流程语言（**无工具声明**），工具路由=广告范围+LLM 语义配对，依赖顺序 任务→技能→LLM配工具→记忆横切；⑤ 沉淀 count-based 从未成功（事实）+ token 成本约束（能沉淀也能遗忘/封顶）；⑥ 现有资产盘点（decay/replace/容量在运行，缺 last_used/合并/剪枝/验证）。
 - **落盘**：HARNESS-DESIGN.md v2（§1-§7 完整，含执行顺序与开放问题）。
 
+### B52 · A1 记忆物理模块化 —— 提交（待填）· 2026-08-24（分支 feat/harness-a1-memory，未合 main）
+- **改动**：v5_memory 单 JSON 存储 → **按类分文件**（knowledge_base/<TYPE>.json ×6 + _meta.json 存 folders/order/额外顶层键）；旧单文件自动迁移；逐类原子写 + .bak；读接口（_load 返回结构）不变 → injector 零改动。
+- **配套**：memory_mirror 改用 v5 读接口（sync_mirror/import_from_md/_write_json 不依赖存储布局）；补 `last_used` 字段（LRU 生命周期地基）+ `mark_used()` 函数（显式触碰，不接读路径）。
+- **测试适配（实现细节断言）**：mirror 测试的 _read_entries 改读接口；_touch_newer 基准改真源（_meta）；.bak 断言改按类文件。
+- **验证**：记忆系 60 测试全绿；行为基线 6/6 diff=0；injector/engine 53 过；启动冒烟 5/5。
+- **影响面**：proactive/memory_mirror/injector 无行为变化（读接口不变纪律兑现）。
+- **红线**：分支未合 main；rollback/pre-a1 就位。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
