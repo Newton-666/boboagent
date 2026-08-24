@@ -523,6 +523,14 @@
 - **验证**：基线 6/6；fact_protect 4 + acceptance 1 + memory/engine/ticket023 46 测试绿。
 - **设计衔接**：注入层（MoE 召回）已有——本实现只做保存层守卫；LLM 语义兜底（漏斗③）预留（成本纪律下不默认启用）。
 
+### B71 · spawn_worker 修复（可用化）—— 提交（待填）· 2026-08-24
+- **owner 定**：spawn_worker 探索过程黑箱 + 无职责拆分（exploring/coding）；自定义（角色/prompt/模型/数量/超时）后做，先修到可用。
+- **改动**：
+  1. 角色预设（_ROLE_PRESETS + _detect_role）：explorer（只探索不修改）/ coder（动手实现）/ researcher；name 自动检测角色，prompt 职责化；
+  2. 回调增强（非黑箱）：工具调用 + 状态转换阶段 + 思考推理，全部发事件到 TUI——探索过程可见。
+- **验证**：role 5 测试绿；基线 6/6。
+- **自定义（前端方向，后做）**：角色/prompt/模型/数量/超时 → FRONTEND-DESIGN 方向三。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
