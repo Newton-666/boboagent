@@ -512,6 +512,11 @@
 - **结论**：① 意图修复确认生效；② 稳态能 90+；③ 唯一掉点 = 每轮首主调用 tools 段冷启动——接"路由工具子集稳定位置"（MoE vs 缓存冲突的实测依据）。
 - **待查**：冷启动是每 session 一次还是每轮一次。
 
+### B69 · 意图缓存修复合 main —— 提交（待填）· 2026-08-24
+- **合并**：feat/cache-intent-prefix → main（7e22225）；rollback/pre-cache-intent-fix 就位。
+- **验证（便宜栈）**：engine/goal/cu/tel_8 53 测试绿；基线 6/6；工作树干净。
+- **修复**：parse_intent 共享主 system 前缀——意图调用命中率 ~36%→97.6%（实测 B68）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
