@@ -472,6 +472,14 @@
 - **补录**：pyproject --ignore=experiments（防沙盒同名测试模块冲突，遗留改动）。
 - **合后全量**：后台跑（预期 tel_8 转绿全绿）。
 
+### B62 · D 沉淀机制落地 —— 提交（待填）· 2026-08-24（feat/harness-d-sediment，未合 main）
+- **改动**：
+  1. core/skill_lifecycle.py——技能生命周期状态机（active→stale→archived，使用驱动 last_activity_at）+ provenance（agent_created）+ pinned 保护 + 时间锚定 + mark_used reactivate（纯确定性无 LLM）；
+  2. tools/sediment_skill.py——agent 自主触发工具（替代从未成功的 count-based）：沉淀技能包 + 登记生命周期；
+  3. **skill_loader 补扫 custom 目录**——修"沉淀出来不可路由"根因（原沉淀器写 data/skills/custom，loader 只扫 skill-standards——即使触发也用不上）。
+- **验证**：lifecycle 5 单测绿；基线 6/6；skill/engine/injector 51 过；D 端到端（自主沉淀→登记 active→loader 路由命中）通过。
+- **§3b 落地对照**：触发=agent 自主 ✅ · 生命周期=使用驱动状态机 ✅ · 保护=pinned+锚定 ✅ · 纯确定性 ✅ · provenance ✅。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
