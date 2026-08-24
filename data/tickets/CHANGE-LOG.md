@@ -439,6 +439,13 @@
 - **修正**：code-fix 触发词补 pytest/运行测试/测试情况。
 - **诚实记录**：先前 -63.6% token 的 A/B 未含路由准确性测量——本票补上；结论：召回无损 + 技能/记忆 100%，精确率（多余广告）作为 B 内后续优化项（domain 表细化）。
 
+### B56 · C 学习环（观察总线→落笔→生命周期）—— 提交（待填）· 2026-08-24（feat/harness-b-router 续）
+- **C1 观察总线**（core/observer.py）：挂现有 event_bus，读 events.jsonl；信号 schema=决策点×结果；tool.exec 成败→信号（错误分类：正则/路径/权限/网络）；累积阈值 ≥3；BOBO_LEARN=1 启用，默认关。
+- **C2 落笔**（core/learner.py）：过阈值→写 LESSON 记忆（确定性模板，后端监督，不调 LLM）。
+- **C3 生命周期**（learner.prune_memory）：超容量→归档最低价值（先归档可逆护栏；活跃条目≤容量）。
+- **验证**：observer 5 测试 + learner 4 测试全绿；基线 6/6 diff=0；engine/记忆 48 过；全链冒烟（edit_file regex×3→触发→写 LESSON）通过——正是范式讨论的正则例子。
+- **护栏兑现**：信号可测（确定性单测）、观察与落笔分轨、先归档后驱逐、只写不碰前馈。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
