@@ -665,7 +665,8 @@ def format_all_memory(max_chars: int = 5000) -> str:
     return header + "\n" + "\n".join(lines)
 
 
-def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000) -> tuple[str, dict]:
+def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000,
+                             entry_types: list | None = None) -> tuple[str, dict]:
     """票 LN-4：按信号分降序注入记忆（分段保底 + 信号淘汰）。
 
     与 format_all_memory 的区别：
@@ -675,17 +676,19 @@ def format_memory_by_signal(max_chars: int = 2500, min_chars: int = 1000) -> tup
           {"entries": 注入条数, "total_entries": 总条数, "evicted": 信号合格但超预算被淘汰数}
       - max_chars 上限（天花板 2500）；min_chars 保底语义：记忆充足时至少注入
         min_chars 字符（由独立段落 + 上限控制自然满足，参数保留供调用方文档化）
+      - B4（阶段 B）：entry_types 可选——路由记忆类型过滤（None=全类型，默认行为不变）
     """
     data = _load()
     entries = data.get("entries", [])
     if not entries:
         return "", {"entries": 0, "total_entries": 0, "evicted": 0}
     total_all = len(entries)
-    # 过滤：归档 + 低信号永不注入
+    # 过滤：归档 + 低信号永不注入；B4：entry_types 过滤（路由记忆类型）
     eligible = [
         e for e in entries
         if not e.get("archived", False)
         and e.get("signal_score", 100) >= 20
+        and (entry_types is None or (e.get("type") or "") in entry_types)
         and (e.get("text") or "").strip()
     ]
     if not eligible:

@@ -428,6 +428,11 @@
   - 冒烟：code_fix 激活 code-fix 技能 + 13 工具广告，run done。
 - **待续（B 内）**：B4 记忆召回路由（route.memory_types 未接 injector——下一步）；规则表按实测校准。
 
+### B54 · B4 记忆召回路由 —— 提交（待填）· 2026-08-24（feat/harness-b-router）
+- **改动**：format_memory_by_signal 加可选 entry_types 参数（B4 记忆类型过滤，默认 None=全类型行为不变）；injector 路由开时按 route.memory_types 过滤记忆召回。
+- **验证**：基线 6/6 diff=0；记忆/技能/injector 44 测试绿。
+- **B 阶段收官**：路由器（工具/技能/记忆三路全接，BOBO_ROUTER 开关，默认关行为不变；开实测 token -63.6%/calls -54%——B 完整）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
