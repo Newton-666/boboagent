@@ -517,6 +517,12 @@
 - **验证（便宜栈）**：engine/goal/cu/tel_8 53 测试绿；基线 6/6；工作树干净。
 - **修复**：parse_intent 共享主 system 前缀——意图调用命中率 ~36%→97.6%（实测 B68）。
 
+### B70 · 压缩必保层实现 —— 提交（待填）· 2026-08-24（feat/compression-protect，未合 main）
+- **改动**：core/fact_protect.py（必保层：显式信号关键词 + 硬事实规则 URL/路径/数字/决策/凭据，零 LLM 成本）；接入 _compress_history——压缩前保护"将摘要掉的段"（layer0 保留段不压）。
+- **验收（B67 两层）**：压 6 次后 8080 仍在记忆（保存层 durable）+ 召回含 8080（注入层 routing）——测试通过。
+- **验证**：基线 6/6；fact_protect 4 + acceptance 1 + memory/engine/ticket023 46 测试绿。
+- **设计衔接**：注入层（MoE 召回）已有——本实现只做保存层守卫；LLM 语义兜底（漏斗③）预留（成本纪律下不默认启用）。
+
 ## 待办追溯索引
 
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
