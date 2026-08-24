@@ -549,7 +549,7 @@
 - 修绿剩余：`data/tickets/TICKET-MAIN-REGREEN.md` §4
 - D1 遗留（D2/D3）：`data/tickets/TICKET-DEMOLISH-OFFICE-DUO.md` §8
 
-### B74 · worker 可见性（主卡显角色 + 独立折叠卡 + 收工收纳）—— 提交（待填）· 2026-08-24
+### B74 · worker 可见性（主卡显角色 + 独立折叠卡 + 收工收纳）—— 提交 62df2ae· 2026-08-24
 - **owner 施工实测反馈**：卡片仍写 "spawn worker"、worker 过程仍黑箱；"别着急修复，怕深入细节" → 先定叶子形状再动手。
 - **叶子定稿（owner）**：①主卡直接写角色名（explorer/coder）；②每个 worker 有独立折叠卡可展开看；③worker 收工后才收纳进主折叠卡。
 - **断点诊断（实测链路三处）**：回调读键名与引擎发射不一致（tool_name vs name）→ 工具名全空；state.change 不走回调通道（只进事件总线）→ 阶段永不到前端；GUI 无 thinking 处理器 → 思考不可见。
