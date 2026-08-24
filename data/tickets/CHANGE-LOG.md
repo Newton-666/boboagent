@@ -559,3 +559,12 @@
   3. 前端：spawn 主卡标题=角色名 + 机器人图标；worker 内部事件路由进独立折叠卡（工具行/单步完成态/阶段思考）；收工收纳进主卡 .worker-slot（点击主卡展开考古）；thinking 处理器仅响应 worker 事件，不影响现有行为。
 - **验证（便宜栈）**：spawn_worker 8 测试（真实键名断言）+ worker-card-render 5 DOM 测试（事件判别/建卡/单步完成/收纳）+ 守卫登记（v4/v4b/tel 24+20）+ GUI 结构 53 + engine_core 24 —— 全绿；构建 dist 逐字节一致。
 - **待 owner 施工实测**：让 bobo spawn worker（如"调查 X"）→ 看主卡写 explorer、独立折叠卡实时展开、收工后收纳进主卡。
+
+### B75 · 点亮 harness 灯（TICKET-HARNESS-LIGHTS）—— 提交 d4f630a · 2026-08-24
+- **owner 决定**：把之前"默认关"的 harness 灯点亮（呼应"打通 loop"——机制在屋子里，现在开灯）。
+- **改动**：BOBO_ROUTER / BOBO_LEARN / BOBO_ADAPT 默认值 "0"→"1"，`BOBO_*=0` 显式关闭可回滚。
+  - ROUTER（阶段 B）：每轮按任务分类路由工具子集/技能/记忆——已接线（engine.py:1698）。
+  - ADAPT（阶段 E）：画像偏好提升路由权重（只加不删）——已接线，随 ROUTER 生效。
+  - LEARN（阶段 C1）：**运行时驱动点未接线**（observer.observe/learner.write_lesson 无调用者，仅测试在调）——灯座已接，灯泡未通电，点亮观察循环属 harness 接线工作，另议。
+- **守卫登记**：v4/v4b/tel 加 TICKET-HARNESS-LIGHTS（router/adapt/observer 新白名单 + engine DEMOLISH/COST3 检查兼容标记）。
+- **验证**：87 相关 + 45 回归全绿；默认值三灯亮、显式 0 可关。
