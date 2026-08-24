@@ -58,7 +58,7 @@ _TASK_RULES = [
 
 # ── 任务关键词 → 技能候选（激活仍由 description 语义定）──
 _SKILL_RULES = [
-    (("修复", "bug", "报错", "测试失败", "调试"), ["code-fix"]),
+    (("修复", "bug", "报错", "测试失败", "调试", "pytest", "运行测试", "测试情况"), ["code-fix"]),
     (("提交", "commit", "push", "git"), ["git-workflow"]),
     (("查", "调研", "对比", "资料", "research", "搜"), ["research"]),
     (("笔记", "记到", "整理", "note"), ["note-taking"]),
