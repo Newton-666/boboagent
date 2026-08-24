@@ -452,10 +452,10 @@
 - **验证**：基线 6/6；adapt 4 测试绿；闭环冒烟（画像"用 Python"→ 路由工具提升）通过。
 - **工程化施工完成**：A/B + A1 + B + C + E 全部落地（D 沉淀挂起 / prompt 专题待议）——进入完整 harness 测试。
 
-### B58 · 沉淀机制参考：Hermes 复盘 —— 提交（待填）· 2026-08-24
-- **owner 指示**：看桌面 hermes-agent-main 的沉淀逻辑，按此方向尝试。
-- **发现**：① 触发=agent 自主创建（非次数）；② 生命周期=使用驱动 active→stale→archived；③ 保护=pinned+时间锚定防误杀；④ 纯函数无 LLM；⑤ provenance 只管理 agent-created。
-- **落盘**：HARNESS-DESIGN.md §3b（参考 + 对照结论：触发改自主判断、生命周期补 stale/pinned/锚定、last_used=使用驱动地基已就位）。
+### B58 · 沉淀机制设计方向定稿 —— 提交（待填）· 2026-08-24
+- **owner 边界**：不采用外部代码、不引用外部项目（复盘仅作方向参考，实现为原创）。
+- **定稿方向**：① 触发=agent 自主判断（替代从未成功的 count-based）；② 生命周期=使用驱动状态机 active→stale→archived（可逆/再用 reactivate）；③ 保护=pinned+时间锚定；④ 纯确定性实现（无 LLM）；⑤ provenance 只管理自主沉淀技能。
+- **落盘**：HARNESS-DESIGN.md §3b（原创表述，无外部引用）。
 
 ## 待办追溯索引
 

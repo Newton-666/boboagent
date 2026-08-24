@@ -67,19 +67,18 @@
 
 **边界**：安全/收尾在学习环外（只观察不奖励）；信号不进前馈；description 不动；LLM 不负责学习。
 
-## §3b 沉淀机制参考（Hermes 复盘，2026-08-24 owner 认可方向）
+## §3b 沉淀机制设计方向（2026-08-24 定）
 
-### Hermes 的沉淀逻辑（对照我们设计）
-1. **触发 = agent 自主创建**（skill_manage create），非次数——回应"count-based 从未成功"；
-2. **生命周期 = 使用驱动**（last_activity_at）：active→stale→archived；stale_after_days 未用→stale；archive_after_days→归档（可逆）；用后 reactivate；
-3. **保护**：pinned 永不触碰；时间锚定（首见锚定 now、未用过锚 created_at）防新技能误杀；
-4. **纯函数无 LLM**（curator apply_automatic_transitions）——符合"学习=后端监督"；
-5. **provenance**：只有 agent-created 技能进管理；hub/builtin 不自动管（除非 prune_builtins）。
+1. **触发 = agent 自主判断**（替代从未成功的 count-based：同模式≥3 从未触发过——次数不成立）。agent 判断"这值得沉淀成技能"时创建；判定标准待细化。
+2. **生命周期 = 使用驱动**（基于"最后使用时间"，非创建年龄）：active → stale → archived 状态机；长时间未用 → stale；更久 → 归档（可逆，不删除）；再用 → 自动 reactivate。
+3. **保护**：用户显式钉住（pinned）的技能永不自动改动；新技能时间锚定（防刚创建就被误杀）。
+4. **纯确定性实现**：生命周期状态转换无 LLM（符合"学习=后端监督"）；仅创建判定可考虑轻量规则。
+5. **Provenance 跟踪**：只管理"自主沉淀"的技能；内置/外部技能不自动改。
 
-### 对照结论
-- 触发：我们 count-based 失败 → 采纳"agent 自主判断"方向（待细化触发判定）；
-- 生命周期：我们 C3 有剪枝归档，缺 stale 中间态 / pinned 保护 / 时间锚定——补齐；
-- 判据：last_used（A1 已补字段）即"使用驱动"地基，与 Hermes 一致。
+### 与已建组件衔接
+- 触发判定：C 观察总线的累积信号可作为创建候选来源（agent 自主决定的输入）；
+- 生命周期判据：last_used（A1 已补字段）= 使用驱动地基；
+- C3 已有剪枝归档，补 stale 中间态 / pinned 保护 / 时间锚定。
 
 ## §4 沉淀机制（现状与重构）
 
