@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" /><title>Bobo</title>
+<style>/*__STYLES__*/</style>
+<!-- TICKET-GUI-F16: KaTeX 样式（vendor 本地，数学公式排版；字体相对路径 fonts/） -->
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+</head>
+<body>
+<div id="app">
+  <button id="sidebar-expand-btn" title="Expand sidebar" onclick="toggleSidebar()"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><line x1="3.8" y1="5.5" x2="5" y2="5.5"/><line x1="3.8" y1="8" x2="5" y2="8"/></svg></button>
+  <div id="sidebar">
+    <!-- TICKET-GUI-F22: 折叠按钮（SVG）置顶 —— 移到 Session section 头之上（owner 2026-08-18 实弹；重建提交） -->
+    <button id="sidebar-collapse" class="sidebar-fold" title="Collapse sidebar" onclick="toggleSidebar()"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><line x1="3.8" y1="5.5" x2="5" y2="5.5"/><line x1="3.8" y1="8" x2="5" y2="8"/></svg></button>
+    <!-- 导航项（票 P0-1 改版：New session / Memory / Session 三导航，SVG+高亮；Session 固定展开）-->
+    <div class="nav-item" id="nav-new-session" onclick="onNavNewSession()" title="New session">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 V13.5 M2.5 8 H13.5"/></svg>
+      <span class="nav-label">New session</span>
+    </div>
+    <div class="nav-item" id="nav-memory" onclick="onNavMemory()" title="Memory">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2.5 H13 V13.5 H3 Z"/><path d="M5.5 5 H10.5 M5.5 7.5 H10.5 M5.5 10 H8.5"/></svg>
+      <span class="nav-label">Memory</span>
+      <span class="nav-count" id="memory-count" style="margin-left:auto;">0</span>
+    </div>
+    <!-- 票 TICKET-SKILL-PANEL v2（owner 实弹反馈）：Skills 导航项 —— 与 Memory
+         同款（SVG + 名称 + hover 高亮），位于 Memory 与 Session 之间；
+         点击在主区域（#main）列出全部 skills。 -->
+    <div class="nav-item" id="nav-skills" onclick="onNavSkills()" title="Skills">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5 H7 L8.5 5.5 H13.5 V12.5 H2.5 Z"/><path d="M5 8 H11 M5 10 H9"/></svg>
+      <span class="nav-label">Skills</span>
+      <span class="nav-count" id="skills-count" style="margin-left:auto;">0</span>
+    </div>
+    <div class="nav-item nav-static" id="nav-session" title="Session">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><line x1="5" y1="5.5" x2="11" y2="5.5"/><line x1="5" y1="8" x2="11" y2="8"/><line x1="5" y1="10.5" x2="8.5" y2="10.5"/></svg>
+      <span class="nav-label">Session</span>
+    </div>
+    <!-- Session 固定展开区（不折叠；New session 已提升为导航项，Search 保留）-->
+    <div class="section-bd" id="body-session">
+      <div id="sidebar-header"><input id="session-search" type="text" placeholder="Search..." style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:inherit;outline:none;box-sizing:border-box;" /></div>
+      <div id="session-list"></div>
+    </div>
+    <!-- Plugin section（保留原位与折叠功能）-->
+    <div class="section-hd" onclick="toggleSection('plugin')">
+      <span class="section-arrow" id="arr-plugin">▼</span>
+      <span class="section-label">Plugin</span>
+    </div>
+    <div class="section-bd" id="body-plugin">
+      <div id="plugin-list"></div>
+    </div>
+    <!-- TICKET-SKILL-PANEL：Skills 分区（治理先行 A 票——preset 可关可开，
+         custom 为 B 票自动沉淀位，空状态给引导文案；与 Plugin 同款折叠）-->
+    <div id="sidebar-footer"><span id="status-mode"></span><button id="widget-toggle" title="Live widget (read-only)">Widget</button><button id="settings-icon" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:inherit;" title="Settings">⚙</button></div>
+  </div>
+  <div id="main">
+    <div id="welcome">
+      <!-- 票 DESK-P1：ASCII BOBO 大字（pre#welcome-logo）整块摘除 → 文案标题 -->
+      <h1 id="welcome-title">Let's finish up something today.</h1>
+    </div>
+    <!-- Memory 主面板（票 P0-1 改版：独立视图，✕ 关闭回到 chat；diff 高亮/统计/编辑）-->
+    <div id="memory-view" style="display:none;flex:1;overflow-y:auto;padding:24px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button id="memory-close" onclick="closeMemoryView()" title="Close memory view (back to chat)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:13px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">✕</button>
+        <span style="font-size:13px;font-weight:600;color:var(--text);">Memory</span>
+        <span id="memory-stats" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div id="memory-diff" style="margin:0 0 8px;display:none;"></div>
+      <div id="memory-groups"></div>
+    </div>
+    <!-- Skills 主面板（票 TICKET-SKILL-PANEL v2：与 Memory 同款独立视图，
+         ✕ 关闭回到 chat；preset/custom 分组 + on/off 开关）-->
+    <div id="skills-view" style="display:none;flex:1;overflow-y:auto;padding:24px 16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button id="skills-close" onclick="closeSkillsView()" title="Close skills view (back to chat)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;font-size:13px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">✕</button>
+        <span style="font-size:13px;font-weight:600;color:var(--text);">Skills</span>
+        <span id="skills-stats" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div id="skills-groups"></div>
+    </div>
+    <div id="debug" style="text-align:center;font-size:11px;color:#666;font-family:monospace;padding:4px;">Starting...</div>
+    <div id="chat"></div>
+    <!-- TICKET-DESK-V2B：上下文仪表盘细条（#input-box 正上方，22px；点击展开明细卡，Esc 收起）-->
+    <div id="ctx-stats-wrap">
+      <div id="ctx-stats-detail" class="ctx-detail" style="display:none"></div>
+      <div id="ctx-stats-bar" class="ctx-bar" title="Context stats (click to expand / Esc to collapse)" onclick="toggleCtxStats()">
+        <div class="ctx-pill">
+          <div class="ctx-pill-fill" id="ctx-pill-fill"></div>
+          <span class="ctx-pill-text" id="ctx-pill-text">0% · 0/128K</span>
+        </div>
+      </div>
+    </div>
+    <div id="input-box">
+      <!-- TICKET-DESK-V2B3：斜杠命令面板（输入框正上方，左对齐；内容 JS 渲染） -->
+      <div id="slash-panel" style="display:none"></div>
+      <textarea id="input" placeholder="Connecting..." disabled></textarea>
+      <!-- TICKET-VISION-CHAT-UPLOAD：已选图片缩略图预览（图上文下；带移除按钮） -->
+      <div id="img-preview-wrap" style="display:none"></div>
+      <!-- TICKET-GUI-F26：auto-toggle/send/stop-btn 移入 input-actions 与 project/request 同行（去 absolute，不再重叠输入框） -->
+      <div id="input-actions">
+        <div id="project-pill-wrap">
+          <button id="project-pill" title="Work with a project (choose a folder)">Work with a project ▾</button>
+          <div id="project-menu" style="display:none">
+            <div id="project-recents"></div>
+            <button id="project-choose">Choose a folder</button>
+            <div class="project-sep"></div>
+            <button id="project-clear">Clear project</button>
+          </div>
+        </div>
+        <div id="request-pill-wrap">
+          <button id="request-pill" title="Request: set roles &amp; rules for this session">Request ▾</button>
+          <div id="request-panel" style="display:none">
+            <div class="req-label">Roles</div>
+            <input id="req-roles" type="text" placeholder="e.g. code reviewer, line-by-line">
+            <div class="req-label">Rules</div>
+            <textarea id="req-rules" rows="2" placeholder="e.g. always reply in Chinese"></textarea>
+            <div class="req-btns">
+              <button id="req-save">Save</button>
+              <button id="req-clear">Clear</button>
+            </div>
+            <div id="req-summary"></div>
+          </div>
+        </div>
+        <button id="img-btn" title="Attach image (vision)" onclick="imgPick()">＋</button>
+        <input type="file" id="img-file" accept="image/*" style="display:none" />
+        <button id="auto-toggle" title="AUTO mode toggle (click to switch; Enter=send / Shift+Enter=newline)" disabled>AUTO</button>
+        <button id="computer-use-toggle" title="Computer Use mode toggle (click to switch; quick direct operations)" disabled>COMPUTER</button>
+        <button id="stop-btn" title="Stop (Esc)" onclick="stopThinking()">■</button>
+        <button id="send" disabled>↑</button>
+      </div>
+    </div>
+  </div>
+  <div id="resize-handle"></div>
+  <div id="right-panel">
+    <div id="right-tabs"></div>
+    <div id="right-content"></div>
+  </div>
+</div>
+<!-- Preview panel -->
+<div id="preview-overlay"></div>
+<div id="preview-panel">
+  <div id="preview-header">
+    <span>Preview</span>
+    <button id="preview-close">✕</button>
+  </div>
+  <iframe id="preview-iframe" sandbox="allow-scripts"></iframe>
+</div>
+<div id="settings-modal">
+  <div id="settings-panel">
+    <div id="settings-nav">
+      <div class="settings-tab active" data-tab="basic">Basic</div>
+      <div class="settings-tab" data-tab="api">API</div>
+      <div class="settings-tab" data-tab="advanced">Advanced</div>
+      <!-- TICKET-PROFILE-4：设置页 Profile tab（bobo 自我认知仪表盘） -->
+      <div class="settings-tab" data-tab="profile">Profile</div>
+    </div>
+    <div id="settings-content">
+      <h2>⚙ Settings</h2>
+      <div class="settings-page" id="page-basic">
+        <label>Provider</label>
+        <select id="cfg-provider">
+          <!-- TICKET-PROVIDER-ADAPTER：动态渲染（model.options RPC，provider.py 唯一事实源） -->
+        </select>
+        <label>Model</label>
+        <select id="cfg-model">
+          <option value="deepseek-chat">deepseek-chat</option>
+        </select>
+      </div>
+      <div class="settings-page" id="page-api" style="display:none">
+        <!-- TICKET-PROVIDER-ADAPTER：API Key 表格——每个 provider 一行，
+             左边 provider 名（+状态），右边 key 输入框。动态渲染（model.options
+             RPC 返回 providers 含 authenticated/key_env）。 -->
+        <div class="apikey-table" id="apikey-table" style="margin-bottom:12px;"></div>
+        <label>Base URL <span style="font-weight:400;font-size:11px;">(optional)</span></label>
+        <input id="cfg-baseurl" type="text" placeholder="Leave empty for Provider default" />
+        <label>Obsidian Vault Path <span id="obsidian-status" style="font-weight:400;font-size:11px;"></span></label>
+        <input id="cfg-obsidian" type="text" placeholder="Leave empty to auto-detect" />
+      </div>
+      <div class="settings-page" id="page-advanced" style="display:none">
+        <label>Max Tokens</label>
+        <input id="cfg-maxtokens" type="number" value="8192" placeholder="8192" />
+        <label>Timeout (s)</label>
+        <input id="cfg-timeout" type="number" value="120" placeholder="120" />
+        <div style="margin-top:20px;">
+          <button id="settings-clear" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#f48771;color:#fff;">Delete all</button>
+        </div>
+      </div>
+      <!-- TICKET-PROFILE-4：Profile 仪表盘页面（当前用户模型 + 更新历史）。
+           页面文案走 JS \u 转义（DESK-P2 金标准：index.html 非注释区零中文）。 -->
+      <div class="settings-page" id="page-profile" style="display:none">
+        <!-- 区块 1：用户模型编辑器（白底可编辑 + Save，用户绝对权威） -->
+        <div class="settings-sec-label" id="profile-edit-label"></div>
+        <div class="profile-edit-wrap">
+          <textarea id="profile-edit-area" spellcheck="false"></textarea>
+          <div class="profile-edit-actions">
+            <button class="profile-save-btn" id="profile-save-btn">Save</button>
+            <span class="profile-save-hint" id="profile-save-hint"></span>
+          </div>
+        </div>
+        <!-- 区块 2：更新历史（独立区块，GitHub 式，按来源着色） -->
+        <div class="profile-history" id="profile-history"></div>
+      </div>
+    </div>
+    <div style="position:absolute;bottom:16px;right:24px;display:flex;gap:8px;z-index:3;">
+      <button class="btn-save" id="settings-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:#e8913a;color:#fff;">Save</button>
+      <button class="btn-close" id="settings-close" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font:inherit;background:var(--bg3);color:var(--text);">Cancel</button>
+    </div>
+  </div>
+</div>
+<div id="setup-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;flex-direction:column;align-items:center;justify-content:center;">
+  <div style="max-width:400px;text-align:center;padding:40px;">
+    <div style="font-size:36px;margin-bottom:12px;">◆ <span style="color:#e8913a;">Bobo</span></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:24px;">First run — configure API Key</p>
+    <input id="setup-key" type="password" placeholder="API Key" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
+    <input id="setup-url" type="text" placeholder="API Base URL (optional)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:10px;">
+    <input id="setup-model" type="text" placeholder="Model (default: deepseek-chat)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font:inherit;font-size:13px;margin-bottom:20px;">
+    <button id="setup-save" style="width:100%;padding:10px;border:none;border-radius:6px;background:#e8913a;color:#fff;cursor:pointer;font:inherit;font-size:13px;">Save &amp; Launch</button>
+    <p id="setup-msg" style="font-size:11px;color:var(--text-muted);margin-top:10px;"></p>
+  </div>
+</div>
+<!-- TICKET-D1d ③: 闸确认模态卡（替代原生 confirm，无超时自动拒绝）-->
+<div id="approval-overlay">
+  <div id="approval-modal">
+    <div class="ap-title">⚠ Approval needed</div>
+    <div class="ap-cmd" id="approval-cmd"></div>
+    <div class="ap-desc" id="approval-desc"></div>
+    <div class="ap-btns">
+      <button class="ap-btn ap-deny" id="approval-deny">Deny</button>
+      <button class="ap-btn ap-allow" id="approval-allow">Allow once</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TICKET-DESK-V2A：状态覆盖层（连接中 / 连接失败 / 断连 / 空会话引导保留欢迎页）══ -->
+<div id="overlay-root">
+  <div class="ovl" id="ovl-connecting">
+    <div class="ovl-spinner"><span></span><span></span><span></span></div>
+    <div class="ovl-title">Connecting…</div>
+    <div class="ovl-desc">Connecting to backend…</div>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
+    <div class="ovl-detail-box" id="ovl-detail-connecting"></div>
+  </div>
+  <div class="ovl" id="ovl-failed">
+    <div class="ovl-err-icon">⚠</div>
+    <div class="ovl-title">Connection failed</div>
+    <div class="ovl-desc">Cannot reach the backend. Make sure Bobo is running.</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">Retry</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
+    <div class="ovl-detail-box" id="ovl-detail-failed"></div>
+  </div>
+  <div class="ovl" id="ovl-disconnected">
+    <div class="ovl-warn-icon">⚠</div>
+    <div class="ovl-title">Backend disconnected</div>
+    <div class="ovl-desc">Backend exited. Restart Bobo and retry — your sessions are preserved.</div>
+    <button class="ovl-btn primary" onclick="retryConnect()">Reconnect</button>
+    <button class="ovl-detail-toggle" onclick="toggleOvlDetail(this)">Details</button>
+    <div class="ovl-detail-box" id="ovl-detail-disconnected"></div>
+  </div>
+</div>
+<!-- TICKET-DESK-V2A：Toast 通知（右上角，3s 自动消失 + 手动关闭）-->
+<div id="toast-root"></div>
+<!-- TICKET-DESK-V2A：删除二次确认模态（复用 approval 模态样式体系）-->
+<div id="confirm-overlay">
+  <div id="confirm-modal">
+    <div class="cf-title" id="cf-title">⚠ Confirm action</div>
+    <div class="cf-desc" id="cf-desc"></div>
+    <div class="cf-btns">
+      <button class="cf-btn cf-cancel" id="cf-cancel">Cancel</button>
+      <button class="cf-btn cf-ok" id="cf-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- TICKET-DESK-V2C12: vendor 本地引入（不走 CDN，桌面端离线可用；LICENSE 见 apps/desktop/vendor/） -->
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
+<!-- TICKET-GUI-F16: KaTeX 本地引入（数学公式渲染，0.18.4；LICENSE: vendor/katex/LICENSE.katex.txt） -->
+<script src="vendor/katex/katex.min.js"></script>
+<script>
+// ── Gateway ────────────────────────────────────────────────────────────
+const handlers = new Map(); let reqId = 0; const pending = new Map();
+let currentSessionId = null; let connected = false;
+// TICKET-DESK-V4B: 小窗当前钉住的会话（null = 跟随主窗）。单一事实源：
+// 主窗行内按钮 / 小窗轮换上报 / 删除回落 三处共同维护，供行内按钮 on 态与删除回落判断。
+let _widgetPinnedSid = null;
+// TICKET-DESK-V4B: 行内"投影到小组件"入口（L5 体系；SVG 眼睛，与 PIN_SVG 同款细线风）
+var PROJECT_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2.3"/></svg>';
+// TICKET-DESK-V4B: 投影钉选 —— 本地态 + 广播小窗（sid 空串 = 回落跟随主窗）
+function widgetPinSession(sid) {
+  _widgetPinnedSid = sid || null;
+  renderSessions();
+  if (window.boboAPI && window.boboAPI.widgetPinSession) window.boboAPI.widgetPinSession(sid || '');
+}
+function toggleSidebar() {
+  var sb = document.getElementById('sidebar');
+  if (!sb) return;
+  sb.classList.toggle('closed');
+  document.body.classList.toggle('sidebar-collapsed', sb.classList.contains('closed'));
+}
+function connect() {
+  if (!window.boboAPI) { debug('Browser mode'); return; }
+  // TICKET-DESK-V2A：连接中全屏态（动画指示，非纯文字）
+  showOverlay('connecting');
+  debug('Connecting...');
+  window.boboAPI.onMessage(function(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    // TICKET-GUI-F27：任何事件到达 = 后端有活动 → 活动超时滚动（thinking 长回合不误报）
+    _anyEventSinceSend = true;
+    if (msg.method === 'event' && msg.params && msg.params.type) {
+      var h = handlers.get(msg.params.type);
+      if (h) {
+        // TICKET-GUI-F10：sid 在 params 顶层（server_utils.emit 结构），注入回调数据，
+        // 供各渲染回调按会话过滤 —— 杜绝 A 会话事件流渲染进 B 窗口
+        var evData = msg.params.payload || msg.params;
+        if (msg.params.session_id) evData = Object.assign({}, evData, { session_id: msg.params.session_id });
+        h(evData);
+      }
+      return;
+    }
+    if (msg.id) { var r = pending.get(msg.id); if (r) { pending.delete(msg.id); r(msg.result || msg.error || {}); } }
+  });
+  window.boboAPI.onStatus(function(data) {
+    if (data.status === 'exited') { var h = handlers.get('backend.exited'); if (h) h(data); }
+  });
+  if (window.boboAPI.getPending) window.boboAPI.getPending();
+}
+function on(e, h) { handlers.set(e, h); }
+// TICKET-GUI-F10：后台会话事件统一闸门 —— 事件带 session_id 且非当前会话 → 不渲染
+// （sid 由分发层注入，见 connect()；无 sid 的全局事件如 gateway.ready/backend.exited 恒放行）
+function isForeignSession(data) {
+  var sid = data && data.session_id;
+  if (!sid || sid === currentSessionId) return false;
+  markBgActive(sid);
+  return true;
+}
+// TICKET-GUI-F10（加分项）：后台活动中会话标记 —— 轻量只记活跃位，不做事件缓存；
+// 切回时 F9 resume 全量拉取兜底（loadSession 里 clearBgActive）
+var bgActiveSids = {};
+function markBgActive(sid) {
+  if (!bgActiveSids[sid]) {
+    bgActiveSids[sid] = 1;
+    var sv = document.getElementById('session-search');
+    renderSessions(sv ? sv.value : '');
+  }
+}
+function clearBgActive(sid) {
+  if (bgActiveSids[sid]) {
+    delete bgActiveSids[sid];
+    var sv = document.getElementById('session-search');
+    renderSessions(sv ? sv.value : '');
+  }
+}
+function call(m, p) {
+  if (!window.boboAPI) return Promise.resolve({});
+  return new Promise(function(resolve) {
+    var id = 'req-' + (++reqId); pending.set(id, resolve);
+    window.boboAPI.send({ jsonrpc:'2.0', id:id, method:m, params:p||{} });
+    setTimeout(function() { pending.delete(id); resolve({}); }, 120000);
+  });
+}
+// TICKET-VISION-CHAT-UPLOAD：待发送图片状态 + 选图/预览/移除 + 草稿按会话存取
+var pendingImage = null;
+function imgPick() { var fi = document.getElementById('img-file'); if (fi) fi.click(); }
+function setImgPreview(dataUrl) {
+  pendingImage = dataUrl || null;
+  var w = document.getElementById('img-preview-wrap');
+  if (!w) return;
+  if (pendingImage) {
+    w.innerHTML = '<div class="img-preview"><img src="' + pendingImage + '" alt="preview"/><button title="Remove" onclick="clearPendingImage()">×</button></div>';
+    w.style.display = 'block';
+  } else {
+    w.innerHTML = ''; w.style.display = 'none';
+  }
+  saveDraft(currentSessionId);
+}
+function clearPendingImage() { setImgPreview(null); }
+function attachImg(file) {
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function() { setImgPreview(String(r.result)); };
+  r.readAsDataURL(file);
+}
+// 草稿（text+image）按会话持久化到 localStorage
+function saveDraft(sid) {
+  try {
+    var t = document.getElementById('input');
+    localStorage.setItem('boboDraft_' + sid, JSON.stringify({ text: t ? t.value : '', image: pendingImage || '' }));
+  } catch(e) {}
+}
+function restoreDraft(sid) {
+  var t = document.getElementById('input');
+  try {
+    var raw = localStorage.getItem('boboDraft_' + sid);
+    if (raw) {
+      var d = JSON.parse(raw);
+      if (t) t.value = d.text || '';
+      if (t) t.style.height = 'auto';
+      setImgPreview(d.image || null);
+    } else {
+      if (t) t.value = '';
+      setImgPreview(null);
+    }
+  } catch(e) { setImgPreview(null); }
+}
+document.getElementById('img-file') && document.getElementById('img-file').addEventListener('change', function(e) {
+  if (e.target.files && e.target.files[0]) attachImg(e.target.files[0]);
+  this.value = '';
+});
+
+function sendPrompt(text, image) {
+  if (!currentSessionId || !window.boboAPI) { debug('Cannot send: no session or API'); return; }
+  debug('Sent ✓');
+  // TICKET-DESK-V2D5：新回合开始 —— 重置本轮认知计数（记忆增量基线 + 工具调用数）
+  roundMemBaseline = null; roundMemInjected = 0; roundToolCount = 0;
+  // TICKET-GUI-F27：活动超时（替代 15s 固定超时）——推理模型 thinking 可长达
+  // 30-90s，15s 固定超时必然误报 "not responding"。收到任何事件（_anyEventSinceSend）
+  // 即重置计时器继续等待；只有 15s 完全无活动（真挂起/断连）才提示。
+  if (sendTimeoutId) clearTimeout(sendTimeoutId);
+  _anyEventSinceSend = false;
+  function _sendTimeoutCheck() {
+    if (_anyEventSinceSend) {
+      _anyEventSinceSend = false;   // 有活动 → 继续等（滚动超时）
+      sendTimeoutId = setTimeout(_sendTimeoutCheck, 15000);
+    } else {
+      addStatus('⚠ Backend unresponsive (no activity for 15s), possibly disconnected');
+      sendTimeoutId = null;
+    }
+  }
+  sendTimeoutId = setTimeout(_sendTimeoutCheck, 15000);
+  // 票 DESK-P1：会话项目根随 prompt.submit 下发（有值才带；null=默认现状，绝对兼容）
+  var submitParams = { session_id:currentSessionId, text:text };
+  if (image) submitParams.image = image;
+  if (currentProjectRoot) submitParams.project_root = currentProjectRoot;
+  window.boboAPI.send({ jsonrpc:'2.0', id:'prompt-'+(++reqId), method:'prompt.submit', params:submitParams });
+  // TICKET-VISION-CHAT-UPLOAD：发送后清挂载图片 + 草稿（textarea 已由调用方清空）
+  if (image) clearPendingImage();
+  else if (pendingImage) saveDraft(currentSessionId);
+}
+
+// ── 票 DESK-P1：Work with a project（项目文件夹模式）──────────────────
+// 会话项目根：null=默认现状。前端选项目后随 prompt.submit 下发 project_root。
+// 最近项目持久化 localStorage（上限 8 个，最近使用置顶）。
+var currentProjectRoot = null;
+var recentProjects = [];
+try { recentProjects = JSON.parse(localStorage.getItem('boboRecentProjects') || '[]'); } catch(e) { recentProjects = []; }
+
+function prjName(path) { return path.split('/').filter(Boolean).pop() || path; }
+
+// 自审（GOV-1）：innerHTML 拼接前转义——localStorage 路径可含 < > & 等字符
+function prjEsc(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function prjToggleMenu() {
+  var menu = document.getElementById('project-menu');
+  menu.style.display = (menu.style.display === 'none') ? 'block' : 'none';
+}
+
+function prjCloseMenu() {
+  document.getElementById('project-menu').style.display = 'none';
+}
+
+function prjSaveRecents() {
+  try { localStorage.setItem('boboRecentProjects', JSON.stringify(recentProjects)); } catch(e) {}
+}
+
+function prjAddRecent(path) {
+  var entry = { name:prjName(path), path:path, starred:false, ts:Date.now() };
+  recentProjects = recentProjects.filter(function(p){ return p.path !== path; });
+  recentProjects.unshift(entry);
+  if (recentProjects.length > 8) recentProjects = recentProjects.slice(0, 8);
+  prjSaveRecents();
+}
+
+function prjChooseFolder() {
+  if (!window.boboAPI || !window.boboAPI.selectFolder) { debug('chooseFolder unavailable'); return; }
+  window.boboAPI.selectFolder().then(function(path) {
+    if (!path) return;
+    currentProjectRoot = path;
+    prjAddRecent(path);
+    prjUpdatePill();
+  });
+}
+
+function prjSelect(path) {
+  currentProjectRoot = path;
+  prjAddRecent(path);
+  prjUpdatePill();
+}
+
+function prjClear() {
+  currentProjectRoot = null;
+  prjUpdatePill();
+}
+
+function prjUpdatePill() {
+  var pill = document.getElementById('project-pill');
+  pill.textContent = currentProjectRoot ? (prjName(currentProjectRoot) + ' ▾') : 'Work with a project ▾';
+  prjRenderMenu();
+}
+
+function prjRenderMenu() {
+  var box = document.getElementById('project-recents');
+  if (!recentProjects.length) {
+    box.innerHTML = '<div class="prj-empty">No recent projects</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < recentProjects.length; i++) {
+    var p = recentProjects[i];
+    var star = p.starred ? '<span class="prj-star on" data-path="' + prjEsc(p.path) + '">★</span>'
+                         : '<span class="prj-star" data-path="' + prjEsc(p.path) + '">☆</span>';
+    html += '<button class="prj-item" data-path="' + prjEsc(p.path) + '">' + star +
+            '<span class="prj-name">' + prjEsc(p.name) + '</span><br><span class="prj-path">' + prjEsc(p.path) + '</span></button>';
+  }
+  box.innerHTML = html;
+  var items = box.querySelectorAll('.prj-item');
+  for (var j = 0; j < items.length; j++) {
+    (function(item) {
+      item.addEventListener('click', function(ev) {
+        if (ev.target.classList && ev.target.classList.contains('prj-star')) {
+          var path = ev.target.getAttribute('data-path');
+          for (var k = 0; k < recentProjects.length; k++) {
+            if (recentProjects[k].path === path) { recentProjects[k].starred = !recentProjects[k].starred; break; }
+          }
+          prjSaveRecents(); prjRenderMenu(); return;
+        }
+        prjSelect(item.getAttribute('data-path')); prjCloseMenu();
+      });
+    })(items[j]);
+  }
+}
+
+document.getElementById('project-pill').addEventListener('click', prjToggleMenu);
+document.getElementById('project-choose').addEventListener('click', function(){ prjChooseFolder(); prjCloseMenu(); });
+document.getElementById('project-clear').addEventListener('click', function(){ prjClear(); prjCloseMenu(); });
+document.addEventListener('click', function(ev) {
+  var wrap = document.getElementById('project-pill-wrap');
+  if (!wrap.contains(ev.target)) prjCloseMenu();
+});
+prjUpdatePill();
+
+// ── 票 GUI-F24：会话级 Request（Roles/Rules 面板，Work with a project 兄弟按钮）──
+// 仅当前会话生效；保存 → session.set_request；清除 → request:null；面板打开从
+// session.resume/activate 带回的 request 字段回显（切会话显示对应会话的已保存值）。
+var currentRequest = null;
+
+function reqTogglePanel() {
+  var p = document.getElementById('request-panel');
+  p.style.display = (p.style.display === 'none') ? 'block' : 'none';
+}
+function reqClosePanel() {
+  document.getElementById('request-panel').style.display = 'none';
+}
+function reqSyncFromSession(req) {
+  currentRequest = req || null;
+  var rolesEl = document.getElementById('req-roles');
+  var rulesEl = document.getElementById('req-rules');
+  var sumEl = document.getElementById('req-summary');
+  if (rolesEl) rolesEl.value = (currentRequest && currentRequest.roles) || '';
+  if (rulesEl) rulesEl.value = (currentRequest && currentRequest.rules) || '';
+  if (sumEl) {
+    if (currentRequest && (currentRequest.roles || currentRequest.rules)) {
+      sumEl.textContent = 'Roles/rules: ' + ((currentRequest.roles || '') + ' / ' + (currentRequest.rules || ''));
+    } else { sumEl.textContent = ''; }
+  }
+}
+// TICKET-GUI-F25：错误消息统一提取（Bug A 修复）。后端 err 经 connect()
+// 以 {code,message} 本体 resolve（r(msg.result || msg.error || {}) 取整段
+// msg.error），旧代码查 res.error.message 恒 undefined → 真实错误被吞成
+// 'unknown'。兼容三形态：{code,message} 本体 / {error:{code,message}} 完整
+// 响应 / 字符串；都拿不到才回退 'unknown'（含超时 resolve({}) 情形）。
+function errMsg(res) {
+  if (!res) return 'unknown';
+  if (typeof res === 'string' && res) return res;
+  if (res.error && res.error.message) return res.error.message;
+  if (res.message) return res.message;
+  if (res.error) return res.error;
+  return 'unknown';
+}
+function reqSave() {
+  if (!currentSessionId) { showToast('fail', 'Start a session first'); return; }
+  var roles = document.getElementById('req-roles').value.trim();
+  var rules = document.getElementById('req-rules').value.trim();
+  call('session.set_request', { session_id: currentSessionId, request: { roles: roles, rules: rules } }).then(function(res) {
+    // 校验 res.session_id：call 超时兜底 resolve({}) 时不得误报成功（GUI-LESSONS 不静默/不谎报）
+    if (res && !res.error && res.session_id) {
+      currentRequest = { roles: roles, rules: rules };
+      reqSyncFromSession(currentRequest);
+      showToast('success', 'Request saved (this session)');
+      reqClosePanel();
+    } else {
+      showToast('fail', 'Save failed: ' + errMsg(res));
+    }
+  });
+}
+function reqClear() {
+  if (!currentSessionId) return;
+  call('session.set_request', { session_id: currentSessionId, request: null }).then(function(res) {
+    if (res && !res.error && res.session_id) {
+      currentRequest = null;
+      reqSyncFromSession(null);
+      showToast('success', 'Request cleared');
+      reqClosePanel();
+    } else {
+      showToast('fail', 'Clear failed: ' + errMsg(res));
+    }
+  });
+}
+document.getElementById('request-pill').addEventListener('click', reqTogglePanel);
+document.getElementById('req-save').addEventListener('click', reqSave);
+document.getElementById('req-clear').addEventListener('click', reqClear);
+document.addEventListener('click', function(ev) {
+  var wrap = document.getElementById('request-pill-wrap');
+  if (wrap && !wrap.contains(ev.target)) reqClosePanel();
+});
+
+// ── UI refs ────────────────────────────────────────────────────────────
+var chatEl = document.getElementById('chat');
+var welcomeEl = document.getElementById('welcome');
+var inputEl = document.getElementById('input');
+var sendEl = document.getElementById('send');
+var debugEl = document.getElementById('debug');
+var sessionListEl = document.getElementById('session-list');
+var statusDot = document.getElementById('status-dot');
+var statusText = document.getElementById('status-text');
+// TICKET-DESK-P2: #sidebar-footer 连接指示（绿点+文字）已删除 —— statusDot/statusText 恒 null，引用处均走守卫
+var messaging = false;
+var sessions = [];
+var sendTimeoutId = null;
+var _anyEventSinceSend = false;   // TICKET-GUI-F27：回合内是否收到任何事件（活动超时滚动判定）
+// TICKET-GUI-F3 (F3-2): 会话加载竞态序号 —— 快速连点两会话，以后一次为准（前者作废）
+var sessionLoadSeq = 0;
+
+function debug(msg) {
+  // 票 SAFETY-1：debugEl 空值守卫（getElementById 可能为 null）
+  if (debugEl) debugEl.textContent = '[' + msg + ']';
+  // TICKET-DESK-V2A：调试信息同步收纳进覆盖层"详情"可展开区
+  var boxes = document.querySelectorAll('.ovl-detail-box');
+  for (var i = 0; i < boxes.length; i++) boxes[i].textContent = '[' + msg + ']';
+}
+// ── TICKET-DESK-V2A：状态覆盖层状态机 ──
+var _ovlType = null;
+function showOverlay(type) {
+  // 已显示同型则跳过（300ms 防抖窗口内不重绘）
+  if (_ovlType === type) return;
+  var root = document.getElementById('overlay-root');
+  if (!root) return;
+  var types = ['connecting', 'failed', 'disconnected'];
+  for (var i = 0; i < types.length; i++) {
+    var el = document.getElementById('ovl-' + types[i]);
+    if (el) el.classList.toggle('show', types[i] === type);
+  }
+  root.classList.add('open');
+  _ovlType = type;
+}
+function hideOverlay() {
+  var root = document.getElementById('overlay-root');
+  if (!root) return;
+  var els = root.querySelectorAll('.ovl');
+  for (var i = 0; i < els.length; i++) els[i].classList.remove('show');
+  root.classList.remove('open');
+  _ovlType = null;
+}
+function toggleOvlDetail(btn) {
+  var box = btn.nextElementSibling;
+  if (box && box.classList) box.classList.toggle('open');
+}
+function retryConnect() {
+  debug('Retrying...');
+  hideOverlay();
+  showOverlay('connecting');
+  // 触发重新探测：gateway.ready 未到则走 readyFallback 轮询
+  setConnected(false);
+  if (window.boboAPI && window.boboAPI.getPending) window.boboAPI.getPending();
+  setTimeout(function() {
+    if (window.boboAPI) {
+      call('setup.status', {}).then(function(r) {
+        if (r && typeof r === 'object' && !r.error) {
+          _everConnected = true;
+          setConnected(true);
+          hideOverlay();
+          loadSessions();
+        }
+      });
+    }
+  }, 800);
+}
+// ── TICKET-DESK-V2A：Toast（右上角，3s 自动消失 + 手动关闭）──
+function showToast(type, msg) {
+  var root = document.getElementById('toast-root');
+  if (!root) return;
+  var t = document.createElement('div');
+  t.className = 'toast ' + (type === 'fail' ? 'fail' : 'success');
+  t.innerHTML = '<span>' + esc(msg) + '</span><button class="toast-close" title="Close">✕</button>';
+  root.appendChild(t);
+  var killed = false;
+  function remove() {
+    if (killed) return; killed = true;
+    t.classList.add('hide');
+    setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 160);
+  }
+  t.querySelector('.toast-close').onclick = remove;
+  setTimeout(remove, 3000);
+}
+// ── TICKET-DESK-V2A：删除二次确认（复用确认模态，替代原生 confirm）──
+// V2A 打磨（owner 反馈）：打开即聚焦确认键，Enter=确认 / Esc=取消（对齐原生 confirm 手感）
+var _confirmCb = null;
+function _confirmKey(e) {
+  var ov = document.getElementById('confirm-overlay');
+  if (!ov || !ov.classList.contains('open')) return;
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('cf-ok').click(); }
+  else if (e.key === 'Escape') { e.preventDefault(); document.getElementById('cf-cancel').click(); }
+}
+document.addEventListener('keydown', _confirmKey);
+function askConfirm(title, desc, cb) {
+  document.getElementById('cf-title').textContent = title;
+  document.getElementById('cf-desc').textContent = desc;
+  document.getElementById('cf-ok').textContent = 'Delete';
+  _confirmCb = cb;
+  document.getElementById('confirm-overlay').classList.add('open');
+  document.getElementById('cf-ok').focus();
+}
+document.getElementById('cf-cancel').onclick = function() {
+  _confirmCb = null;
+  document.getElementById('confirm-overlay').classList.remove('open');
+};
+document.getElementById('cf-ok').onclick = function() {
+  var cb = _confirmCb; _confirmCb = null;
+  document.getElementById('confirm-overlay').classList.remove('open');
+  if (cb) cb();
+};
+// TICKET-D1d ④: 模式徽标（AUTO / OFFICE / 正常不显示）
+function setMode(mode) {
+  var el = document.getElementById('status-mode');
+  if (!el) return;
+  el.className = mode ? 'on ' + mode : '';
+  el.textContent = mode ? mode.toUpperCase() : '';
+  // F2-2: 输入框旁 AUTO 开关与状态条徽标同源联动（session.auto_state → setMode）
+  var at = document.getElementById('auto-toggle');
+  if (at) {
+    at.classList.toggle('on', mode === 'auto');
+    at.textContent = mode === 'auto' ? 'AUTO ✓' : 'AUTO';
+  }
+}
+// TICKET-D1d ④: 状态条 running 状态 —— 已由 TICKET-DESK-V4B⓪ renderBusyUI 取代
+// （原全局 setBusy 改为按会话隔离：statusText 只反映当前显示会话的运行态）
+// TICKET-D1d ⑤: 中断按钮显隐
+function showStop(b) {
+  var sb = document.getElementById('stop-btn');
+  if (sb) sb.classList.toggle('show', b);
+}
+// TICKET-DESK-V4B⓪：忙碌态按会话隔离 —— A 运行中切到 B，B 的输入框/发送键/状态条
+// 显示空闲态可独立发消息；切回 A 恢复 A 的运行态。F10 事件闸门已按会话过滤渲染，
+// 这里补上"忙碌"这一全局副作用（loading 动画/状态条 Running/停止键/发送闸门）的隔离。
+/* ===BUSYGATE-START=== */
+var _busySids = {};
+function isSidBusy(sid) { return !!_busySids[sid]; }
+function setSidBusy(sid, busy) { if (busy) _busySids[sid || ''] = 1; else delete _busySids[sid || '']; }
+function currentBusy() { return isSidBusy(currentSessionId) || isSidBusy(''); }
+function renderBusyUI() {
+  var busy = currentBusy();
+  messaging = busy;
+  if (!connected) return;   // 未连接不刷状态条（applyConnected 管显示）
+  sendEl.classList.toggle('loading', busy);
+  if (statusText) statusText.textContent = busy ? 'Running' : 'Ready';
+  showStop(busy);
+}
+/* ===BUSYGATE-END=== */
+var _connTimer = null;
+// TICKET-DESK-V2A：连接态 300ms 防抖（连接抖动时 300ms 内不重绘，禁止闪烁切换）
+function setConnected(c) {
+  if (_connTimer) clearTimeout(_connTimer);
+  _connTimer = setTimeout(function() { applyConnected(c); }, 300);
+}
+function applyConnected(c) {
+  connected = c; inputEl.disabled = !c; sendEl.disabled = !c;
+  var at = document.getElementById('auto-toggle'); if (at) at.disabled = !c;
+  var cut = document.getElementById('computer-use-toggle'); if (cut) cut.disabled = !c;
+  inputEl.placeholder = c ? 'Type a message (↵ send, Shift+↵ newline)' : 'Connecting...';
+  if (statusDot) statusDot.className = 'dot ' + (c ? 'green' : 'red');
+  if (statusText) statusText.textContent = c ? 'Ready' : 'Offline';
+  if (!c) showStop(false);
+}
+var _codeStore = {};
+var _codeId = 0;
+function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function copyCode(id) {
+  var code = _codeStore[id];
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(function() {
+    var btn = document.getElementById('copy-' + id);
+    if (btn) { btn.textContent = '✓ Copied'; btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000); }
+  });
+}
+function highlight(code, lang) {
+  // 1) 转义 HTML 特殊字符
+  var html = esc(code);
+  // 2) 在纯文本上收集所有高亮区间（不含 HTML 标签干扰）
+  var spans = [];  // {start, end, tag}
+  function addSpan(re, tag) {
+    var m;
+    // Reset lastIndex
+    re.lastIndex = 0;
+    while ((m = re.exec(html)) !== null) {
+      spans.push({ start: m.index, end: m.index + m[0].length, tag: tag });
+    }
+  }
+  // 字符串 — 优先于注释/关键字，避免 "hi # comment" 里的 # 被误标
+  addSpan(/''[^']*''|"""[^"]*"""/g, '<span style="color:#50a14f">');
+  addSpan(/&quot;.*?&quot;|&#39;.*?&#39;|".*?"|'.*?'/g, '<span style="color:#50a14f">');
+  // 注释
+  addSpan(/(#.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">');
+  addSpan(/(\/\/.*$)/gm, '<span style="color:#a0a0a0;font-style:italic">');
+  // 数字
+  addSpan(/\b(\d+\.?\d*)\b/g, '<span style="color:#c18401">');
+  // 关键字
+  var kw = '\\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|in|not|and|or|True|False|None|pass|break|continue|yield|async|await|function|const|let|var|export|default|new|this|throw|catch|go|func|defer|struct|interface|map|chan|fn|let|mut|pub|impl|trait|enum|mod|use)\\b';
+  addSpan(new RegExp(kw, 'g'), '<span style="color:#a626a4;font-weight:600">');
+  // 装饰器
+  addSpan(/(@\w+)/g, '<span style="color:#c18401">');
+  // 3) 按 start 排序，后处理覆盖：短区间被长区间覆盖时丢弃
+  spans.sort(function(a, b) { return a.start - b.start; });
+  var merged = [];
+  for (var i = 0; i < spans.length; i++) {
+    var s = spans[i];
+    // 被上一个覆盖？后面的 start 小于前一个的 end 就丢弃
+    if (merged.length > 0 && s.start < merged[merged.length - 1].end) continue;
+    merged.push(s);
+  }
+  // 4) 从右到左插入，确保位置不偏移
+  var result = html;
+  for (var i = merged.length - 1; i >= 0; i--) {
+    var sp = merged[i];
+    result = result.slice(0, sp.end) + '</span>' + result.slice(sp.end);
+    result = result.slice(0, sp.start) + sp.tag + result.slice(sp.start);
+  }
+  return result;
+}
+// ── 票 AUTO-G2：待人工清单折叠卡片（默认收起，点开展开完整列表）──
+// TICKET-DESK-V2B4 ③：收工实况区块 → 默认折叠卡（与 AUTO-G2 同构：抽离 → 占位符 → md 处理后还原）。
+// 检测特征：── 工作区实况 / ── 实况对账 / 工作区实况（收工对账 等分隔线起始；
+// 区块结束：下一个行首 ── 分隔线 或 消息结尾。历史重放与流式同走 md() → 同路径折叠。
+function buildWorktreeCard(text) {
+  var WORKTREE_MARKERS = ['── 工作区实况', '── 实况对账', '工作区实况（收工对账'];
+  var idx = -1;
+  for (var i = 0; i < WORKTREE_MARKERS.length; i++) {
+    var f = text.indexOf(WORKTREE_MARKERS[i]);
+    if (f >= 0 && (idx < 0 || f < idx)) idx = f;
+  }
+  if (idx < 0) return null;
+  var lineStart = text.lastIndexOf('\n', idx - 1) + 1; // 标记所在行行首
+  var head = text.slice(0, lineStart).replace(/[ \t]+\n/g, '\n');
+  var rest = text.slice(lineStart);
+  var lines = rest.split('\n');
+  var end = lines.length;
+  for (var j = 1; j < lines.length; j++) {
+    if (/^─{2,}/.test(lines[j])) { end = j; break; } // 下一个同级分隔线
+  }
+  var block = lines.slice(0, end).join('\n');
+  var tail = lines.slice(end).join('\n').replace(/^[ \t]+$/gm, '');
+  return { head: head + (tail ? tail + '\n' : ''), card:
+    '<div class="v2b4-wt-card">' +
+    '<div class="v2b4-wt-head" onclick="toggleWorktree(this)">' +
+    '<span class="v2b4-wt-title">📋 Workspace diff</span><span class="v2b4-wt-arrow">▸</span></div>' +
+    '<pre class="v2b4-wt-body" style="display:none">' + esc(block) + '</pre>' +
+    '</div>' };
+}
+function toggleWorktree(headEl) {
+  var body = headEl.parentNode.querySelector('.v2b4-wt-body');
+  var arrow = headEl.querySelector('.v2b4-wt-arrow');
+  if (!body || !arrow) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  arrow.textContent = open ? '▸' : '▾';
+}
+function buildHandoffCard(text) {
+  var marker = '📋 待人工执行清单';
+  var idx = text.indexOf(marker);
+  if (idx < 0) return null;
+  var head = text.slice(0, idx).replace(/[ \t]+\n/g, '\n');
+  var list = text.slice(idx + marker.length).replace(/^\s*\n/, '');
+  var sections = [];
+  var cur = null;
+  list.split('\n').forEach(function(line) {
+    var sm = line.match(/^【(.+?)】$/);
+    if (sm) { cur = { title: sm[1], items: [] }; sections.push(cur); return; }
+    var im = line.match(/^- (.+?)：(.*)$/);
+    if (im && cur) { cur.items.push({ cmd: im[1], reason: im[2] }); }
+  });
+  var total = 0;
+  sections.forEach(function(s) { total += s.items.length; });
+  if (total === 0) return null;  // 无条目不渲染卡片
+  var body = sections.map(function(s) {
+    var items = s.items.map(function(it) {
+      return '<div style="padding:4px 0;border-bottom:1px solid rgba(220,60,40,0.1);"><code>' + esc(it.cmd) + '</code><div style="color:var(--text2);font-size:12px;margin-top:2px;">' + esc(it.reason) + '</div></div>';
+    }).join('');
+    return '<div style="font-weight:600;color:var(--text1);margin:6px 0 2px;">' + esc(s.title) + '</div>' + items;
+  }).join('');
+  return { head: head, card:
+    '<div style="border:1px solid #d33;border-left:3px solid #d33;border-radius:6px;margin:8px 0;overflow:hidden;">' +
+    '<div onclick="toggleHandoff(this)" style="padding:8px 12px;background:rgba(220,60,40,0.08);cursor:pointer;font-weight:600;color:#d33;">⚠ ' + total + ' ops blocked by AUTO — review needed <span style="float:right;">▸</span></div>' +
+    '<div class="handoff-body" style="display:none;padding:8px 12px;border-top:1px solid rgba(220,60,40,0.2);">' + body + '</div>' +
+    '</div>' };
+}
+function toggleHandoff(headEl) {
+  var body = headEl.parentNode.querySelector('.handoff-body');
+  var arrow = headEl.querySelector('span');
+  if (!body || !arrow) return;  // 票 SAFETY-1：空值守卫（与 toggleWorktree 同款）
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  arrow.textContent = open ? '▸' : '▾';
+}
+function md(s) {
+  // 票 AUTO-G2：待人工清单 → 默认收起的折叠卡片（先抽离，markdown 处理后还原）
+  var handoffCard = buildHandoffCard(s);
+  if (handoffCard) { s = handoffCard.head + '\n\n%%HANDOFF_CARD%%'; }
+  // TICKET-DESK-V2B4 ③：工作区实况区块 → 默认收起的折叠卡（与 AUTO-G2 同构抽离/还原；
+  // 历史重放（resume/重启加载）与流式消息都经 md()，两边同路径折叠）
+  var worktreeCard = buildWorktreeCard(s);
+  if (worktreeCard) { s = worktreeCard.head + '\n\n%%WORKTREE_CARD%%'; }
+  var codeBlocks = [];
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    var rawCode = code.trim();
+    var cid = 'c' + (++_codeId);
+    _codeStore[cid] = rawCode;
+    codeBlocks.push(
+      '<div class="code-block-wrapper">' +
+      '<div class="code-header">' +
+      '<span class="code-lang">' + esc(lang || '') + '</span>' +
+      (lang === 'html' ? '<button class="preview-btn" data-cid="' + cid + '" onclick="openPreview(\'' + cid + '\')">Preview</button>' : '') +
+      '<button id="copy-' + cid + '" class="copy-btn" onclick="copyCode(\'' + cid + '\')">Copy</button>' +
+      '</div>' +
+      '<pre><code>' + highlight(rawCode, lang) + '</code></pre>' +
+      '</div>'
+    );
+    return '%%CODEBLOCK' + (codeBlocks.length-1) + '%%';
+  });
+  var tables = [];
+  s = s.replace(/((?:\\|.+(?:\\r?\\n|$))+)/gm, function(block) {
+    var lines = block.trim().split(/\r?\n/);
+    if (lines.length < 2) return block;
+    var sepLine = lines[1].replace(/\s/g, '');
+    var hasDivider = /^\|?[-:]+\|?$/.test(sepLine);
+    if (hasDivider) {
+      // Standard markdown table with header/divider/data
+      var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
+      for (var i=2; i<lines.length; i++) {
+        h += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+esc(c.trim())+'</td>';}).join('') + '</tr>';
+      }
+      h += '</tbody></table>';
+      tables.push(h);
+      return '%%TABLE' + (tables.length-1) + '%%';
+    }
+    // Fallback: no divider row — detect if it looks like a table (all lines have ≥2 | cells)
+    var cellCounts = lines.map(function(l) { return l.split('|').filter(function(c){return c.trim();}).length; });
+    var avg = cellCounts.reduce(function(a,b){return a+b;}, 0) / cellCounts.length;
+    if (avg >= 2 && cellCounts.every(function(c) { return Math.abs(c - avg) <= 1; })) {
+      // First row = header, rest = data
+      var h = '<table><thead><tr>' + lines[0].split('|').filter(function(c){return c.trim();}).map(function(c){return '<th>'+esc(c.trim())+'</th>';}).join('') + '</tr></thead><tbody>';
+      for (var i=1; i<lines.length; i++) {
+        if (lines[i].trim()) {
+          h += '<tr>' + lines[i].split('|').filter(function(c){return c.trim();}).map(function(c){return '<td>'+esc(c.trim())+'</td>';}).join('') + '</tr>';
+        }
+      }
+      h += '</tbody></table>';
+      tables.push(h);
+      return '%%TABLE' + (tables.length-1) + '%%';
+    }
+    return block;
+  });
+  s = esc(s);
+  // Headings
+  s = s.replace(/^### (.+)$/gm, '<h3 style="font-size:16px;margin:12px 0 4px;">$1</h3>');
+  s = s.replace(/^## (.+)$/gm, '<h2 style="font-size:18px;margin:16px 0 4px;">$1</h2>');
+  s = s.replace(/^# (.+)$/gm, '<h1 style="font-size:20px;margin:20px 0 4px;">$1</h1>');
+  // Lists
+  s = s.replace(/^\- (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
+  s = s.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;">$1</li>');
+  // Quotes
+  s = s.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:2px solid var(--border);padding-left:12px;color:var(--text2);margin:4px 0;">$1</blockquote>');
+  // Links [text](url)
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--text2);text-decoration:underline;">$1</a>');
+  // Inline code, bold
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Diff lines
+  var lines = s.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    if (/^\+/.test(lines[i]) && !/^\+[-\s]/.test(lines[i])) lines[i] = '<span class="diff-add">' + lines[i] + '</span>';
+    else if (/^\-/.test(lines[i]) && !/^\-[-\s]/.test(lines[i])) lines[i] = '<span class="diff-del">' + lines[i] + '</span>';
+    else if (/^@@/.test(lines[i])) lines[i] = '<span class="diff-file">' + lines[i] + '</span>';
+  }
+  s = lines.join('\n');
+  s = s.replace(/%%CODEBLOCK(\d+)%%/g, function(_, i) { return codeBlocks[+i]; });
+  s = s.replace(/%%TABLE(\d+)%%/g, function(_, i) { return tables[+i]; });
+  if (handoffCard) { s = s.replace(/%%HANDOFF_CARD%%/g, handoffCard.card); }
+  if (worktreeCard) { s = s.replace(/%%WORKTREE_CARD%%/g, worktreeCard.card); }
+  return s;
+}
+
+// TICKET-DESK-V2C12 (C1)：助手正文专用完整 Markdown 管线 —— marked + DOMPurify + highlight.js（vendor 本地）。
+// 仅 addMsg('bobo', ...) 走此管线；工具卡/思考框/diff 块/实况折叠卡/用户消息一律不碰。
+// 流式半截语法（表格/代码块未闭合）由 marked 容错 + DOMPurify 兜底，绝不 throw；
+// 历史重放（resume）与新消息同走 addMsg → 同一路径。vendor 未就绪时回退 md()，正文不丢。
+// ── TICKET-GUI-F16：数学公式提取与还原（KaTeX vendor 本地，0.18.4）──
+// 顺序：先保护代码块（``` 内 $ 不参与提取）→ 提取 $$...$$ 块级 + $...$ 行内 →
+// %%MATH_N%% 占位符（对齐 buildHandoffCard 模式）→ marked 渲染后还原：
+// 块级 displayMode:true、行内 false；渲染失败（throw）原样返回 $...$ 文本（半截容错）。
+// 降级：window.katex 未就绪 → 占位符还原为原始 LaTeX 文本（公式原样输出，不打断正文）。
+function extractMath(s) {
+  var placeholders = [];
+  // 1. 代码块保护：``` 段整体切出（内嵌 $ 不参与提取），原样拼回（仍走 marked code renderer）
+  var parts = String(s).split(/```[\s\S]*?```/);
+  var codeBlocks = String(s).match(/```[\s\S]*?```/g) || [];
+  for (var i = 0; i < parts.length; i++) {
+    // 2. 提取块级 $$...$$（displayMode）
+    parts[i] = parts[i].replace(/\$\$([\s\S]+?)\$\$/g, function (m, inner) {
+      placeholders.push({ tex: inner.trim(), display: true });
+      return '%%MATH_' + (placeholders.length - 1) + '%%';
+    });
+    // 3. 提取行内 $...$（边界：行首/非字母数字反斜杠前置、内文非纯数字（$5/$10 货币）、后置非 $）
+    parts[i] = parts[i].replace(/(^|[^$\w\\])\$([^$\n]+?)\$(?!\$)/g, function (m, pre, inner) {
+      var tex = inner.trim();
+      if (!tex || /^\d+$/.test(tex)) return m;  // 货币/纯数字不提取
+      if (/^\s|\s$/.test(inner)) return m;      // 内文首尾空白不提取
+      placeholders.push({ tex: tex, display: false });
+      return pre + '%%MATH_' + (placeholders.length - 1) + '%%';
+    });
+  }
+  // 4. 交错拼回代码块
+  var out = parts[0];
+  for (var j = 0; j < codeBlocks.length; j++) {
+    out += codeBlocks[j] + (parts[j + 1] || '');
+  }
+  return { text: out, placeholders: placeholders };
+}
+
+function restoreMath(html, placeholders) {
+  if (!placeholders || !placeholders.length) return html;
+  return String(html).replace(/%%MATH_(\d+)%%/g, function (m, i) {
+    var p = placeholders[+i];
+    if (!p) return m;
+    var raw = p.display ? '$$\n' + p.tex + '\n$$' : '$' + p.tex + '$';
+    if (!window.katex) return raw;  // 降级：vendor 未就绪 → 原样文本
+    try {
+      return window.katex.renderToString(p.tex, { displayMode: p.display, throwOnError: false });
+    } catch (e) {
+      return raw;  // 渲染失败容错：原样文本（半截 $x^ 等）
+    }
+  });
+}
+
+var _mdReplyInit = false;
+function mdReply(s) {
+  s = (s == null) ? '' : String(s);
+  try {
+    // 折叠卡（AUTO-G2 待人工清单 / V2B4 工作区实况）先抽离、渲染后还原 —— 与 md() 同构，保结构化组件不被 markdown 打散
+    var handoffCard = buildHandoffCard(s);
+    if (handoffCard) { s = handoffCard.head + '\n\n%%HANDOFF_CARD%%'; }
+    var worktreeCard = buildWorktreeCard(s);
+    if (worktreeCard) { s = worktreeCard.head + '\n\n%%WORKTREE_CARD%%'; }
+    // TICKET-GUI-F16：数学公式提取（代码块保护 + $/$$ 占位符，marked 后还原）
+    var mathPack = extractMath(s);
+    s = mathPack.text;
+    var out;
+    if (window.marked && window.DOMPurify) {
+      if (!_mdReplyInit) {
+        _mdReplyInit = true;
+        window.marked.setOptions({
+          gfm: true,
+          breaks: false,
+          renderer: (function() {
+            var r = new window.marked.Renderer();
+            // 代码块高亮：highlight.js 本地 vendor，只对已注册语言着色，未知语言原样转义
+            r.code = function(code, lang) {
+              var l = (lang || '').trim().toLowerCase();
+              var html;
+              if (window.hljs && l && window.hljs.getLanguage(l)) {
+                try { html = window.hljs.highlight(code, { language: l, ignoreIllegals: true }).value; }
+                catch (e) { html = esc(code); }
+              } else { html = esc(code); }
+              return '<pre><code' + (l ? ' class="language-' + esc(l) + '"' : '') + '>' + html + '</code></pre>';
+            };
+            return r;
+          })()
+        });
+      }
+      out = window.marked.parse(s);
+      // DOMPurify 始终过一遍（XSS 剥离：<script>/*__APPJS__*/</script>
+</body>
+</html>
