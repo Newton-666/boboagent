@@ -117,18 +117,23 @@ class TestTokenEstimator:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestDynamicBudget:
-    """C3: Budget scales with provider context_length. Small windows trigger earlier."""
+    """C3: Budget scales with provider context_length, capped by effective-memory window.
+
+    COST-3（2026-08-26 数据驱动）：预算 = min(窗口比例, BOBO_EFFECTIVE_CONTEXT 默认 30k)。
+    实验（重复工具调用率 vs prompt 大小）：0-20k 重复率 14-17%，20-40k 跳升 41-47%，
+    40k+ 65-76%——模型有效记忆约 20-30k。大窗口模型预算被 30k 上限约束。
+    """
 
     @pytest.mark.parametrize("provider,model,expected_min_budget", [
-        ("moonshot", "kimi-k3", 600000),          # 1M window (k3 actual)
-        ("deepseek", "deepseek-v4-pro", 50000),  # 128K - 25K overhead * 0.7
-        ("openai", "gpt-4o", 50000),              # 128k window
-        ("anthropic", "claude-sonnet-4-20250514", 100000),  # 200k window
-        ("google", "gemini-2.0-flash", 50000),   # 128K conservative
-        ("ollama", "llama3", 5000),              # 32k window (overhead capped at 40%)
+        ("moonshot", "kimi-k3", 30000),           # 1M window → cap 30k（有效记忆上限）
+        ("deepseek", "deepseek-v4-pro", 30000),  # 1M window → cap 30k
+        ("openai", "gpt-4o", 30000),              # 128k window → cap 30k
+        ("anthropic", "claude-sonnet-4-20250514", 30000),  # 200k window → cap 30k
+        ("google", "gemini-2.0-flash", 30000),   # 128K window → cap 30k
+        ("ollama", "llama3", 5000),              # 32k window（窗口比例 < 30k，不 cap）
     ])
     def test_budget_scales_with_window(self, monkeypatch, provider, model, expected_min_budget):
-        """Budget should be roughly (context_len - max_tokens) * 0.7."""
+        """Budget = min(window-ratio, effective-memory-cap 30k). Large windows cap at 30k."""
         monkeypatch.setenv("BOBO_PROVIDER", provider)
         monkeypatch.setenv("API_MODEL_NAME", model)
         monkeypatch.setenv("BOBO_MAX_TOKENS", "8192")  # neutral default
@@ -137,6 +142,16 @@ class TestDynamicBudget:
         assert budget >= expected_min_budget, (
             f"{provider}/{model}: budget {budget:,} < expected min {expected_min_budget:,}"
         )
+
+    def test_effective_memory_cap_applies(self, monkeypatch):
+        """1M-window model budget is capped by BOBO_EFFECTIVE_CONTEXT (default 30k)."""
+        monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
+        monkeypatch.setenv("API_MODEL_NAME", "deepseek-v4-flash")  # 1M window
+        monkeypatch.setenv("BOBO_MAX_TOKENS", "8192")
+        from core.context import _get_context_budget
+        assert _get_context_budget() == 30000, "1M 窗口预算应被有效记忆上限 cap 到 30k"
+        monkeypatch.setenv("BOBO_EFFECTIVE_CONTEXT", "45000")
+        assert _get_context_budget() == 45000, "BOBO_EFFECTIVE_CONTEXT 应可调"
 
     def test_ollama_compresses_earlier_than_k3(self, monkeypatch):
         """Same history: small-window model triggers, large-window doesn't."""
@@ -170,21 +185,23 @@ class TestDynamicBudget:
         )
 
     def test_custom_fallback(self, monkeypatch):
-        """Unknown provider → 128k conservative fallback."""
+        """Unknown provider → 128k conservative fallback, capped at 30k."""
         monkeypatch.setenv("BOBO_PROVIDER", "unknown_provider_xyz")
         monkeypatch.setenv("API_MODEL_NAME", "some-model")
         monkeypatch.setenv("BOBO_MAX_TOKENS", "8192")
         from core.context import _get_context_budget
         budget = _get_context_budget()
-        assert 50000 <= budget <= 90000, (
-            f"Unknown provider budget {budget:,} should be ~128k-based (with fixed overhead)"
+        assert budget == 30000, (
+            f"Unknown provider budget {budget:,} should be capped at 30k (128k fallback)"
         )
 
     def test_ratio_env_override(self, monkeypatch):
-        """BOBO_CONTEXT_BUDGET_RATIO should be adjustable."""
+        """BOBO_CONTEXT_BUDGET_RATIO should be adjustable (below the cap)."""
         monkeypatch.setenv("BOBO_PROVIDER", "deepseek")
         monkeypatch.setenv("API_MODEL_NAME", "deepseek-v4-pro")
         monkeypatch.setenv("BOBO_MAX_TOKENS", "8192")
+        # 强制小窗口（窗口比例 < 30k cap），ratio 差异才能体现
+        monkeypatch.setenv("BOBO_CONTEXT_LENGTH", "40000")
         monkeypatch.setenv("BOBO_CONTEXT_BUDGET_RATIO", "0.5")
         from core.context import _get_context_budget
         budget_half = _get_context_budget()

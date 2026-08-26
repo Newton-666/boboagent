@@ -153,6 +153,13 @@ def _get_context_budget(_engine=None) -> int:
     固定开销 = 工具 schema + system prompt + 记忆注入（实测约 20-25K token）。
     max_tokens 扣除上限不超过 context_length 的 50%（防大 max_tokens 配小窗口时预算归零）。
     BOBO_CONTEXT_BUDGET_RATIO 默认 0.7，可通过环境变量覆盖。
+
+    COST-3（数据驱动压缩时机，2026-08-26）：预算再受"有效记忆窗口"上限约束——
+    events.jsonl 全量会话实验（重复工具调用率 vs prompt 大小）：0-20k 重复率
+    14-17%，20-40k 跳升至 41-47%，40k+ 65-76%——模型有效记忆约 20-30k。
+    预算 = min(窗口比例, 有效上限)，默认 BOBO_EFFECTIVE_CONTEXT=30000（可调）。
+    修复：窗口 1M 时原预算 677k，模型在 40-90k 区间已失忆（重复读文件/绕圈），
+    压缩应在此前触发，而非等 200 条兜底。
     """
     import os
     from core.provider import get_context_length
@@ -166,7 +173,10 @@ def _get_context_budget(_engine=None) -> int:
     effective_overhead = min(_FIXED_OVERHEAD_TOKENS,
                              int((context_len - max_tokens) * 0.4))
     available = context_len - max_tokens - effective_overhead
-    return max(int(available * ratio), 1)  # 至少 1 token
+    _budget = max(int(available * ratio), 1)  # 至少 1 token
+    # COST-3：有效记忆窗口上限（数据驱动，见函数 docstring）
+    _eff_limit = int(os.environ.get("BOBO_EFFECTIVE_CONTEXT", "30000"))
+    return max(min(_budget, _eff_limit), 1)
 
 def _build_local_fallback_summary(old_msgs: list) -> str:
     """生成本地机械摘要——当 LLM 摘要失败或无文本时做兜底（票 TICKET-023）。
