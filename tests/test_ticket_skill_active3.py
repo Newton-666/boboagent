@@ -64,13 +64,13 @@ def test_l1_three_same_pattern_triggers(tmp_path):
     assert counts["execute_terminal|pytest tests/"] == 3
 
 
-def test_l1_two_times_not_trigger(tmp_path):
-    """边界：仅 2 次 → 不触发（count_patterns 空）。"""
+def test_l1_two_times_still_counted(tmp_path):
+    """v5：数量不再是门槛，仅 2 次也会出现在 count_patterns 中（供 LLM 参考）。"""
     _write_events(tmp_path / "events.jsonl", [
         _tool_exec("execute_terminal", {"command": "pytest tests/test_a.py"}),
         _tool_exec("execute_terminal", {"command": "pytest tests/test_b.py"}),
     ])
-    assert sed.count_patterns() == {}
+    assert sed.count_patterns() == {"execute_terminal|pytest tests/": 2}
 
 
 def test_l1_different_commands_not_same_pattern(tmp_path):
@@ -84,7 +84,8 @@ def test_l1_different_commands_not_same_pattern(tmp_path):
     ])
     counts = sed.count_patterns()
     assert "execute_terminal|pytest tests/" in counts, f"pytest 3 次应命中: {counts}"
-    assert "execute_terminal|git commit" not in counts, "git commit 仅 2 次不得命中"
+    # v5: 数量不再是门槛，git commit 2 次也会出现在 counts 中（仅作 LLM 参考）
+    assert "execute_terminal|git commit" in counts, f"git commit 2 次也应被计数: {counts}"
 
 
 def test_l1_no_args_fallback_to_tool_name(tmp_path):
@@ -108,33 +109,43 @@ def test_l1_empty_or_broken_file(tmp_path):
 # ── L2：二级 LLM 精判 ────────────────────────────────────────────────
 
 def test_l2_worth_generates_draft():
-    """值得（固定流程）→ 草案 dict（name/triggers/steps）。"""
+    """值得（固定流程）→ 草案 dict（含 v5 新增字段）。"""
     draft = sed._judge(
         "execute_terminal|pytest tests/",
+        3,
         lambda msgs, **kw: _judge_resp(
-            '{"worth": true, "name": "pytest-runner", "triggers": ["跑测试", "pytest"],'
-            ' "steps": ["cd 项目根", "跑 pytest tests/"]}'
+            '{"memory_only": false, "worth": true, "confidence": "high",'
+            ' "update_priority": "create-new", "name": "pytest-runner",'
+            ' "triggers": ["跑测试", "pytest"], "steps": ["cd 项目根", "跑 pytest tests/"]}'
         ),
     )
     assert draft == {
         "name": "pytest-runner",
         "triggers": ["跑测试", "pytest"],
         "steps": ["cd 项目根", "跑 pytest tests/"],
+        "update_priority": "create-new",
+        "existing_skill": None,
+        "reason": "",
     }
 
 
 def test_l2_not_worth_silent():
     """不值得（一次性/用户偏好手动）→ None（静默）。"""
-    assert sed._judge("execute_terminal|pytest tests/",
-                      lambda msgs, **kw: _judge_resp('{"worth": false}')) is None
+    assert sed._judge(
+        "execute_terminal|pytest tests/",
+        3,
+        lambda msgs, **kw: _judge_resp(
+            '{"memory_only": false, "worth": false, "confidence": "high"}'
+        ),
+    ) is None
 
 
 def test_l2_llm_failure_silent():
     """LLM 异常 / 错误返回 / 垃圾输出 → None（零打扰）。"""
-    assert sed._judge("x|y", lambda msgs, **kw: (_ for _ in ()).throw(RuntimeError("boom"))) is None
-    assert sed._judge("x|y", lambda msgs, **kw: {"error": "rate limit"}) is None
-    assert sed._judge("x|y", lambda msgs, **kw: _judge_resp("完全不是 JSON 的废话")) is None
-    assert sed._judge("x|y", lambda msgs, **kw: _judge_resp('{"worth": true, "name": "Bad Name!"}')) is None
+    assert sed._judge("x|y", 3, lambda msgs, **kw: (_ for _ in ()).throw(RuntimeError("boom"))) is None
+    assert sed._judge("x|y", 3, lambda msgs, **kw: {"error": "rate limit"}) is None
+    assert sed._judge("x|y", 3, lambda msgs, **kw: _judge_resp("完全不是 JSON 的废话")) is None
+    assert sed._judge("x|y", 3, lambda msgs, **kw: _judge_resp('{"worth": true, "name": "Bad Name!"}')) is None
 
 
 def test_l2_cold_call_disables_thinking():
@@ -143,9 +154,9 @@ def test_l2_cold_call_disables_thinking():
 
     def fake_llm(msgs, **kw):
         seen.update(kw)
-        return _judge_resp('{"worth": false}')
+        return _judge_resp('{"memory_only": false, "worth": false, "confidence": "high"}')
 
-    sed._judge("x|y", fake_llm)
+    sed._judge("x|y", 3, fake_llm)
     assert seen.get("thinking_disabled") is True, "冷调用必须关 thinking"
     assert seen.get("use_tools") is False
 
