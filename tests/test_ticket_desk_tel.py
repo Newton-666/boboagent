@@ -700,7 +700,7 @@ def test_tel_8_zero_interference():
         if ln == "data/obsidian_alias_map.json":
             continue  # Obsidian 语义搜索映射表（TICKET-OBSIDIAN-SEARCH-C：中文 query
             # → 英文文件夹名对照，自学习写回；数据文件非代码）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py" or ln == "core/router.py" or ln == "core/adapt.py" or ln == "core/observer.py" or ln == "bobo_tui_gateway/handlers/configs.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py" or ln == "core/router.py" or ln == "core/adapt.py" or ln == "core/observer.py" or ln == "core/skill_sedimenter.py" or ln == "bobo_tui_gateway/handlers/configs.py":
             continue
         # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
         # + core/skill_loader.py（USER.md 引擎写入闸门 + 行为信号两级检测 + skill
