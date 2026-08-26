@@ -18,6 +18,8 @@ TICKET-PROFILE-5 的 signal_detector 同款 daemon 线程模式，主线程零�
     - 若判定为"技能"且存在同类 skill → patch 现有 skill；
     - 若判定为"技能"且无同类 → 新建 data/skills/custom/<name>/standard.md；
     - 写完后调用 skill_lifecycle.register_skill(name, agent_created=True) 登记。
+
+（COST-3 守卫标记：本文件沉淀机制升级——bobo 施工 2026-08-26，入库配套。）
 """
 
 import json
