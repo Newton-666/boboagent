@@ -561,6 +561,12 @@ def test_tel_8_zero_interference():
             assert "TICKET-HARNESS-LIGHTS" in r_hl.stdout, \
                 f"{ln} 缺 TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
             continue
+        # 票 COST-3（2026-08-26）特批：bobo_tui_gateway/handlers/configs.py
+        # （providers 下拉加 qwen——阿里云百炼官方接入），diff 必须含 COST-3 标记
+        if ln == "bobo_tui_gateway/handlers/configs.py":
+            r_qw = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "COST-3" in r_qw.stdout, f"{ln} 缺 COST-3 特批标记，未授权改动被拦截"
+            continue
         # 票 DESK-P1 特批：core/engine_adapter.py（会话 project_root 落库）+
         # core/tool_runner.py（execute_terminal 注入 cwd），diff 必须含 DESK-P1 标记；
         # 票 VSC-2B：engine_adapter.py 复用（写审批闸门），diff 标记兼容；
@@ -694,7 +700,7 @@ def test_tel_8_zero_interference():
         if ln == "data/obsidian_alias_map.json":
             continue  # Obsidian 语义搜索映射表（TICKET-OBSIDIAN-SEARCH-C：中文 query
             # → 英文文件夹名对照，自学习写回；数据文件非代码）
-        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py" or ln == "core/router.py" or ln == "core/adapt.py" or ln == "core/observer.py":
+        if ln in COST1B_ALLOWED or ln.endswith("metrics.py") or ln == "core/llm_caller.py" or ln == "core/injector.py" or ln == "core/command_safety.py" or ln == "core/context.py" or ln == "core/engine.py" or ln == "core/engine_adapter.py" or ln == "core/tool_runner.py" or ln == "core/provider.py" or ln == "core/router.py" or ln == "core/adapt.py" or ln == "core/observer.py" or ln == "bobo_tui_gateway/handlers/configs.py":
             continue
         # 票 PROFILE/SKILL 系列特批：core/profile_writer.py + core/signal_detector.py
         # + core/skill_loader.py（USER.md 引擎写入闸门 + 行为信号两级检测 + skill

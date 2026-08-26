@@ -198,6 +198,31 @@ PROVIDERS = {
         },
         "tools": {"native": True, "parallel": True, "json_mode": True},
     },
+    "qwen": {
+        "name": "Qwen (Alibaba Cloud)",
+        "env_key": "DASHSCOPE_API_KEY",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "models": ["qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash"],
+        "dynamic_models": True,  # 百炼兼容模式 /v1/models（失败静默回退写死列表，同 deepseek 先例）
+        "context_length": 128000,
+        # COST-3：qwen3.x 官方窗口 1M（2026-08 百炼计费页确认：max/plus/flash 均 ~1M）
+        "model_context": {"qwen3.8-max": 1000000, "qwen3.7-plus": 1000000, "qwen3.7-flash": 1000000},
+        "context_family": {"qwen3.": 1000000},  # qwen3.x 系列前缀继承 1M（对齐 PROVIDER-CONTEXT-MODEL 机制）
+        # 千问 thinking 协议（TICKET-PROVIDER-ADAPTER 对齐）：
+        # field=reasoning_content（与 DeepSeek 一致——千问官方 OpenAI 兼容模式同字段）；
+        # echo_required=False（千问不需要回传 reasoning_content——DeepSeek 才要求；
+        #   误设 True 会把该字段带进历史 → 千问 400，实弹 bad_request 教训）；
+        # disable_supported=False（千问用 enable_thinking 参数控制思考，不是 DeepSeek
+        #   的 {"thinking":{"type":"disabled"}} 格式——保守不发，避免 400）
+        "reasoning": {
+            "field": "reasoning_content",
+            "echo_required": False,
+            "thinking_mode": True,
+            "stream_reasoning": True,
+            "disable_supported": False,
+        },
+        "tools": {"native": True, "parallel": True, "json_mode": False},
+    },
     "custom": {
         "name": "Custom",
         "env_key": "CUSTOM_API_KEY",

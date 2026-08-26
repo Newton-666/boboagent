@@ -15,7 +15,8 @@ def handle_setup_status(params: dict, rid: str) -> dict:
     return ok(rid, {
         "provider_configured": bool(_cfg.API_KEY),
         "provider": _cfg.ACTIVE_PROVIDER,
-        "providers": ["deepseek", "openai", "anthropic", "openrouter", "google", "ollama", "custom"],
+        # COST-3：providers 下拉（qwen = 阿里云百炼官方接入，2026-08）
+        "providers": ["deepseek", "openai", "anthropic", "openrouter", "google", "ollama", "qwen", "custom"],
     })
 
 
@@ -76,7 +77,25 @@ def handle_setup_submit(params: dict, rid: str) -> dict:
 
 
 def handle_config_get(params: dict, rid: str) -> dict:
+    """config.get 分派：key=full → 全量配置（前端 useConfigSync/createGatewayEventHandler
+    以 config.get {key:'full'} 拉取 ConfigFullResponse，契约见 gatewayTypes.ts）；
+    key=mtime → .env 文件 mtime（驱动前端 mtime 轮询，配置热改后触发重新同步）；
+    其余 key → 单值（model 等，保持旧行为）。
+
+    TICKET-QWEN-THINKING：此前只返回 {"value": model}，key=full 落到空串 →
+    前端 applyDisplay 读到 cfg.config 缺失 → showReasoning 恒为 false →
+    recordReasoningDelta 门控丢弃全部 thinking（Qwen/DeepSeek/Kimi 思考过程一律不显示）。
+    """
     key = params.get("key", "")
+    if key == "full":
+        return handle_config_full(params, rid)
+    if key == "mtime":
+        try:
+            env_path = Path(_cfg.BOBO_DATA_DIR) / ".env"
+            mt = int(env_path.stat().st_mtime) if env_path.exists() else 0
+        except OSError:
+            mt = 0
+        return ok(rid, {"mtime": mt})
     values = {"model": _cfg.API_MODEL_NAME}
     return ok(rid, {"value": values.get(key, "")})
 

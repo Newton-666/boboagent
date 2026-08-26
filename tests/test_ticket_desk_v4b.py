@@ -227,11 +227,15 @@ def test_v4b_5_engine_gateway_zero_diff():
     # 工具集会话内全量稳定），diff 必须含 COST-3 标记
     COST3_ALLOWED = {"core/context.py", "core/engine.py",
                      "core/profile_writer.py", "core/signal_detector.py",
-                     "core/skill_loader.py", "core/provider.py"}  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列
+                     "core/skill_loader.py", "core/skill_sedimenter.py",
+                     "core/provider.py"}  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列（对齐 v4/tel）
     # TICKET-HARNESS-LIGHTS（2026-08-24）特批：core/router.py + core/adapt.py +
     # core/observer.py（点亮 harness 灯：BOBO_ROUTER/BOBO_ADAPT/BOBO_LEARN 默认
     # 改为开启，BOBO_*=0 可关回滚），diff 必须含 TICKET-HARNESS-LIGHTS 标记
     HARNESS_LIGHTS_ALLOWED = {"core/router.py", "core/adapt.py", "core/observer.py"}
+    # COST-3（2026-08-26）特批：bobo_tui_gateway/handlers/configs.py（providers
+    # 下拉加 qwen——阿里云百炼官方接入），diff 必须含 COST-3 标记
+    QWEN_ALLOWED = {"bobo_tui_gateway/handlers/configs.py"}
     # DESK-P1（2026-08-17）特批：core/engine_adapter.py + core/tool_runner.py（会话
     # 项目根注入链路：gateway 落库 → engine 属性 → injector 尾部段 / execute_terminal
     # cwd），diff 必须含 DESK-P1 标记
@@ -250,7 +254,7 @@ def test_v4b_5_engine_gateway_zero_diff():
                         "core/duo_orchestrator.py", "bobo_tui_gateway/server.py",
                         "bobo_tui_gateway/handlers/prompts.py",
                         "bobo_tui_gateway/handlers/sessions.py", "tools/office_manager.py"}
-    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED and f not in DEMOLISH_ALLOWED and f not in HARNESS_LIGHTS_ALLOWED]
+    unexpected = [f for f in changed if f != "bobo_tui_gateway/entry.py" and f not in COST1B_ALLOWED and f not in COST1C_ALLOWED and f not in COST2_ALLOWED and f not in SAFETY1_ALLOWED and f not in COST3_ALLOWED and f not in DESK_P1_ALLOWED and f not in GWMULTI_ALLOWED and f not in VSC2B_ALLOWED and f not in P0_1_ALLOWED and f not in DEMOLISH_ALLOWED and f not in HARNESS_LIGHTS_ALLOWED and f not in QWEN_ALLOWED]
     assert not unexpected, f"engine/gateway 未授权改动: {unexpected}"
     for f in sorted(DEMOLISH_ALLOWED & set(changed)):
         r_dm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
@@ -279,6 +283,10 @@ def test_v4b_5_engine_gateway_zero_diff():
         r_hl = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "TICKET-HARNESS-LIGHTS" in r_hl.stdout, \
             f"{f} 的改动缺 TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
+    for f in sorted(QWEN_ALLOWED & set(changed)):
+        r_qw = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
+        assert "COST-3" in r_qw.stdout, \
+            f"{f} 的改动缺 COST-3 特批标记，未授权改动被拦截"
     for f in sorted(DESK_P1_ALLOWED & set(changed)):
         r8 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         # 票 VSC-2B：engine_adapter.py 复用该文件（写审批闸门），diff 标记兼容；
