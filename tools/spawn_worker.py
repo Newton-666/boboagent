@@ -196,7 +196,7 @@ def _get_llm_caller():
     """获取缓存的 LLM caller，配置变化时重新创建。"""
     global _llm_caller_cache, _llm_caller_cache_key
     from core.llm_caller import create_llm_caller
-    from core.provider import resolve_provider
+    from core.provider import resolve_provider, get_provider
     from tools import TOOLS_SCHEMA
     config = resolve_provider()
     # api_key 只存短哈希，避免明文驻留缓存 key
@@ -204,11 +204,13 @@ def _get_llm_caller():
     cache_key = (config["name"], config["model"], key_hash)
     if _llm_caller_cache is not None and _llm_caller_cache_key == cache_key:
         return _llm_caller_cache
+    proto = get_provider(config["name"]) or {}
     _llm_caller_cache = create_llm_caller(
         api_key=config["api_key"],
         api_url=config["base_url"],
         model_name=config["model"],
         tools_schema=TOOLS_SCHEMA,
+        provider_proto=proto,
     )
     _llm_caller_cache_key = cache_key
     return _llm_caller_cache

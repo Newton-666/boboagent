@@ -30,6 +30,16 @@ import requests
 import threading as _threading
 import urllib3.connection as _urllib3_connection
 
+from core.anthropic_adapter import (
+    ANTHROPIC_STREAM_DONE,
+    AnthropicStreamState,
+    anthropic_event_to_openai_chunk,
+    build_anthropic_headers,
+    from_anthropic_response,
+    to_anthropic_payload,
+    uses_anthropic_protocol,
+)
+
 _logger = _logging.getLogger(__name__)
 
 
@@ -473,8 +483,14 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
     reasoning/tools 协议声明（见 core/provider.py）。None → DeepSeek 兼容默认
     （reasoning_content / echo_required=True / disable_supported=True）。适配层
     原则：本函数只读声明，不写死任何 provider 专属字段——新 provider 纯注册即可。
+
+    GitHub #9：provider_proto.protocol == anthropic_messages（或 URL 为原生
+    /v1/messages）时，经 core/anthropic_adapter 把 OpenAI chat/completions
+    请求/响应/工具调用转成 Anthropic Messages API；引擎侧形状不变。
+    /chat/completions（OpenRouter 等）永不走该适配器。
     """
     # ── 协议声明解析（保守默认：无声明按无 thinking 处理）──
+    _is_anthropic = uses_anthropic_protocol(provider_proto, api_url)
     _reasoning_proto = (provider_proto or {}).get("reasoning") or {}
     _r_field = _reasoning_proto.get("field") or "reasoning_content"  # 思考字段名
     _r_echo = _reasoning_proto.get("echo_required", False)           # 工具轮后回传
@@ -541,6 +557,12 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
+        # GitHub #9：直连 Anthropic Messages API——改 headers + 请求体形态。
+        # 引擎仍传入 OpenAI messages/tool_calls；适配器在发送前转换。
+        if _is_anthropic:
+            headers = build_anthropic_headers(api_key)
+            payload = to_anthropic_payload(payload)
+
         # 事件总线用于 headers stall / stream stall / reasoning 事件
         from core.event_bus import event_bus as _event_bus
 
@@ -600,6 +622,7 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             _finish_reason = None   # 票 PERF-1 事故 2：流式 finish_reason 收集
                             _parsed_any = False  # 票 P：是否成功解析过任何 SSE 数据行
                             _got_done = False    # 是否收到 [DONE]（防半截 EOF 冒充完整流）
+                            _anth_state = AnthropicStreamState() if _is_anthropic else None
                             # 票 N2：读者线程 + 队列；看门狗只看"内容行"时间
                             _vitals = {"last_chunk": time.time(), "raw": bytearray()}
 
@@ -632,6 +655,20 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                                     _parsed = json.loads(_d)
                                 except json.JSONDecodeError:
                                     continue
+                                # GitHub #9：Anthropic SSE 事件 → OpenAI delta 形状，
+                                # 后面的 content / reasoning / tool_calls 收集逻辑复用。
+                                if _is_anthropic:
+                                    _converted = anthropic_event_to_openai_chunk(
+                                        _parsed, _anth_state)
+                                    if _converted is ANTHROPIC_STREAM_DONE:
+                                        _parsed_any = True
+                                        _got_done = True
+                                        break
+                                    if _converted is None:
+                                        if _parsed.get("type"):
+                                            _parsed_any = True
+                                        continue
+                                    _parsed = _converted
                                 _parsed_any = True
                                 # 捕获 usage（部分 API 在流结束前返回）
                                 if "usage" in _parsed:
@@ -682,6 +719,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                             if not _parsed_any and _all_raw.strip():
                                 try:
                                     _body = json.loads(_all_raw.decode("utf-8", "replace"))
+                                    if _is_anthropic and "choices" not in _body:
+                                        _body = from_anthropic_response(_body)
                                     _msg = _body.get("choices", [{}])[0].get("message", {})
                                     full_content = _msg.get("content") or ""
                                     reasoning_buf = (_msg.get(_r_field) or "") or reasoning_buf
@@ -855,6 +894,10 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
 
                 # ── 非流式模式 ──
                 _body = response.json()
+                if _is_anthropic:
+                    _body = from_anthropic_response(_body)
+                    if isinstance(_body, dict) and _body.get("error") and "choices" not in _body:
+                        return _body
                 # ── 票 PERF-1 事故 2：非流式同样检测 finish_reason=length 且正文为空 → 翻倍重试一次 ──
                 _fr_ns = _body.get("choices", [{}])[0].get("finish_reason")
                 _content_ns = (_body.get("choices", [{}])[0]
