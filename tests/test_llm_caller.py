@@ -11,7 +11,15 @@ import time
 import pytest
 import requests
 from unittest.mock import MagicMock, patch
-from core.llm_caller import _classify_error, _get_sse_read_timeout, _emit_stream_stall
+from core.llm_caller import (
+    HeadersStallError,
+    MAX_RETRIES,
+    RETRY_DELAY_BASE,
+    _classify_error,
+    _get_sse_read_timeout,
+    _emit_stream_stall,
+    create_llm_caller,
+)
 
 
 # ── _get_sse_read_timeout ─────────────────────────────────────────
@@ -197,6 +205,104 @@ class TestExceptionClassification:
         error_type, retryable, message = _classify_error(exception=exc)
         assert error_type == "unknown"
         assert retryable is False
+
+    def test_headers_stall_is_retryable(self):
+        """issue #10: 内层看门狗耗尽后 HeadersStallError 不得一次判死。"""
+        exc = HeadersStallError("headers 阶段总预算 90s 耗尽，已重试仍失败")
+        error_type, retryable, message = _classify_error(exception=exc)
+        assert error_type == "headers_stall"
+        assert retryable is True
+        assert "已重试仍失败" in message
+
+
+class TestHeadersStallOuterRetry:
+    """issue #10: 外层 call_llm 对 headers_stall 走 MAX_RETRIES + 指数退避。
+
+    内层 `_post_with_headers_watchdog` 的即时 1 次重试由 live 测试覆盖；
+    这里 mock 掉内层，只验证外层：慢厂商/冷启动不再一次判死，致命错误仍不可重试。
+    """
+
+    def _ok_response(self, content="warmed up"):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "choices": [{"message": {"role": "assistant", "content": content}}]
+        }
+        resp.text = json.dumps(resp.json.return_value)
+        return resp
+
+    def test_cold_start_recovers_on_outer_retry(self, monkeypatch):
+        """复现：内层已抛 HeadersStallError（看门狗即时重试耗尽），外层再试一次成功。
+
+        模拟慢厂商/冷启动：第一次 headers 周期装死，退避后第二次出头。
+        若 retryable=False，call_llm 会在第一次 stall 后直接返回 error，不会再 POST。
+        """
+        import core.llm_caller as llm_mod
+
+        calls = {"n": 0}
+
+        def fake_post(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise HeadersStallError("headers 阶段总预算 90s 耗尽，已重试仍失败")
+            return self._ok_response()
+
+        monkeypatch.setattr(llm_mod, "_post_with_headers_watchdog", fake_post)
+        monkeypatch.setattr(llm_mod.time, "sleep", lambda _d: None)
+
+        caller = create_llm_caller("k", "http://vendor.test/v1/chat/completions", "m")
+        result = caller([{"role": "user", "content": "hi"}], use_tools=False)
+
+        assert calls["n"] == 2, f"外层应再试一次，实际 POST 次数 {calls['n']}"
+        assert "error" not in result, f"冷启动恢复后不应返回 error: {result}"
+        assert result["choices"][0]["message"]["content"] == "warmed up"
+
+    def test_outer_retries_use_max_retries_and_backoff(self, monkeypatch):
+        """外层次数/退避对齐既有 MAX_RETRIES + RETRY_DELAY_BASE，不另起 stall 计数器。"""
+        import core.llm_caller as llm_mod
+
+        posts = {"n": 0}
+        sleeps = []
+
+        def fake_post(*args, **kwargs):
+            posts["n"] += 1
+            raise HeadersStallError("headers stall")
+
+        monkeypatch.setattr(llm_mod, "_post_with_headers_watchdog", fake_post)
+        monkeypatch.setattr(llm_mod.time, "sleep", lambda d: sleeps.append(d))
+
+        caller = create_llm_caller("k", "http://vendor.test/v1/chat/completions", "m")
+        result = caller([{"role": "user", "content": "hi"}], use_tools=False)
+
+        assert posts["n"] == MAX_RETRIES + 1
+        assert sleeps == [RETRY_DELAY_BASE * (2 ** i) for i in range(MAX_RETRIES)]
+        assert result.get("error_type") == "headers_stall"
+        # 耗尽后仍标 retryable，engine 不走 STATE_ERROR 一次判死
+        assert result.get("retryable") is True
+
+    def test_fatal_errors_still_not_retryable(self):
+        """安全/资源面：auth / 余额不足 / bad_request 不得被 headers_stall 策略带偏。"""
+        cases = [
+            _classify_error(status_code=401),
+            _classify_error(status_code=403),
+            _classify_error(
+                status_code=429,
+                response_body='{"error": {"message": "Insufficient quota", "type": "insufficient_quota"}}',
+            ),
+            _classify_error(status_code=400),
+        ]
+        types_and_retry = [(t, r) for t, r, _ in cases]
+        assert types_and_retry[0] == ("auth_error", False)
+        assert types_and_retry[1] == ("auth_error", False)
+        assert types_and_retry[2] == ("fatal_insufficient_quota", False)
+        assert types_and_retry[3] == ("bad_request", False)
+
+        # 对照：headers_stall 可重试，且不改写上述分类
+        stall_type, stall_retry, _ = _classify_error(
+            exception=HeadersStallError("stall")
+        )
+        assert stall_type == "headers_stall"
+        assert stall_retry is True
 
 
 class TestPriorityOrder:
