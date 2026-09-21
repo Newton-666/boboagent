@@ -11,8 +11,11 @@
 工具配合、降级先排查、意图是决策的根。
 """
 
-import tools.computer_use as cu
+import pytest
+
 from core import engine as eng
+
+cu = pytest.importorskip("tools.computer_use")
 
 
 def _make_engine(cu=True, auto=False, confirm=None, test_mode=False):

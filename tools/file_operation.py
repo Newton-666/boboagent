@@ -51,6 +51,12 @@ def _generate_diff(old_lines: list[str], new_lines: list[str], file_path: str) -
 
 def _write_single_file(path: str, content: str) -> str:
     """写入单个文件（带自动备份 + inline diff）"""
+    try:
+        from core.tool_lifecycle import is_cancelled
+        if is_cancelled():
+            return f"错误: 操作已取消（超时），未写入 {path}"
+    except Exception:
+        pass
     full_path = os.path.expanduser(path)
     try:
         old_content = ""
@@ -134,12 +140,24 @@ def execute(action: str, path: str = None, content: str = None, files: list = No
             return f"读取失败: {e}"
     
     elif action == "write":
+        try:
+            from core.tool_lifecycle import is_cancelled
+            if is_cancelled():
+                return "错误: 操作已取消（超时），未写入"
+        except Exception:
+            pass
         denied, reason = is_write_denied(full_path)
         if denied:
             return f"❌ {reason}"
         return _write_single_file(path, content)
     
     elif action == "delete":
+        try:
+            from core.tool_lifecycle import is_cancelled
+            if is_cancelled():
+                return "错误: 操作已取消（超时），未删除"
+        except Exception:
+            pass
         denied, reason = is_write_denied(full_path)
         if denied:
             return f"❌ {reason}"

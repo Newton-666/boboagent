@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.command_safety import is_high_risk_tool, is_self_repo_hard_block
 from core.event_bus import event_bus
+from core.tool_lifecycle import SIDE_EFFECT_TOOLS, resolve_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -373,15 +374,19 @@ class ToolRunnerMixin:
             tc, tool_name, tool_args, _tool_t0 = future_map[future]
             start_time = time.time()
             try:
-                # P1.1: 对齐 tool_executor 的每工具超时表
-                _per_tool_timeout = {"spawn_worker": 310, "execute_terminal": 120}
-                _tool_timeout = _per_tool_timeout.get(tool_name, 30)
+                # 单一事实源：config.TOOL_TIMEOUT + 每工具上限。
+                # execute_tool 已在内层按同一表超时并取消；此处 +5s 作兜底，
+                # 避免 runner 先于 executor 放弃导致双重孤儿。
+                _tool_timeout = resolve_timeout(tool_name, tool_args) + 5
                 result = future.result(timeout=_tool_timeout)
             except Exception as e:
                 error_detail = str(e)
                 # 根据异常类型给出更有用的提示
                 if "Timeout" in type(e).__name__ or "timeout" in error_detail.lower():
-                    error_type_hint = "（超时，可重试一次或增加超时时间）"
+                    if tool_name in SIDE_EFFECT_TOOLS:
+                        error_type_hint = "（超时已取消内层执行，请勿用相同参数立即重试）"
+                    else:
+                        error_type_hint = "（超时已取消内层执行）"
                 elif "Connection" in type(e).__name__ or "connect" in error_detail.lower():
                     error_type_hint = "（网络连接失败，检查网络后重试）"
                 else:

@@ -149,15 +149,15 @@ def _run_test_file(test_path: str, language: str) -> str:
     """运行测试文件，返回测试结果"""
     try:
         if language == "python":
-            result = subprocess.run(
+            result = _run_cmd(
                 ['python3', '-m', 'pytest', test_path, '-q'],
-                capture_output=True, text=True, timeout=30,
+                timeout=30,
                 env=sanitize_env()
             )
         elif language == "javascript":
-            result = subprocess.run(
+            result = _run_cmd(
                 ['node', '--test', test_path],
-                capture_output=True, text=True, timeout=30,
+                timeout=30,
                 env=sanitize_env()
             )
         else:
@@ -191,6 +191,12 @@ def execute(code: str, language: str = "python", type: str = "run") -> str:
         language: python, javascript, bash
         type: run(执行), lint(检查语法)
     """
+    try:
+        from core.tool_lifecycle import is_cancelled
+        if is_cancelled():
+            return "错误: 操作已取消（超时），未执行代码"
+    except Exception:
+        pass
     filepath, task_name = _save_code(code, language)
 
     if type == "run":
@@ -233,6 +239,12 @@ def _run_code(code, language):
 
 MAX_OUTPUT_CHARS = 50_000  # 与 Hermes MAX_STDOUT_BYTES 对齐
 
+
+def _run_cmd(cmd, timeout, env=None, cwd=None):
+    """可被外层 tool 超时取消的子进程执行。"""
+    from core.tool_lifecycle import run_cancellable_subprocess
+    return run_cancellable_subprocess(cmd, timeout=timeout, env=env, cwd=cwd)
+
 def _run_python(code):
     temp_file = None
     try:
@@ -240,10 +252,8 @@ def _run_python(code):
             f.write(code)
             temp_file = f.name
 
-        result = subprocess.run(
+        result = _run_cmd(
             ['python3', temp_file],
-            capture_output=True,
-            text=True,
             timeout=30,
             env=sanitize_env()
         )
@@ -277,10 +287,8 @@ def _run_javascript(code):
             f.write(code)
             temp_file = f.name
 
-        result = subprocess.run(
+        result = _run_cmd(
             ['node', temp_file],
-            capture_output=True,
-            text=True,
             timeout=30,
             env=sanitize_env()
         )
@@ -317,10 +325,8 @@ def _run_bash(code):
             f.write(code)
             temp_file = f.name
 
-        result = subprocess.run(
+        result = _run_cmd(
             ['bash', temp_file],
-            capture_output=True,
-            text=True,
             timeout=30,
             env=sanitize_env()
         )
@@ -354,9 +360,9 @@ def _run_go(code):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.go', delete=False) as f:
             f.write(code)
             temp_file = f.name
-        result = subprocess.run(
+        result = _run_cmd(
             ['go', 'run', temp_file],
-            capture_output=True, text=True, timeout=60,
+            timeout=60,
             env=sanitize_env()
         )
         output = ""
@@ -392,16 +398,16 @@ def _run_rust(code):
             f.write(code)
             temp_rs = f.name
         temp_bin = temp_rs.replace('.rs', '')
-        compile_result = subprocess.run(
+        compile_result = _run_cmd(
             ['rustc', temp_rs, '-o', temp_bin, '--edition', '2024'],
-            capture_output=True, text=True, timeout=60,
+            timeout=60,
             env=sanitize_env()
         )
         if compile_result.returncode != 0:
             return f"编译失败:\n{compile_result.stderr[:MAX_OUTPUT_CHARS]}"
-        run_result = subprocess.run(
+        run_result = _run_cmd(
             [temp_bin],
-            capture_output=True, text=True, timeout=30,
+            timeout=30,
             env=sanitize_env()
         )
         output = ""

@@ -106,6 +106,12 @@ class TestEngineLevelInterruptNoRetry:
         def tool_executor(tool_name, args):
             if tool_name == "execute_terminal":
                 captured["calls"] += 1
+                # 必须在工具已开始后再 set 中断：从 engine.run 起算 0.5s 会在
+                # 慢收集/前置超时测之后抢在 tool_loop 之前开火 → 调用次数 0。
+                def _delayed_set():
+                    time.sleep(0.3)
+                    engine._interrupt_event.set()
+                threading.Thread(target=_delayed_set, daemon=True).start()
                 from tools.execute_terminal import execute
                 captured["result"] = execute(
                     args.get("command", ""),
@@ -118,11 +124,6 @@ class TestEngineLevelInterruptNoRetry:
         engine = _make_test_engine(fake_llm, tool_executor, monkeypatch)
         engine._interrupt_event = threading.Event()
 
-        def _delayed_set():
-            time.sleep(0.5)
-            engine._interrupt_event.set()
-
-        threading.Thread(target=_delayed_set, daemon=True).start()
         engine.run(user_input="执行 sleep 30")
 
         # 1. execute_terminal 恰好一次——中断的命令不被自动重试

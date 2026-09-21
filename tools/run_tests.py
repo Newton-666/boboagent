@@ -19,6 +19,11 @@ from pathlib import Path
 TIMEOUT = 120  # 秒
 
 
+def _run_cmd(cmd, timeout, cwd=None):
+    from core.tool_lifecycle import run_cancellable_subprocess
+    return run_cancellable_subprocess(cmd, timeout=timeout, cwd=cwd)
+
+
 def _detect_framework(project_dir: Path) -> str | None:
     """自动检测项目的测试框架。"""
     # pytest
@@ -55,9 +60,9 @@ _last_test_results: dict[str, tuple[int, str]] = {}
 def _run_pytest(project_dir: Path) -> str:
     """运行 pytest，返回格式化的结果。"""
     try:
-        result = subprocess.run(
+        result = _run_cmd(
             ["python3", "-m", "pytest", str(project_dir), "-q", "--tb=short"],
-            capture_output=True, text=True, timeout=TIMEOUT, cwd=str(project_dir)
+            timeout=TIMEOUT, cwd=str(project_dir)
         )
     except FileNotFoundError:
         return "pytest 未安装。运行: pip install pytest"
@@ -116,9 +121,9 @@ def _run_pytest(project_dir: Path) -> str:
 def _run_jest(project_dir: Path) -> str:
     """运行 jest。"""
     try:
-        result = subprocess.run(
+        result = _run_cmd(
             ["npx", "jest", "--no-coverage", "--verbose"],
-            capture_output=True, text=True, timeout=TIMEOUT, cwd=str(project_dir)
+            timeout=TIMEOUT, cwd=str(project_dir)
         )
     except FileNotFoundError:
         return "Node.js / npx 未安装"
@@ -139,9 +144,9 @@ def _run_jest(project_dir: Path) -> str:
 def _run_go_test(project_dir: Path) -> str:
     """运行 go test。"""
     try:
-        result = subprocess.run(
+        result = _run_cmd(
             ["go", "test", "./..."],
-            capture_output=True, text=True, timeout=TIMEOUT, cwd=str(project_dir)
+            timeout=TIMEOUT, cwd=str(project_dir)
         )
     except FileNotFoundError:
         return "Go 未安装"
@@ -160,6 +165,12 @@ def execute(path: str = ".", framework: str = "auto") -> str:
         path: 项目根目录路径（默认当前工作目录）
         framework: 测试框架，支持 auto / pytest / jest / go。默认 auto 自动检测。
     """
+    try:
+        from core.tool_lifecycle import is_cancelled
+        if is_cancelled():
+            return "错误: 操作已取消（超时），未运行测试"
+    except Exception:
+        pass
     project_dir = Path(path).expanduser().resolve()
     if not project_dir.exists():
         return f"错误: 目录不存在: {project_dir}"
