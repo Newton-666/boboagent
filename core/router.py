@@ -3,10 +3,12 @@
 接口（写死）：route(task, user_profile, recent_rounds) -> RoutePlan
   RoutePlan = {tool_names, skill_names, memory_types}  — 该轮上下文应带什么。
 
-默认开启（BOBO_ROUTER=0 可关，可回滚）：engine 每轮按路由结果执行工具广告/
-技能激活/记忆召回。点亮后行为变化：工具子集/技能/记忆按任务分类路由
+默认开启（BOBO_ROUTER=0 可关，可回滚）：engine 每轮按路由结果执行
+技能激活/记忆召回。点亮后行为变化：技能/记忆按任务分类路由
 （此前默认关闭，行为不变——TICKET-HARNESS-LIGHTS：owner 决定点亮 harness 灯）。
-开启后：工具广告/技能激活/记忆召回按路由结果执行。
+开启后：技能激活/记忆召回按路由结果执行。tool_names 只是元信息，
+engine/injector **不得**用它裁剪工具注入（issue #8：adapt 也不得把
+tool_names 接回注入面；全量注入是故意边界，不是漏接线）。
 
 规则版 v1（从 tool_park + skill_loader 起步，适配层是第二阶段）：
 - 工具：常驻小集 + 任务分类 → domain 映射
@@ -111,7 +113,9 @@ def route(task: str, user_profile: dict = None, recent_rounds: list = None) -> R
     - **不管工具注入**：工具是 description 驱动的"包"，全量注入、LLM 自己按
       描述选（COST-3 定案：按分类过滤工具 → 能力抖动/前缀断裂/可用性缩水，
       可用性 100% 不缩水是 owner 红线）。tool_names 仅作"该轮建议关注哪些
-      工具"的元信息，engine 不用于裁剪注入。
+      工具"的元信息，engine 不用于裁剪注入。issue #8 / TICKET-HARNESS-LIGHTS：
+      禁止把 adapt 的 tool_names boost 接回本路径——那是死路径，正确修法
+      是删除，不是接线。
 
     无命中 → 返回常驻工具（元信息）+ 空技能/记忆（对应"无技能命中按 domain
     兜底"的设计；本版无命中时工具仅常驻集，兜底域在启用后观察再补）。

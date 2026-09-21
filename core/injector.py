@@ -675,6 +675,9 @@ class PromptInjector:
                 mem_floor = pool.floor("memory")
                 mem_ceiling = pool.ceiling("memory")
                 # B4：路由开时按路由记忆类型过滤（默认 None=全类型，行为不变）
+                # issue #8 / TICKET-HARNESS-LIGHTS：只读 memory_types。禁止按
+                # 路由工具名列表裁剪注入——工具全量注入（COST-3 / 062ca05）
+                # 是故意边界，adapt 的工具名 boost 是死路径，不要"修"成接线。
                 _mem_types = getattr(engine, "_route_plan", None)
                 _mem_types = _mem_types.memory_types if _mem_types is not None else None
                 mem_text, mem_stats = format_memory_by_signal(

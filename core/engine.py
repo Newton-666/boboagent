@@ -1312,6 +1312,8 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 召回，**不管工具注入**——工具是 description 驱动的"包"，全量注入、
         # LLM 自己按描述选择（COST-3 定案：可用性 100% 不缩水）。route_plan 的
         # tool_names 仅作"该轮建议关注哪些工具"的元信息，不再用于裁剪注入。
+        # issue #8：adapt 不得把 tool_names 接回这里。全量注入是故意边界
+        # （062ca05 / B55 / B68），不是漏接线；接回去会回退冷启动稳定性。
         filtered_tools = TOOLS_SCHEMA
         if filtered_tools is not None:
             names = [t.get("function", {}).get("name", "") for t in filtered_tools]
@@ -1740,7 +1742,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
         # 阶段 B：路由器（默认开；BOBO_ROUTER=0 显式关闭，可回滚——TICKET-HARNESS-LIGHTS 点亮）
         self._route_plan = _router_route(str(user_input or "")) if _router_enabled() else None
         if self._route_plan is not None:
-            # 阶段 E：适配层（BOBO_ADAPT=1，默认开）——画像偏好提升路由权重（只加不删）
+            # 阶段 E：适配层（BOBO_ADAPT=1，默认开）——画像偏好提升 skills/memory
+            # 路由权重（只加不删）。TICKET-HARNESS-LIGHTS / issue #8：adapt 不
+            # 得改 tool_names，也不得接到下方 TOOLS_SCHEMA 全量注入。
             try:
                 from core.adapt import adapt, adapt_enabled as _adapt_on
                 if _adapt_on():
