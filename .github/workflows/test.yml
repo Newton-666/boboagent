@@ -30,7 +30,8 @@ jobs:
         # conftest collect_ignore + 本步指定文件。#2 超时/写槽测必须一起跑。
         # GitHub #11：loop_detect 误杀/变参绕圈测必须一起跑。
         # GitHub #10：headers_stall 可重试分类测必须一起跑。
-        run: uv run pytest -v --tb=short tests/test_issue4_write_approval_high_risk.py tests/test_command_safety.py tests/test_auto_mode.py tests/test_auto_mode_b.py tests/test_ticket_safety_1.py tests/test_engine_adapter_interrupt.py tests/test_tool_timeout_lifecycle.py tests/test_execute_terminal_interrupt.py tests/test_engine_injection_pollution.py tests/test_loop_detect.py tests/test_ticket_core_r1.py tests/test_llm_caller.py
+        # GitHub #9：Anthropic Messages adapter 测必须一起跑。
+        run: uv run pytest -v --tb=short tests/test_issue4_write_approval_high_risk.py tests/test_command_safety.py tests/test_auto_mode.py tests/test_auto_mode_b.py tests/test_ticket_safety_1.py tests/test_engine_adapter_interrupt.py tests/test_tool_timeout_lifecycle.py tests/test_execute_terminal_interrupt.py tests/test_engine_injection_pollution.py tests/test_loop_detect.py tests/test_ticket_core_r1.py tests/test_llm_caller.py tests/test_anthropic_adapter.py
         env:
           DEEPSEEK_API_KEY: "sk-test-placeholder"
           OBSIDIAN_VAULT: "/tmp"
