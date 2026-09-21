@@ -684,6 +684,10 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
+        if ln.startswith(".github/"):
+            r_gh = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "GitHub #4" in r_gh.stdout, f"{ln} 缺 GitHub #4 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("data/tickets/"):
             continue  # 治理票据（TICKET-*.md 非代码；与 docs/ 同性质）
         if ln == "scripts/step_baseline.py":

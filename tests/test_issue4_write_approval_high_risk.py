@@ -213,7 +213,6 @@ class TestWriteApprovalCannotSilentBypass:
 
     def test_engine_auto_denies_code_execution_and_computer_use(self):
         """auto 下高危通道即时 deny——不弹窗、不静默放行（120s 策略不改）。"""
-        caller_unused = object()
         eng = Engine(lambda *a, **k: {}, execute_tool, test_mode=False,
                      auto_mode_getter=lambda: True)
         eng.test_mode = False
@@ -222,6 +221,54 @@ class TestWriteApprovalCannotSilentBypass:
         assert eng._confirm("code_execution", {"code": "x"}, "执行代码") is False
         assert eng._confirm("computer_use", {"action": "click"}, "电脑操作") is False
         assert called == [], "auto 下不得走 confirm_callback（无 120s 卡死）"
+
+    def test_engine_auto_denies_computer_use_capture(self):
+        """AUTO 下连 capture 也 deny：intentional tightening，不是漏判只读。"""
+        eng = Engine(lambda *a, **k: {}, execute_tool, test_mode=False,
+                     auto_mode_getter=lambda: True)
+        eng.test_mode = False
+        called = []
+        eng.confirm_callback = lambda *a: called.append(a) or True
+        assert is_high_risk_tool("computer_use", {"action": "capture"})[0] is False
+        assert eng._confirm("computer_use", {"action": "capture"},
+                            "auto 模式：computer_use（含 capture）即时拒绝") is False
+        assert called == [], "AUTO capture deny 不得走 120s confirm_callback"
+
+    def test_tool_loop_auto_denies_capture(self):
+        """工具循环：AUTO 开启时 capture 进 _confirm 并取消，不得执行。"""
+        class _H(ToolRunnerMixin):
+            def __init__(self):
+                self.tool_executor = lambda *_a, **_k: pytest.fail("AUTO capture 不得执行")
+                self._tool_failures = {}
+                self._recent_tool_calls = []
+                self._confirm_calls = []
+                self._notify_calls = []
+                self._recorded = []
+                self.sid = "issue4-auto-capture"
+                self._auto_mode_getter = lambda: True
+
+            def _confirm(self, tool_name, tool_args, reason):
+                self._confirm_calls.append((tool_name, tool_args, reason))
+                return False
+
+            def _notify(self, event_type, data):
+                self._notify_calls.append((event_type, data))
+
+            def _record_message(self, role, **kwargs):
+                self._recorded.append((role, kwargs))
+
+        runner = _H()
+        results = runner._execute_tool_loop([{
+            "id": "c1",
+            "function": {
+                "name": "computer_use",
+                "arguments": json.dumps({"action": "capture"}),
+            },
+        }])
+        assert len(runner._confirm_calls) == 1
+        assert runner._confirm_calls[0][0] == "computer_use"
+        assert "capture" in runner._confirm_calls[0][2]
+        assert "操作已取消" in results[0]["content"]
 
 
 class TestGuardedExecuteWriteApproval:

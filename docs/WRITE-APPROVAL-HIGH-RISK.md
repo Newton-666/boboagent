@@ -36,7 +36,9 @@
 | `computer_use` click / type / key / open_app / scroll / 未知 action | 是 → `_confirm` | 必须确认 |
 | `edit_file` / `file_operation` | 否（沿用 VSC-2B：只走写审批闸） | 必须确认（原行为） |
 
-AUTO 模式不弹窗（铁律，避免 120s 卡死）：`code_execution` 与高危 `computer_use` 即时 **deny** + 留痕，不静默执行。
+AUTO 模式不弹窗（铁律，避免 120s 卡死）：`code_execution` 与 **全部** `computer_use`（**含 `capture`**）即时 **deny** + 留痕，不静默执行。
+
+`capture` 在 `is_high_risk_tool` 里仍是只读（普通模式不抬确认闸、写审批不抬闸）。AUTO 下对 `capture` 的拒绝是 **intentional tightening**（有意收紧），不是漏写只读豁免：AUTO 不弹 120s 窗，也不把看屏当成静默放行。
 
 ## 相关代码
 

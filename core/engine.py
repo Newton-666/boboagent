@@ -348,6 +348,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
 
         # GitHub #4：code_execution / computer_use 高危通道。auto 不弹窗是铁律
         # （不留 120s 卡死），也不引入静默放行——即时 deny + 留痕。
+        # computer_use 含 capture：intentional tightening，不是漏判只读。
         # 确认闸 120s=deny 属 P1，本分支不改超时策略。
         if tool_name in ("code_execution", "computer_use"):
             self._write_auto_audit("deny", tool_name, str(tool_args)[:120],

@@ -14,6 +14,23 @@ if _project_root not in sys.path:
 # Force test mode for the engine — no real API calls, no user prompts
 os.environ["BOBO_TEST_MODE"] = "1"
 
+# GitHub #4：Linux/CI 缺 pandas 或 macOS ApplicationServices 时，下列模块在
+# 收集阶段 ImportError，pytest 会中断整场（issue4 高危覆盖测无法执行）。
+# 缺依赖则跳过这些文件；macOS/装了 pandas 的环境仍照常收集。
+collect_ignore = []
+try:
+    import pandas  # noqa: F401
+except ImportError:
+    collect_ignore.append("test_context_lab.py")
+try:
+    import ApplicationServices  # noqa: F401
+except ImportError:
+    collect_ignore.extend([
+        "test_ticket_computer_use_action.py",
+        "test_ticket_computer_use_background.py",
+        "test_ticket_computer_use_core.py",
+    ])
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _redirect_event_bus():
