@@ -295,7 +295,8 @@ def is_write_denied(filepath: str) -> tuple[bool, str]:
             if _HOME in path and len(parts) < 5:
                 return True, f"疑似凭据文件，禁止写入: {basename}"
 
-    # Issue #3：仓内内核路径（protected_paths ∪ 默认 core/tools/gateway）
+    # Issue #3：仓内内核路径（protected_paths ∪ 默认 core/tools/gateway）。
+    # 本函数给文件工具用。execute_terminal 改内核仍走 #4 确认链，本票不拦 shell 绕写。
     if is_protected(filepath) or is_protected(path):
         return True, f"禁止写入受保护路径（protected_paths）: {path}"
 

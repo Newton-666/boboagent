@@ -5,6 +5,9 @@
 - load_protected_paths / is_protected 有配置与单测
 - AUTO 下写/删不因「有快照可回滚」而默认放行
 - 未授权改内核路径被拒绝；授权路径（非 protected）行为符合预期
+
+残余（本票不拦，归 issue #4）：execute_terminal 改内核路径仍走确认链；
+shell 绕写（python -c / sed -i / tee 等）不是本闸的覆盖面。
 """
 
 import json

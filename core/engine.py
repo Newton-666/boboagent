@@ -343,6 +343,9 @@ class Engine(ContextMixin, ToolRunnerMixin):
                 "local-reversible", snapshot)
             return True
 
+        # Issue #3 residual / #4：execute_terminal 改内核路径不在本票文件工具闸内。
+        # `>`/`>>` 可能因 is_write_denied 被 classify 成 dangerous，但 python -c /
+        # sed -i / tee 等 shell 绕写仍走确认链（issue #4），本票不拦。
         if tool_name == "execute_terminal":
             command = tool_args.get("command", "")
             # ── 票 AUTO-D D-1：黑名单硬锁——auto 下最高优先级，即时拒绝 ──
