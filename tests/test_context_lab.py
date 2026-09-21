@@ -5,8 +5,9 @@ import os
 import tempfile
 from pathlib import Path
 
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
 
 from docs.战役工具.context_lab import (
     _calc_amnesia_signals,

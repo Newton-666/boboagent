@@ -195,6 +195,31 @@ class TestWriteToolTimeoutNoDoubleApply:
         )
         assert ident is None
 
+    def test_code_execution_is_side_effect_gated(self):
+        """code_execution 必须进写槽：同一脚本超时重试不得双跑。"""
+        assert "code_execution" in lifecycle.SIDE_EFFECT_TOOLS
+        assert "code_execution" in lifecycle.WRITE_TOOLS
+        ident = lifecycle.write_identity(
+            "code_execution",
+            {"code": "open('x','a').write('a')", "language": "python", "type": "run"},
+        )
+        assert ident is not None
+        ident2 = lifecycle.write_identity(
+            "code_execution",
+            {"code": "open('x','a').write('a')", "language": "python", "type": "run"},
+        )
+        assert ident == ident2
+
+    def test_other_write_capable_tools_are_listed(self):
+        for name in (
+            "run_tests", "task_ledger", "restore_checkpoint",
+            "write_obsidian", "append_obsidian", "refactor",
+        ):
+            assert name in lifecycle.SIDE_EFFECT_TOOLS, name
+        # 远程写：写槽覆盖，但不能 killpg（见 docs/TOOL_TIMEOUT_LIFECYCLE.md）
+        for name in ("github_create_pr", "notion_create_page", "computer_use"):
+            assert name in lifecycle.SIDE_EFFECT_TOOLS, name
+
     def test_does_not_mutate_caller_arguments(self):
         import json
         args = {"action": "exists", "path": "/tmp"}

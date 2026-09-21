@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import signal
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,7 @@ CANCEL_GRACE_S = 2.0
 _REPLAY_TTL_S = 120.0
 
 WRITE_TOOLS = frozenset({
+    # 本地文件系统 / 笔记落地
     "edit_file",
     "file_operation",
     "file_writer",
@@ -42,10 +44,46 @@ WRITE_TOOLS = frozenset({
     "append_obsidian",
     "delete_file",
     "refactor",
+    "code_execution",  # 先把代码写到 projects/ 再跑，超时重试会双跑脚本
+    "restore_checkpoint",
+    "delete_note",
+    "delete_folder",
+    "batch_delete_notes",
+    "move_note",
+    "rename_note",
+    "batch_move_notes",
+    "batch_copy_notes",
+    "copy_to_obsidian",
+    "copy_to_notion",
+    "code_to_obsidian",
+    "review_to_obsidian",
+    "create_folder",
+    "wiki_rebuild",
+    "save_skill",
+    "task_ledger",
+    "index_project",
+    "run_tests",
 })
 
-# 有副作用、超时重试危险的工具（含终端命令）。
-SIDE_EFFECT_TOOLS = WRITE_TOOLS | frozenset({"execute_terminal", "spawn_worker"})
+# 有副作用、超时重试危险。含写工具 + 终端/Worker + 远程写 API。
+# 远程 HTTP（github/notion/calendar）没有可 killpg 的子进程，只走写槽拒绝/去重。
+SIDE_EFFECT_TOOLS = WRITE_TOOLS | frozenset({
+    "execute_terminal",
+    "spawn_worker",
+    "computer_use",
+    "notion_create_page",
+    "notion_append",
+    "github_create_pr",
+    "github_create_repo",
+    "github_pr_comment",
+    "github_setup",
+    "bobo_config",
+    "bobo_schedule",
+    "create_calendar_event",
+    "reminder",
+    "api_register",
+    "render",
+})
 
 _READ_FILE_OPS = frozenset({"read", "exists"})
 
@@ -132,6 +170,40 @@ def register_current_proc(proc) -> None:
     ctx = _call_ctx.get()
     if ctx is not None:
         ctx.register_proc(proc)
+
+
+def run_cancellable_subprocess(command, *, timeout: float, env=None, cwd=None,
+                               text: bool = True) -> subprocess.CompletedProcess:
+    """Popen + 登记进程组，外层超时/取消可 killpg。
+
+    替代会把子进程留在 ThreadPool 里的 subprocess.run(timeout=...)。
+    取消或到期时抛 subprocess.TimeoutExpired（与 run 一致）。
+    """
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    register_current_proc(proc)
+    deadline = time.time() + float(timeout)
+    out = err = ""
+    while True:
+        if is_cancelled() or time.time() >= deadline:
+            _kill_process_group(proc)
+            try:
+                out, err = proc.communicate(timeout=0.5)
+            except Exception:
+                pass
+            raise subprocess.TimeoutExpired(command, timeout, output=out, stderr=err)
+        try:
+            out, err = proc.communicate(timeout=0.15)
+            return subprocess.CompletedProcess(command, proc.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _kill_process_group(proc) -> None:
@@ -231,6 +303,8 @@ def write_identity(tool_name: str, arguments: dict | None) -> str | None:
         return f"{tool_name}|{_fingerprint(args.get('command'))}"
     if tool_name == "spawn_worker":
         return f"{tool_name}|{_fingerprint(_public_args(args))}"
+    if tool_name == "code_execution":
+        return f"{tool_name}|{_fingerprint((args.get('language'), args.get('code'), args.get('type')))}"
     if tool_name == "edit_file":
         return (
             f"{tool_name}|{_canonical_path(path)}|"

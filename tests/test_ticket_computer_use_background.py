@@ -15,7 +15,7 @@
 import pytest
 from types import SimpleNamespace
 
-import tools.computer_use as cu
+cu = pytest.importorskip("tools.computer_use")
 
 
 @pytest.fixture(autouse=True)

@@ -10,7 +10,7 @@
 
 import pytest
 
-import tools.computer_use as cu
+cu = pytest.importorskip("tools.computer_use")
 
 
 def _authorize_off(monkeypatch):
