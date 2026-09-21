@@ -346,6 +346,15 @@ class Engine(ContextMixin, ToolRunnerMixin):
                                    "external-irreversible", None)
             return False
 
+        # GitHub #4：code_execution / computer_use 高危通道。auto 不弹窗是铁律
+        # （不留 120s 卡死），也不引入静默放行——即时 deny + 留痕。
+        # 确认闸 120s=deny 属 P1，本分支不改超时策略。
+        if tool_name in ("code_execution", "computer_use"):
+            self._write_auto_audit("deny", tool_name, str(tool_args)[:120],
+                                   f"auto 模式：高危执行通道即时拒绝（{reason}）",
+                                   "external-irreversible", None)
+            return False
+
         # ── 票 AUTO-D D-1（Q1 裁决）：非 terminal 灰名单意外落入兜底 → 统一 deny ──
         # auto 不弹窗是铁律：任何意外落入兜底的未分类操作即时拒绝+留痕，
         # 不留 120s 卡死路径（原 confirm_callback 弹窗在 auto 下废除）。
