@@ -150,12 +150,23 @@ def _make_caller(port: int):
     return caller
 
 
+@pytest.fixture
+def isolate_inner_headers_retry(monkeypatch):
+    """issue #10: live stall 套件只测内层看门狗（即时 1 次 + BOBO_HEADERS_TIMEOUT）。
+
+    外层 MAX_RETRIES 由 tests/test_llm_caller.py::TestHeadersStallOuterRetry 覆盖。
+    若不掐外层，每次装死会变成 3×内层周期，时序断言与 CI 时长都会炸。
+    """
+    import core.llm_caller as lc
+    monkeypatch.setattr(lc, "MAX_RETRIES", 0)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 复核项 1：真撞闸 — accept 后装死
 # ═══════════════════════════════════════════════════════════════
 
 @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
-def test_headers_stall_triggers_within_timeout(stall_server):
+def test_headers_stall_triggers_within_timeout(stall_server, isolate_inner_headers_retry):
     """【咬合验证】headers_timeout 内准时引爆 HeadersStallError。
 
     证据：真 TCP 服务器 accept 后永远不回字节，headers_timeout=3s，
@@ -183,13 +194,20 @@ def test_headers_stall_triggers_within_timeout(stall_server):
         assert result.get("error_type") == "headers_stall", (
             f"error_type 应为 headers_stall，实际: {result.get('error_type')}"
         )
+        # 内层耗尽后外层仍标 retryable（isolate_inner 把 MAX_RETRIES=0，
+        # 所以本用例不再外层重试，但分类必须是可重试，避免 engine 一次判死）
+        assert result.get("retryable") is True, (
+            f"headers_stall 应 retryable=True，实际: {result.get('retryable')}"
+        )
 
-        # 耗时应当 ≈ headers_timeout * 2（2 次尝试），每次 ≈ 3s
+        # 2 inner attempts * 3s timeout, plus up to 2s worker join per attempt
+        # (_t.join(timeout=2.0) after shutdown). isolate_inner 把 MAX_RETRIES=0，
+        # 所以这里量的是内层看门狗，不含外层退避。
         assert elapsed >= _HEADERS_TIMEOUT * 2 - 1.0, (
             f"应约 {_HEADERS_TIMEOUT*2}s 后返回（2 次尝试），实际 elapsed={elapsed:.2f}s"
         )
-        assert elapsed <= _HEADERS_TIMEOUT * 2 + 4.0, (
-            f"不应远超 {_HEADERS_TIMEOUT*2}s，实际 elapsed={elapsed:.2f}s"
+        assert elapsed <= _HEADERS_TIMEOUT * 2 + 6.0, (
+            f"不应远超 {_HEADERS_TIMEOUT*2}s + join 余量，实际 elapsed={elapsed:.2f}s"
         )
 
     finally:
@@ -200,7 +218,7 @@ def test_headers_stall_triggers_within_timeout(stall_server):
 
 
 @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
-def test_headers_stall_retry_happens(stall_server):
+def test_headers_stall_retry_happens(stall_server, isolate_inner_headers_retry):
     """【咬合验证】HeadersStallError 前有 1 次内部重试。
 
     证据：服务器装死，watchdog 应尝试 2 次（初始 + 1 次重试），
@@ -226,12 +244,12 @@ def test_headers_stall_retry_happens(stall_server):
             f"error_type 应为 headers_stall，实际: {result.get('error_type')}"
         )
 
-        # 2 次尝试 * 3s timeout ≈ 6s 以上
+        # 2 次尝试 * 3s timeout ≈ 6s 以上；每次 shutdown 后最多 join 2s
         assert elapsed >= _HEADERS_TIMEOUT * 2 - 1.0, (
             f"应经历 2 次超时（约 {_HEADERS_TIMEOUT*2}s），实际 elapsed={elapsed:.2f}s"
         )
-        assert elapsed <= _HEADERS_TIMEOUT * 2 + 4.0, (
-            f"不应远超 {_HEADERS_TIMEOUT*2}s，实际 elapsed={elapsed:.2f}s"
+        assert elapsed <= _HEADERS_TIMEOUT * 2 + 6.0, (
+            f"不应远超 {_HEADERS_TIMEOUT*2}s + join 余量，实际 elapsed={elapsed:.2f}s"
         )
 
     finally:
@@ -242,7 +260,7 @@ def test_headers_stall_retry_happens(stall_server):
 
 
 @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
-def test_headers_stall_event_bus_fires(stall_server, monkeypatch):
+def test_headers_stall_event_bus_fires(stall_server, monkeypatch, isolate_inner_headers_retry):
     """【咬合验证】llm.headers_stall 事件写入总线。
 
     证据：事件总线收到 llm.headers_stall，含 elapsed_ms 和 action。
@@ -304,7 +322,7 @@ def test_headers_stall_event_bus_fires(stall_server, monkeypatch):
 # ═══════════════════════════════════════════════════════════════
 
 @pytest.mark.live  # TICKET-MAIN-REGREEN 分层：真 socket 时序敏感，本地跳过 CI 跑
-def test_worker_thread_cleaned_after_timeout(stall_server):
+def test_worker_thread_cleaned_after_timeout(stall_server, isolate_inner_headers_retry):
     """【咬合验证】headers stall 后 worker 线程被 shutdown 打断并退出。
 
     证据：_close_socket 执行 shutdown(SHUT_RDWR)，worker 线程应
@@ -501,17 +519,11 @@ class TestConfigChain:
 # ═══════════════════════════════════════════════════════════════
 
 def test_headers_stall_classified_as_retryable_network_error():
-    """【松动】HeadersStallError 被归类为 ("headers_stall", False, ...)。
+    """issue #10: HeadersStallError → ("headers_stall", True, ...)。
 
-    当前实现：_classify_error 返回 ("headers_stall", False, ...)，
-    retryable=False 导致 engine 走 STATE_ERROR 死局。
-
-    分析：headers 看门狗内部已做 2 次尝试（初始 + 重试），
-    耗尽后抛出 HeadersStallError。从 engine 的角度看 retryable=False
-    是合理的——内部重试已用尽，engine 再重试无意义。
-
-    结论：设计上非缺陷，但 _classify_error 分类不一致——
-    headers_stall 被单独分类而非归入 network_error。
+    内层看门狗已即时重试 1 次；外层必须仍标 retryable，否则慢厂商/冷启动
+    会在第一次 stall 周期后被 engine 一次判死。类型保持 headers_stall
+    （不并入 network_error），与 timeout 一样走既有 MAX_RETRIES 退避。
     """
     from core.llm_caller import HeadersStallError, _classify_error
 
@@ -519,15 +531,15 @@ def test_headers_stall_classified_as_retryable_network_error():
         exception=HeadersStallError("test stall")
     )
     assert error_type == "headers_stall", (
-        f"当前分类: {error_type}，非 network_error"
+        f"当前分类: {error_type}，非 headers_stall"
     )
-    assert retryable is False, (
-        f"当前 retryable: {retryable}"
+    assert retryable is True, (
+        f"headers_stall 必须 retryable=True，实际: {retryable}"
     )
     assert "test stall" in message
 
 
-def test_engine_returns_error_dict_not_state_error(stall_server):
+def test_engine_returns_error_dict_not_state_error(stall_server, isolate_inner_headers_retry):
     """【咬合】engine 收到 HeadersStallError 返回 error dict，不崩溃。
 
     证据：call_llm 返回 {"error": ..., "error_type": "headers_stall", ...}，
@@ -551,6 +563,7 @@ def test_engine_returns_error_dict_not_state_error(stall_server):
             f"应含 error 字段，实际 keys: {list(result.keys())}"
         )
         assert result.get("error_type") == "headers_stall"
+        assert result.get("retryable") is True
     finally:
         if orig_timeout is not None:
             os.environ["BOBO_HEADERS_TIMEOUT"] = orig_timeout

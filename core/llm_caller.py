@@ -122,7 +122,9 @@ def _post_with_headers_watchdog(
     超时则通过 monkeypatch urllib3.connection.HTTPConnection._new_conn 捕获的
     socket 执行 shutdown(SHUT_RDWR) 打断阻塞，然后按断流重试通道处理（硬上限 1 次）。
 
-    返回 response（正常）或抛出 HeadersStallError（headers 阶段超时且已重试失败）。
+    返回 response（正常）或抛出 HeadersStallError（本层 headers 预算耗尽且已即时重试
+    仍失败）。HeadersStallError 不是终局：外层 _classify_error 标 retryable=True，
+    call_llm 再用 MAX_RETRIES + RETRY_DELAY_BASE 指数退避（见 #10 两层策略注释）。
     其他异常直接抛出，交给外层重试逻辑处理。
     """
     if headers_timeout is None:
@@ -130,7 +132,7 @@ def _post_with_headers_watchdog(
 
     _original_new_conn = _urllib3_connection.HTTPConnection._new_conn
 
-    for _headers_attempt in range(2):  # 初始 1 次 + 硬上限 1 次重试
+    for _headers_attempt in range(2):  # 内层：初始 1 次 + 即时 1 次重试（无退避）
         _start = time.time()
         _q = _queue.Queue(maxsize=1)
         # TICKET-PROVIDER-ADAPTER（并发竞态修复）：_sock_holder 从共享 dict
@@ -216,11 +218,13 @@ def _post_with_headers_watchdog(
 
         if _retried:
             _urllib3_connection.HTTPConnection._new_conn = _original_new_conn
+            # 内层即时重试已用尽。抛给 call_llm：_classify_error 标 retryable，
+            # 外层再按 MAX_RETRIES / RETRY_DELAY_BASE 退避（慢厂商 / 冷启动）。
             raise HeadersStallError(
                 f"headers 阶段总预算 {headers_timeout}s 耗尽，已重试仍失败"
             )
 
-        # 首次 headers stall → 重试 1 次（继续下一轮循环）
+        # 首次 headers stall → 即时重试 1 次（无退避；预算仍是 BOBO_HEADERS_TIMEOUT）
         _logger.warning(
             "headers 阶段超时: elapsed=%dms, session=%s, 准备重试",
             _elapsed_ms, session_id or "?",
@@ -357,6 +361,7 @@ def _classify_error(exception: Exception = None, status_code: int = None,
         tuple: (error_type: str, retryable: bool, message: str)
             - error_type: 错误类型标识
                 "timeout"       — 连接超时或读取超时
+                "headers_stall" — headers 阶段总预算耗尽（内层看门狗已即时重试）
                 "rate_limit"    — 限流 (429)
                 "fatal_insufficient_quota" — 余额不足 (429 + insufficient_quota)
                 "server_error"  — 服务器错误 (5xx)
@@ -372,7 +377,31 @@ def _classify_error(exception: Exception = None, status_code: int = None,
         exc_class = exception.__class__.__name__
 
         if isinstance(exception, HeadersStallError):
-            return ("headers_stall", False, str(exception))
+            # headers_stall retry policy (issue #10)
+            # -------------------------------------
+            # Two layers, existing knobs only (no extra env vars):
+            #
+            # 1. Inner — _post_with_headers_watchdog
+            #    When: TCP up but no response headers within BOBO_HEADERS_TIMEOUT
+            #          (default 90s; same budget as the headers watchdog).
+            #    How many: 1 immediate retry (initial + 1), no backoff.
+            #    Then raises HeadersStallError. This is NOT a fatal classification.
+            #
+            # 2. Outer — this classifier + call_llm `for attempt in range(MAX_RETRIES+1)`
+            #    When: HeadersStallError (inner cycle exhausted). Recoverable for
+            #          slow vendor / cold start that outlasts one watchdog cycle.
+            #    How many: MAX_RETRIES extra attempts (default 2 → 3 call_llm tries).
+            #    Backoff: RETRY_DELAY_BASE * 2**attempt seconds (default 1s, 2s).
+            #    Exhausted: still retryable=True so engine does not treat this as
+            #          a one-shot STATE_ERROR (same as timeout / network_error).
+            #
+            # Worst-case wall clock ≈ (MAX_RETRIES+1) * 2 * BOBO_HEADERS_TIMEOUT
+            # + backoff (defaults ~9 min). Tune those knobs; do not add a stall-
+            # specific retry counter.
+            #
+            # Still NOT retryable below: auth_error (401/403),
+            # fatal_insufficient_quota, bad_request (4xx except 429 rate_limit).
+            return ("headers_stall", True, str(exception))
 
         if isinstance(exception, requests.exceptions.Timeout):
             return ("timeout", True, "请求超时，服务器未在预期时间内响应")
@@ -429,7 +458,9 @@ CONNECT_TIMEOUT = 10   # 建立连接的超时时间
 READ_TIMEOUT = int(__import__("os").environ.get("BOBO_READ_TIMEOUT", "30"))
 # SSE 流块间间隙看门狗由 _SseWatchdog + BOBO_SSE_READ_TIMEOUT 管理
 
-# 重试配置
+# 重试配置（headers_stall / timeout / rate_limit / 5xx / network_error 共用）
+# headers_stall 外层次数与退避走这里；内层即时 1 次重试在 _post_with_headers_watchdog，
+# 单次预算走 BOBO_HEADERS_TIMEOUT。不要再加独立 stall 计数器（issue #10）。
 MAX_RETRIES = 2        # 最大重试次数（初始请求 + 2 次重试 = 共 3 次尝试）
 RETRY_DELAY_BASE = 1   # 基础等待时间（秒），指数退避
 
@@ -871,6 +902,8 @@ def create_llm_caller(api_key: str, api_url: str, model_name: str, tools_schema:
                 # 原样上抛给引擎走既有 interrupted 路径（STATE interrupted）。
                 raise
             except Exception as e:
+                # headers_stall 在此走 retryable=True：内层看门狗已即时重试过，
+                # 外层再用 MAX_RETRIES + RETRY_DELAY_BASE，避免慢厂商一次判死。
                 error_type, retryable, message = _classify_error(exception=e)
                 if retryable and attempt < MAX_RETRIES:
                     delay = RETRY_DELAY_BASE * (2 ** attempt)
