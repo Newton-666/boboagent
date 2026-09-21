@@ -28,7 +28,8 @@ jobs:
       - name: Run tests
         # GitHub #4：Linux CI 全量收集会被 pandas/ApplicationServices ImportError 中断；
         # conftest collect_ignore + 本步指定文件。#2 超时/写槽测必须一起跑。
-        run: uv run pytest -v --tb=short tests/test_issue4_write_approval_high_risk.py tests/test_command_safety.py tests/test_auto_mode.py tests/test_auto_mode_b.py tests/test_ticket_safety_1.py tests/test_engine_adapter_interrupt.py tests/test_tool_timeout_lifecycle.py tests/test_execute_terminal_interrupt.py tests/test_engine_injection_pollution.py
+        # GitHub #11：loop_detect 误杀/变参绕圈测必须一起跑。
+        run: uv run pytest -v --tb=short tests/test_issue4_write_approval_high_risk.py tests/test_command_safety.py tests/test_auto_mode.py tests/test_auto_mode_b.py tests/test_ticket_safety_1.py tests/test_engine_adapter_interrupt.py tests/test_tool_timeout_lifecycle.py tests/test_execute_terminal_interrupt.py tests/test_engine_injection_pollution.py tests/test_loop_detect.py tests/test_ticket_core_r1.py
         env:
           DEEPSEEK_API_KEY: "sk-test-placeholder"
           OBSIDIAN_VAULT: "/tmp"

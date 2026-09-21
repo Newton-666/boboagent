@@ -2,8 +2,8 @@
 
 验收锚点：
   1. 60% 水位（默认 150 的 90 轮）：轻量收束提示，只提示不限制，记 round.watermark，只发一次
-  2. 撞 150 线：连续 5 轮同模式或无推进信号 → stuck 硬掐（强制收尾指令）；
-     仍在推进 → progressing 软提醒（完成当前子任务后收工）；均记 loop.verdict
+  2. 撞 150 线：连续同模式 / 变参绕圈 / 无推进信号 → stuck 硬掐（强制收尾指令）；
+     仍在推进（含只读调研目标扩展）→ progressing 软提醒；均记 loop.verdict
   3. BOBO_MAX_TOOL_ROUNDS：未设置/非法 → 默认 150；合法值生效（水位按比例缩放）
   4. 铁律不动：200 深度硬断、500 步保险丝、收工闸语义
 """
@@ -149,7 +149,22 @@ class TestLoopVerdict:
         assert evs and evs[-1]["verdict"] == "progressing", f"event 应留 loop.verdict=progressing: {evs}"
 
     def test_zero_progress_also_stuck(self, engine, monkeypatch, tmp_path):
-        """5 轮不同但纯读且无更早轮次 → 无推进信号 → stuck。"""
+        """5 轮在两个目标间变参绕圈 → stuck（不再把"5 个不同只读文件"当无推进）。"""
+        from core import event_bus as eb
+        eb.event_bus.reset(log_dir=str(tmp_path))
+        for i in range(5):
+            path = "/tmp/a.py" if i % 2 == 0 else "/tmp/b.py"
+            engine.history.append(_tool_round([
+                ("read_local_file", json.dumps({"filepath": path})),
+            ]))
+        engine.current_tool_round = 151
+        engine._check_guards()
+        evs = _read_events(str(tmp_path / "events.jsonl"), "loop.verdict")
+        assert evs and evs[-1]["verdict"] == "stuck", \
+            f"两目标变参绕圈应 stuck: {evs}"
+
+    def test_readonly_research_not_stuck(self, engine, monkeypatch, tmp_path):
+        """5 轮只读不同文件（纯调研）→ progressing，不得硬掐。"""
         from core import event_bus as eb
         eb.event_bus.reset(log_dir=str(tmp_path))
         for i in range(5):
@@ -158,9 +173,13 @@ class TestLoopVerdict:
             ]))
         engine.current_tool_round = 151
         engine._check_guards()
+        user_msgs = [m.get("content", "") for m in engine.history if m.get("role") == "user"]
+        assert any("长回合收尾阶段" in c for c in user_msgs), \
+            f"只读调研应软着陆，实际: {user_msgs}"
+        assert not any("强制收尾" in c for c in user_msgs), "只读调研不得硬掐"
         evs = _read_events(str(tmp_path / "events.jsonl"), "loop.verdict")
-        assert evs and evs[-1]["verdict"] == "stuck", \
-            f"纯读无推进应 stuck: {evs}"
+        assert evs and evs[-1]["verdict"] == "progressing", \
+            f"只读调研应 progressing: {evs}"
 
     def test_at_limit_no_verdict(self, engine, tmp_path):
         """恰在 150 线（未超）→ 不触发分流。"""
