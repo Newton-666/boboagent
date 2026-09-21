@@ -44,5 +44,6 @@ AUTO 模式不弹窗（铁律，避免 120s 卡死）：`code_execution` 与 **�
 
 - `core/command_safety.py` — `is_high_risk_tool`
 - `core/engine_adapter.py` — `needs_write_approval` / `_guarded_execute` / `_wait_for_confirmation`
-- `core/engine.py` — `_auto_decide` 对高危执行通道即时 deny
+- `core/engine.py` — `_auto_decide` 对 `code_execution` / **全部** `computer_use`（含 capture）即时 deny
+- `core/tool_runner.py` — AUTO 下 capture 也进 `_confirm`（否则只读判定会绕过 AUTO）
 - `tests/test_issue4_write_approval_high_risk.py` + `tests/test_command_safety.py::TestHighRiskTool`
