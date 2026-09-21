@@ -43,7 +43,7 @@ Rules of thumb: a decision/enforcement question → engine; a session/command qu
 ## 4. Boundaries and enforcement
 
 - All writes/shell pass the engine decision chain. In staff/dispatcher roles (BOBO_ROLE), whole capability classes are denied; ticket frontmatter `authorized_paths` is the only exemption channel.
-- `data/protected_paths.json` is read-only without a ticket. Never attempt to "route around" a gate — routing around is itself a violation.
+- `data/protected_paths.json` is read-only without a ticket for **file tools** (`edit_file` / `file_operation` / `delete_file`). Issue #3 restored that gate. `execute_terminal` rewriting kernel paths is **not** blocked by this ticket; shell writearounds stay on the confirmation / high-risk chain (issue #4). Never attempt to "route around" a gate — routing around is itself a violation.
 - Degradations must leave an audit trail (`degradation: time, cause, action, recovery`).
 
 ## 5. Failure self-rescue

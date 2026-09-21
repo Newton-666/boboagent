@@ -23,7 +23,8 @@ from core.tool_runner import ToolRunnerMixin
 from core.round_tracker import RoundTracker
 from core.emoji_cleaner import remove_emojis
 from core.command_safety import (classify_command, is_high_risk_tool, is_auto_readonly_command,
-                                 classify_side_effect, _has_real_git_command, is_blacklisted)
+                                 classify_side_effect, _has_real_git_command, is_blacklisted,
+                                 file_tool_mutation, is_write_denied)
 from core.verifier import Verifier
 from core.steps.base import StepContext, StepResult
 from core.steps.promise_gate import PromiseGateStage
@@ -287,7 +288,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
         return _allow
 
     def _auto_decide(self, tool_name: str, tool_args: dict, reason: str) -> bool:
-        """AUTO MODE 决策树 v2（票 B）：副作用三级分类 + 快照 + 审计字段扩展。
+        """AUTO MODE 决策树 v2（票 B）+ issue #3 授权语义。
 
         v2 规则（票 B-1/B-2/B-3）：
         - execute_terminal 按 classify_side_effect 逐段分级：
@@ -296,21 +297,55 @@ class Engine(ContextMixin, ToolRunnerMixin):
             串行完成，禁止挪到执行线程）后放行；
           * external-irreversible（git push / curl 写 / scp / npm publish 等）
             → 转弹窗（B-3），超时无人应答默认 deny（安全默认，火 2）；
-        - 非 terminal 文件工具（edit_file/file_operation 等）→ 快照（复用
-          file_writer checkpoint）后放行。
+        - 文件工具（edit_file/file_operation/delete_file）：
+          * 只读 action（read/exists）→ 放行；
+          * 写/删：授权=路径未命中 protected_paths / is_write_denied；
+            快照只是回滚保险，**不构成授权**。未授权内核路径一律 deny。
         每次决策写 auto.decide 审计，字段含 side_effect_level / snapshot_ref /
         rollback_path（B-4）。
         """
-        # 非 terminal 文件工具：快照（复用 file_writer checkpoint 自动备份）后放行
+        # 非 terminal 文件工具：授权看路径策略，不因「有快照可回滚」放行
         if tool_name in ("edit_file", "file_operation", "delete_file"):
+            mutating, paths = file_tool_mutation(tool_name, tool_args)
+            _fcmd = (
+                str(paths[0] if paths else
+                    tool_args.get("path") or tool_args.get("filepath")
+                    or tool_args.get("file_path") or tool_args.get("file") or "")
+            )[:200]
+            if not mutating:
+                self._write_auto_audit(
+                    "allow", tool_name, _fcmd,
+                    "auto 决策树：文件只读操作（非写删，无需写授权）",
+                    "pure-read", None)
+                return True
+            if not paths:
+                self._write_auto_audit(
+                    "deny", tool_name, _fcmd,
+                    "auto 决策树：写/删缺少目标路径，拒绝（快照可回滚≠已授权）",
+                    "external-irreversible", None)
+                return False
+            unauthorized: list[str] = []
+            for p in paths:
+                denied, deny_reason = is_write_denied(p)
+                if denied:
+                    unauthorized.append(deny_reason or p)
+            if unauthorized:
+                self._write_auto_audit(
+                    "deny", tool_name, _fcmd,
+                    f"auto 决策树：未授权路径写/删，拒绝（快照可回滚≠已授权）— {unauthorized[0]}",
+                    "external-irreversible", None)
+                return False
             snapshot = self._snapshot_for_rollback(f"file:{tool_name}")
-            # TICKET-GUI-F4 F4-6（Kimi 特批）：补传缺失的 command 实参——原调用 6 参传 5，
-            # snapshot 错位进 side_effect_level，AUTO 下文件工具必 TypeError 崩溃。
-            _fcmd = str(tool_args.get("path") or tool_args.get("filepath") or tool_args.get("file_path") or tool_args.get("file") or "")[:200]
-            self._write_auto_audit("allow", tool_name, _fcmd, "auto 决策树 v2：文件工具（file_writer checkpoint）",
-                                   "local-reversible", snapshot)
+            # TICKET-GUI-F4 F4-6：补传 command 实参，避免 snapshot 错位进 side_effect_level
+            self._write_auto_audit(
+                "allow", tool_name, _fcmd,
+                "auto 决策树：授权路径写/删（非 protected_paths）；快照仅作回滚保险，不构成授权",
+                "local-reversible", snapshot)
             return True
 
+        # Issue #3 residual / #4：execute_terminal 改内核路径不在本票文件工具闸内。
+        # `>`/`>>` 可能因 is_write_denied 被 classify 成 dangerous，但 python -c /
+        # sed -i / tee 等 shell 绕写仍走确认链（issue #4），本票不拦。
         if tool_name == "execute_terminal":
             command = tool_args.get("command", "")
             # ── 票 AUTO-D D-1：黑名单硬锁——auto 下最高优先级，即时拒绝 ──
