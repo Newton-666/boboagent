@@ -797,7 +797,7 @@ class Engine(ContextMixin, ToolRunnerMixin):
             if _verdict == "stuck":
                 _summary = (
                     f"你已达到最大工具调用轮次上限（{_max_rounds} 轮），"
-                    "且检测到死循环（连续 5 轮同模式或无推进信号）。"
+                    "且检测到死循环（连续同模式、变参绕圈、或无推进信号）。"
                     "强制收尾：请立即停止工具调用，给出最终回复。"
                 )
             else:
