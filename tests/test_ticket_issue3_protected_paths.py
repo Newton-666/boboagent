@@ -25,6 +25,14 @@ from core.file_safety import reset_protected_paths_cache
 from core.tool_executor import execute_tool
 from tests.mock_llm import MockLLMCaller, text_response
 
+_REPO = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _cwd_repo(monkeypatch):
+    """全量 suite 里其他测试可能 chdir；本文件一律在仓库根判定相对路径。"""
+    monkeypatch.chdir(_REPO)
+
 
 def _engine():
     caller = MockLLMCaller([text_response("ok")])
@@ -40,6 +48,10 @@ KERNEL_PATHS = [
     "tools/file_operation.py",
     "bobo_tui_gateway/server.py",
 ]
+
+
+def _abs(rel: str) -> str:
+    return str(_REPO / rel)
 
 
 # ── 配置 / is_protected ──────────────────────────────────────────────
@@ -86,8 +98,7 @@ class TestProtectedPathsConfig:
         assert is_protected(path), path
 
     def test_is_protected_absolute_kernel_path(self):
-        abs_core = str(Path("core/engine.py").resolve())
-        assert is_protected(abs_core)
+        assert is_protected(_abs("core/engine.py"))
 
     def test_authorized_paths_not_protected(self, tmp_path):
         assert not is_protected("tests/test_ticket_issue3_protected_paths.py")
@@ -96,8 +107,8 @@ class TestProtectedPathsConfig:
         assert not is_protected(str(tmp_path / "scratch.md"))
 
     def test_custom_globs_only_when_explicit(self):
-        assert not is_protected("core/engine.py", globs=["docs/**"])
-        assert is_protected("docs/SELF.md", globs=["docs/**"])
+        assert not is_protected(_abs("core/engine.py"), globs=["docs/**"])
+        assert is_protected(_abs("docs/SELF.md"), globs=["docs/**"])
 
 
 # ── is_write_denied / 工具层 ─────────────────────────────────────────
@@ -120,21 +131,23 @@ class TestWriteDeniedKernel:
 
     def test_edit_file_denies_kernel_without_writing(self):
         from tools.edit_file import execute
-        original = Path("core/engine.py").read_bytes()
+        target = _REPO / "core/engine.py"
+        original = target.read_bytes()
         try:
-            result = execute("core/engine.py", "Engine", "HackedEngine")
+            result = execute(str(target), "Engine", "HackedEngine")
             assert "禁止" in result or "受保护" in result
         finally:
-            assert Path("core/engine.py").read_bytes() == original
+            assert target.read_bytes() == original
 
     def test_file_operation_write_denies_kernel(self):
         from tools.file_operation import execute
-        original = Path("core/file_safety.py").read_bytes()
+        target = _REPO / "core/file_safety.py"
+        original = target.read_bytes()
         try:
-            result = execute(action="write", path="core/file_safety.py", content="hack")
+            result = execute(action="write", path=str(target), content="hack")
             assert "禁止" in result or "受保护" in result
         finally:
-            assert Path("core/file_safety.py").read_bytes() == original
+            assert target.read_bytes() == original
 
     def test_file_operation_write_authorized_tmp(self, tmp_path):
         from tools.file_operation import execute
@@ -146,14 +159,15 @@ class TestWriteDeniedKernel:
     def test_file_operation_batch_write_mixed(self, tmp_path):
         from tools.file_operation import execute
         ok = tmp_path / "ok.txt"
-        original = Path("core/engine.py").read_bytes()
+        kernel = _REPO / "core/engine.py"
+        original = kernel.read_bytes()
         result = execute(action="batch_write", files=[
             {"path": str(ok), "content": "yes"},
-            {"path": "core/engine.py", "content": "hack"},
+            {"path": str(kernel), "content": "hack"},
         ])
         assert "禁止" in result or "受保护" in result
         assert ok.read_text(encoding="utf-8") == "yes"
-        assert Path("core/engine.py").read_bytes() == original
+        assert kernel.read_bytes() == original
 
 
 # ── file_tool_mutation ───────────────────────────────────────────────
