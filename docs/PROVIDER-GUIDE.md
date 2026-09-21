@@ -54,18 +54,18 @@ OPENAI_API_KEY=sk-***
 
 ## 二、已注册 Provider（9 个）
 
-| provider | 说明 | reasoning 字段 | echo_required | 实弹验证 |
-|---|---|---|---|---|
-| `deepseek` | 主力 | `reasoning_content` | ✅ | ✅ |
-| `moonshot` | Kimi（OpenAI 兼容） | `reasoning_content` | ✅ | ✅ |
-| `lmstudio` | 本地（无 key） | `reasoning_content` | ❌ | ✅ |
-| `openai` | GPT 系 | `reasoning_content` | ❌ | 未实弹 |
-| `anthropic` | Claude | `thinking` | ❌ | 未实弹 |
-| `google` | Gemini | `reasoning_content` | ❌ | 未实弹 |
-| `openrouter` | 聚合 | `reasoning_content` | ❌ | 未实弹 |
-| `ollama` | 本地（无 key） | `reasoning_content` | ❌ | 未实弹 |
-| `glm` | 智谱（OpenAI 兼容，动态拉模型） | `reasoning_content` | ❌ | ✅ 实弹 2026-08-21 |
-| `custom` | 自定义端点 | `reasoning_content` | ❌ | 未实弹 |
+| provider | 说明 | protocol | reasoning 字段 | echo_required | 实弹验证 |
+|---|---|---|---|---|---|
+| `deepseek` | 主力 | `openai_chat` | `reasoning_content` | ✅ | ✅ |
+| `moonshot` | Kimi（OpenAI 兼容） | `openai_chat` | `reasoning_content` | ✅ | ✅ |
+| `lmstudio` | 本地（无 key） | `openai_chat` | `reasoning_content` | ❌ | ✅ |
+| `openai` | GPT 系 | `openai_chat` | `reasoning_content` | ❌ | 未实弹 |
+| `anthropic` | Claude 直连 | **`anthropic_messages`** | `thinking` | ❌ | 适配器单测（#9） |
+| `google` | Gemini | `openai_chat` | `reasoning_content` | ❌ | 未实弹 |
+| `openrouter` | 聚合（含 Claude） | `openai_chat` | `reasoning_content` | ❌ | 未实弹 |
+| `ollama` | 本地（无 key） | `openai_chat` | `reasoning_content` | ❌ | 未实弹 |
+| `glm` | 智谱（OpenAI 兼容，动态拉模型） | `openai_chat` | `reasoning_content` | ❌ | ✅ 实弹 2026-08-21 |
+| `custom` | 自定义端点 | `openai_chat` | `reasoning_content` | ❌ | 未实弹 |
 
 > echo_required = 工具轮后必须回传 thinking 内容（DeepSeek/Kimi 要求，否则 400）。
 
@@ -82,6 +82,7 @@ OPENAI_API_KEY=sk-***
     "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
     "models": ["glm-4-plus"],            # 第一个是默认
     "context_length": 128000,
+    "protocol": "openai_chat",            # 缺省 = openai_chat；直连 Claude 用 anthropic_messages
     "temperature": 1.0,                  # 可选：模型 temperature 约束（如 kimi 只允许 1.0）
     "reasoning": {                        # 思考协议声明（缺省 = 保守无 thinking）
         "field": "reasoning_content",    # 思考字段名（DeepSeek/Kimi/Qwen3 = reasoning_content）
@@ -136,6 +137,23 @@ print('OK' if not r.get('error') else r['error'][:200])
 | temperature | 0.3 自由 | **只能 1.0**（否则 400） | 自由 | kimi 的约束在 provider 声明 `temperature: 1.0` |
 | 关 thinking | `{"thinking":{"type":"disabled"}}` | 同左 | 不支持 | 信号精判/冷调用用（P5-400 教训） |
 | 本地代理 | — | — | **requests 走系统代理会 502** | 已修：本地端点自动禁代理 |
+
+---
+
+## 四.b、直连 Anthropic（GitHub #9）
+
+引擎与 `llm_caller` 内部始终是 OpenAI `chat/completions` + `tool_calls` 形状。
+`BOBO_PROVIDER=anthropic` 登记的端点是官方 `/v1/messages`，**不是** OpenAI 兼容面。
+
+适配层 `core/anthropic_adapter.py` 在发送前把请求转成 Messages API，响应/SSE/工具调用再转回 OpenAI 形状，引擎不用改。
+
+| 路径 | 怎么选 | 线上形态 |
+|---|---|---|
+| 直连 Anthropic | `protocol=anthropic_messages` 且 URL 不含 `/chat/completions` | `x-api-key` + `/v1/messages` + `tool_use`/`tool_result` |
+| OpenRouter 上的 Claude | `protocol=openai_chat`（OpenRouter 登记） | Bearer + `/chat/completions` + `tool_calls`（**不进适配器**） |
+| 把 Anthropic 的 `API_BASE_URL` 改成 OpenAI 兼容代理 | URL 含 `/chat/completions` 优先 | 走 OpenAI 路径，避免误转换 |
+
+不要把 Anthropic 直连登记改成 `chat/completions` 来"绕过"——那只是掩盖根因。Claude 经 OpenRouter 本来就是兼容路径，保持原样。
 
 ---
 

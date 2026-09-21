@@ -2,7 +2,13 @@
 
 A provider is defined by:
   - env_key:   The env var to read for the API key
-  - base_url:  The API endpoint for chat completions
+  - base_url:  The API endpoint (chat/completions, or Anthropic /v1/messages)
+  - protocol:  Wire protocol the endpoint actually speaks (GitHub #9)
+               "openai_chat"         — OpenAI chat/completions + tool_calls
+               "anthropic_messages"  — native Anthropic Messages API
+               omitted               — openai_chat (conservative default)
+               llm_caller reads this (plus URL) and runs the matching adapter.
+               OpenRouter stays openai_chat even when the model is Claude.
   - models:    List of available model names (first is default)
   - reasoning: Reasoning/thinking protocol declaration (TICKET-PROVIDER-ADAPTER)
       field:             streaming chunk field carrying reasoning text
@@ -19,6 +25,7 @@ A provider is defined by:
       json_mode: True if API has native response_format json_object
 
   Conservative defaults (missing fields):
+      protocol absent  -> openai_chat (llm_caller OpenAI path; Anthropic adapter off)
       reasoning absent -> no-thinking model (never set/echo reasoning fields)
       tools absent     -> native=False, parallel=False, json_mode=False
   (These keep a partially-declared provider runnable without protocol mismatch.)
@@ -54,6 +61,7 @@ PROVIDERS = {
             "stream_reasoning": True,
             "disable_supported": True,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": True, "json_mode": False},
     },
     "openai": {
@@ -70,6 +78,7 @@ PROVIDERS = {
             "stream_reasoning": False,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": True, "json_mode": True},
     },
     "anthropic": {
@@ -78,6 +87,9 @@ PROVIDERS = {
         "base_url": "https://api.anthropic.com/v1/messages",
         "models": ["claude-sonnet-4-20250514", "claude-haiku-3-20240307"],
         "context_length": 200000,
+        # GitHub #9：直连 Anthropic 走 Messages API，不是 OpenAI chat/completions。
+        # llm_caller 读 protocol 后经 core/anthropic_adapter 转换请求/响应/工具调用。
+        "protocol": "anthropic_messages",
         # Claude：thinking 通过 extended thinking 参数开启（默认关），
         # 回传非必需（不带 thinking 字段即可）
         "reasoning": {
@@ -96,7 +108,9 @@ PROVIDERS = {
         "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4", "google/gemini-2.0-flash"],
         "context_length": 128000,
         # OpenRouter 透传各家协议——按 OpenAI 兼容处理（reasoning 字段各家不同，
-        # 保守默认不回传；实际取决于背后模型）
+        # 保守默认不回传；实际取决于背后模型）。即使模型是 anthropic/claude-*
+        # 也走 chat/completions，禁止误入 Messages 适配器（#9 不回归）。
+        "protocol": "openai_chat",
         "reasoning": {
             "field": "reasoning_content",
             "echo_required": False,
@@ -120,6 +134,7 @@ PROVIDERS = {
             "stream_reasoning": True,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": True, "json_mode": True},
     },
     "ollama": {
@@ -136,6 +151,7 @@ PROVIDERS = {
             "stream_reasoning": False,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": False, "json_mode": False},
     },
     "moonshot": {
@@ -160,6 +176,7 @@ PROVIDERS = {
             "stream_reasoning": True,
             "disable_supported": True,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": True, "json_mode": False},
     },
     "lmstudio": {
@@ -177,6 +194,7 @@ PROVIDERS = {
             "stream_reasoning": False,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": False, "json_mode": False},
     },
     "glm": {
@@ -196,6 +214,7 @@ PROVIDERS = {
             "stream_reasoning": True,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": True, "json_mode": True},
     },
     "custom": {
@@ -212,6 +231,7 @@ PROVIDERS = {
             "stream_reasoning": False,
             "disable_supported": False,
         },
+        "protocol": "openai_chat",
         "tools": {"native": True, "parallel": False, "json_mode": False},
     },
 }
