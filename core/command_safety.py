@@ -6,10 +6,14 @@
 import re as _re
 import shlex as _shlex
 import os as _os
-import json as _json
-import fnmatch as _fnmatch
 from typing import Tuple
-from core.file_safety import is_write_denied
+from core.file_safety import (
+    is_write_denied,
+    load_protected_paths,
+    is_protected,
+    effective_protected_globs,
+    file_tool_mutation,
+)
 
 # Bobo 自身仓库根（core/ 的上级目录，即 ~/Desktop/boboagent_main）
 _BOBO_REPO_ROOT = _os.path.abspath(
@@ -681,7 +685,19 @@ def is_self_repo_hard_block(tool_name: str, tool_args: dict) -> Tuple[bool, str]
     return False, ""
 
 
+# GitHub #4：computer_use 只读 action（看屏/AX 树）不进确认；其余操作含副作用。
+_COMPUTER_USE_READONLY_ACTIONS = frozenset({"capture"})
+
+
 def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
+    """高危工具判定：命中则进入 Engine._confirm（确认闸 / AUTO 决策树）。
+
+    覆盖（GitHub #4）：
+    - execute_terminal：按命令分级（safe 静默；gray/dangerous 确认）
+    - code_execution：任意代码执行，始终确认
+    - computer_use：capture 只读放行；click/type/key/open_app/scroll/未知 action 确认
+    确认闸超时策略不在本函数：Reject/120s=deny 属 P1，见 engine_adapter._wait_for_confirmation。
+    """
     if tool_name == "execute_terminal":
         command = tool_args.get("command", "")
 
@@ -730,6 +746,20 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         if level == "dangerous":
             return True, f"🚫 危险操作 — {reason}: {command[:60]}"
         return True, f"执行终端命令: {command[:60]}"
+
+    # GitHub #4：code_execution 可写文件/跑任意代码，始终进确认闸（无静默放行）
+    if tool_name == "code_execution":
+        lang = str(tool_args.get("language") or "code")
+        preview = str(tool_args.get("code") or "")[:60]
+        return True, f"执行代码 ({lang}): {preview}"
+
+    # GitHub #4：computer_use 按 action 分级——capture 只读；其余含键鼠/开应用副作用
+    if tool_name == "computer_use":
+        action = str(tool_args.get("action") or "").strip().lower()
+        if action in _COMPUTER_USE_READONLY_ACTIONS:
+            return False, ""
+        label = action if action else tool_name
+        return True, f"电脑操作: {label}"
 
     return False, ""
 
@@ -974,8 +1004,9 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
     return ("local-reversible", f"{base_cmd or '?'}（本地操作，可回滚）")
 
 
-# ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：load_protected_paths / is_protected 拆除
-# （office 受保护清单专属；data/protected_paths.json 随 D3 清扫移除）
+# ── issue #3：load_protected_paths / is_protected 恢复（实现落在 file_safety）
+# command_safety 再导出，保持历史 import 路径（core.command_safety.is_protected）。
+# 清单不再绑定 office 角色：默认策略下内核路径（core/ tools/ gateway）不可静默改写。
 
 def is_git_readonly_subcommand(subcommand: str | None) -> bool:
     """票 O-1：git 子命令是否只读（status/log/diff/show/blame/ls-files/ls-tree）。

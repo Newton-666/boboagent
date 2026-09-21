@@ -118,13 +118,16 @@ def test_kill_safe_cases(cmd):
 
 def test_kill_confirm_pid_shows_identity():
     """审批提示必须包含目标进程身份（ps 现场查询）。"""
-    own_pid = os.getpid()  # 当前 python 测试进程，必然存在
+    own_pid = os.getpid()  # 当前测试进程，必然存在
     high_risk, reason = is_high_risk_tool(
         "execute_terminal", {"command": f"kill {own_pid}"})
     assert high_risk
-    assert "目标进程" in reason or str(own_pid) in reason, reason
-    # ps 输出应包含 python（本测试进程的 comm）
-    assert "python" in reason.lower(), reason
+    assert "目标进程" in reason, reason
+    assert str(own_pid) in reason, reason
+    # GitHub #4 CI 收窄后此测会在 Linux Actions 跑：`uv run pytest` 的 ps comm
+    # 是 pytest；`python -m pytest` 是 python。断言身份出现即可，不绑死入口名。
+    lowered = reason.lower()
+    assert "python" in lowered or "pytest" in lowered, reason
 
 
 def test_kill_block_is_blacklisted():

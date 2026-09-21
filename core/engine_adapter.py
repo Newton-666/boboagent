@@ -22,7 +22,15 @@ _live_engines_lock = threading.Lock()
 # 会话开启写审批（session.set_write_approval on:true）后，这些工具在执行前
 # 进入 confirm_callback（approval.request）闸门：Accept=allow 继续执行；
 # Reject/120s 超时=deny，工具返回拒绝结果，模型自然换方法。
+#
+# GitHub #4：execute_terminal / code_execution / computer_use 原先不进该闸，
+# 可在写审批开启时静默绕过。现与 is_high_risk_tool 对齐——高危调用必须确认。
+# 确认闸超时策略不变（P1）：_wait_for_confirmation 默认 120s，超时仍返回 False=deny。
+# 本票不改 120 秒、不改超时默认 deny，也不引入新的静默放行。
 _VSC2B_WRITE_TOOLS = frozenset({"edit_file", "file_operation"})
+_WRITE_APPROVAL_HIGH_RISK_TOOLS = frozenset({
+    "execute_terminal", "code_execution", "computer_use",
+})
 
 
 def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool:
@@ -30,8 +38,33 @@ def _wait_for_confirmation(event: threading.Event, timeout: float = 120) -> bool
 
     超时返回 False = 安全默认 deny（auto 下外部不可逆操作无人应答即拒绝，
     不默认放行——v0.6.1 火 2 安全默认）。此行为由测试钉死防回归。
+
+    GitHub #4 / P1：确认闸 120s=deny 策略本票不改。默认 timeout=120，
+    超时仍 False。覆盖缺口补齐后禁止把超时改成 allow，也禁止缩短/取消等待
+    来换一条静默放行路径。
     """
     return event.wait(timeout=timeout)
+
+
+def needs_write_approval(tool_name: str, tool_args: dict | None, write_approval_on: bool) -> bool:
+    """写审批开启时，写工具与高危执行通道必须进确认闸（GitHub #4）。
+
+    - edit_file / file_operation：原 VSC-2B WRITE_TOOLS，始终确认
+    - execute_terminal / code_execution / computer_use：仅当 is_high_risk_tool
+      判定为高危时确认（safe 终端 / computer_use capture 不抬闸）
+    写审批关：一律 False（走 Engine._confirm / is_high_risk_tool 原路径）
+
+    本函数只决定是否弹闸，不改变 120s 超时=deny。
+    """
+    if not write_approval_on:
+        return False
+    if tool_name in _VSC2B_WRITE_TOOLS:
+        return True
+    if tool_name in _WRITE_APPROVAL_HIGH_RISK_TOOLS:
+        from core.command_safety import is_high_risk_tool
+        is_high, _ = is_high_risk_tool(tool_name, tool_args or {})
+        return is_high
+    return False
 
 
 def cancel(sid: str):
@@ -303,7 +336,11 @@ def run_engine(
         _approval_lock = threading.Lock()
 
         def _guarded_execute(tool_name: str, tool_args: dict) -> str:
-            if session.get("write_approval") and tool_name in _VSC2B_WRITE_TOOLS:
+            # GitHub #4：写审批开启时，WRITE_TOOLS + 高危 execute_terminal/
+            # code_execution/computer_use 都进同一闸。Engine._confirm 的
+            # _all_confirmed 粘性放行不能让这些工具静默落地——本闸在执行前再问一次。
+            # 超时仍走 confirm_callback → _wait_for_confirmation(120) → False=deny。
+            if needs_write_approval(tool_name, tool_args, bool(session.get("write_approval"))):
                 with _approval_lock:
                     allowed = confirm_callback(tool_name, tool_args, "write_approval")
                 if not allowed:

@@ -255,6 +255,35 @@ class TestHighRiskTool:
         is_risk, reason = is_high_risk_tool("shell.exec", {"command": "echo hello"})
         assert is_risk is True
 
+    def test_code_execution_is_always_high_risk(self, engine):
+        """GitHub #4：code_execution 任意代码执行，始终高危。"""
+        is_risk, reason = is_high_risk_tool(
+            "code_execution", {"language": "python", "code": "print(1)"}
+        )
+        assert is_risk is True
+        assert "执行代码" in reason
+
+    def test_code_execution_empty_args_still_high_risk(self, engine):
+        is_risk, reason = is_high_risk_tool("code_execution", {})
+        assert is_risk is True
+
+    def test_computer_use_capture_not_high_risk(self, engine):
+        """GitHub #4：capture 只读看屏，风险匹配路径 = 不抬确认闸。"""
+        is_risk, reason = is_high_risk_tool("computer_use", {"action": "capture"})
+        assert is_risk is False
+
+    def test_computer_use_mutating_actions_high_risk(self, engine):
+        for action in ("click", "type", "key", "open_app", "scroll"):
+            is_risk, reason = is_high_risk_tool("computer_use", {"action": action})
+            assert is_risk is True, action
+            assert action in reason
+
+    def test_computer_use_unknown_or_missing_action_high_risk(self, engine):
+        is_risk, _ = is_high_risk_tool("computer_use", {"action": "drag"})
+        assert is_risk is True
+        is_risk, _ = is_high_risk_tool("computer_use", {})
+        assert is_risk is True
+
 
 class TestSelfRepoGitGate:
     """self-hosting v2：bobo 自身仓库的 git push/毁灭性操作物理闸。

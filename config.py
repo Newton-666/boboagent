@@ -19,6 +19,17 @@ else:
 BOBO_DATA_DIR = _DEFAULT_DATA_DIR
 BOBO_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# 仓内受保护路径清单（issue #3）：默认策略下 Agent 不可静默改写内核。
+# 配置文件可追加 glob；缺失/损坏不得炸启动。DEFAULT 作为 fail-closed 兜底，
+# 即使 json 被拆掉，core/ / tools/ / gateway 仍受保护。
+PROTECTED_PATHS_FILE = _BOBO_REPO_ROOT / "data" / "protected_paths.json"
+DEFAULT_PROTECTED_GLOBS = (
+    "core/**",
+    "tools/**",
+    "bobo_tui_gateway/**",
+    "data/protected_paths.json",
+)
+
 # .env 文件路径
 BOBO_ENV_FILE = BOBO_DATA_DIR / ".env"
 
