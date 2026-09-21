@@ -569,7 +569,7 @@
 - **守卫登记**：v4/v4b/tel 加 TICKET-HARNESS-LIGHTS（router/adapt/observer 新白名单 + engine DEMOLISH/COST3 检查兼容标记）。
 - **验证**：87 相关 + 45 回归全绿；默认值三灯亮、显式 0 可关。
 
-### B76 · P2 adapt 删 tool_names 死路径（issue #8）—— 提交待填 · 2026-09-21
+### B76 · P2 adapt 删 tool_names 死路径（issue #8）—— 提交 1083801 · 2026-09-21
 - **之前问题**：`boost_route` 向 `plan.tool_names` 追加偏好域工具，但 engine 全量注入 `TOOLS_SCHEMA`（062ca05 / COST-3），只用 `skill_names` / `memory_types`——tool_names boost 是死路径。
 - **错误修法**：把 `tool_names` 再接到工具注入/过滤（会回退冷启动稳定性）。
 - **正确修法**：删死路径；boost 只加 skills / memory（只加不删）。空 `memory_types` 保持全类型召回，不从空列表收成子集。
