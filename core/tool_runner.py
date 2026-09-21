@@ -259,6 +259,17 @@ class ToolRunnerMixin:
                 continue
 
             is_high_risk, reason = is_high_risk_tool(tool_name, tool_args)
+            # GitHub #4：AUTO 下 computer_use 含 capture 也进决策树。
+            # intentional tightening：is_high_risk_tool 视 capture 为只读，但 AUTO
+            # 不弹窗、不静默落地——走 _auto_decide 即时 deny（非 120s 路径）。
+            if (
+                not is_high_risk
+                and tool_name == "computer_use"
+                and callable(getattr(self, "_auto_mode_getter", None))
+                and self._auto_mode_getter()
+            ):
+                is_high_risk = True
+                reason = "auto 模式：computer_use（含 capture）即时拒绝"
             if is_high_risk:
                 self._notify("confirm_request", {"tool_name": tool_name, "tool_args": tool_args, "reason": reason})
                 confirmed = self._confirm(tool_name, tool_args, reason)

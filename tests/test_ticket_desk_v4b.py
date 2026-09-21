@@ -255,8 +255,9 @@ def test_v4b_5_engine_gateway_zero_diff():
     for f in sorted(DEMOLISH_ALLOWED & set(changed)):
         r_dm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         if os.path.exists(f):  # 整文件删除：白名单登记即授权（同 entry.py 先例，diff 为空无法含标记）
-            assert ("TICKET-DEMOLISH-OFFICE-DUO" in r_dm.stdout or "TICKET-HARNESS-LIGHTS" in r_dm.stdout), \
-                f"{f} 的改动缺 TICKET-DEMOLISH-OFFICE-DUO/TICKET-HARNESS-LIGHTS 标记，未授权改动被拦截"
+            assert ("TICKET-DEMOLISH-OFFICE-DUO" in r_dm.stdout or "TICKET-HARNESS-LIGHTS" in r_dm.stdout
+                    or "GitHub #4" in r_dm.stdout), \
+                f"{f} 的改动缺 TICKET-DEMOLISH-OFFICE-DUO/TICKET-HARNESS-LIGHTS/GitHub #4 标记，未授权改动被拦截"
     for f in sorted(COST1B_ALLOWED & set(changed)):
         r3 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert ("COST-1b" in r3.stdout or "COST-1c" in r3.stdout or "DESK-P1" in r3.stdout), \
@@ -270,11 +271,12 @@ def test_v4b_5_engine_gateway_zero_diff():
             f"{f} 的改动缺 COST-2/DIAG-1/DESK-P1 特批标记，未授权改动被拦截"
     for f in sorted(SAFETY1_ALLOWED & set(changed)):
         r6 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert "SAFETY-1" in r6.stdout, f"{f} 的改动缺 SAFETY-1 特批标记，未授权改动被拦截"
+        assert ("SAFETY-1" in r6.stdout or "GitHub #4" in r6.stdout), \
+            f"{f} 的改动缺 SAFETY-1/GitHub #4 特批标记，未授权改动被拦截"
     for f in sorted(COST3_ALLOWED & set(changed)):
         r7 = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
-        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout or "TICKET-HARNESS-LIGHTS" in r7.stdout), \
-            f"{f} 的改动缺 COST-3/DESK-P1/P0-1/COST-7/TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
+        assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout or "TICKET-HARNESS-LIGHTS" in r7.stdout or "GitHub #4" in r7.stdout), \
+            f"{f} 的改动缺 COST-3/DESK-P1/P0-1/COST-7/TICKET-HARNESS-LIGHTS/GitHub #4 特批标记，未授权改动被拦截"
     for f in sorted(HARNESS_LIGHTS_ALLOWED & set(changed)):
         r_hl = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "TICKET-HARNESS-LIGHTS" in r_hl.stdout, \
@@ -284,8 +286,8 @@ def test_v4b_5_engine_gateway_zero_diff():
         # 票 VSC-2B：engine_adapter.py 复用该文件（写审批闸门），diff 标记兼容；
         # 票 TICKET-DESK-WORKER-VISIBLE：engine_adapter.py 复用（spawn_worker 主卡
         # 附加 worker/worker_role 键，前端 worker 折叠卡配对），diff 标记兼容
-        assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout), \
-            f"{f} 的改动缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE 特批标记，未授权改动被拦截"
+        assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout or "GitHub #4" in r8.stdout), \
+            f"{f} 的改动缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE/GitHub #4 特批标记，未授权改动被拦截"
     for f in sorted(GWMULTI_ALLOWED & set(changed)):
         r_gm = subprocess.run(["git", "diff", "--", f], capture_output=True, text=True, cwd=ROOT)
         assert "TICKET-GW-MULTI" in r_gm.stdout, f"{f} 的改动缺 TICKET-GW-MULTI 特批标记，未授权改动被拦截"

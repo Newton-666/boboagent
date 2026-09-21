@@ -685,7 +685,19 @@ def is_self_repo_hard_block(tool_name: str, tool_args: dict) -> Tuple[bool, str]
     return False, ""
 
 
+# GitHub #4：computer_use 只读 action（看屏/AX 树）不进确认；其余操作含副作用。
+_COMPUTER_USE_READONLY_ACTIONS = frozenset({"capture"})
+
+
 def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
+    """高危工具判定：命中则进入 Engine._confirm（确认闸 / AUTO 决策树）。
+
+    覆盖（GitHub #4）：
+    - execute_terminal：按命令分级（safe 静默；gray/dangerous 确认）
+    - code_execution：任意代码执行，始终确认
+    - computer_use：capture 只读放行；click/type/key/open_app/scroll/未知 action 确认
+    确认闸超时策略不在本函数：Reject/120s=deny 属 P1，见 engine_adapter._wait_for_confirmation。
+    """
     if tool_name == "execute_terminal":
         command = tool_args.get("command", "")
 
@@ -734,6 +746,20 @@ def is_high_risk_tool(tool_name: str, tool_args: dict) -> Tuple[bool, str]:
         if level == "dangerous":
             return True, f"🚫 危险操作 — {reason}: {command[:60]}"
         return True, f"执行终端命令: {command[:60]}"
+
+    # GitHub #4：code_execution 可写文件/跑任意代码，始终进确认闸（无静默放行）
+    if tool_name == "code_execution":
+        lang = str(tool_args.get("language") or "code")
+        preview = str(tool_args.get("code") or "")[:60]
+        return True, f"执行代码 ({lang}): {preview}"
+
+    # GitHub #4：computer_use 按 action 分级——capture 只读；其余含键鼠/开应用副作用
+    if tool_name == "computer_use":
+        action = str(tool_args.get("action") or "").strip().lower()
+        if action in _COMPUTER_USE_READONLY_ACTIONS:
+            return False, ""
+        label = action if action else tool_name
+        return True, f"电脑操作: {label}"
 
     return False, ""
 

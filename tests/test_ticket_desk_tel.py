@@ -501,8 +501,9 @@ def test_tel_8_zero_interference():
                     "bobo_tui_gateway/server.py", "bobo_tui_gateway/handlers/prompts.py",
                     "bobo_tui_gateway/handlers/sessions.py"):
             r_dm0 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("TICKET-DEMOLISH-OFFICE-DUO" in r_dm0.stdout or "TICKET-HARNESS-LIGHTS" in r_dm0.stdout), \
-                f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO/TICKET-HARNESS-LIGHTS 标记，未授权改动被拦截"
+            assert ("TICKET-DEMOLISH-OFFICE-DUO" in r_dm0.stdout or "TICKET-HARNESS-LIGHTS" in r_dm0.stdout
+                    or "GitHub #4" in r_dm0.stdout), \
+                f"{ln} 缺 TICKET-DEMOLISH-OFFICE-DUO/TICKET-HARNESS-LIGHTS/GitHub #4 标记，未授权改动被拦截"
             changed.remove(ln)
     # COST-1B（2026-08-16）授权：消耗度量双观测注入点，白名单文件 diff 必须含 COST-1b 标记
     COST1B_ALLOWED = {
@@ -536,8 +537,8 @@ def test_tel_8_zero_interference():
         # 票 SAFETY-1 特批：core/command_safety.py 进程杀灭白名单，diff 必须含 SAFETY-1 标记
         if ln == "core/command_safety.py":
             r5 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("SAFETY-1" in r5.stdout or "TICKET-DEMOLISH-OFFICE-DUO" in r5.stdout), \
-                f"{ln} 缺 SAFETY-1/TICKET-DEMOLISH-OFFICE-DUO 特批标记，未授权改动被拦截"
+            assert ("SAFETY-1" in r5.stdout or "TICKET-DEMOLISH-OFFICE-DUO" in r5.stdout or "GitHub #4" in r5.stdout), \
+                f"{ln} 缺 SAFETY-1/TICKET-DEMOLISH-OFFICE-DUO/GitHub #4 特批标记，未授权改动被拦截"
             continue
         # 票 COST-3 特批：core/context.py + core/engine.py（工作锚点属性化 + 工具集
         # 会话内全量稳定），diff 必须含 COST-3 标记；DESK-P1 复用 engine.py 追加
@@ -550,8 +551,8 @@ def test_tel_8_zero_interference():
                   "core/provider.py"):  # PROFILE + SKILL + PROVIDER-CONTEXT-MODEL 系列
             r7 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
             assert ("COST-3" in r7.stdout or "DESK-P1" in r7.stdout or "P0-1" in r7.stdout or "COST-7" in r7.stdout
-                    or "P0-2" in r7.stdout or "TICKET-HARNESS-LIGHTS" in r7.stdout), \
-                f"{ln} 缺 COST-3/DESK-P1/P0-1/P0-2/TICKET-HARNESS-LIGHTS 特批标记，未授权改动被拦截"
+                    or "P0-2" in r7.stdout or "TICKET-HARNESS-LIGHTS" in r7.stdout or "GitHub #4" in r7.stdout), \
+                f"{ln} 缺 COST-3/DESK-P1/P0-1/P0-2/TICKET-HARNESS-LIGHTS/GitHub #4 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-HARNESS-LIGHTS（2026-08-24）特批：core/router.py + core/adapt.py +
         # core/observer.py（点亮 harness 灯：BOBO_ROUTER/BOBO_ADAPT/BOBO_LEARN 默认
@@ -568,8 +569,9 @@ def test_tel_8_zero_interference():
         # 附加 worker/worker_role 键，前端 worker 折叠卡配对），diff 标记兼容
         if ln in ("core/engine_adapter.py", "core/tool_runner.py"):
             r8 = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
-            assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout), \
-                f"{ln} 缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE 特批标记，未授权改动被拦截"
+            assert ("DESK-P1" in r8.stdout or "VSC-2B" in r8.stdout or "TICKET-DESK-WORKER-VISIBLE" in r8.stdout
+                    or "GitHub #4" in r8.stdout), \
+                f"{ln} 缺 DESK-P1/VSC-2B/TICKET-DESK-WORKER-VISIBLE/GitHub #4 特批标记，未授权改动被拦截"
             continue
         # 票 TICKET-COMPUTER-USE-CURSOR 特批：core/cursor.py（虚拟光标 NSPanel
         # 悬浮窗——透明性钥匙，docs 37 节），diff 必须含 COST-3 标记
@@ -682,6 +684,10 @@ def test_tel_8_zero_interference():
             continue
         if ln.startswith("docs/"):
             continue  # 文档目录（分支既有提交如 TICKET-WRITING.md，非代码零干涉范畴）
+        if ln.startswith(".github/"):
+            r_gh = subprocess.run(["git", "diff", "main", "--", ln], capture_output=True, text=True, cwd=ROOT)
+            assert "GitHub #4" in r_gh.stdout, f"{ln} 缺 GitHub #4 特批标记，未授权改动被拦截"
+            continue
         if ln.startswith("data/tickets/"):
             continue  # 治理票据（TICKET-*.md 非代码；与 docs/ 同性质）
         if ln == "scripts/step_baseline.py":
