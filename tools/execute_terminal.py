@@ -102,6 +102,14 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None, _project_roo
             # 被拦时明确告知"已拦截"而非误导"需要确认"
             return f"⛔ 安全策略拦截: {command}\n此命令已被内置黑名单拦截，请换用安全替代方案。"
 
+        # GitHub #2：外层已取消则不要再拉起子进程
+        try:
+            from core.tool_lifecycle import is_cancelled as _already_cancelled
+            if _already_cancelled():
+                return "错误: 操作已取消（超时），未执行命令"
+        except Exception:
+            pass
+
         # 使用 shell 执行（支持管道、重定向），环境变量已脱敏
         # 安全防护由上游 Engine 的 _is_high_risk_tool + 用户确认机制保障
         clean_env = sanitize_env()
@@ -121,6 +129,12 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None, _project_roo
             cwd=_cwd,
             start_new_session=True,  # E2-1：独立进程组，可整组 killpg
         )
+        # GitHub #2：登记到当前 tool 调用上下文，外层超时可 killpg，不留孤儿
+        try:
+            from core.tool_lifecycle import is_cancelled, register_current_proc
+            register_current_proc(proc)
+        except Exception:
+            is_cancelled = lambda: False  # noqa: E731
 
         # 后台读线程：轮询期间不读管道会写满缓冲死锁（大输出命令），
         # 用 daemon 线程持续排空 stdout/stderr
@@ -138,11 +152,16 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None, _project_roo
         t_out.start()
         t_err.start()
 
-        # E2-1：轮询循环——中断事件 / 进程结束 / 超时 三者其一即退出
+        # E2-1：轮询循环——中断事件 / 进程结束 / 超时 / 外层取消 四者其一即退出
         interrupted = False
         timed_out = False
         deadline = time.time() + timeout
         while True:
+            # 外层 executor 超时取消：按超时终止，不要报成 ESC
+            if is_cancelled():
+                timed_out = True
+                _kill_process_group(proc)
+                break
             if _interrupt_event is not None and _interrupt_event.is_set():
                 interrupted = True
                 _kill_process_group(proc)
@@ -174,8 +193,12 @@ def execute(command: str, timeout: int = 30, _interrupt_event=None, _project_roo
 
         if timed_out:
             partial = output.strip()[:2000]
-            hint = f"\n如果需要更长时间，请指定更大的 timeout 参数后重试。" if partial else "无输出。如果需要更长时间，请指定更大的 timeout 参数后重试。"
-            return f"命令执行超过 {timeout}s（当前上限），已终止。已有部分输出:\n{partial}{hint}"
+            hint = (
+                "\n命令已终止（含子进程）。请先确认无残留再决定是否重试；"
+                "写操作请勿在未确认终止时用相同命令重试。"
+            )
+            body = partial if partial else "无输出。"
+            return f"命令执行超过 {timeout}s（当前上限），已终止。已有部分输出:\n{body}{hint}"
 
         if not output:
             output = "(命令执行成功，无输出)"

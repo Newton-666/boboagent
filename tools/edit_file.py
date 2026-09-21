@@ -156,6 +156,13 @@ def execute(file_path: str, old_string: str, new_string: str) -> str:
             f"old_string 匹配到 {count} 处，不够精确。请增加前后文（包含前后 1-2 行），使其匹配唯一。\n提示：用 read_local_file 读取文件确认上下文。"
         )
 
+    try:
+        from core.tool_lifecycle import is_cancelled
+        if is_cancelled():
+            return "错误: 操作已取消（超时），未写入"
+    except Exception:
+        pass
+
     # ── 备份 ──
     backup_name = _backup(path)
 

@@ -84,6 +84,13 @@ def write_obsidian(filename: str, content: str, auto_backup: bool = True) -> str
             if blocked and blocked in filepath.split(os.sep):
                 return f"❌ 无权写入该文件（隐私保护）"
         
+        try:
+            from core.tool_lifecycle import is_cancelled
+            if is_cancelled():
+                return "❌ 操作已取消（超时），未写入"
+        except Exception:
+            pass
+
         _ensure_dir(filepath)
         
         # 自动备份
@@ -141,6 +148,13 @@ def append_obsidian(filename: str, content: str, auto_backup: bool = True) -> st
             blocked = blocked.strip()
             if blocked and blocked in filepath.split(os.sep):
                 return "❌ 无权写入该文件（隐私保护）"
+
+        try:
+            from core.tool_lifecycle import is_cancelled
+            if is_cancelled():
+                return "❌ 操作已取消（超时），未追加"
+        except Exception:
+            pass
 
         _ensure_dir(filepath)
 

@@ -2,18 +2,37 @@
 core/tool_executor.py - 工具执行器（带超时保护 + 错误分类 + 参数校验 + 执行统计）
 """
 
+import contextvars
+import inspect
 import json
-from config import BOBO_DATA_DIR
+from config import BOBO_DATA_DIR, TOOL_TIMEOUT
 import os
 import threading
 import time
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from tools import TOOL_FUNCTIONS
+from core.tool_lifecycle import (
+    AnySetEvent,
+    CANCEL_GRACE_S,
+    ToolCallContext,
+    acquire_path_lock,
+    begin_write_slot,
+    bind_context,
+    clamp_inner_timeout,
+    finish_write_slot,
+    is_cancelled,
+    is_success_result,
+    mark_slot_timed_out,
+    release_path_lock,
+    reset_context,
+    resolve_timeout,
+    timeout_message,
+    write_identity,
+    write_path_key,
+)
 
-TOOL_TIMEOUT = 30
-
-# ── 审计日志：记录每次工具调用（数据访问透明度 Layer 1）────────────
+# 审计日志：记录每次工具调用（数据访问透明度 Layer 1）
 _ACCESS_LOG = str(BOBO_DATA_DIR / "access_log.jsonl")
 _AUDIT_LOCK = threading.Lock()
 
@@ -59,12 +78,49 @@ def _log_access(tool_name: str, args: dict, result: str, duration: float):
 # 其他工具——下一个调用获得全新的 executor。
 # 代价：无法限制并发线程总数。实际场景中并行工具数由 LLM 的一次调用中
 # 的 tool_calls 数量自然限制（通常 ≤10），风险可控。
+# GitHub #2：超时必须 set cancel + kill 已登记子进程；写槽在线程真正结束后才释放。
 _STUCK_WARN_THRESHOLD = 20  # 累计超过此阈值时日志警告
 
 # 命令结果缓存：key=(tool_name, args[:200]) → (timestamp, result)
 _COMMAND_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
 _COMMAND_CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 30  # 缓存有效期（秒）
+
+
+def _supported_kwargs(func, arguments: dict) -> dict:
+    """只传目标函数签名里有的关键字，避免注入 _interrupt_event 等撑爆无关工具。"""
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return dict(arguments)
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return dict(arguments)
+    allowed = {
+        name for name, p in sig.parameters.items()
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    return {k: v for k, v in arguments.items() if k in allowed}
+
+
+def _invoke_tool(func, exec_args: dict, identity: str | None, path_key: str | None,
+                 ctx: ToolCallContext, lock_wait: float) -> str:
+    """在 worker 线程跑工具：路径锁 + 取消检查 + 结束时释放写槽。"""
+    path_lock = acquire_path_lock(path_key, ctx.cancel_event, timeout=lock_wait)
+    if path_key and path_lock is None:
+        msg = "错误: 操作已取消（超时）— 未能获得路径写锁"
+        finish_write_slot(identity, msg, success=False)
+        return msg
+    result = None
+    try:
+        if is_cancelled() or ctx.cancel_event.is_set():
+            result = "错误: 操作已取消（超时）"
+            return result
+        result = func(**_supported_kwargs(func, exec_args))
+        return result
+    finally:
+        finish_write_slot(identity, str(result) if result is not None else None,
+                          is_success_result(result))
+        release_path_lock(path_lock)
 
 
 def execute_tool(tool_name: str, arguments: dict, engine=None) -> str:
@@ -93,19 +149,45 @@ def execute_tool(tool_name: str, arguments: dict, engine=None) -> str:
 
     try:
         func = TOOL_FUNCTIONS[tool_name]
+        timeout = resolve_timeout(tool_name, arguments)
+        identity = write_identity(tool_name, arguments)
+        path_key = write_path_key(tool_name, arguments)
+
+        slot_status, slot_payload = begin_write_slot(identity)
+        if slot_status == "inflight":
+            return slot_payload
+        if slot_status == "replay":
+            return f"{slot_payload}（与超时前一次写入相同，已去重，未再次落地）"
+
+        # 热修：注入前复制，禁止污染调用方字典本体（Engine 泄漏进 JSON 序列化会炸）
+        exec_args = dict(arguments)
+        if tool_name in ("task_ledger", "describe_tool") and "_engine" not in exec_args:
+            exec_args["_engine"] = engine
+
+        exec_args = clamp_inner_timeout(tool_name, exec_args, timeout)
+
+        ctx = ToolCallContext(tool_name)
+        existing_interrupt = exec_args.get("_interrupt_event")
+        combined = AnySetEvent(existing_interrupt, ctx.cancel_event,
+                               timeout_event=ctx.cancel_event)
+        exec_args["_interrupt_event"] = combined
+
+        token = bind_context(ctx)
+        copied = contextvars.copy_context()
         # 每个工具独立 executor——一个卡死不占全局槽，不影响其他工具（脆弱链 2）
         executor = ThreadPoolExecutor(max_workers=1)
+        future = None
         try:
-            # 票 L：显式传参——task_ledger 需要路由到调用方 Engine 的台账
-            # 票 TICKET-E2b：describe_tool 需要路由到调用方 Engine 的 _extra_tools
-            # 热修：注入前复制，禁止污染调用方字典本体（Engine 泄漏进 JSON 序列化会炸）
-            if tool_name in ("task_ledger", "describe_tool") and "_engine" not in arguments:
-                arguments = dict(arguments)
-                arguments["_engine"] = engine
-            future = executor.submit(func, **arguments)
-            # spawn_worker 需要更长的超时时间（含重试），execute_terminal 次之
-            _timeout_map = {"spawn_worker": 310, "execute_terminal": 120}
-            timeout = _timeout_map.get(tool_name, TOOL_TIMEOUT)
+            future = executor.submit(
+                copied.run,
+                _invoke_tool,
+                func,
+                exec_args,
+                identity,
+                path_key,
+                ctx,
+                float(timeout),
+            )
             result = future.result(timeout=timeout)
             duration = time.time() - start_time
             output = str(result) if result else "执行成功"
@@ -123,15 +205,36 @@ def execute_tool(tool_name: str, arguments: dict, engine=None) -> str:
             if tool_name not in _SKIP_AUDIT:
                 _log_access(tool_name, arguments, output, duration)
             return f"{output}（耗时: {duration:.1f}s）"
+        except TimeoutError:
+            ctx.cancel_event.set()
+            ctx.kill_procs()
+            mark_slot_timed_out(identity)
+            # 宽限：若内层在取消窗口内完成，返回真实结果，避免「已写入却报超时」诱使重试
+            if future is not None:
+                try:
+                    result = future.result(timeout=CANCEL_GRACE_S)
+                    duration = time.time() - start_time
+                    output = str(result) if result else "执行成功"
+                    if tool_name not in _SKIP_AUDIT:
+                        _log_access(tool_name, arguments, output, duration)
+                    return f"{output}（耗时: {duration:.1f}s）"
+                except TimeoutError:
+                    pass
+                except Exception as inner_e:
+                    duration = time.time() - start_time
+                    return f"执行失败: {str(inner_e)}（耗时: {duration:.1f}s）"
+            duration = time.time() - start_time
+            return timeout_message(tool_name, timeout, duration)
         finally:
-            executor.shutdown(wait=False)  # 不等待卡死的线程
-    except TimeoutError:
-        duration = time.time() - start_time
-        return f"工具 '{tool_name}' 执行超过 {timeout}s（上限）。如果工具支持 timeout 参数，请指定更大值后重试（已等待 {duration:.1f}s）"
+            executor.shutdown(wait=False, cancel_futures=True)
+            reset_context(token)
     except TypeError as e:
+        finish_write_slot(write_identity(tool_name, arguments), None, success=False)
         return f"参数错误: {str(e)}"
     except ValueError as e:
+        finish_write_slot(write_identity(tool_name, arguments), None, success=False)
         return f"参数错误: {str(e)}"
     except Exception as e:
+        finish_write_slot(write_identity(tool_name, arguments), None, success=False)
         duration = time.time() - start_time
         return f"执行失败: {str(e)}（耗时: {duration:.1f}s）"
