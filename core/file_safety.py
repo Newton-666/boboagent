@@ -2,9 +2,14 @@
 
 Phase 2 security catch-up: prevents LLM from accidentally writing to or
 reading sensitive system files. Inspired by Hermes' agent/file_safety.py.
+
+Issue #3: also enforces data/protected_paths.json (plus hardcoded kernel
+defaults) so in-repo core/ / tools/ / gateway cannot be silently rewritten.
 """
 
+import json
 import os
+import fnmatch
 import struct
 from pathlib import Path
 from typing import Optional, Set
@@ -82,6 +87,188 @@ CREDENTIAL_SNIFF_PATTERNS = (
 )
 
 
+# ── protected_paths（issue #3）────────────────────────────────────────
+# 仓库根：core/ 的上级。路径常量以 config 为准；失败时本地兜底，不炸启动。
+_BOBO_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+try:
+    from config import PROTECTED_PATHS_FILE as _CFG_PROTECTED_FILE
+    from config import DEFAULT_PROTECTED_GLOBS as _CFG_DEFAULT_GLOBS
+    _PROTECTED_PATHS_FILE = str(_CFG_PROTECTED_FILE)
+    _DEFAULT_PROTECTED_GLOBS: tuple[str, ...] = tuple(_CFG_DEFAULT_GLOBS)
+except Exception:
+    _PROTECTED_PATHS_FILE = os.path.join(_BOBO_REPO_ROOT, "data", "protected_paths.json")
+    _DEFAULT_PROTECTED_GLOBS = (
+        "core/**",
+        "tools/**",
+        "bobo_tui_gateway/**",
+        "data/protected_paths.json",
+    )
+
+_FILE_READ_ACTIONS = frozenset({"read", "exists"})
+_FILE_MUTATING_TOOLS = frozenset({"edit_file", "delete_file", "file_writer"})
+
+_protected_load_fail_audited = False
+
+
+def reset_protected_paths_cache() -> None:
+    """测试钩子：重置缺失/损坏清单的一次性审计标记。"""
+    global _protected_load_fail_audited
+    _protected_load_fail_audited = False
+
+
+def _audit_protected_load_failure(cfg_path: str, reason: str) -> None:
+    """清单缺失/损坏写审计，不得抛出（不炸启动）。"""
+    global _protected_load_fail_audited
+    if _protected_load_fail_audited:
+        return
+    _protected_load_fail_audited = True
+    try:
+        from core.event_bus import event_bus
+        event_bus.write("protected_paths.load", {
+            "ok": False,
+            "path": cfg_path,
+            "reason": reason,
+        })
+    except Exception:
+        pass
+
+
+def load_protected_paths(path: str | None = None) -> list[str]:
+    """读取受保护清单（glob 表达式，相对项目根）。
+
+    - 默认读 data/protected_paths.json（相对仓库根，不依赖 CWD）；
+    - 缺失 / JSON 损坏 / 字段非法 → 返回空清单 + 审计（不炸启动）；
+    - 返回的 globs 已去空白、去空串。
+    内核兜底 glob 不在本函数返回值里，由 effective_protected_globs / is_protected 合并。
+    """
+    cfg = path if path is not None else _PROTECTED_PATHS_FILE
+    try:
+        with open(cfg, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        globs = data.get("globs", [])
+        if not isinstance(globs, list):
+            _audit_protected_load_failure(str(cfg), "globs 字段非法（非 list）")
+            return []
+        return [g.strip() for g in globs if isinstance(g, str) and g.strip()]
+    except FileNotFoundError:
+        _audit_protected_load_failure(str(cfg), "文件缺失")
+        return []
+    except Exception as exc:
+        _audit_protected_load_failure(str(cfg), f"{type(exc).__name__}: {exc}")
+        return []
+
+
+def effective_protected_globs(path: str | None = None) -> list[str]:
+    """默认内核 glob ∪ 配置 glob（去重保序）。配置缺失时仍有内核兜底。"""
+    seen: list[str] = []
+    for glob in list(_DEFAULT_PROTECTED_GLOBS) + load_protected_paths(path):
+        if glob not in seen:
+            seen.append(glob)
+    return seen
+
+
+def _normalize_repo_rel(path: str) -> list[str]:
+    """把输入路径收成若干相对仓库根的候选（POSIX 分隔符）。
+
+    相对路径按原样匹配（测试传 core/engine.py 不依赖 CWD）；
+    绝对路径 / resolve 后路径再转相对。仓外路径不进入候选。
+    """
+    candidates: list[str] = []
+    raw = (path or "").strip().lstrip("./").replace("\\", "/")
+    if raw and not raw.startswith("/"):
+        candidates.append(raw)
+
+    repo_root = os.path.abspath(_BOBO_REPO_ROOT)
+
+    def _rel_if_inside(abs_path: str) -> None:
+        try:
+            rel = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+        except Exception:
+            return
+        if rel.startswith("..") or os.path.isabs(rel):
+            return
+        if rel not in candidates:
+            candidates.append(rel)
+
+    if raw.startswith("/"):
+        _rel_if_inside(os.path.abspath(os.path.expanduser(raw)))
+    try:
+        resolved = str(Path(path).expanduser().resolve())
+        _rel_if_inside(resolved)
+    except Exception:
+        pass
+    return candidates
+
+
+def _glob_hits(rel: str, glob: str) -> bool:
+    """glob 命中或目录前缀命中（core/** 命中 core/engine.py）。"""
+    g = glob.strip().rstrip("/").replace("\\", "/")
+    if not g or not rel:
+        return False
+    if fnmatch.fnmatch(rel, g):
+        return True
+    prefix = g[:-3] if g.endswith("/**") else g
+    prefix = prefix.rstrip("/")
+    if not prefix:
+        return False
+    return rel == prefix or rel.startswith(prefix + "/")
+
+
+def is_protected(path: str, globs: list[str] | None = None) -> bool:
+    """路径是否命中受保护清单（glob / 目录前缀，相对项目根）。
+
+    globs 为空时使用 effective_protected_globs()（配置 ∪ 内核兜底）。
+    显式传入空列表 → False（调用方自管清单）。
+    """
+    if not path:
+        return False
+    if globs is None:
+        globs = effective_protected_globs()
+    if not globs:
+        return False
+    for rel in _normalize_repo_rel(path):
+        for g in globs:
+            if _glob_hits(rel, g):
+                return True
+    return False
+
+
+def file_tool_mutation(tool_name: str, tool_args: dict | None) -> tuple[bool, list[str]]:
+    """文件工具是否写/删，及其目标路径。
+
+    Returns (is_mutating, paths)。
+    file_operation 的 read/exists 为只读；write/delete/batch_write 为写；
+    未知 action 按写处理（保守）。路径空串不收入列表。
+    """
+    args = tool_args or {}
+    if tool_name == "file_operation":
+        action = str(args.get("action") or "").strip().lower()
+        if action == "batch_write":
+            paths: list[str] = []
+            for item in args.get("files") or []:
+                if isinstance(item, dict):
+                    p = str(item.get("path") or "").strip()
+                    if p:
+                        paths.append(p)
+            return True, paths
+        p = str(args.get("path") or args.get("file_path") or args.get("filepath") or "").strip()
+        paths = [p] if p else []
+        if action in _FILE_READ_ACTIONS:
+            return False, paths
+        return True, paths
+    if tool_name in _FILE_MUTATING_TOOLS:
+        p = str(
+            args.get("file_path")
+            or args.get("filepath")
+            or args.get("path")
+            or args.get("file")
+            or args.get("filename")
+            or ""
+        ).strip()
+        return True, [p] if p else []
+    return False, []
+
+
 def is_write_denied(filepath: str) -> tuple[bool, str]:
     """Check if a file path should be write-denied.
 
@@ -107,6 +294,10 @@ def is_write_denied(filepath: str) -> tuple[bool, str]:
             parts = path.split(os.sep)
             if _HOME in path and len(parts) < 5:
                 return True, f"疑似凭据文件，禁止写入: {basename}"
+
+    # Issue #3：仓内内核路径（protected_paths ∪ 默认 core/tools/gateway）
+    if is_protected(filepath) or is_protected(path):
+        return True, f"禁止写入受保护路径（protected_paths）: {path}"
 
     return False, ""
 

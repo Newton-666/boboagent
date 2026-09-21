@@ -1,11 +1,12 @@
 {
   "globs": [
+    "core/**",
+    "tools/**",
+    "bobo_tui_gateway/**",
     "tools/*relay*.py",
     "tools/agent_connect.py",
     "tools/agent_scan.py",
     "data/relay_v2/**",
-    "bobo_tui_gateway/**",
-    "core/**",
     "library/**",
     "data/protected_paths.json",
     "data/office_roles.json"

@@ -6,10 +6,14 @@
 import re as _re
 import shlex as _shlex
 import os as _os
-import json as _json
-import fnmatch as _fnmatch
 from typing import Tuple
-from core.file_safety import is_write_denied
+from core.file_safety import (
+    is_write_denied,
+    load_protected_paths,
+    is_protected,
+    effective_protected_globs,
+    file_tool_mutation,
+)
 
 # Bobo 自身仓库根（core/ 的上级目录，即 ~/Desktop/boboagent_main）
 _BOBO_REPO_ROOT = _os.path.abspath(
@@ -974,8 +978,9 @@ def _classify_segment_side_effect(cmd: str) -> tuple[str, str]:
     return ("local-reversible", f"{base_cmd or '?'}（本地操作，可回滚）")
 
 
-# ── 票 TICKET-DEMOLISH-OFFICE-DUO（D1）：load_protected_paths / is_protected 拆除
-# （office 受保护清单专属；data/protected_paths.json 随 D3 清扫移除）
+# ── issue #3：load_protected_paths / is_protected 恢复（实现落在 file_safety）
+# command_safety 再导出，保持历史 import 路径（core.command_safety.is_protected）。
+# 清单不再绑定 office 角色：默认策略下内核路径（core/ tools/ gateway）不可静默改写。
 
 def is_git_readonly_subcommand(subcommand: str | None) -> bool:
     """票 O-1：git 子命令是否只读（status/log/diff/show/blame/ls-files/ls-tree）。
